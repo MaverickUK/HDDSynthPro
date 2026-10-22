@@ -69,6 +69,10 @@ Never connect the adapter's +5 V (its Molex power) to the BB48. The two boards s
 
   The firmware never enables internal pull-downs (RP2350 erratum E9).
 - **Power order:** power the BB48 (USB-C) before switching on the adapter's brick, and switch the brick off before unplugging the BB48. The RP2350's pins are only 5 V tolerant while it is powered. Flashing is fine: USB power stays on throughout.
+- **The adapter drives the bus by itself.** Whenever the NS1081 adapter is powered, it drives the IDE signal lines, whether or not the drive end is.
+  - This was seen on 22 Oct 2026. With a CF-to-IDE adapter's own power switched off, its LEDs stayed lit, fed through the signal lines. The card couldn't be read.
+  - An unpowered BB48 on the cable would be fed the same way, through its pins' protection diodes, at up to 5 V. This is why the power-order rule matters.
+  - The adapter's logic runs from its brick (its LED stays lit with USB switched off), so "adapter off" means the brick off, not just the USB cable.
 
 ## Wiring check
 
