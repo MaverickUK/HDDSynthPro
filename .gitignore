@@ -1,0 +1,6 @@
+.pio/
+.vscode/
+__pycache__/
+.pytest_cache/
+host/runs/
+host/.venv/

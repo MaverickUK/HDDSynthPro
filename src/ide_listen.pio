@@ -1,0 +1,37 @@
+; Slice 0: listen to the IDE bus without driving anything.
+;
+; The pins stay under SIO control as inputs, so this program can read them
+; but has no way to drive them, even if it is wrong.
+;
+; IN_BASE is GPIO4 (DD0), so one 32-bit pin read gives (see bus_sample.h):
+;   bits 0-15  DD0-DD15      bit 21  LED (not a bus line)
+;   bits 16-18 DA0-DA2       bit 22  DIOR#
+;   bit 19     CS0#          bit 23  DIOW#
+;   bit 20     CS1#          bits 24-26  IORDY, INTRQ, RESET#
+;
+; Each strobe pulse (DIOR# or DIOW# low) produces one word in the RX FIFO:
+; the last pin sample taken while a strobe was still low. Sampling is every
+; 6 cycles (40 ns at 150 MHz). In PIO mode 0 a write's data is valid at least
+; 60 ns before DIOW# rises, so the kept sample always holds valid data.
+;
+; Glitches are recorded too: a pulse seen in a single sample still produces
+; a word. The FIFO push blocks when full; the C++ side reports that as a
+; stall (FDEBUG.RXSTALL) because strobes are missed while it lasts.
+
+.program ide_listen
+.wrap_target
+idle:
+    mov y, pins             ; sample every pin
+    mov osr, ~y
+    out null, 22            ; drop DD, DA, CS# and LED
+    out x, 2                ; x = DIOR#/DIOW# inverted: non-zero while either is low
+    jmp !x idle
+low:
+    mov isr, y              ; y was sampled with a strobe low: keep it
+    mov y, pins
+    mov osr, ~y
+    out null, 22
+    out x, 2
+    jmp x-- low             ; still low: sample again
+    push block              ; released: send the last low sample
+.wrap

@@ -1,0 +1,36 @@
+// Pin map and sizes. Pure constants, so host tests can include it.
+// docs/wiring.md maps each pin to the IDE header.
+#pragma once
+
+#include <cstddef>
+
+namespace cfg {
+
+// The bus uses GPIO 4-30, all inside one PIO block's GPIO 0-31 window.
+// Avoided on purpose:
+//   GPIO 0-3  the BB48 pulls GPIO 2/3 up to 3.3 V through 2.2k (R17/R18,
+//             UEXT/Qwiic I2C); GPIO 0/1 stay free for a UART if needed.
+//   GPIO 25   the on-board LED (2.2k + LED to GND).
+// DD, DA and CS# are on consecutive pins so one PIO read captures an access.
+constexpr unsigned PIN_DD0 = 4;      // DD0-DD15 on GPIO 4-19
+constexpr unsigned PIN_DA0 = 20;     // DA0-DA2 on GPIO 20-22
+constexpr unsigned PIN_CS0_N = 23;   // CS0# (ATA "CS1FX-"): command block registers
+constexpr unsigned PIN_CS1_N = 24;   // CS1# (ATA "CS3FX-"): control block registers
+constexpr unsigned PIN_BOARD_LED = 25;  // on-board LED, not a bus line
+constexpr unsigned PIN_DIOR_N = 26;
+constexpr unsigned PIN_DIOW_N = 27;
+constexpr unsigned PIN_IORDY = 28;   // host pulls up to 5 V via 1k: only ever drive low or release
+constexpr unsigned PIN_INTRQ = 29;
+constexpr unsigned PIN_RESET_N = 30;
+
+constexpr unsigned BUS_FIRST_PIN = PIN_DD0;
+constexpr unsigned BUS_LAST_PIN = PIN_RESET_N;
+
+// Trace ring between core 1 (producer) and core 0 (consumer):
+// 8192 events x 12 bytes = 96 KB.
+constexpr size_t TRACE_RING_EVENTS = 8192;
+
+// Core 0 prints a run of identical accesses once it has been quiet this long.
+constexpr unsigned TRACE_FLUSH_MS = 20;
+
+}  // namespace cfg

@@ -1,0 +1,162 @@
+# Pico IDE Drive Emulator: Prototype Plan
+
+22 Oct 2026, Peter Bridger. Amended the same day after checking the plan against the BB48 design files and this Mac; the amendments are marked **(amended)**.
+
+## Goal and scope
+
+The prototype proves one thing: an RP2350B can act as an IDE hard disk that a real host reads and writes reliably. Speed, features and the HDD Synth side all come later, in thin layers on top of a working base.
+
+**In scope**
+- One device, configured as master, no slave on the cable.
+- PIO mode 0 only, with IORDY used to buy time.
+- LBA28 addressing. The IDENTIFY block reports a default CHS geometry from slice 2 onwards, because some hosts read it. CHS commands come in slice 6. **(amended)**
+- A small fixed-size disk: first generated or in RAM, then a contiguous image file on SD.
+- The core command set: IDENTIFY DEVICE, READ SECTORS, WRITE SECTORS, and the handful of housekeeping commands hosts send.
+
+**Out of scope for now**
+- Every HDD Synth feature (audio, sample packs, encoder, OLED, supercap).
+- Faster PIO modes, READ/WRITE MULTIPLE, any kind of DMA.
+- ATAPI, slave operation, cable select, 44-pin hosts and real retro machines.
+- Bus transceivers and the final board.
+
+**Done means:** the USB-IDE adapter enumerates the drive; the host can partition, format, mount, write and read it; and an overnight soak test of random reads and writes finishes with zero mismatches.
+
+## Test rig **(amended)**
+
+The Mac that builds the firmware also flashes it, talks to the drive through the USB-IDE adapter, and reads the drive's own log over USB serial. Slice 6 adds a Linux machine (a Raspberry Pi 5) for ATA pass-through, which macOS doesn't offer for USB storage.
+
+| Part | Role |
+|---|---|
+| Olimex RP2350-PICO2-BB48 on a Perma-Proto board | The emulated drive |
+| IDC breakout + IDE ribbon | Host connection, wired per [wiring.md](wiring.md) |
+| Adafruit SDIO microSD breakout + five 10 kΩ pull-ups | Image storage from slice 5 (GPIO 32–37) |
+| USB-IDE adapter with its own Molex power brick | The host under test |
+| Mac (slices 0–5), Raspberry Pi 5 (slice 6) | Test runner, flashing, log capture |
+| Spare Pico 2 as a logic analyser (sigrok) | Bus traces when a test fails |
+
+**Pin map (amended):**
+
+| Lines | GPIO |
+|---|---|
+| DD0–15 | 4–19 |
+| DA0–2 | 20–22 |
+| CS0#, CS1# | 23, 24 |
+| DIOR#, DIOW# | 26, 27 |
+| IORDY | 28 |
+| INTRQ | 29 |
+| RESET# | 30 |
+
+The original map put DD2/DD3 on GPIO 2/3, which the BB48 pulls up to 3.3 V for I2C. The new map also leaves out GPIO 25, the board's LED.
+
+**Power-order rule:** the BB48 is powered before the adapter's brick is switched on, and the brick goes off before the BB48 is unplugged. There are no buffers, and the RP2350's pins are only 5 V tolerant while it is powered.
+
+**Worth adding if automation gets annoying:**
+- A USB hub with per-port power switching that `uhubctl` supports.
+- A smart plug or relay on the adapter's brick, for cold-start tests.
+- A Raspberry Pi Debug Probe for SWD.
+
+## Automation loop
+
+`scripts/rig.sh -m sliceN` runs the host unit tests, then builds, flashes and runs the rig tests. Every code change gets the full suite with no hands on the rig (once a switchable hub is fitted). A failing run leaves its evidence in `host/runs/`.
+
+- **Flash:** `pio run -t upload` resets the board into the bootloader over serial and loads it with picotool. The runner then waits for the `READY` line. USB power stays on throughout.
+- **Replug:** if a hub is configured, `uhubctl` power-cycles the adapter's port; otherwise the test asks for a manual replug and waits for bus activity.
+- **Tests:** pytest, one marker per slice, so earlier slices re-run as regression tests. The `sim` marker covers the tests that need no hardware.
+
+**Two views of every test.**
+- **Host view:** what macOS sees: the system log, `diskutil`, and data read and written through the raw device `/dev/rdiskN`, which bypasses the cache (macOS has no `O_DIRECT`).
+  - macOS mounts and indexes new disks, so traces include its reads too.
+  - **(amended)**
+- **Drive view:** the trace streamed over USB serial. A test passes only when both views agree.
+
+## Firmware shape
+
+Arduino-Pico (earlephilhower core, which runs on the Pico SDK) under PlatformIO, as in HDDSynth_Native. The PIO programs are assembled by `scripts/pioasm.py`.
+
+| Module | Job | Testable on the Mac? |
+|---|---|---|
+| `ide_listen` (slice 0), later `ide_bus` (PIO + C++ wrapper) | Sees strobes, captures register accesses, drives reads, controls IORDY | In a simulator: `host/hddproto/pio_sim.py` runs the real assembled program |
+| `ata_device` | Task-file registers, status bits, the command state machine | Yes |
+| `identify` | The IDENTIFY DEVICE block | Yes |
+| `block_device` | RamDisk and SdImage backends | Yes, with a fake SD |
+| `trace_format`, `spsc_ring` | Trace events, their text form, the core 1 → core 0 ring | Yes |
+| `main` | Console and core wiring | No |
+
+**Core split:**
+- Core 1 runs the IDE side only, in a tight loop that never touches the SD card or USB.
+- Core 0 owns USB serial, the SD card and the trace output.
+
+### The slowest-safe bus approach
+
+**The deadline (amended):** the strict limit is **tA = 35 ns**. That is the time from DIOR#/DIOW# going low until IORDY must be low. It is tighter than the ~115 ns data deadline, and leaves about 5 PIO cycles at 150 MHz.
+
+The answer is to trigger on the chip-selects instead of the strobe. CS0#/CS1# and DA0–2 are valid at least 70 ns (t1) before the strobe falls, so PIO can pull IORDY low as soon as a chip-select goes active. That leaves about 105 ns. Any deglitch filter belongs on the chip-selects, not the strobes.
+
+The read path:
+1. A chip-select goes active. PIO pulls IORDY low and hands the register address to core 1.
+2. Core 1 looks up the value and pushes it back.
+3. PIO drives the data bus once DIOR# is low, then releases IORDY. It tri-states the bus when DIOR# rises.
+
+Host writes need no wait: PIO keeps sampling while DIOW# is low and keeps the last sample. That sample is taken 0–40 ns before DIOW# rises, inside mode 0's 60 ns data setup time. PIO modes 3/4 (setup 30/20 ns) will need a faster loop.
+
+Rules:
+- IORDY waits stay under 1.25 µs.
+- Slow work never hides behind IORDY: anything that touches the SD card happens while STATUS shows BSY.
+
+## Thin slices
+
+Each slice ends in a passing automated test before the next starts.
+
+- **Slice 0: listen only.**
+  - Every pin is an input under SIO control, so PIO cannot drive it.
+  - The trace shows every access and reset.
+  - **Exit:** a clean, repeatable trace of the adapter's probe sequence, saved with `--save-reference`.
+- **Slice 1: answer status.**
+  - The register file, with status reads returning ready after reset, and soft reset through Device Control.
+  - This is the first use of the IORDY read path.
+  - **Exit:** the adapter gets past detection on 20 replugs in a row.
+- **Slice 2: IDENTIFY DEVICE.**
+  - Model `HDDSYNTH PROTO`, LBA28 capacity, default CHS, PIO 0 only, IORDY, no DMA, no MULTIPLE.
+  - The trace must show the same IDENTIFY sequence as the saved reference. Adapters can retry, and macOS can add commands, so this checks against the reference rather than for exactly one IDENTIFY. **(amended)**
+  - **Exit:** a disk of the right capacity appears on 20 replugs out of 20.
+- **Slice 3: read from a generated disk.**
+  - READ SECTORS from a disk whose content is computed from the LBA (64 MB). Sector count 0 means 256, and reads past the end fail cleanly.
+  - **Exit:** a full-disk read and random reads with zero mismatches.
+- **Slice 4: write to a RAM disk.**
+  - WRITE SECTORS into a 256 KB RAM disk.
+  - **Exit:** 1,000 write-then-read cycles clean.
+- **Slice 5: image file on SD.**
+  - FatFs in SPI mode, a contiguous image, every SD access under BSY.
+  - **Exit:** the full file-system cycle passes and the image survives a power cycle.
+- **Slice 6: housekeeping commands and soak.**
+  - CHS addressing, INITIALIZE DEVICE PARAMETERS, SET FEATURES, READ VERIFY, SEEK, RECALIBRATE, EXECUTE DEVICE DIAGNOSTIC, IDLE, STANDBY, CHECK POWER MODE, FLUSH CACHE. Anything unknown gets ABRT.
+  - Pass-through tests run from the Pi 5.
+  - **Exit:** an overnight soak with zero mismatches and zero hangs.
+
+## Later layers
+
+1. Faster register path (status from PIO without IORDY; DMA-fed sector data).
+2. READ/WRITE MULTIPLE.
+3. PIO modes 1–4.
+4. SDIO 4-bit.
+5. Image selection and VHD footers.
+6. A 486-class host.
+7. Slave and cable select.
+8. Amiga A600/A1200.
+9. An adapter PCB with transceivers.
+10. HDD Synth integration.
+
+## Risks and open questions
+
+| Risk | Mitigation |
+|---|---|
+| Strobe ringing on hand-wired links | 33 Ω series resistors on DIOR#/DIOW#; a filter on the chip-selects, not the strobes (tA) |
+| The adapter is fussy | The slice 0 trace shows what it does; keep a second adapter with a different chipset |
+| No ATA pass-through (always the case on macOS) | Slice 6 pass-through tests on a Pi 5 |
+| Wrong power order | The rule above; a relay-controlled brick later |
+| Erratum E9 on A2-stepping RP2350s | Never use internal pull-downs |
+| SD write stalls | BSY covers every SD access; measure the worst case in slice 5 |
+
+**Open questions:**
+- Which chipset is in the USB-IDE adapter? Does its logic run from USB or from the brick? This decides whether a USB replug alone resets the IDE bus; the slice 0 trace will show it.
+- Is the BB48's RP2350 the A2 or A4 stepping?
