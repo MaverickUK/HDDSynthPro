@@ -6,6 +6,8 @@ An RP2350 that pretends to be an IDE hard disk, as the base for a future HDD Syn
 
 At this stage it is a proof of concept on an Olimex RP2350-PICO2-BB48, tested through a USB-IDE adapter from the same Mac that builds it. See [docs/plan.md](docs/plan.md) for the slices and [docs/wiring.md](docs/wiring.md) for the connections. For an interactive wiring diagram, open [docs/wiring.html](docs/wiring.html) in a browser.
 
+The logo? The pro part is meant to be an IDE cable, with pin 1 being red :)
+
 <br clear="left">
 
 ## Status
