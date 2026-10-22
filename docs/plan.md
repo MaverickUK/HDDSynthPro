@@ -51,7 +51,7 @@ The original map put DD2/DD3 on GPIO 2/3, which the BB48 pulls up to 3.3 V for I
 **Power-order rule:** the BB48 is powered before the adapter's brick is switched on, and the brick goes off before the BB48 is unplugged. There are no buffers, and the RP2350's pins are only 5 V tolerant while it is powered.
 
 **Worth adding if automation gets annoying:**
-- A USB hub with per-port power switching that `uhubctl` supports.
+- ~~A USB hub with per-port power switching that `uhubctl` supports~~: the rig's Realtek hub already does this (see below).
 - A smart plug or relay on the adapter's brick, for cold-start tests.
 - A Raspberry Pi Debug Probe for SWD.
 
@@ -164,6 +164,16 @@ Each slice ends in a passing automated test before the next starts.
 | Erratum E9 on A2-stepping RP2350s | Never use internal pull-downs |
 | SD write stalls | BSY covers every SD access; measure the worst case in slice 5 |
 
+**Answered (22 Oct 2026, adapter plugged into the Mac):**
+- **The adapter is a Norelsys NS1081** (USB `2537:1081`): a USB 3.0 bridge with SATA and IDE ports.
+  - macOS drives it with the standard Bulk-Only mass-storage driver (not UAS).
+  - It exposes two units, `1081CS0` and `1081CS1`, presumably one per port.
+  - The disk will probably be named after the bridge, not the drive's model, so the tests find it by size (or `HDDPRO_DISK`).
+- **Hands-free replugs work.** The adapter sits on port 4 of a Realtek RTS5411 USB 3 hub (`0bda:0411`, with a USB 2 half `0bda:5411`), which `uhubctl` controls.
+  - Switching both halves of the port off removes the adapter from USB within 2 s, and it re-enumerates within about 1 s of switching on.
+  - The settings are in `host/rig.env` (see `host/rig.env.example`).
+
 **Open questions:**
-- Which chipset is in the USB-IDE adapter? Does its logic run from USB or from the brick? This decides whether a USB replug alone resets the IDE bus; the slice 0 trace will show it.
+- **Does the hub really cut power to the port, or only disconnect it logically?** Watch the adapter's LED during a long off period (`uhubctl -l 0-2 -e -p 4 -a cycle -d 10`, plus the same for `0-1`). If the adapter's logic runs from the brick, a USB replug may not reset the IDE bus at all. The slice 0 trace will show whether the adapter probes again after a replug.
+- **Will the NS1081 accept a PIO-only drive?** It's mostly paired with modern disks. If it wants DMA, the slice 0 trace will show it sending SET FEATURES (`EF`) for a transfer mode or READ DMA (`C8`), then giving up. A second adapter with a different chipset is the fallback.
 - Is the BB48's RP2350 the A2 or A4 stepping?

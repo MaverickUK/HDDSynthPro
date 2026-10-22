@@ -3,8 +3,12 @@ the system log. Everything specific to the host OS lives here, so a Linux
 version (needed for ATA pass-through in slice 6) can sit alongside it.
 
 Replug, in order of preference:
-  1. HDDPRO_UHUBCTL set: uhubctl power-cycles the adapter's hub port.
-     Its value is the uhubctl location and port, e.g. "-l 20-2 -p 3".
+  1. HDDPRO_UHUBCTL set: uhubctl switches the adapter's hub port off, waits
+     HDDPRO_REPLUG_OFF_S (default 2 s) and switches it back on. Its value is
+     one or more uhubctl targets separated by ";". A USB 3 port needs two:
+     the USB 3 half and its USB 2 companion. For the rig's Realtek hub:
+       HDDPRO_UHUBCTL="-l 0-2 -e -p 4;-l 0-1 -e -p 4"
+     (-e: exact location. Without it, uhubctl on macOS finds no hub.)
   2. Otherwise the test asks you to do it by hand and waits.
 """
 from __future__ import annotations
@@ -32,8 +36,12 @@ class MacHost:
         """Disconnects and reconnects the adapter. Manual mode returns at once;
         the caller waits for the drive to see bus activity."""
         if self._uhubctl:
-            subprocess.run(["uhubctl", "-a", "cycle", "-d", "2", *shlex.split(self._uhubctl)],
-                           check=True, capture_output=True)
+            targets = [shlex.split(t) for t in self._uhubctl.split(";") if t.strip()]
+            for target in targets:
+                subprocess.run(["uhubctl", "-a", "off", *target], check=True, capture_output=True)
+            time.sleep(float(os.environ.get("HDDPRO_REPLUG_OFF_S", "2")))
+            for target in targets:
+                subprocess.run(["uhubctl", "-a", "on", *target], check=True, capture_output=True)
         else:
             self._ask("Replug the USB-IDE adapter now: unplug its USB cable and plug it back in "
                       "(or switch its power brick off and on; the BB48 stays powered).")

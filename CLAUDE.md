@@ -35,6 +35,10 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - `host/hddproto/ide_host_model.py` is a mode 0 host that honours IORDY. `tests/test_pio_bus_sim.py` uses it to hold `ide_bus.pio` to the ATA timings, and the sim must be configured as `ide_bus.cpp` configures the state machine.
 - **On the rig:** `scripts/rig.sh -m sliceN` runs the unit tests, builds, flashes and runs the rig tests.
   - Evidence goes to `host/runs/` (git-ignored); reference traces live in `host/reference/`.
+- **Rig:**
+  - The adapter is a Norelsys NS1081 (USB `2537:1081`, Bulk-Only, two units `1081CS0`/`1081CS1`).
+  - It sits on port 4 of a Realtek RTS5411 hub that `uhubctl` controls; both USB 3 and USB 2 halves must be switched, and macOS needs `-e`.
+  - `host/rig.env` (git-ignored, from `rig.env.example`) holds the replug settings, and `scripts/rig.sh` loads it.
 - **Host OS:** the dev machine is macOS. There's no `O_DIRECT` (use `/dev/rdiskN`), no `dmesg` (use `log show`), and no ATA pass-through. OS-specific code stays in `host/hddproto/host_macos.py`; slice 6 adds a Linux host for pass-through.
 
 ## Drive data path

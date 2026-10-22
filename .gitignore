@@ -5,3 +5,4 @@ __pycache__/
 host/runs/
 host/.venv/
 src/*.pio.h
+host/rig.env

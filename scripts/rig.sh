@@ -10,9 +10,11 @@
 #
 # PIO_ENV picks the build: bb48 (default, listen only) for slice 0,
 # bb48_drive for slices 1-3. Tests that need the other build skip themselves.
-# Set HDDPRO_UHUBCTL (see host/hddproto/host_macos.py) for hands-free replugs.
+# Rig settings (hands-free replugs etc.) come from host/rig.env if it exists:
+# see host/rig.env.example and host/hddproto/host_macos.py.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+[[ -f host/rig.env ]] && source host/rig.env
 
 PIO="${PIO:-$(command -v pio || echo "$HOME/.platformio-venv/bin/pio")}"
 VENV=host/.venv
