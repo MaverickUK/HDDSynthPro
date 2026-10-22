@@ -1,6 +1,6 @@
 # HDD Synth Pro
 
-<img src="media/HDDSynthProWide.png" alt="HDD Synth Pro logo" width="160" align="left">
+<img src="media/HDDSynthProWide.png" alt="HDD Synth Pro logo" width="300" align="left">
 
 An RP2350 that pretends to be an IDE hard disk, as the base for a future HDD Synth that *is* the drive rather than one that listens to it.
 
