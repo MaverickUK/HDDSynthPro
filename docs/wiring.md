@@ -2,6 +2,8 @@
 
 The pin map lives in [src/config.h](../src/config.h); this table must match it.
 
+[wiring.html](wiring.html) shows the same connections as an interactive diagram. Open it in a browser: GitHub shows HTML files as source. It includes a soldering checklist, and its ticks are saved in that browser only.
+
 ## Why these pins
 
 - **GPIO 0–3 are not used.** The BB48 pulls GPIO 2 and 3 up to 3.3 V through 2.2 kΩ (R17/R18, for the UEXT and Qwiic I2C connectors). GPIO 0/1 stay free for a debug UART.

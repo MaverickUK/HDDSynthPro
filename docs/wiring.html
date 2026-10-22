@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Interactive wiring diagram: open in a browser. Pin map must match src/config.h and docs/wiring.md. -->
+<title>BB48 IDE Wiring</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body { margin: 0; }
+[hidden] { display: none !important; }
+/* Layout: a bench sheet. Warnings first, then the pin-to-pin drawing, then the
+   checklist you tick off while soldering. Signal colours = suggested wire colours. */
+:root {
+  --bg: #f4f6f3;
+  --panel: #ffffff;
+  --fg: #1c2125;
+  --muted: #5d6870;
+  --line: #d3d9d4;
+  --accent: #0e6a87;
+  --warn-bg: #fff4e5;
+  --warn-fg: #7a3d00;
+  --c-data: #2457d6;
+  --c-addr: #a87700;
+  --c-cs: #13803f;
+  --c-strobe: #c2410c;
+  --c-ctl: #7b3aec;
+  --c-gnd: #3c444a;
+  --c-nc: #a3acb2;
+  --font-display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121518; --panel: #1a1e22; --fg: #e3e7ea; --muted: #94a0a8; --line: #2c3338;
+    --accent: #5cc3e0; --warn-bg: #33240f; --warn-fg: #ffcf94;
+    --c-data: #79a6ff; --c-addr: #e7b94c; --c-cs: #4fc27a; --c-strobe: #ff8a4f;
+    --c-ctl: #b598ff; --c-gnd: #aab3ba; --c-nc: #5b656c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121518; --panel: #1a1e22; --fg: #e3e7ea; --muted: #94a0a8; --line: #2c3338;
+  --accent: #5cc3e0; --warn-bg: #33240f; --warn-fg: #ffcf94;
+  --c-data: #79a6ff; --c-addr: #e7b94c; --c-cs: #4fc27a; --c-strobe: #ff8a4f;
+  --c-ctl: #b598ff; --c-gnd: #aab3ba; --c-nc: #5b656c;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.wrap {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 32px;
+}
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: 2.1rem; font-weight: 700; letter-spacing: 0.01em; }
+h2 { font-size: 1.35rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase;
+  letter-spacing: 0.12em; color: var(--muted);
+}
+header { display: grid; gap: 10px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+
+.warnings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.warn {
+  background: var(--warn-bg); color: var(--warn-fg);
+  border-radius: 6px; padding: 12px 14px; display: grid; gap: 4px; min-width: 0;
+}
+.warn strong { font-family: var(--font-display); font-size: 1.02rem; font-weight: 600; }
+.warn p { font-size: 0.92rem; }
+
+section { display: grid; gap: 14px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 18px; height: 4px; border-radius: 2px; background: var(--c); display: inline-block; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; cursor: pointer; }
+.toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+button {
+  font: inherit; font-size: 0.85rem; color: var(--fg); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 5px; padding: 5px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+figure { margin: 0; display: grid; gap: 10px; }
+.drawing {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  overflow-x: auto; padding: 8px;
+}
+.drawing svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--fg); }
+figcaption { font-size: 0.88rem; color: var(--muted); max-width: 80ch; }
+
+/* SVG parts, coloured through tokens so both themes work */
+.g-data { --c: var(--c-data); } .g-addr { --c: var(--c-addr); } .g-cs { --c: var(--c-cs); }
+.g-strobe { --c: var(--c-strobe); } .g-ctl { --c: var(--c-ctl); } .g-gnd { --c: var(--c-gnd); }
+.g-nc { --c: var(--c-nc); } .g-pwr { --c: var(--c-nc); }
+.board { fill: var(--bg); stroke: var(--muted); stroke-width: 1.2; }
+.conn { fill: var(--bg); stroke: var(--muted); stroke-width: 1.2; }
+.usb { fill: var(--line); stroke: var(--muted); }
+.pin { fill: var(--c); stroke: var(--panel); stroke-width: 1.5; }
+.pin.nc { fill: none; stroke: var(--c-nc); stroke-width: 1.2; }
+.tagbox { fill: color-mix(in srgb, var(--c) 14%, transparent); }
+.tagtext { fill: var(--c); font: 600 11.5px var(--font-mono); }
+.num { fill: var(--muted); font: 400 10px var(--font-mono); }
+.boardlbl { fill: var(--muted); font: 400 10px var(--font-mono); }
+.title { fill: currentColor; font: 600 13px var(--font-display); letter-spacing: 0.04em; }
+.sub { fill: var(--muted); font: 400 11px var(--font-body); }
+.wire { fill: none; stroke: var(--c); stroke-width: 2.2; stroke-linecap: round; opacity: 0.55; }
+.wire.gnd { stroke-dasharray: 5 4; }
+.wire.on { opacity: 1; stroke-width: 3.2; }
+.res rect { fill: var(--panel); stroke: var(--c); stroke-width: 1.5; }
+.res text { fill: var(--c); font: 600 9.5px var(--font-mono); }
+.hit { cursor: pointer; }
+.hit.on .tagbox { fill: color-mix(in srgb, var(--c) 32%, transparent); }
+.hit.on .pin { stroke: var(--fg); stroke-width: 2; }
+.x { stroke: var(--c-nc); stroke-width: 1.3; }
+
+/* Checklist */
+.progress { font-family: var(--font-mono); font-size: 0.9rem; }
+.progress b { color: var(--accent); }
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th {
+  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.1em; color: var(--muted); background: var(--panel); position: sticky; top: 0;
+}
+tbody tr { cursor: pointer; }
+tbody tr:hover, tbody tr.on { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+tbody tr.done td:not(:first-child) { color: var(--muted); }
+tbody tr.done .sig { text-decoration: line-through; text-decoration-color: var(--muted); }
+td.mono, td .mono { font-family: var(--font-mono); font-size: 0.86rem; }
+.sig { font-family: var(--font-mono); font-weight: 600; font-size: 0.88rem; color: var(--c); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--c); margin-right: 8px; vertical-align: -1px; }
+td input { accent-color: var(--accent); width: 17px; height: 17px; cursor: pointer; }
+.note { font-size: 0.88rem; color: var(--muted); }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+.cols > div { display: grid; gap: 10px; align-content: start; min-width: 0; }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+pre {
+  margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 12px 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.6;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .wire { transition: opacity 120ms ease, stroke-width 120ms ease; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">HDDSynthPro · slice 0 rig · firmware v0.1.0 pin map</div>
+    <h1>Olimex BB48 to a 40-pin IDE header</h1>
+    <p>26 signal wires and the grounds. No power crosses between the boards: they share ground only. Pick any pin or row to see its wire.</p>
+  </header>
+
+  <div class="warnings" aria-label="Before you wire">
+    <div class="warn"><strong>Use a plain BB48, not the BB48R</strong><p>On the R, GPIO 8 is the PSRAM chip-select and GPIO 9–11 and 24 go to its SD slot. Here those pins carry DD4–DD7 and CS1#.</p></div>
+    <div class="warn"><strong>Power order</strong><p>BB48 on (USB-C) before the adapter's brick; brick off before unplugging the BB48. Its pins are 5 V tolerant only while powered.</p></div>
+    <div class="warn"><strong>One strip per header pin</strong><p>Before soldering the IDC helper, check with a meter that pins 1 and 2 (RESET# and GND) are on different Perma-Proto strips.</p></div>
+    <div class="warn"><strong>Leave these unconnected</strong><p>BB48 +3.3V, 3V3_EN, VBUS and VSYS. IDE pins 20, 21, 28, 29, 32, 34 and 39.</p></div>
+  </div>
+
+  <section aria-labelledby="map-h">
+    <h2 id="map-h">Pin to pin</h2>
+    <div class="toolbar">
+      <label class="toggle"><input type="checkbox" id="showAll"> Show all wires</label>
+      <div class="legend" aria-label="Signal groups (suggested wire colours)">
+        <span class="g-data"><i></i>Data DD0–15</span>
+        <span class="g-addr"><i></i>Address DA0–2</span>
+        <span class="g-cs"><i></i>Chip selects</span>
+        <span class="g-strobe"><i></i>Strobes (33 Ω)</span>
+        <span class="g-ctl"><i></i>IORDY · INTRQ · RESET#</span>
+        <span class="g-gnd"><i></i>Ground</span>
+      </div>
+    </div>
+    <figure>
+      <div class="drawing">
+        <svg id="map" viewBox="0 0 820 630" role="img"
+             aria-label="Each IDE header pin wired to a BB48 GPIO: DD0 to DD15 on GPIO 4 to 19, DA0 to DA2 on GPIO 20 to 22, CS0# and CS1# on GPIO 23 and 24, DIOR# and DIOW# on GPIO 26 and 27 through 33 ohm resistors, IORDY on 28, INTRQ on 29, RESET# on 30, and all IDE grounds to the BB48 ground."></svg>
+      </div>
+      <figcaption>Left: the IDE header seen from above, pin 1 at the top, odd pins in the left column, pin 20 being the key. Right: the BB48 as drawn in Olimex's pinout, with USB-C at the top; EXT1 (GPIO 0–23) is the left row and EXT2 (GPIO 24–47) the right. Check this against the board's silkscreen. Grounds run through the Perma-Proto ground rail; they are drawn to the BB48's GND pin for clarity.</figcaption>
+    </figure>
+  </section>
+
+  <section aria-labelledby="list-h">
+    <div class="toolbar">
+      <h2 id="list-h">Wiring checklist</h2>
+      <span class="progress" id="progress" aria-live="polite"></span>
+      <button type="button" id="clear">Clear ticks</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Done</th><th scope="col">IDE pin</th><th scope="col">Signal</th><th scope="col">BB48 pin</th><th scope="col">GPIO</th><th scope="col">Notes</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="note">The ticks are saved in this browser only.</p>
+  </section>
+
+  <section class="cols" aria-label="Layout and checks">
+    <div>
+      <h2>On the Perma-Proto</h2>
+      <ul>
+        <li>Solder female headers for the BB48 rather than the board itself, so it can be swapped for your spare.</li>
+        <li>Seat it across the centre channel at one end, with the EXT1 row (GPIO 0–23) facing the IDC helper at the other end. 20 of the 26 signals are on EXT1.</li>
+        <li>Put the two 33 Ω resistors in DIOR# and DIOW#, close to the BB48.</li>
+        <li>Run the IDE grounds and the BB48's GND to the same ground rail. Wire all seven IDE grounds if you can, and at least three spread along the header.</li>
+        <li>Keep signal wires short, under 15 cm.</li>
+        <li>Leave GPIO 32–37 free for the SD breakout in slice 5.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>First power-up check</h2>
+      <p>With the adapter powered and idle, type <code>p</code> in the serial monitor. You should see something close to this:</p>
+<pre>PINS DD=.... DA=. CS0#=1 CS1#=1 DIOR#=1 DIOW#=1 IORDY=1 INTRQ=0 RESET#=1</pre>
+      <ul>
+        <li>Strobes, chip selects and RESET# are high (idle).</li>
+        <li>IORDY is high: the host pulls it up to 5 V.</li>
+        <li>INTRQ and DD7 are low: the host pulls them down.</li>
+        <li>The other DD and DA lines may float.</li>
+      </ul>
+      <p>A strobe or chip select reading 0 at idle usually means a wire is on the wrong pin.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  // IDE pin -> [signal, group, gpio]
+  const IDE = {
+    1: ["RESET#", "ctl", 30], 2: ["GND", "gnd"], 3: ["DD7", "data", 11], 4: ["DD8", "data", 12],
+    5: ["DD6", "data", 10], 6: ["DD9", "data", 13], 7: ["DD5", "data", 9], 8: ["DD10", "data", 14],
+    9: ["DD4", "data", 8], 10: ["DD11", "data", 15], 11: ["DD3", "data", 7], 12: ["DD12", "data", 16],
+    13: ["DD2", "data", 6], 14: ["DD13", "data", 17], 15: ["DD1", "data", 5], 16: ["DD14", "data", 18],
+    17: ["DD0", "data", 4], 18: ["DD15", "data", 19], 19: ["GND", "gnd"], 20: ["key", "nc"],
+    21: ["DMARQ", "nc"], 22: ["GND", "gnd"], 23: ["DIOW#", "strobe", 27], 24: ["GND", "gnd"],
+    25: ["DIOR#", "strobe", 26], 26: ["GND", "gnd"], 27: ["IORDY", "ctl", 28], 28: ["CSEL", "nc"],
+    29: ["DMACK#", "nc"], 30: ["GND", "gnd"], 31: ["INTRQ", "ctl", 29], 32: ["IOCS16#", "nc"],
+    33: ["DA1", "addr", 21], 34: ["PDIAG#", "nc"], 35: ["DA0", "addr", 20], 36: ["DA2", "addr", 22],
+    37: ["CS0#", "cs", 23], 38: ["CS1#", "cs", 24], 39: ["DASP#", "nc"], 40: ["GND", "gnd"],
+  };
+  const NOTES = {
+    "DIOR#": "33 Ω in series, near the BB48", "DIOW#": "33 Ω in series, near the BB48",
+    "IORDY": "Open drain; host pulls up to 5 V", "INTRQ": "Host pulls down",
+    "DD7": "Host pulls down", "RESET#": "From the host", "CS0#": "ATA “CS1FX-”, command block",
+    "CS1#": "ATA “CS3FX-”, control block", "GND": "To the ground rail",
+  };
+  const bbPin = g => (g <= 23 ? { ext: 1, n: g + 4 } : { ext: 2, n: g - 20 });
+  const bbName = (ext, n) => `EXT${ext}-${n}`;
+  const EXT1 = ["+3.3V", "GND", "3V3_EN"].concat(Array.from({ length: 24 }, (_, i) => `GP${i}`));
+  const EXT2 = ["VBUS", "VSYS", "GND"].concat(Array.from({ length: 24 }, (_, i) => `GP${i + 24}`));
+
+  // Geometry
+  const P = 20, IDE_Y0 = 165, X_ODD = 175, X_EVEN = 205;
+  const BB_Y0 = 60, X_EXT1 = 600, X_EXT2 = 700;
+  const idePos = pin => ({ x: pin % 2 ? X_ODD : X_EVEN, y: IDE_Y0 + Math.floor((pin - 1) / 2) * P });
+  const bbPos = (ext, n) => ({ x: ext === 1 ? X_EXT1 : X_EXT2, y: BB_Y0 + (n - 1) * P });
+  const GND_TARGET = bbPos(1, 2);
+
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("map");
+  const el = (tag, attrs, parent, text) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text != null) e.textContent = text;
+    (parent || svg).appendChild(e);
+    return e;
+  };
+  const tagWidth = s => s.length * 7.1 + 12;
+
+  // Layers
+  const gBody = el("g", {}), gWires = el("g", {}), gPins = el("g", {});
+
+  // Titles
+  el("text", { x: X_ODD + 15, y: 120, "text-anchor": "middle", class: "title" }, gBody, "IDE 40-PIN HEADER");
+  el("text", { x: X_ODD + 15, y: 136, "text-anchor": "middle", class: "sub" }, gBody, "from the USB-IDE adapter");
+  el("text", { x: 650, y: 14, "text-anchor": "middle", class: "title" }, gBody, "OLIMEX RP2350-PICO2-BB48");
+
+  // IDE connector body
+  el("rect", { x: X_ODD - 15, y: IDE_Y0 - 14, width: X_EVEN - X_ODD + 30, height: 20 * P + 8, rx: 3, class: "conn" }, gBody);
+  el("path", { d: `M ${X_ODD - 15} ${IDE_Y0 - 22} l 8 0 l -8 8 z`, fill: "currentColor" }, gBody);
+  el("text", { x: X_ODD - 2, y: IDE_Y0 - 18, class: "num" }, gBody, "1");
+
+  // BB48 body
+  el("rect", { x: X_EXT1 - 14, y: BB_Y0 - 30, width: X_EXT2 - X_EXT1 + 28, height: 27 * P + 34, rx: 6, class: "board" }, gBody);
+  el("rect", { x: 632, y: BB_Y0 - 38, width: 36, height: 16, rx: 4, class: "usb" }, gBody);
+  el("text", { x: 650, y: BB_Y0 - 27, "text-anchor": "middle", class: "boardlbl" }, gBody, "USB");
+  el("text", { x: X_EXT1 - 16, y: BB_Y0 - 14, "text-anchor": "end", class: "num" }, gBody, "EXT1");
+  el("text", { x: X_EXT2 + 16, y: BB_Y0 - 14, class: "num" }, gBody, "EXT2");
+
+  // Which BB48 pins carry which IDE signal
+  const bbUse = {};
+  for (const [pin, [sig, grp, gpio]] of Object.entries(IDE)) {
+    if (gpio != null) { const b = bbPin(gpio); bbUse[bbName(b.ext, b.n)] = { sig, grp, key: String(pin) }; }
+  }
+  bbUse["EXT1-2"] = { sig: "GND", grp: "gnd", key: "bbgnd" };
+
+  const hits = {}; // key -> [svg groups]
+  const addHit = (key, g) => { (hits[key] = hits[key] || []).push(g); };
+
+  function tag(parent, x, y, text, anchor) {
+    const w = tagWidth(text);
+    const x0 = anchor === "end" ? x - w : x;
+    el("rect", { x: x0, y: y - 8.5, width: w, height: 17, rx: 3, class: "tagbox" }, parent);
+    el("text", { x: x0 + w / 2, y: y + 4, "text-anchor": "middle", class: "tagtext" }, parent, text);
+  }
+
+  // IDE pins
+  for (let pin = 1; pin <= 40; pin++) {
+    const [sig, grp] = IDE[pin];
+    const { x, y } = idePos(pin);
+    const odd = pin % 2 === 1;
+    const g = el("g", { class: `g-${grp}` + (grp === "nc" ? "" : " hit"), "data-key": pin }, gPins);
+    el("text", { x: odd ? x - 22 : x + 22, y: y + 3.5, "text-anchor": odd ? "end" : "start", class: "num" }, g, pin);
+    if (grp === "nc") {
+      if (pin === 20) {
+        el("line", { x1: x - 4, y1: y - 4, x2: x + 4, y2: y + 4, class: "x" }, g);
+        el("line", { x1: x - 4, y1: y + 4, x2: x + 4, y2: y - 4, class: "x" }, g);
+      } else el("circle", { cx: x, cy: y, r: 4.5, class: "pin nc" }, g);
+      el("text", { x: odd ? x - 44 : x + 44, y: y + 3.5, "text-anchor": odd ? "end" : "start", class: "num" }, g, sig);
+    } else {
+      el("circle", { cx: x, cy: y, r: 5, class: "pin" }, g);
+      tag(g, odd ? x - 42 : x + 42, y, sig, odd ? "end" : "start");
+      addHit(String(pin), g);
+    }
+  }
+
+  // BB48 pins
+  [[1, EXT1], [2, EXT2]].forEach(([ext, names]) => {
+    names.forEach((label, i) => {
+      const n = i + 1;
+      const { x, y } = bbPos(ext, n);
+      const use = bbUse[bbName(ext, n)];
+      const grp = use ? use.grp : (["+3.3V", "3V3_EN", "VBUS", "VSYS", "GND"].includes(label) ? "pwr" : "nc");
+      const g = el("g", { class: `g-${grp}` + (use ? " hit" : "") , "data-key": use ? use.key : "" }, gPins);
+      el("text", { x: ext === 1 ? x + 12 : x - 12, y: y + 3.5, "text-anchor": ext === 1 ? "start" : "end", class: "boardlbl" }, g, label);
+      if (use) {
+        el("circle", { cx: x, cy: y, r: 5, class: "pin" }, g);
+        tag(g, ext === 1 ? x - 22 : x + 22, y, use.sig, ext === 1 ? "end" : "start");
+        addHit(use.key, g);
+      } else {
+        el("circle", { cx: x, cy: y, r: 4, class: "pin nc" }, g);
+      }
+    });
+  });
+
+  // Wires
+  const wires = {};
+  for (const [pin, [sig, grp, gpio]] of Object.entries(IDE)) {
+    if (grp === "nc") continue;
+    const a = idePos(Number(pin));
+    const b = grp === "gnd" ? GND_TARGET : (() => { const p = bbPin(gpio); return bbPos(p.ext, p.n); })();
+    const c1 = a.x + 210, c2 = b.x - (b.x === X_EXT2 ? 120 : 170);
+    const g = el("g", { class: `g-${grp}`, visibility: "hidden" }, gWires);
+    const path = el("path", { d: `M ${a.x} ${a.y} C ${c1} ${a.y}, ${c2} ${b.y}, ${b.x} ${b.y}`, class: "wire" + (grp === "gnd" ? " gnd" : "") }, g);
+    if (grp === "strobe") {
+      const mid = path.getPointAtLength(path.getTotalLength() * 0.78);
+      const r = el("g", { class: "res" }, g);
+      el("rect", { x: mid.x - 17, y: mid.y - 7, width: 34, height: 14, rx: 2 }, r);
+      el("text", { x: mid.x, y: mid.y + 3.5, "text-anchor": "middle" }, r, "33Ω");
+    }
+    (wires[pin] = wires[pin] || []).push(g);
+    if (grp === "gnd") (wires.bbgnd = wires.bbgnd || []).push(g);
+  }
+
+  // Checklist rows: signals in IDE pin order, then the BB48 ground
+  const rows = document.getElementById("rows");
+  const entries = Object.entries(IDE).filter(([, v]) => v[1] !== "nc")
+    .map(([pin, [sig, grp, gpio]]) => {
+      const b = gpio != null ? bbPin(gpio) : null;
+      return { key: pin, ide: pin, sig, grp, bb: b ? bbName(b.ext, b.n) : "rail", gpio: gpio != null ? gpio : "—" };
+    });
+  entries.push({ key: "bbgnd", ide: "—", sig: "GND", grp: "gnd", bb: "EXT1-2 (or EXT2-3)", gpio: "—", note: "BB48 ground to the same rail" });
+
+  const STORE = "bb48-ide-wiring-v1";
+  let done = {};
+  try { done = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) { done = {}; }
+  const save = () => { try { localStorage.setItem(STORE, JSON.stringify(done)); } catch (e) {} };
+
+  const rowEls = {};
+  for (const e of entries) {
+    const tr = document.createElement("tr");
+    tr.className = `g-${e.grp}`;
+    tr.dataset.key = e.key;
+    tr.tabIndex = 0;
+    const id = `w-${e.key}`;
+    tr.innerHTML =
+      `<td><input type="checkbox" id="${id}" aria-label="${e.sig}${e.ide !== "—" ? " (IDE pin " + e.ide + ")" : ""} wired"></td>` +
+      `<td class="mono">${e.ide}</td>` +
+      `<td><span class="swatch"></span><span class="sig">${e.sig}</span></td>` +
+      `<td class="mono">${e.bb}</td>` +
+      `<td class="mono">${e.gpio}</td>` +
+      `<td class="note">${e.note || NOTES[e.sig] || ""}</td>`;
+    const cb = tr.querySelector("input");
+    cb.checked = !!done[e.key];
+    tr.classList.toggle("done", cb.checked);
+    cb.addEventListener("click", ev => ev.stopPropagation());
+    cb.addEventListener("change", () => {
+      done[e.key] = cb.checked; tr.classList.toggle("done", cb.checked); save(); progress();
+    });
+    rows.appendChild(tr);
+    rowEls[e.key] = tr;
+  }
+
+  const prog = document.getElementById("progress");
+  function progress() {
+    const n = entries.filter(e => done[e.key]).length;
+    prog.innerHTML = `<b>${n}</b> of ${entries.length} wired`;
+  }
+  progress();
+  document.getElementById("clear").addEventListener("click", () => {
+    done = {}; save();
+    for (const e of entries) { const tr = rowEls[e.key]; tr.querySelector("input").checked = false; tr.classList.remove("done"); }
+    progress();
+  });
+
+  // Selection: hover previews, click pins it
+  const showAll = document.getElementById("showAll");
+  let pinned = null, hovered = null;
+  function render() {
+    const active = hovered || pinned;
+    const all = showAll.checked;
+    for (const [key, gs] of Object.entries(wires)) {
+      if (key === "bbgnd") continue;
+      const on = key === active || (active === "bbgnd" && IDE[key] && IDE[key][1] === "gnd");
+      for (const g of gs) {
+        g.setAttribute("visibility", all || on ? "visible" : "hidden");
+        g.querySelector(".wire").classList.toggle("on", on);
+      }
+    }
+    for (const [key, gs] of Object.entries(hits)) {
+      const on = key === active || (active && active !== "bbgnd" && IDE[active] && IDE[active][1] === "gnd" && key === "bbgnd");
+      gs.forEach(g => g.classList.toggle("on", on || (active === "bbgnd" && IDE[key] && IDE[key][1] === "gnd")));
+    }
+    for (const [key, tr] of Object.entries(rowEls)) tr.classList.toggle("on", key === active);
+  }
+  const keyOf = t => { const g = t.closest && t.closest(".hit"); return g ? g.getAttribute("data-key") : null; };
+  svg.addEventListener("mouseover", ev => { hovered = keyOf(ev.target); render(); });
+  svg.addEventListener("mouseleave", () => { hovered = null; render(); });
+  svg.addEventListener("click", ev => { const k = keyOf(ev.target); pinned = k && k !== pinned ? k : null; render(); });
+  rows.addEventListener("mouseover", ev => { const tr = ev.target.closest("tr"); hovered = tr ? tr.dataset.key : null; render(); });
+  rows.addEventListener("mouseleave", () => { hovered = null; render(); });
+  rows.addEventListener("click", ev => { const tr = ev.target.closest("tr"); if (!tr) return; pinned = tr.dataset.key === pinned ? null : tr.dataset.key; render(); });
+  rows.addEventListener("keydown", ev => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    const tr = ev.target.closest("tr"); if (!tr || ev.target.tagName === "INPUT") return;
+    ev.preventDefault(); pinned = tr.dataset.key === pinned ? null : tr.dataset.key; render();
+  });
+  showAll.addEventListener("change", render);
+
+  // Open on a real example: DIOR# selected, so the first view shows a wire and its resistor.
+  pinned = "25";
+  render();
+})();
+</script>
+</body>
+</html>
