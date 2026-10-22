@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.4.0] - 2026-10-22
+
+### Added
+- A solder-bridge test, run from the console in both builds with the IDE cable unplugged: `x` explains it, then `Y` within 10 s runs it.
+  - Every bus pin and its header neighbours (GPIO 0–3, 31) are pulled up; each bus pin in turn is driven low for 50 µs.
+  - It reports `STUCK` (low with nothing driven: shorted to GND or the LED) and `SHORT` pairs, then reboots.
+  - Core 1 is paused while it runs.
+  - The analysis (`short_test.*`) is host-tested against simulated boards with known faults.
+- `docs/bringup.md`: the checklist for hardware day, from continuity checks to slice 3.
+
 ## [0.3.0] - 2026-10-22
 
 ### Added

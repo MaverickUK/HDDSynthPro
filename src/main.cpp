@@ -18,6 +18,7 @@
 
 #include "bus_sample.h"
 #include "config.h"
+#include "short_test.h"
 #include "spsc_ring.h"
 #include "trace_format.h"
 #include "version.h"
@@ -213,19 +214,79 @@ static void printStats() {
     Serial.print("\n");
 }
 
+// ---- Solder-bridge test (console `x`, then `Y`) -----------------------------
+//
+// Pulls each bus pin low in turn, with the others pulled up, to find solder
+// bridges (short_test.h). Only with the IDE cable unplugged: it drives the
+// bus. Core 1 is paused while it runs, and the board reboots afterwards so
+// the normal pin setup comes back.
+
+constexpr uint32_t SHORT_TEST_CONFIRM_MS = 10000;
+static uint32_t g_short_test_armed_ms = 0;  // 0 = not armed
+
+static void emitLine(const char* line, void*) { Serial.println(line); }
+
+static void runShortTest() {
+    Serial.println("# short test: running, core 1 paused");
+    Serial.flush();
+    rp2040.idleOtherCore();
+
+    uint32_t observed = short_test::observedMask();
+    uint32_t driven = short_test::drivenMask();
+    for (unsigned g = 0; g < 32; ++g) {
+        if ((observed >> g) & 1) {
+            gpio_init(g);                     // SIO input (takes pins back from PIO)
+            gpio_set_pulls(g, true, false);   // pull-up only: never pull-downs (E9)
+        }
+    }
+    busy_wait_us(500);
+    uint32_t baseline_low = ~gpio_get_all() & observed;
+
+    uint32_t low_when_driven[32] = {};
+    for (unsigned g = 0; g < 32; ++g) {
+        if (!((driven >> g) & 1) || ((baseline_low >> g) & 1)) continue;  // stuck pins: never driven
+        gpio_put(g, 0);
+        gpio_set_dir(g, GPIO_OUT);  // 50 us at the default 4 mA drive
+        busy_wait_us(50);
+        low_when_driven[g] = ~gpio_get_all() & observed;
+        gpio_set_dir(g, GPIO_IN);
+        busy_wait_us(100);  // pull-ups bring the line back
+    }
+
+    short_test::report(short_test::analyse(baseline_low, low_when_driven), emitLine, nullptr);
+    Serial.println("# rebooting to restore the bus setup");
+    Serial.flush();
+    delay(100);
+    rp2040.reboot();
+}
+
 static void handleConsole() {
     while (Serial.available()) {
-        switch (Serial.read()) {
+        int c = Serial.read();
+        if (c != 'x' && c != 'Y' && c != '\r' && c != '\n') g_short_test_armed_ms = 0;
+        switch (c) {
             case 'h':
                 printReady();
 #if FIRMWARE_SLICE == 0
-                Serial.println("# h help, p pins, s stats, b reboot to bootloader");
+                Serial.println("# h help, p pins, s stats, x short test (cable unplugged), "
+                               "b reboot to bootloader");
 #else
                 Serial.println("# h help, p pins, s stats, r reset loop max, t raw bus trace on/off, "
-                               "b reboot to bootloader");
+                               "x short test (cable unplugged), b reboot to bootloader");
 #endif
                 break;
             case 'p': printPins(); break;
+            case 'x':
+                Serial.println("# SHORT TEST drives the bus pins. UNPLUG THE IDE CABLE from the BB48 first,");
+                Serial.println("# then type Y (capital) within 10 s to run it. Anything else cancels.");
+                g_short_test_armed_ms = millis() | 1;
+                break;
+            case 'Y':
+                if (g_short_test_armed_ms && millis() - g_short_test_armed_ms < SHORT_TEST_CONFIRM_MS) {
+                    runShortTest();  // reboots
+                }
+                Serial.println("# short test not armed: type x first");
+                break;
             case 's': printStats(); break;
 #if FIRMWARE_SLICE != 0
             case 'r': g_loop_max_reset.store(true); break;

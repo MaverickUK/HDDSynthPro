@@ -76,6 +76,8 @@ Never connect the adapter's +5 V (its Molex power) to the BB48. The two boards s
 
 ## Wiring check
 
+The full order for hardware day, including the solder-bridge test (console `x`), is in [bringup.md](bringup.md).
+
 With the adapter powered and idle, the console's `p` command should show:
 - DIOR#, DIOW#, CS0#, CS1# and RESET# high
 - IORDY high (host pull-up)
