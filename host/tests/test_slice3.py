@@ -37,16 +37,6 @@ TOTAL = gen_disk.DEFAULT_SECTORS
 CHUNK_SECTORS = 256  # one READ SECTORS command's worth
 
 
-@pytest.fixture(scope="module")
-def raw_disk(drive):
-    from hddproto.host_macos import MacHost
-    rig = MacHost(lambda m: print(f"\n>>> {m}"))
-    disk = rig.find_disk(TOTAL * SECTOR)
-    fd = rig.open_raw(disk)
-    yield disk, fd
-    os.close(fd)
-
-
 def read(fd: int, lba: int, count: int) -> bytes:
     data = os.pread(fd, count * SECTOR, lba * SECTOR)
     assert len(data) == count * SECTOR, f"short read at LBA {lba}: {len(data)} bytes"

@@ -2,6 +2,19 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.5.0] - 2026-10-22
+
+### Added
+- **Activity classification (drive build), for the HDD Synth to choose a sequential or a random sound.**
+  - Each media command is sequential (it carries on one of 4 tracked streams) or a seek, with its distance. The state comes from the share of seeks over a 250 ms window, with hysteresis and a 100 ms dwell.
+  - The first command of a burst is neutral, and the drive wakes as Sequential and needs 3 commands to call Random.
+  - Idle comes 150 ms after the last command ends.
+  - Printed as `ACT` lines on each change; `s` shows the totals and the state.
+  - See `docs/activity.md`.
+- Console `m` prints a `MARK` timestamp, so tests can line phases up with the trace.
+- `test/tools/classify_trace`: replays a recorded trace through the classifier, for tuning.
+- Rig test `-m activity`: sequential, idle, random and interleaved phases from the Mac, each at least 90% in the right state.
+
 ## [0.4.0] - 2026-10-22
 
 ### Added

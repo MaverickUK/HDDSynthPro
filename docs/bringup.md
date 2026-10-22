@@ -15,7 +15,7 @@ You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter
 ## 2. First power: BB48 only, IDE cable unplugged
 
 - [ ] Plug the BB48 into the Mac and flash the listen build: `pio run -e bb48 -t upload`.
-- [ ] Open the console: `pio device monitor`. Type `h`; it should answer `READY HDDSynthPro 0.4.0 slice0`.
+- [ ] Open the console: `pio device monitor`. Type `h`; it should answer `READY HDDSynthPro 0.5.0 slice0`.
 - [ ] **Solder-bridge test.** Type `x`, then `Y`. With the cable unplugged, every pin should read high on its pull-up, and pulling each one low should move no other pin.
   - `SHORTTEST OK 26 pins`: no solder bridges.
   - `SHORT GPIO9 (DD5) GPIO10 (DD6)`: those two are bridged. Fix it, then run the test again.
@@ -52,6 +52,7 @@ You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter
   - macOS will say the disk is not readable: choose **Ignore**.
   - The first raw read asks for your password (`sudo chown` on `/dev/rdiskN`).
 - [ ] Run `PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m slice3`. Full-disk and random reads with zero mismatches.
+- [ ] Run `PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m activity`. The drive tells sequential from random reads: each phase spends at least 90% of its time in the right state (see [activity.md](activity.md)).
 
 ## If something fails
 

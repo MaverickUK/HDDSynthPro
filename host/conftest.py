@@ -74,6 +74,18 @@ def require_build(firmware_slice: int, drive_build: bool):
         pytest.skip("needs the listen-only build: scripts/rig.sh ... (PIO_ENV=bb48)")
 
 
+@pytest.fixture(scope="module")
+def raw_disk(drive):
+    """The drive's raw device (/dev/rdiskN) opened read-only: (Disk, fd).
+    macOS does not cache it, so every byte read came from the drive."""
+    from hddproto import gen_disk
+    rig = MacHost(lambda m: print(f"\n>>> {m}"))
+    disk = rig.find_disk(gen_disk.DEFAULT_SECTORS * gen_disk.SECTOR_BYTES)
+    fd = rig.open_raw(disk)
+    yield disk, fd
+    os.close(fd)
+
+
 @pytest.fixture
 def ask(request):
     """Shows a message to the person at the rig, even while pytest captures output."""

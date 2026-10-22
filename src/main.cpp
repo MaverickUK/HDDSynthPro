@@ -29,6 +29,7 @@
 #include <hardware/clocks.h>
 #include <hardware/structs/m33.h>
 
+#include "activity.h"
 #include "ata_device.h"
 #include "block_source.h"
 #include "fetch_mailbox.h"
@@ -160,6 +161,23 @@ void loop1() {
 // Core 0's share of the drive: fetch the sectors core 1 asks for.
 static GeneratedDisk g_disk;
 
+// Activity classification for the HDD Synth (activity.h), fed from the
+// command events on their way to the trace. Prints an ACT line on each change.
+static activity::Classifier g_activity;
+static uint32_t g_activity_checked_us = 0;
+static bool g_activity_unprinted = false;
+
+static void noteActivity(const TraceEvent& e) {
+    uint8_t command = uint8_t(e.extra);
+    if (!activity::isMediaCommand(command)) return;
+    if (e.kind == TraceKind::CommandStart) {
+        bool seek_only = (command >= 0x10 && command <= 0x1F) || (command >= 0x70 && command <= 0x7F);
+        g_activity.onCommand(e.time_us, e.pins, seek_only ? 0 : (e.extra >> 8));
+    } else if (e.kind == TraceKind::CommandEnd) {
+        g_activity.onCommandEnd(e.time_us);
+    }
+}
+
 static void serveFetches() {
     ata::Fetch fetch;
     while (g_mailbox.takeRequest(fetch)) {
@@ -209,7 +227,9 @@ static void printStats() {
 #if FIRMWARE_SLICE != 0
     // Cycles at clk_sys -> ns. Must stay well under ~1000 ns (see setup1).
     uint32_t ns = uint32_t(uint64_t(g_loop_max_cycles.load()) * 1000000000ull / clock_get_hz(clk_sys));
-    Serial.printf(" loop_max_ns=%lu bus_trace=%d", (unsigned long)ns, (int)g_trace_bus.load());
+    Serial.printf(" loop_max_ns=%lu bus_trace=%d seq=%lu rand=%lu activity=%s", (unsigned long)ns,
+                  (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
+                  (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
 #endif
     Serial.print("\n");
 }
@@ -268,14 +288,17 @@ static void handleConsole() {
             case 'h':
                 printReady();
 #if FIRMWARE_SLICE == 0
-                Serial.println("# h help, p pins, s stats, x short test (cable unplugged), "
+                Serial.println("# h help, p pins, s stats, m mark, x short test (cable unplugged), "
                                "b reboot to bootloader");
 #else
                 Serial.println("# h help, p pins, s stats, r reset loop max, t raw bus trace on/off, "
-                               "x short test (cable unplugged), b reboot to bootloader");
+                               "m mark, x short test (cable unplugged), b reboot to bootloader");
 #endif
                 break;
             case 'p': printPins(); break;
+            case 'm':  // a timestamp, so tests can line phases up with the trace
+                Serial.printf("MARK %lu\n", (unsigned long)time_us_32());
+                break;
             case 'x':
                 Serial.println("# SHORT TEST drives the bus pins. UNPLUG THE IDE CABLE from the BB48 first,");
                 Serial.println("# then type Y (capital) within 10 s to run it. Anything else cancels.");
@@ -316,6 +339,19 @@ void setup() {
 void loop() {
 #if FIRMWARE_SLICE != 0
     serveFetches();
+
+    // Re-evaluate the activity state once a millisecond, before anything
+    // below can return early on a busy serial link.
+    uint32_t now_us = time_us_32();
+    if (now_us - g_activity_checked_us >= 1000) {
+        g_activity_checked_us = now_us;
+        if (g_activity.update(now_us)) g_activity_unprinted = true;
+    }
+    if (g_activity_unprinted) {
+        char line[48];
+        size_t n = activity::formatActivity(now_us, g_activity, line, sizeof line);
+        if (printLine(line, n)) g_activity_unprinted = false;
+    }
 #endif
     handleConsole();
 
@@ -332,6 +368,9 @@ void loop() {
     TraceEvent e;
     for (int i = 0; i < 64 && g_trace.pop(e); ++i) {
         g_last_event_ms = millis();
+#if FIRMWARE_SLICE != 0
+        noteActivity(e);
+#endif
         if (g_coalescer.add(e, pending)) {
             char line[96];
             size_t n = formatRun(pending, line, sizeof line);

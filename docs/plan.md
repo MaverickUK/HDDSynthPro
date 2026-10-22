@@ -140,6 +140,8 @@ Each slice ends in a passing automated test before the next starts.
   - Pass-through tests run from the Pi 5.
   - **Exit:** an overnight soak with zero mismatches and zero hangs.
 
+**After slice 3: activity classification.** Can the drive tell sequential from random activity, for the HDD Synth's sounds? The classifier and its tests are done; `-m activity` on the rig proves it on the generated disk. Real workloads (file copies, OS boots) follow once slices 4 and 5 give it a file system. See [activity.md](activity.md).
+
 ## Later layers
 
 1. Faster register path (status from PIO without IORDY; DMA-fed sector data).

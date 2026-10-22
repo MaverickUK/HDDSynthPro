@@ -59,3 +59,20 @@ def test_parse_commands():
     assert not bad.ok
     assert pending.status is None and not pending.ok
     assert "IDENTIFY x1" in trace.summary(t)
+
+
+def test_activity_lines_and_time_in_states():
+    t = trace.parse([
+        "MARK 1000",
+        "ACT 2000 SEQ 0 0",
+        "ACT 5000 RAND 80 40000",
+        "ACT 9000 IDLE 0 0",
+        "MARK 10000",
+    ])
+    assert t.marks == [1000, 10000]
+    assert [a.state for a in t.activity] == ["SEQ", "RAND", "IDLE"]
+    assert t.activity[1].avg_seek == 40000
+    spent = trace.time_in_states(t.activity, 1000, 10000)
+    assert spent == {"IDLE": 1000 + 1000, "SEQ": 3000, "RAND": 4000}
+    # A window starting mid-state takes the state in force at its start.
+    assert trace.time_in_states(t.activity, 6000, 8000) == {"IDLE": 0, "SEQ": 0, "RAND": 2000}

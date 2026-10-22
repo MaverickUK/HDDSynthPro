@@ -27,7 +27,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   `main.cpp` holds both. Rig tests skip unless the board runs the build they need, and `scripts/rig.sh` takes `PIO_ENV`.
   - The variant defines `PIN_LED` as a macro, so don't reuse Arduino pin-macro names for constants.
 - **PIO programs:** the platform assembles each `src/*.pio` into a `.pio.h` next to it (git-ignored) before every build. Include them as `"name.pio.h"`.
-- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox` and `short_test` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
+- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test` and `activity` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
 - **CI:** `.github/workflows/build.yml` builds the firmware and runs the C++ tests and `pytest -m sim` on every push. A `vX.Y.Z` tag that matches `FIRMWARE_VERSION` publishes a release with the UF2.
 - **Python tests:** in `host/` (pytest). One marker per slice; `sim` needs no hardware.
   - Plain `pytest` runs only the `sim` tests.
@@ -53,6 +53,15 @@ Core 1 owns `ata::Device` and never waits. For a read:
 
 The device doesn't touch the buffer while BSY. Core 0 must never block for long: it serves fetches before and between trace prints, and only prints when USB serial has room. The SD card (slice 5) becomes another `BlockSource`.
 
+## Activity classification
+
+`src/activity.*` (pure C++, `test_activity.cpp`) classifies media commands as sequential or seeks, and the recent mix as IDLE/SEQ/RAND, for the HDD Synth's sounds.
+- It runs on core 0, fed from the CMD/DONE events as they leave the trace ring.
+- It prints `ACT` lines on each change.
+- Thresholds are in `activity::Config`.
+- To tune on recorded traces: `.pio/native-tests/classify_trace < trace.txt`.
+- Rationale and limits: `docs/activity.md`.
+
 ## Trace format
 
 Core 1 records events into an SPSC ring, and core 0 prints them (`src/trace_format.h`).
@@ -67,6 +76,7 @@ Console:
 - `s`: stats, including `loop_max_ns` on the drive build;
 - `r`: reset the loop maximum;
 - `t`: raw bus trace on or off;
+- `m`: print a `MARK` timestamp (used by the activity rig test);
 - `x` then `Y`: the solder-bridge test, IDE cable unplugged (`short_test.*`; the board reboots afterwards);
 - `b`: reboot to the bootloader.
 

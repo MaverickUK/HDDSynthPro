@@ -54,12 +54,23 @@ class Command:
 
 
 @dataclass
+class Activity:
+    """An ACT line: the activity classifier changed state (drive builds)."""
+    t_us: int
+    state: str        # IDLE, SEQ or RAND
+    seek_pct: int     # share of seeks among the window's commands
+    avg_seek: int     # their mean distance, sectors
+
+
+@dataclass
 class Trace:
     accesses: list[Access] = field(default_factory=list)
     resets: list[tuple[int, str]] = field(default_factory=list)  # (t_us, ASSERT|RELEASE)
     stalls: list[int] = field(default_factory=list)
     dropped: int = 0
     commands: list[Command] = field(default_factory=list)
+    activity: list[Activity] = field(default_factory=list)
+    marks: list[int] = field(default_factory=list)  # MARK timestamps, us
     other: list[str] = field(default_factory=list)  # anything else the drive printed
 
     @property
@@ -96,6 +107,12 @@ def parse(lines: list[str]) -> Trace:
                 continue
             if kind == "DROP":
                 t.dropped += int(parts[1])
+                continue
+            if kind == "ACT" and len(parts) == 5:
+                t.activity.append(Activity(int(parts[1]), parts[2], int(parts[3]), int(parts[4])))
+                continue
+            if kind == "MARK" and len(parts) == 2:
+                t.marks.append(int(parts[1]))
                 continue
             if kind == "CMD" and len(parts) == 6:
                 t.commands.append(Command(int(parts[1]), int(parts[2], 16), parts[3],
@@ -135,3 +152,20 @@ def summary(t: Trace, sequence_lines: int = 60) -> str:
     for ts, text in events[:sequence_lines]:
         out.append(f"  +{(ts - start) & 0xFFFFFFFF:>10} us  {text}")
     return "\n".join(out)
+
+
+def time_in_states(activity: list[Activity], start_us: int, end_us: int) -> dict[str, int]:
+    """Microseconds spent in each activity state between two drive times,
+    from the ACT transitions (the state before the first one is IDLE)."""
+    spent = {"IDLE": 0, "SEQ": 0, "RAND": 0}
+    state, since = "IDLE", start_us
+    for a in sorted(activity, key=lambda a: a.t_us):
+        if a.t_us <= start_us:
+            state = a.state
+            continue
+        if a.t_us >= end_us:
+            break
+        spent[state] += a.t_us - since
+        state, since = a.state, a.t_us
+    spent[state] += max(0, end_us - since)
+    return spent
