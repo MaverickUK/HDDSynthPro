@@ -150,7 +150,7 @@ Each slice ends in a passing automated test before the next starts.
 6. A 486-class host.
 7. Slave and cable select.
 8. Amiga A600/A1200.
-9. An adapter PCB with transceivers.
+9. An adapter PCB with transceivers: targets and a draft BOM in [pcb-bom.md](pcb-bom.md).
 10. HDD Synth integration.
 
 ## Risks and open questions
