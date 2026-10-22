@@ -71,7 +71,7 @@ The original map put DD2/DD3 on GPIO 2/3, which the BB48 pulls up to 3.3 V for I
 
 ## Firmware shape
 
-Arduino-Pico (earlephilhower core, which runs on the Pico SDK) under PlatformIO, as in HDDSynth_Native. The PIO programs are assembled by `scripts/pioasm.py`.
+Arduino-Pico (earlephilhower core, which runs on the Pico SDK) under PlatformIO, as in HDDSynth_Native. The platform assembles the PIO programs (`src/*.pio`) at build time.
 
 | Module | Job | Testable on the Mac? |
 |---|---|---|

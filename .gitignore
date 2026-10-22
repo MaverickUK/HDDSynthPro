@@ -4,3 +4,4 @@ __pycache__/
 .pytest_cache/
 host/runs/
 host/.venv/
+src/*.pio.h

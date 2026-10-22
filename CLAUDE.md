@@ -22,7 +22,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 
 - **Build:** `pio run` (PlatformIO lives in `~/.platformio-venv/bin/pio` on the dev Mac). The board is `olimex_pico2bb48`.
   - The variant defines `PIN_LED` as a macro, so don't reuse Arduino pin-macro names for constants.
-- **PIO programs:** `src/*.pio` are assembled by `scripts/pioasm.py` into the build directory. Include them as `"name.pio.h"`.
+- **PIO programs:** the platform assembles each `src/*.pio` into a `.pio.h` next to it (git-ignored) before every build. Include them as `"name.pio.h"`.
 - **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify` and later `ata_device`/`block_device` free of Arduino and SDK headers so they stay testable here.
 - **Python tests:** in `host/` (pytest). One marker per slice; `sim` needs no hardware.
   - `host/hddproto/pio_sim.py` simulates the PIO instructions the programs use and runs the real `pioasm` output. Extend it when a program uses a new instruction, rather than letting it guess.
