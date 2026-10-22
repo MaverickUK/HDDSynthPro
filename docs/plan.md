@@ -135,7 +135,7 @@ Each slice ends in a passing automated test before the next starts.
 - **Slice 5: image file on SD.**
   - FatFs in SPI mode, a contiguous image, every SD access under BSY.
   - **Exit:** the full file-system cycle passes and the image survives a power cycle.
-- **Slice 6: housekeeping commands and soak.**
+- **Slice 6: housekeeping commands and soak.** The housekeeping commands were pulled forward into 0.3.0, so a bridge's setup can't stall slice 2. They're unit-tested and still need checking against a real host. Slice 6 keeps the soak and the pass-through tests.
   - CHS addressing, INITIALIZE DEVICE PARAMETERS, SET FEATURES, READ VERIFY, SEEK, RECALIBRATE, EXECUTE DEVICE DIAGNOSTIC, IDLE, STANDBY, CHECK POWER MODE, FLUSH CACHE. Anything unknown gets ABRT.
   - Pass-through tests run from the Pi 5.
   - **Exit:** an overnight soak with zero mismatches and zero hangs.

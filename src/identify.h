@@ -31,6 +31,10 @@ struct IdentifyInfo {
 // on the nth DATA access). Word 255 carries the integrity checksum.
 void buildIdentify(const IdentifyInfo& info, uint16_t words[256]);
 
+// Rewrites the "current CHS translation" words (54-58), after INITIALIZE
+// DEVICE PARAMETERS, and fixes up the checksum.
+void setCurrentGeometry(uint16_t words[256], const Geometry& g);
+
 // ATA strings are space-padded and stored two characters per word with the
 // first character in the high byte. Writes `len_words` words.
 void putAtaString(uint16_t* words, unsigned len_words, const char* text);

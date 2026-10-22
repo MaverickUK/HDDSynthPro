@@ -31,7 +31,15 @@ bool TraceCoalescer::flush(TraceRun& done) {
 
 const char* commandName(uint8_t command) {
     switch (command) {
+        case 0x10: return "RECALIBRATE";
         case 0x20: return "READ_SECTORS";
+        case 0x40: return "READ_VERIFY";
+        case 0x41: return "READ_VERIFY_NR";
+        case 0x70: return "SEEK";
+        case 0xE0: case 0x94: return "STANDBY_IMMED";
+        case 0xE1: case 0x95: return "IDLE_IMMED";
+        case 0xE2: case 0x96: return "STANDBY";
+        case 0xE3: case 0x97: return "IDLE";
         case 0x21: return "READ_SECTORS_NR";
         case 0x90: return "EXEC_DIAGNOSTIC";
         case 0xEC: return "IDENTIFY";
@@ -43,7 +51,7 @@ const char* commandName(uint8_t command) {
         case 0xC8: return "READ_DMA";
         case 0x30: return "WRITE_SECTORS";
         case 0xE7: return "FLUSH_CACHE";
-        case 0xE5: return "CHECK_POWER";
+        case 0xE5: case 0x98: return "CHECK_POWER";
         default: return "?";
     }
 }

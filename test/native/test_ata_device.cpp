@@ -583,6 +583,200 @@ TEST(test_read_across_cores) {
     CHECK(sameAsDisk(got, 5000, 300));
 }
 
+// ---- Housekeeping commands -------------------------------------------------
+
+// Issues a command with the given Features and Sector Count; returns status.
+static uint8_t command(Device& d, uint8_t cmd, uint8_t features = 0, uint8_t count = 0) {
+    d.write(Reg::ErrorFeatures, features);
+    d.write(Reg::SectorCount, count);
+    d.write(Reg::StatusCommand, cmd);
+    return uint8_t(d.read(Reg::AltStatusDevCtrl));
+}
+
+TEST(test_set_features_transfer_mode) {
+    Device d(INFO);
+    // PIO default and PIO flow-control mode 0: accepted.
+    CHECK_EQ(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_PIO_DEFAULT), ST_DRDY | ST_DSC);
+    CHECK(d.intrq());
+    CHECK_EQ(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_PIO_FLOW_0), ST_DRDY | ST_DSC);
+    // Everything not advertised: aborted.
+    const uint8_t refused[] = {
+        0x01,        // PIO default with IORDY disabled
+        0x0A, 0x0C,  // PIO modes 2 and 4
+        0x20, 0x22,  // multiword DMA 0 and 2
+        0x40, 0x45,  // Ultra DMA 0 and 5
+    };
+    for (uint8_t mode : refused) {
+        CHECK(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, mode) & ST_ERR);
+        CHECK_EQ(d.error(), ER_ABRT);
+    }
+}
+
+TEST(test_set_features_other_subcommands_abort) {
+    Device d(INFO);
+    const uint8_t refused[] = {0x02, 0x82, 0x55, 0xAA, 0x66, 0xCC};  // cache, look-ahead, defaults
+    for (uint8_t f : refused) {
+        CHECK(command(d, CMD_SET_FEATURES, f, 0) & ST_ERR);
+        CHECK_EQ(d.error(), ER_ABRT);
+    }
+}
+
+TEST(test_initialize_device_parameters) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    // 8 heads x 32 sectors: 131072 / 256 = 512 cylinders.
+    d.write(Reg::Device, 0xA0 | (8 - 1));
+    CHECK_EQ(command(d, CMD_INITIALIZE_DEVICE_PARAMETERS, 0, 32), ST_DRDY | ST_DSC);
+    CHECK_EQ(d.geometry().heads, 8);
+    CHECK_EQ(d.geometry().sectors_per_track, 32);
+    CHECK_EQ(d.geometry().cylinders, 512);
+
+    // IDENTIFY reports it as the current translation, with a valid checksum.
+    uint16_t id[256];
+    h.select(0);
+    CHECK(h.identify(id));
+    CHECK_EQ(id[54], 512);
+    CHECK_EQ(id[55], 8);
+    CHECK_EQ(id[56], 32);
+    CHECK_EQ(uint32_t(id[57]) | (uint32_t(id[58]) << 16), 512u * 8u * 32u);
+    CHECK_EQ(id[1], 130);  // the default geometry is unchanged
+    uint8_t sum = 0;
+    for (int i = 0; i < 256; ++i) sum += uint8_t(id[i] & 0xFF) + uint8_t(id[i] >> 8);
+    CHECK_EQ(sum, 0);
+
+    // CHS reads use it: cylinder 1, head 2, sector 3 -> (1*8 + 2)*32 + 2 = 322.
+    d.write(Reg::SectorCount, 1);
+    d.write(Reg::LbaLow, 3);
+    d.write(Reg::LbaMid, 1);
+    d.write(Reg::LbaHigh, 0);
+    d.write(Reg::Device, 0xA0 | 2);
+    std::vector<uint16_t> got;
+    CHECK(h.readAfterCommand(1, got));
+    CHECK_EQ(d.lastCommand().lba, 322u);
+    CHECK(sameAsDisk(got, 322, 1));
+}
+
+TEST(test_initialize_device_parameters_survives_soft_reset_not_hard) {
+    Device d(INFO);
+    VirtualHost h{d};
+    d.write(Reg::Device, 0xA0 | 3);
+    command(d, CMD_INITIALIZE_DEVICE_PARAMETERS, 0, 17);
+    CHECK_EQ(d.geometry().heads, 4);
+    h.softReset();
+    CHECK_EQ(d.geometry().heads, 4);
+    d.hardReset(true);
+    d.hardReset(false);
+    CHECK_EQ(d.geometry().heads, 16);
+    CHECK_EQ(d.geometry().sectors_per_track, 63);
+}
+
+TEST(test_initialize_device_parameters_rejects_zero_sectors) {
+    Device d(INFO);
+    d.write(Reg::Device, 0xA0 | 15);
+    CHECK(command(d, CMD_INITIALIZE_DEVICE_PARAMETERS, 0, 0) & ST_ERR);
+    CHECK_EQ(d.error(), ER_ABRT);
+    CHECK_EQ(d.geometry().heads, 16);  // unchanged
+}
+
+TEST(test_read_verify) {
+    Device d(INFO);
+    VirtualHost h{d};
+    h.setLba(1000, 50);
+    d.write(Reg::StatusCommand, CMD_READ_VERIFY);
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);  // done, with no data phase
+    Fetch f;
+    CHECK(!d.pendingFetch(f));
+    CHECK(d.intrq());
+    CHECK_EQ(d.lastCommand().count, 50);
+    h.setLba(131000, 0);  // 256 sectors from 131000 runs off the end
+    d.write(Reg::StatusCommand, CMD_READ_VERIFY);
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK_EQ(d.error(), ER_IDNF);
+}
+
+TEST(test_seek_and_recalibrate) {
+    Device d(INFO);
+    VirtualHost h{d};
+    h.setLba(131071, 1);
+    d.write(Reg::StatusCommand, 0x70);
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    h.setLba(131072, 1);
+    d.write(Reg::StatusCommand, 0x7F);  // any of 70h-7Fh
+    CHECK_EQ(d.error(), ER_IDNF);
+    d.write(Reg::StatusCommand, 0x10);
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    d.write(Reg::StatusCommand, 0x1F);  // any of 10h-1Fh
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    CHECK(d.intrq());
+}
+
+TEST(test_power_commands) {
+    Device d(INFO);
+    VirtualHost h{d};
+    CHECK_EQ(command(d, CMD_CHECK_POWER_MODE), ST_DRDY | ST_DSC);
+    CHECK_EQ(d.read(Reg::SectorCount), POWER_ACTIVE_OR_IDLE);
+    command(d, CMD_STANDBY_IMMEDIATE);
+    CHECK(d.standby());
+    command(d, CMD_CHECK_POWER_MODE);
+    CHECK_EQ(d.read(Reg::SectorCount), POWER_STANDBY);
+    command(d, CMD_IDLE_IMMEDIATE);
+    command(d, CMD_CHECK_POWER_MODE_OLD);
+    CHECK_EQ(d.read(Reg::SectorCount), POWER_ACTIVE_OR_IDLE);
+    // A read wakes a drive in standby.
+    command(d, CMD_STANDBY, 0, 12);  // with a timer value: accepted, ignored
+    CHECK(d.standby());
+    h.setLba(0, 1);
+    d.write(Reg::StatusCommand, CMD_READ_VERIFY);
+    CHECK(!d.standby());
+    const uint8_t also_ok[] = {CMD_STANDBY_OLD, CMD_IDLE, CMD_IDLE_OLD, CMD_IDLE_IMMEDIATE_OLD,
+                               CMD_STANDBY_IMMEDIATE_OLD, CMD_FLUSH_CACHE};
+    for (uint8_t c : also_ok) CHECK_EQ(command(d, c), ST_DRDY | ST_DSC);
+}
+
+TEST(test_set_multiple_mode_aborts) {
+    Device d(INFO);
+    CHECK(command(d, CMD_SET_MULTIPLE_MODE, 0, 16) & ST_ERR);
+    CHECK_EQ(d.error(), ER_ABRT);
+}
+
+TEST(test_housekeeping_commands_complete_for_the_trace) {
+    Device d(INFO);
+    const uint8_t cmds[] = {CMD_FLUSH_CACHE, CMD_CHECK_POWER_MODE, CMD_IDLE_IMMEDIATE, 0x10, 0x70,
+                            CMD_SET_MULTIPLE_MODE};
+    for (uint8_t c : cmds) command(d, c);
+    CHECK_EQ(d.commandsStarted(), 6u);
+    CHECK_EQ(d.commandsCompleted(), 6u);  // each ends with a DONE line
+}
+
+// What a USB bridge typically does once it has found a drive: IDENTIFY, pick
+// a transfer mode from it, set the CHS translation, try multiple mode, read.
+TEST(test_virtual_host_bridge_setup) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    uint16_t id[256];
+    CHECK(h.identify(id));
+
+    // The best mode IDENTIFY allows: no DMA (word 49 bit 8, words 63, 88),
+    // no PIO 3/4 (word 64): so PIO flow-control mode 0.
+    bool dma = (id[49] & (1u << 8)) || (id[63] & 0x7) || ((id[53] & 4) && (id[88] & 0x7F));
+    CHECK(!dma);
+    CHECK_EQ(id[64] & 0x3, 0);
+    CHECK_EQ(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_PIO_FLOW_0) & ST_ERR, 0);
+    h.status();
+
+    d.write(Reg::Device, 0xA0 | (id[3] - 1));
+    CHECK_EQ(command(d, CMD_INITIALIZE_DEVICE_PARAMETERS, 0, uint8_t(id[6])) & ST_ERR, 0);
+
+    // Multiple mode only if IDENTIFY word 47 offers it (it doesn't).
+    CHECK_EQ(id[47] & 0xFF, 0);
+
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(0, 8, got));
+    CHECK(sameAsDisk(got, 0, 8));
+}
+
 void runAtaDeviceTests() {
     RUN(test_reg_mapping);
     RUN(test_power_on_state);
@@ -612,4 +806,15 @@ void runAtaDeviceTests() {
     RUN(test_reset_mid_read_makes_fetch_stale);
     RUN(test_read_with_device1_selected_is_ignored);
     RUN(test_read_across_cores);
+    RUN(test_set_features_transfer_mode);
+    RUN(test_set_features_other_subcommands_abort);
+    RUN(test_initialize_device_parameters);
+    RUN(test_initialize_device_parameters_survives_soft_reset_not_hard);
+    RUN(test_initialize_device_parameters_rejects_zero_sectors);
+    RUN(test_read_verify);
+    RUN(test_seek_and_recalibrate);
+    RUN(test_power_commands);
+    RUN(test_set_multiple_mode_aborts);
+    RUN(test_housekeeping_commands_complete_for_the_trace);
+    RUN(test_virtual_host_bridge_setup);
 }

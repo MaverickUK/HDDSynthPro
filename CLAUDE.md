@@ -78,7 +78,7 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 - **Slice 0 (listen only):** written and tested on the Mac (unit tests, PIO simulation, a clean build). It is the running firmware. Waiting for the board.
 - **Slices 1–3: the `bb48_drive` build**, built and unit-tested, not yet run on hardware. It contains:
   - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and the slice 1 test checks `loop_max_ns` < 800;
-  - `ata_device`: IDENTIFY, READ SECTORS and DIAGNOSTIC;
+  - `ata_device`: IDENTIFY, READ SECTORS, DIAGNOSTIC, and the housekeeping commands bridges send during setup (SET FEATURES transfer mode, INITIALIZE DEVICE PARAMETERS, READ VERIFY, SEEK, RECALIBRATE, power commands, FLUSH CACHE). Everything else gets ABRT;
   - the generated disk, served through the mailbox.
 - **Next:**
   1. Wire the board and run `scripts/rig.sh -m slice0 --save-reference`.

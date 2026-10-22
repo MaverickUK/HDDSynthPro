@@ -106,6 +106,9 @@ void Device::hardReset(bool asserted) {
         reading_ = false;
         fetch_pending_ = false;
         ++fetch_id_;
+        // A hardware reset (not a soft one) restores the power-on CHS translation.
+        setGeometry(defaultGeometry(info_.total_sectors));
+        standby_ = false;
     } else if (in_reset_) {
         in_reset_ = false;
         resetToSignature();
@@ -135,12 +138,122 @@ void Device::startCommand(uint8_t command) {
             break;
         case CMD_READ_SECTORS:
         case CMD_READ_SECTORS_NO_RETRY:
+            standby_ = false;
             startRead();
             break;
+        case CMD_READ_VERIFY:
+        case CMD_READ_VERIFY_NO_RETRY:
+            standby_ = false;
+            readVerify();
+            break;
+        case CMD_SET_FEATURES:
+            setFeatures();
+            break;
+        case CMD_INITIALIZE_DEVICE_PARAMETERS:
+            initializeDeviceParameters();
+            break;
+        case CMD_FLUSH_CACHE:
+            completeNoData();  // no write cache: nothing to flush
+            break;
+        case CMD_STANDBY_IMMEDIATE:
+        case CMD_STANDBY:
+        case CMD_STANDBY_IMMEDIATE_OLD:
+        case CMD_STANDBY_OLD:
+            // STANDBY's Sector Count sets a standby timer; there is no spindle,
+            // so the timer is accepted and ignored.
+            standby_ = true;
+            completeNoData();
+            break;
+        case CMD_IDLE_IMMEDIATE:
+        case CMD_IDLE:
+        case CMD_IDLE_IMMEDIATE_OLD:
+        case CMD_IDLE_OLD:
+            standby_ = false;
+            completeNoData();
+            break;
+        case CMD_CHECK_POWER_MODE:
+        case CMD_CHECK_POWER_MODE_OLD:
+            sector_count_ = standby_ ? POWER_STANDBY : POWER_ACTIVE_OR_IDLE;
+            completeNoData();
+            break;
         default:
-            fail(ER_ABRT);
+            if (command >= CMD_RECALIBRATE && command <= CMD_RECALIBRATE + 0x0F) {
+                standby_ = false;
+                completeNoData();  // nothing to move: back at cylinder 0 at once
+            } else if (command >= CMD_SEEK && command <= CMD_SEEK + 0x0F) {
+                standby_ = false;
+                seek();
+            } else {
+                fail(ER_ABRT);  // includes SET MULTIPLE MODE: not advertised
+            }
             break;
     }
+}
+
+void Device::completeNoData() {
+    status_ = ST_DRDY | ST_DSC;
+    irq_pending_ = true;
+    ++commands_completed_;
+}
+
+bool Device::checkRange(uint32_t count, uint32_t& lba) {
+    bool valid = decodeAddress(lba);
+    last_.lba = lba;
+    last_.count = uint16_t(count);
+    if (!valid || lba >= info_.total_sectors || count > info_.total_sectors - lba) {
+        // Out of range: fail before doing anything, with the first
+        // unreachable address in the task file.
+        if (valid) setTaskFileLba(lba < info_.total_sectors ? info_.total_sectors : lba);
+        fail(ER_IDNF);
+        return false;
+    }
+    return true;
+}
+
+void Device::readVerify() {
+    // Like READ SECTORS, but the data stays on the drive. Generated data
+    // can't fail to read, so a range check is the whole job.
+    uint32_t lba;
+    if (checkRange(sector_count_ ? sector_count_ : 256, lba)) completeNoData();
+}
+
+void Device::seek() {
+    uint32_t lba;
+    if (checkRange(1, lba)) completeNoData();
+}
+
+void Device::setFeatures() {
+    if (features_ == SF_SET_TRANSFER_MODE &&
+        (sector_count_ == XFER_PIO_DEFAULT || sector_count_ == XFER_PIO_FLOW_0)) {
+        completeNoData();  // the only mode there is
+        return;
+    }
+    // Faster PIO modes and every DMA mode are not advertised; nor is turning
+    // IORDY off (01h), write caching, look-ahead or the power-on defaults.
+    fail(ER_ABRT);
+}
+
+void Device::initializeDeviceParameters() {
+    // Sector Count = sectors per track, Device bits 3-0 = heads - 1.
+    uint16_t spt = sector_count_;
+    uint16_t heads = uint16_t((device_ & 0x0F) + 1);
+    if (spt == 0) {
+        fail(ER_ABRT);
+        return;
+    }
+    uint32_t cylinders = info_.total_sectors / (uint32_t(heads) * spt);
+    if (cylinders > 65535) cylinders = 65535;
+    if (cylinders == 0) {
+        fail(ER_ABRT);
+        return;
+    }
+    setGeometry(Geometry{uint16_t(cylinders), heads, spt});
+    completeNoData();
+}
+
+void Device::setGeometry(const Geometry& g) {
+    geometry_ = g;
+    setCurrentGeometry(identify_, g);
 }
 
 bool Device::decodeAddress(uint32_t& lba) const {
@@ -149,7 +262,7 @@ bool Device::decodeAddress(uint32_t& lba) const {
               (uint32_t(lba_mid_) << 8) | lba_low_;
         return true;
     }
-    // CHS, in the default geometry (INITIALIZE DEVICE PARAMETERS comes in slice 6).
+    // CHS, in the current translation (default, or INITIALIZE DEVICE PARAMETERS).
     uint32_t cylinder = (uint32_t(lba_high_) << 8) | lba_mid_;
     uint32_t head = device_ & 0x0F;
     uint32_t sector = lba_low_;  // 1-based
@@ -163,16 +276,7 @@ bool Device::decodeAddress(uint32_t& lba) const {
 void Device::startRead() {
     uint32_t count = sector_count_ ? sector_count_ : 256;
     uint32_t lba = 0;
-    bool valid = decodeAddress(lba);
-    last_.lba = lba;
-    last_.count = uint16_t(count);
-    if (!valid || lba >= info_.total_sectors || count > info_.total_sectors - lba) {
-        // Out of range: fail before transferring anything, with the first
-        // unreachable address in the task file.
-        if (valid) setTaskFileLba(lba < info_.total_sectors ? info_.total_sectors : lba);
-        fail(ER_IDNF);
-        return;
-    }
+    if (!checkRange(count, lba)) return;
     reading_ = true;
     read_lba_ = lba;
     read_left_ = count;

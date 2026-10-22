@@ -24,6 +24,25 @@ void putAtaString(uint16_t* words, unsigned len_words, const char* text) {
     }
 }
 
+static void fixChecksum(uint16_t w[256]) {
+    // Integrity word: signature A5h in the low byte, and a checksum in the
+    // high byte that makes all 512 bytes sum to zero (mod 256).
+    w[255] = 0x00A5;
+    uint8_t sum = 0;
+    for (int i = 0; i < 256; ++i) sum += uint8_t(w[i] & 0xFF) + uint8_t(w[i] >> 8);
+    w[255] = uint16_t((uint8_t(-sum) << 8) | 0xA5);
+}
+
+void setCurrentGeometry(uint16_t w[256], const Geometry& g) {
+    uint32_t sectors = g.sectors();
+    w[54] = g.cylinders;
+    w[55] = g.heads;
+    w[56] = g.sectors_per_track;
+    w[57] = uint16_t(sectors & 0xFFFF);
+    w[58] = uint16_t(sectors >> 16);
+    fixChecksum(w);
+}
+
 void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     std::memset(w, 0, 256 * sizeof(uint16_t));
     Geometry g = defaultGeometry(info.total_sectors);
@@ -59,11 +78,5 @@ void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     w[85] = 0x0000;
     w[86] = 0x0000;
     w[87] = 0x4000;
-
-    // Integrity word: signature A5h in the low byte, and a checksum in the
-    // high byte that makes all 512 bytes sum to zero (mod 256).
-    w[255] = 0x00A5;
-    uint8_t sum = 0;
-    for (int i = 0; i < 256; ++i) sum += uint8_t(w[i] & 0xFF) + uint8_t(w[i] >> 8);
-    w[255] = uint16_t((uint8_t(-sum) << 8) | 0xA5);
+    fixChecksum(w);
 }

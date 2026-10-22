@@ -60,11 +60,40 @@ constexpr uint8_t DEV_LBA = 0x40;  // 1 = LBA addressing, 0 = CHS
 constexpr uint8_t DC_SRST = 0x04;
 constexpr uint8_t DC_NIEN = 0x02;  // 1 = INTRQ disabled
 
-// Commands handled so far
+// Commands handled so far. Anything else is aborted (ABRT).
+constexpr uint8_t CMD_RECALIBRATE = 0x10;  // 10h-1Fh: obsolete, all alike
 constexpr uint8_t CMD_READ_SECTORS = 0x20;
 constexpr uint8_t CMD_READ_SECTORS_NO_RETRY = 0x21;  // obsolete alias
+constexpr uint8_t CMD_READ_VERIFY = 0x40;
+constexpr uint8_t CMD_READ_VERIFY_NO_RETRY = 0x41;
+constexpr uint8_t CMD_SEEK = 0x70;  // 70h-7Fh: obsolete, all alike
 constexpr uint8_t CMD_EXECUTE_DEVICE_DIAGNOSTIC = 0x90;
+constexpr uint8_t CMD_INITIALIZE_DEVICE_PARAMETERS = 0x91;
+constexpr uint8_t CMD_SET_MULTIPLE_MODE = 0xC6;  // aborted: no READ/WRITE MULTIPLE
+constexpr uint8_t CMD_STANDBY_IMMEDIATE = 0xE0;
+constexpr uint8_t CMD_IDLE_IMMEDIATE = 0xE1;
+constexpr uint8_t CMD_STANDBY = 0xE2;
+constexpr uint8_t CMD_IDLE = 0xE3;
+constexpr uint8_t CMD_CHECK_POWER_MODE = 0xE5;
+constexpr uint8_t CMD_FLUSH_CACHE = 0xE7;
 constexpr uint8_t CMD_IDENTIFY_DEVICE = 0xEC;
+constexpr uint8_t CMD_SET_FEATURES = 0xEF;
+// The ATA-1 era opcodes for the power commands (94h-98h), still sent by some hosts.
+constexpr uint8_t CMD_STANDBY_IMMEDIATE_OLD = 0x94;
+constexpr uint8_t CMD_IDLE_IMMEDIATE_OLD = 0x95;
+constexpr uint8_t CMD_STANDBY_OLD = 0x96;
+constexpr uint8_t CMD_IDLE_OLD = 0x97;
+constexpr uint8_t CMD_CHECK_POWER_MODE_OLD = 0x98;
+
+// SET FEATURES subcommand (Features register) and transfer mode values
+// (Sector Count register) that this device accepts.
+constexpr uint8_t SF_SET_TRANSFER_MODE = 0x03;
+constexpr uint8_t XFER_PIO_DEFAULT = 0x00;  // PIO default mode
+constexpr uint8_t XFER_PIO_FLOW_0 = 0x08;   // PIO flow-control mode 0 (with IORDY)
+
+// CHECK POWER MODE results (Sector Count register)
+constexpr uint8_t POWER_STANDBY = 0x00;
+constexpr uint8_t POWER_ACTIVE_OR_IDLE = 0xFF;
 
 constexpr uint16_t SECTOR_WORDS = 256;
 
@@ -120,14 +149,25 @@ public:
     uint32_t commandsStarted() const { return commands_started_; }
     uint32_t commandsCompleted() const { return commands_completed_; }
     const CommandInfo& lastCommand() const { return last_; }
+    // The CHS translation in use: the default, or set by INITIALIZE DEVICE PARAMETERS.
     const Geometry& geometry() const { return geometry_; }
+    bool standby() const { return standby_; }
 
 private:
     bool device1Selected() const { return (device_ & DEV_DEV) != 0; }
     void resetToSignature();  // registers and status as after a reset
     void startCommand(uint8_t command);
     void startRead();
+    void readVerify();
+    void seek();
+    void setFeatures();
+    void initializeDeviceParameters();
+    void setGeometry(const Geometry& g);
+    // Decodes the task-file address and checks `count` sectors from it exist.
+    // On failure, fails the command with IDNF and returns false.
+    bool checkRange(uint32_t count, uint32_t& lba);
     bool decodeAddress(uint32_t& lba) const;  // false if a CHS address is invalid
+    void completeNoData();  // success, with an interrupt
     void requestFetch();
     void fail(uint8_t error);  // ERR + error bits, command complete
     void complete();           // success, no data left
@@ -165,6 +205,7 @@ private:
 
     bool irq_pending_ = false;
     bool in_reset_ = false;  // RESET# held or SRST set: BSY until released
+    bool standby_ = false;   // after STANDBY; any media access wakes it
 
     CommandInfo last_{};
     uint32_t commands_started_ = 0;
