@@ -75,7 +75,7 @@ Arduino-Pico (earlephilhower core, which runs on the Pico SDK) under PlatformIO,
 
 | Module | Job | Testable on the Mac? |
 |---|---|---|
-| `ide_listen` (slice 0), later `ide_bus` (PIO + C++ wrapper) | Sees strobes, captures register accesses, drives reads, controls IORDY | In a simulator: `host/hddproto/pio_sim.py` runs the real assembled program |
+| `ide_listen` (slice 0), `ide_bus` (slice 1 on: PIO + C++ wrapper) | Sees strobes, captures register accesses, drives reads, controls IORDY | In a simulator: `host/hddproto/pio_sim.py` runs the real assembled program, and `ide_host_model.py` plays a mode 0 host against it |
 | `ata_device` | Task-file registers, status bits, the command state machine | Yes |
 | `identify` | The IDENTIFY DEVICE block | Yes |
 | `block_device` | RamDisk and SdImage backends | Yes, with a fake SD |
@@ -96,6 +96,12 @@ The read path:
 1. A chip-select goes active. PIO pulls IORDY low and hands the register address to core 1.
 2. Core 1 looks up the value and pushes it back.
 3. PIO drives the data bus once DIOR# is low, then releases IORDY. It tri-states the bus when DIOR# rises.
+
+Simulated against a mode 0 host, `ide_bus.pio` measures:
+- IORDY is low about 43 ns before the host samples it.
+- The PIO's own share of a read is about 180 ns, so core 1 must answer within about 1,070 ns to keep IORDY under 1.25 µs.
+- Read data is set up 63 ns before IORDY rises.
+- DD is released 10 ns after DIOR# rises (the limit is 30 ns).
 
 Host writes need no wait: PIO keeps sampling while DIOW# is low and keeps the last sample. That sample is taken 0–40 ns before DIOW# rises, inside mode 0's 60 ns data setup time. PIO modes 3/4 (setup 30/20 ns) will need a faster loop.
 

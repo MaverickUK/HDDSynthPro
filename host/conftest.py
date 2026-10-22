@@ -7,15 +7,17 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from datetime import datetime
 
 import pytest
 
+from hddproto import pio_sim
 from hddproto.drive_log import DriveLog
 from hddproto.host_macos import MacHost
-from hddproto.paths import RUNS
+from hddproto.paths import REPO, RUNS
 
 
 def pytest_addoption(parser):
@@ -28,6 +30,19 @@ def pytest_runtest_makereport(item, call):
     report = yield
     setattr(item, f"report_{report.when}", report)
     return report
+
+
+@pytest.fixture(scope="session")
+def assemble():
+    """Assembles src/<name>.pio with the real pioasm. Skips without pioasm,
+    except in CI, where a missing pioasm must not hide these tests."""
+    pioasm = pio_sim.find_pioasm()
+    if not pioasm:
+        message = "pioasm not found (build once with `pio run`, or set PIOASM)"
+        if os.environ.get("CI"):
+            pytest.fail(message)
+        pytest.skip(message)
+    return lambda name: pio_sim.assemble(REPO / "src" / f"{name}.pio", pioasm)
 
 
 @pytest.fixture(scope="session")

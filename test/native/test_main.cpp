@@ -1,6 +1,7 @@
 // Host-side unit tests for the platform-independent firmware code: bus
 // sample decoding, the trace format and coalescer, the SPSC ring (including a
-// two-thread test that mirrors core 1 / core 0) and the IDENTIFY block.
+// two-thread test that mirrors core 1 / core 0), the IDENTIFY block, the
+// generated test disk, and (in test_ata_device.cpp) the ATA device.
 //
 // Run: test/run_native_tests.sh
 #include <cstdio>
@@ -8,51 +9,18 @@
 #include <string>
 #include <thread>
 
+
 #include "bus_sample.h"
 #include "config.h"
+#include "gen_disk.h"
 #include "identify.h"
 #include "spsc_ring.h"
 #include "trace_format.h"
 
-static int failures = 0;
-static int checks = 0;
-#define CHECK(cond)                                                              \
-    do {                                                                         \
-        ++checks;                                                                \
-        if (!(cond)) {                                                           \
-            ++failures;                                                          \
-            std::printf("  FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);        \
-        }                                                                        \
-    } while (0)
-#define CHECK_EQ(a, b)                                                           \
-    do {                                                                         \
-        ++checks;                                                                \
-        auto _a = (a);                                                           \
-        auto _b = (b);                                                           \
-        if (!(_a == _b)) {                                                       \
-            ++failures;                                                          \
-            std::printf("  FAIL %s:%d: %s == %s (%lld vs %lld)\n", __FILE__, __LINE__, \
-                        #a, #b, (long long)_a, (long long)_b);                   \
-        }                                                                        \
-    } while (0)
-#define CHECK_STR(a, b)                                                          \
-    do {                                                                         \
-        ++checks;                                                                \
-        std::string _a = (a);                                                    \
-        std::string _b = (b);                                                    \
-        if (_a != _b) {                                                          \
-            ++failures;                                                          \
-            std::printf("  FAIL %s:%d:\n    got:  \"%s\"\n    want: \"%s\"\n",    \
-                        __FILE__, __LINE__, _a.c_str(), _b.c_str());             \
-        }                                                                        \
-    } while (0)
+#include "check.h"
 
-#define TEST(name) static void name()
-#define RUN(name)                                     \
-    do {                                              \
-        std::printf("%s\n", #name);                   \
-        name();                                       \
-    } while (0)
+int failures = 0;
+int checks = 0;
 
 // ---- Helpers --------------------------------------------------------------
 
@@ -278,6 +246,46 @@ TEST(test_identify_checksum) {
     CHECK_EQ(sum, 0);
 }
 
+// ---- Generated disk --------------------------------------------------------
+
+// zlib's CRC-32, to compare with Python's zlib.crc32.
+static uint32_t crc32(const uint8_t* p, size_t n) {
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; ++i) {
+        c ^= p[i];
+        for (int k = 0; k < 8; ++k) c = (c >> 1) ^ (0xEDB88320u & (0u - (c & 1u)));
+    }
+    return ~c;
+}
+
+TEST(test_gen_disk_known_answers) {
+    // The same values are checked by host/tests/test_gen_disk.py.
+    struct { uint32_t lba, crc; } known[] = {
+        {0, 0xe1249abbu}, {1, 0xe9018a87u}, {12345, 0xd29a1ff2u},
+        {131071, 0x69680a43u}, {0x0FFFFFFFu, 0x907ed2feu},
+    };
+    uint8_t buf[gen_disk::SECTOR_BYTES];
+    for (auto& k : known) {
+        gen_disk::sector(k.lba, buf);
+        CHECK_EQ(crc32(buf, sizeof buf), k.crc);
+    }
+    gen_disk::sector(12345, buf);
+    CHECK_EQ(buf[0], 0x39);  // LBA, little-endian
+    CHECK_EQ(buf[1], 0x30);
+    CHECK_EQ(buf[4], 0xC6);  // ~LBA
+}
+
+TEST(test_gen_disk_sectors_differ) {
+    uint8_t a[gen_disk::SECTOR_BYTES], b[gen_disk::SECTOR_BYTES];
+    gen_disk::sector(100, a);
+    gen_disk::sector(101, b);
+    int same = 0;
+    for (uint32_t i = 8; i < gen_disk::SECTOR_BYTES; ++i) same += a[i] == b[i];
+    CHECK(same < 16);  // about 2 of 504 bytes match by chance
+}
+
+void runAtaDeviceTests();
+
 int main() {
     RUN(test_pin_layout);
     RUN(test_decode_status_read);
@@ -294,6 +302,9 @@ int main() {
     RUN(test_default_geometry);
     RUN(test_identify_fields);
     RUN(test_identify_checksum);
+    RUN(test_gen_disk_known_answers);
+    RUN(test_gen_disk_sectors_differ);
+    runAtaDeviceTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

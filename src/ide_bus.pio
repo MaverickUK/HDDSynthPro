@@ -1,0 +1,65 @@
+; Slice 1 onwards: serve IDE register accesses, using IORDY to buy time.
+;
+; Pin mapping (see ide_bus.cpp; bit numbers as in bus_sample.h):
+;   IN_BASE  = GPIO4 (DD0): one 32-bit pin read is a full access sample
+;   OUT_BASE = GPIO4, 16 pins: DD0-DD15, driven only during reads
+;   SIDE-SET = GPIO28 (IORDY), as a pin direction: 1 = pull low, 0 = release.
+;              Its output value is preset to 0, so the pin is never driven high.
+;   JMP_PIN  = GPIO26 (DIOR#)
+;
+; The timing problem: IORDY must be low within 35 ns (tA) of DIOR# falling,
+; or the host will not wait. Chip selects and DA2-0 are valid at least 70 ns
+; (t1) before the strobe, so this program pulls IORDY low as soon as a chip
+; select is asserted and holds it there until it is ready, with no race
+; against the strobe. Holding IORDY low between cycles is harmless: the host
+; only samples it during a strobe.
+;
+; Each access produces one RX FIFO word: the pin sample (bus_sample.h).
+;   Read:  sample with DIOR# low. Core 1 must answer with one TX FIFO word,
+;          the value to drive on DD0-15. IORDY stays low until it arrives.
+;   Write: the last sample taken with DIOW# low (data valid). No reply.
+
+.pio_version 1
+.program ide_bus
+.side_set 1 opt pindirs
+
+.wrap_target
+idle:
+    mov osr, ~pins          side 0  ; release IORDY; sample, inverted (asserted = 1)
+    out null, 19                    ; drop DD0-15, DA0-2
+    out x, 2                        ; x = CS0#/CS1# asserted
+    jmp !x idle
+armed:
+    mov osr, ~pins          side 1  ; a chip select is asserted: IORDY low
+    out null, 19
+    out x, 2
+    jmp !x idle                     ; chip select gone without a strobe
+    out null, 1                     ; LED
+    out x, 1                        ; DIOR# asserted?
+    jmp x-- read
+    out x, 1                        ; DIOW# asserted?
+    jmp !x armed
+write:
+    mov isr, pins           side 0  ; writes never wait: release IORDY
+write_low:
+    mov y, pins                     ; keep sampling while DIOW# is low
+    mov osr, ~y
+    out null, 23
+    out x, 1
+    jmp !x write_done
+    mov isr, y                      ; still low: keep this sample
+    jmp write_low
+write_done:
+    push block                      ; the last sample with DIOW# low
+    jmp armed
+read:
+    mov isr, pins
+    push block                      ; which register: core 1 looks it up
+    pull block                      ; its value
+    out pins, 16                    ; onto DD0-15 (still inputs)
+    mov pindirs, ~null      [7]     ; drive DD0-15, then let them settle: IORDY rises
+                                    ; 8 cycles (53 ns) later, meeting t5 (50 ns) even
+                                    ; for a host that ignores IORDY's tRD of 0
+    wait 1 jmppin           side 0  ; release IORDY; hold the data until DIOR# rises
+    mov pindirs, null               ; release DD0-15
+.wrap

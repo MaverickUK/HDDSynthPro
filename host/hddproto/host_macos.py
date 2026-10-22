@@ -10,8 +10,11 @@ Replug, in order of preference:
 from __future__ import annotations
 
 import os
+import plistlib
 import shlex
 import subprocess
+import time
+from dataclasses import dataclass
 
 
 class MacHost:
@@ -46,3 +49,56 @@ class MacHost:
     def disks(self) -> str:
         return subprocess.run(["diskutil", "list", "external", "physical"],
                               capture_output=True, text=True).stdout
+
+    # -- The drive as a block device ------------------------------------------
+    #
+    # macOS has no O_DIRECT; the raw device /dev/rdiskN is uncached instead.
+    # It needs sector-aligned offsets and lengths. A disk with no file system
+    # (the generated disk) makes macOS show "not readable": choose Ignore.
+
+    def find_disk(self, expected_bytes: int | None = None, timeout: float = 60.0) -> Disk:
+        """The emulated drive: $HDDPRO_DISK (e.g. disk4), or the external
+        physical disk whose media name says HDDSYNTH or whose size matches."""
+        deadline = time.monotonic() + timeout
+        while True:
+            for disk in self._candidates():
+                if os.environ.get("HDDPRO_DISK"):
+                    if disk.name == os.environ["HDDPRO_DISK"].removeprefix("/dev/"):
+                        return disk
+                elif "HDDSYNTH" in disk.media_name.upper() or (expected_bytes and disk.size == expected_bytes):
+                    return disk
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"no HDDSynthPro disk after {timeout:.0f} s:\n{self.disks()}")
+            time.sleep(1)
+
+    def _candidates(self) -> list[Disk]:
+        out = subprocess.run(["diskutil", "list", "-plist", "external", "physical"],
+                             capture_output=True).stdout
+        if not out:
+            return []
+        disks = []
+        for name in plistlib.loads(out).get("WholeDisks", []):
+            info = plistlib.loads(subprocess.run(["diskutil", "info", "-plist", name],
+                                                 capture_output=True).stdout)
+            disks.append(Disk(name, info.get("MediaName", ""), int(info.get("TotalSize", info.get("Size", 0)))))
+        return disks
+
+    def open_raw(self, disk: Disk, write: bool = False) -> int:
+        """Opens /dev/rdiskN, taking ownership of it first (sudo asks for a
+        password once; ownership resets when the disk is replugged)."""
+        mode = os.O_RDWR if write else os.O_RDONLY
+        if not os.access(disk.raw, os.R_OK | (os.W_OK if write else 0)):
+            subprocess.run(["sudo", "chown", os.environ.get("USER", ""), f"/dev/{disk.name}", disk.raw],
+                           check=True)
+        return os.open(disk.raw, mode)
+
+
+@dataclass
+class Disk:
+    name: str          # e.g. "disk4"
+    media_name: str    # from the adapter's USB inquiry, often the ATA model
+    size: int          # bytes
+
+    @property
+    def raw(self) -> str:
+        return f"/dev/r{self.name}"

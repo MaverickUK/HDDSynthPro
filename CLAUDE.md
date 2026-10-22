@@ -23,9 +23,12 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 - **Build:** `pio run` (PlatformIO lives in `~/.platformio-venv/bin/pio` on the dev Mac). The board is `olimex_pico2bb48`.
   - The variant defines `PIN_LED` as a macro, so don't reuse Arduino pin-macro names for constants.
 - **PIO programs:** the platform assembles each `src/*.pio` into a `.pio.h` next to it (git-ignored) before every build. Include them as `"name.pio.h"`.
-- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify` and later `ata_device`/`block_device` free of Arduino and SDK headers so they stay testable here.
+- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk` and later `block_device` free of Arduino and SDK headers so they stay testable here.
+- **CI:** `.github/workflows/build.yml` builds the firmware and runs the C++ tests and `pytest -m sim` on every push. A `vX.Y.Z` tag that matches `FIRMWARE_VERSION` publishes a release with the UF2.
 - **Python tests:** in `host/` (pytest). One marker per slice; `sim` needs no hardware.
+  - Plain `pytest` runs only the `sim` tests.
   - `host/hddproto/pio_sim.py` simulates the PIO instructions the programs use and runs the real `pioasm` output. Extend it when a program uses a new instruction, rather than letting it guess.
+  - `host/hddproto/ide_host_model.py` is a mode 0 host that honours IORDY. `tests/test_pio_bus_sim.py` uses it to hold `ide_bus.pio` to the ATA timings, and the sim must be configured as `ide_bus.cpp` configures the state machine.
 - **On the rig:** `scripts/rig.sh -m sliceN` runs the unit tests, builds, flashes and runs the rig tests.
   - Evidence goes to `host/runs/` (git-ignored); reference traces live in `host/reference/`.
 - **Host OS:** the dev machine is macOS. There's no `O_DIRECT` (use `/dev/rdiskN`), no `dmesg` (use `log show`), and no ATA pass-through. OS-specific code stays in `host/hddproto/host_macos.py`; slice 6 adds a Linux host for pass-through.
@@ -42,6 +45,13 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 
 ## Status
 
-- **Slice 0 (listen only):** written and tested on the Mac (unit tests, PIO simulation, a clean build). Waiting for the board.
-- **IDENTIFY block (slice 2):** written and unit-tested; not yet served on the bus.
-- **Next:** wire the board, run `scripts/rig.sh -m slice0 --save-reference`, and read the adapter's probe sequence before designing slice 1's read path.
+- **Slice 0 (listen only):** written and tested on the Mac (unit tests, PIO simulation, a clean build). It is the running firmware. Waiting for the board.
+- **Slices 1–2, ready but not wired into the firmware:**
+  - `ata_device`, the drive logic, is unit-tested, including a virtual host's start-up probe;
+  - `ide_bus.pio` and `ide_bus.cpp`, the bus program, have their timing proven in simulation: core 1 must answer a read within about 1,070 ns;
+  - the IDENTIFY block is unit-tested.
+- **Slice 3:** the test disk (`gen_disk`) and the rig tests are written. The firmware's READ SECTORS isn't.
+- **Next:**
+  1. Wire the board and run `scripts/rig.sh -m slice0 --save-reference`.
+  2. Read the adapter's probe sequence and add it as a virtual-host test.
+  3. Switch the firmware to `ide_bus` + `ata_device` (slice 1).

@@ -1,12 +1,11 @@
-"""Runs the real src/ide_listen.pio in the simulator against ATA PIO mode 0
-waveforms. No hardware needed."""
+"""Runs the real src/ide_listen.pio (slice 0) in the simulator against ATA
+PIO mode 0 waveforms. No hardware needed."""
 from __future__ import annotations
 
 import pytest
 
 from hddproto import pio_sim, trace
 from hddproto.pio_sim import CYCLE_PS, PioSim
-from hddproto.paths import REPO
 
 pytestmark = pytest.mark.sim
 
@@ -29,11 +28,8 @@ T9_ADDR_HOLD = 20
 
 
 @pytest.fixture(scope="module")
-def program():
-    pioasm = pio_sim.find_pioasm()
-    if not pioasm:
-        pytest.skip("pioasm not found (build once with `pio run`, or set PIOASM)")
-    return pio_sim.assemble(REPO / "src/ide_listen.pio", pioasm)
+def program(assemble):
+    return assemble("ide_listen")
 
 
 def access(t0_ns: float, write: bool, cs: int, addr: int, data: int, junk: int = 0xDEAD):
