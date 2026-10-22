@@ -1,9 +1,14 @@
 // Tests for the ATA register file and command state machine (ata_device),
 // including a "virtual host" that plays a typical start-up probe.
+#include <atomic>
 #include <cstdint>
+#include <thread>
+#include <vector>
 
 #include "ata_device.h"
+#include "block_source.h"
 #include "check.h"
+#include "fetch_mailbox.h"
 #include "identify.h"
 
 using namespace ata;
@@ -14,7 +19,14 @@ static const IdentifyInfo INFO{"HDDSYNTH PROTO", "HSP-000001", "0.2.0", 131072};
 
 struct VirtualHost {
     Device& dev;
+    BlockSource* source = nullptr;  // stands in for core 0: serves fetches when polled
     uint32_t polls = 0;
+
+    // Core 0's share: fetch whatever the device is waiting for.
+    void pump() {
+        Fetch f;
+        if (source && dev.pendingFetch(f)) dev.fetchDone(f.id, source->read(f.lba, f.buffer));
+    }
 
     uint8_t status() { return uint8_t(dev.read(Reg::StatusCommand)); }
     uint8_t altStatus() { return uint8_t(dev.read(Reg::AltStatusDevCtrl)); }
@@ -23,8 +35,10 @@ struct VirtualHost {
     // Polls Alternate Status until BSY clears (no side effects), like a host
     // waiting for a command. Returns false if it never clears.
     bool waitNotBusy(int max_polls = 1000) {
-        for (int i = 0; i < max_polls; ++i, ++polls)
+        for (int i = 0; i < max_polls; ++i, ++polls) {
             if (!(altStatus() & ST_BSY)) return true;
+            pump();
+        }
         return false;
     }
 
@@ -44,6 +58,35 @@ struct VirtualHost {
     bool ataSignature() {
         return dev.read(Reg::SectorCount) == 1 && dev.read(Reg::LbaLow) == 1 &&
                dev.read(Reg::LbaMid) == 0 && dev.read(Reg::LbaHigh) == 0;
+    }
+
+    void setLba(uint32_t lba, uint8_t count) {
+        dev.write(Reg::SectorCount, count);
+        dev.write(Reg::LbaLow, lba & 0xFF);
+        dev.write(Reg::LbaMid, (lba >> 8) & 0xFF);
+        dev.write(Reg::LbaHigh, (lba >> 16) & 0xFF);
+        dev.write(Reg::Device, 0xE0 | ((lba >> 24) & 0x0F));  // LBA, device 0
+    }
+
+    // READ SECTORS the polled way, one DRQ block per sector. Returns false
+    // on an error or a missing data phase; `out` gets the words read.
+    bool readSectors(uint32_t lba, uint8_t count, std::vector<uint16_t>& out) {
+        setLba(lba, count);
+        return readAfterCommand(count ? count : 256, out);
+    }
+
+    bool readAfterCommand(int sectors, std::vector<uint16_t>& out) {
+        dev.write(Reg::StatusCommand, CMD_READ_SECTORS);
+        out.clear();
+        for (int s = 0; s < sectors; ++s) {
+            if (!waitNotBusy()) return false;
+            uint8_t st = status();
+            if ((st & ST_ERR) || !(st & ST_DRQ)) return false;
+            for (int i = 0; i < 256; ++i) out.push_back(dev.read(Reg::Data));
+        }
+        if (!waitNotBusy()) return false;
+        uint8_t st = altStatus();
+        return !(st & (ST_ERR | ST_DRQ));
     }
 
     // IDENTIFY DEVICE the polled way: returns false on error or no data.
@@ -158,7 +201,7 @@ TEST(test_identify_transfer) {
     CHECK(same);
     CHECK_EQ(h.status(), ST_DRDY | ST_DSC);  // DRQ clears after the last word
     CHECK_EQ(d.read(Reg::Data), 0);          // and extra reads get nothing
-    CHECK_EQ(d.lastCommand(), CMD_IDENTIFY_DEVICE);
+    CHECK_EQ(d.lastCommand().command, CMD_IDENTIFY_DEVICE);
 }
 
 TEST(test_identify_twice) {
@@ -291,6 +334,255 @@ TEST(test_virtual_host_probe) {
     CHECK_EQ(id[0], 0x0040);
 }
 
+
+// ---- READ SECTORS ------------------------------------------------------------
+
+static bool sameAsDisk(const std::vector<uint16_t>& got, uint32_t lba, uint32_t sectors) {
+    GeneratedDisk disk;
+    uint16_t want[256];
+    if (got.size() != sectors * 256u) return false;
+    for (uint32_t s = 0; s < sectors; ++s) {
+        disk.read(lba + s, want);
+        for (int i = 0; i < 256; ++i)
+            if (got[s * 256 + i] != want[i]) return false;
+    }
+    return true;
+}
+
+TEST(test_generated_disk_words) {
+    // The first word on the bus is the sector's first two bytes, low byte first.
+    GeneratedDisk disk;
+    uint16_t w[256];
+    CHECK(disk.read(12345, w));
+    CHECK_EQ(w[0], 0x3039);  // bytes 39 30: LBA 12345 little-endian
+    CHECK(!disk.read(disk.sectors(), w));
+}
+
+TEST(test_read_one_sector) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(0, 1, got));
+    CHECK(sameAsDisk(got, 0, 1));
+    CHECK_EQ(d.lastCommand().command, CMD_READ_SECTORS);
+    CHECK_EQ(d.lastCommand().lba, 0u);
+    CHECK_EQ(d.lastCommand().count, 1);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+}
+
+TEST(test_read_busy_until_fetched) {
+    Device d(INFO);
+    VirtualHost h{d};  // no source: nothing serves the fetch yet
+    h.setLba(500, 1);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(h.altStatus() & ST_BSY);
+    CHECK(!(h.altStatus() & ST_DRQ));
+    CHECK_EQ(d.read(Reg::Data), 0);
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    CHECK_EQ(f.lba, 500u);
+    CHECK(!d.intrq());
+    GeneratedDisk disk;
+    d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);
+    CHECK(d.intrq());  // one interrupt per DRQ block
+    CHECK(!d.pendingFetch(f));
+}
+
+TEST(test_read_multiple_sectors_interrupt_each) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d};
+    h.setLba(1000, 3);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    std::vector<uint16_t> got;
+    for (int s = 0; s < 3; ++s) {
+        Fetch f;
+        CHECK(d.pendingFetch(f));
+        CHECK_EQ(f.lba, 1000u + s);
+        d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+        CHECK(d.intrq());
+        h.status();  // acknowledge
+        CHECK(!d.intrq());
+        for (int i = 0; i < 256; ++i) got.push_back(d.read(Reg::Data));
+    }
+    CHECK(sameAsDisk(got, 1000, 3));
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC);
+    CHECK(!d.intrq());  // no interrupt after the last block of a read
+}
+
+TEST(test_read_count_zero_means_256) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(70000, 0, got));
+    CHECK_EQ(got.size(), 256u * 256u);
+    CHECK(sameAsDisk(got, 70000, 256));
+    CHECK_EQ(d.lastCommand().count, 256);
+}
+
+TEST(test_read_last_sector_and_past_the_end) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(131071, 1, got));
+    CHECK(sameAsDisk(got, 131071, 1));
+
+    Fetch f;
+    h.setLba(131072, 1);  // one past the end
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(h.status() & ST_ERR);
+    CHECK_EQ(d.error(), ER_IDNF);
+    CHECK(!d.pendingFetch(f));  // nothing fetched, nothing transferred
+
+    h.setLba(131070, 3);  // straddles the end: refused before any data
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(h.status() & ST_ERR);
+    CHECK_EQ(d.error(), ER_IDNF);
+    CHECK(!d.pendingFetch(f));
+    // The task file names the first address that doesn't exist.
+    CHECK_EQ(d.read(Reg::LbaLow), 0x00);
+    CHECK_EQ(d.read(Reg::LbaMid), 0x00);
+    CHECK_EQ(d.read(Reg::LbaHigh), 0x02);  // 131072 = 0x020000
+}
+
+TEST(test_read_chs) {
+    Device d(INFO);  // 64 MB: 130 cylinders x 16 heads x 63 sectors
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    // Cylinder 1, head 2, sector 3 -> LBA (1 * 16 + 2) * 63 + 2 = 1136
+    d.write(Reg::SectorCount, 1);
+    d.write(Reg::LbaLow, 3);
+    d.write(Reg::LbaMid, 1);
+    d.write(Reg::LbaHigh, 0);
+    d.write(Reg::Device, 0xA0 | 2);  // CHS, device 0, head 2
+    std::vector<uint16_t> got;
+    CHECK(h.readAfterCommand(1, got));
+    CHECK_EQ(d.lastCommand().lba, 1136u);
+    CHECK(sameAsDisk(got, 1136, 1));
+
+    // Sector numbers start at 1: sector 0 is not an address.
+    d.write(Reg::LbaLow, 0);
+    d.write(Reg::Device, 0xA0);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(h.status() & ST_ERR);
+    CHECK_EQ(d.error(), ER_IDNF);
+    // Nor is a cylinder beyond the geometry (130 cylinders: 0-129).
+    d.write(Reg::LbaLow, 1);
+    d.write(Reg::LbaMid, 130);
+    d.write(Reg::Device, 0xA0 | 15);  // head 15 is fine
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK_EQ(d.error(), ER_IDNF);
+}
+
+struct FailingDisk : GeneratedDisk {
+    uint32_t bad;
+    explicit FailingDisk(uint32_t bad_lba) : bad(bad_lba) {}
+    bool read(uint32_t lba, uint16_t words[256]) override {
+        return lba != bad && GeneratedDisk::read(lba, words);
+    }
+};
+
+TEST(test_read_fetch_failure) {
+    Device d(INFO);
+    FailingDisk disk(2001);
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> got;
+    CHECK(!h.readSectors(2000, 3, got));
+    CHECK_EQ(got.size(), 256u);  // the first sector arrived; the second failed
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK_EQ(d.error(), ER_UNC);
+    CHECK_EQ(d.read(Reg::LbaLow), 2001 & 0xFF);  // where it failed
+    CHECK_EQ(d.read(Reg::LbaMid), 2001 >> 8);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+}
+
+TEST(test_reset_mid_read_makes_fetch_stale) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d};
+    h.setLba(10, 2);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    Fetch old;
+    CHECK(d.pendingFetch(old));
+    h.softReset();  // the host gives up while core 0 is still fetching
+    Fetch f;
+    CHECK(!d.pendingFetch(f));
+    d.fetchDone(old.id, true);  // core 0 finishes late: ignored
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+
+    // A new read gets a new id; the old one still can't complete it.
+    h.setLba(20, 1);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(d.pendingFetch(f));
+    CHECK(f.id != old.id);
+    d.fetchDone(old.id, true);
+    CHECK(h.altStatus() & ST_BSY);
+    d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+    CHECK(h.altStatus() & ST_DRQ);
+}
+
+TEST(test_read_with_device1_selected_is_ignored) {
+    Device d(INFO);
+    VirtualHost h{d};
+    h.setLba(0, 1);
+    h.select(1);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    Fetch f;
+    CHECK(!d.pendingFetch(f));
+    CHECK_EQ(d.commandsStarted(), 0u);
+}
+
+TEST(test_read_across_cores) {
+    // Core 1 (this thread) runs the device and a host reading 300 sectors;
+    // core 0 (another thread) serves fetches through the real mailbox.
+    Device d(INFO);
+    static FetchMailbox mailbox;
+    std::atomic<bool> stop{false};
+    std::thread core0([&] {
+        GeneratedDisk disk;
+        Fetch f;
+        while (!stop.load()) {
+            if (mailbox.takeRequest(f)) {
+                bool ok = disk.read(f.lba, f.buffer);
+                while (!mailbox.postResult(FetchResult{f.id, ok})) {}
+            }
+        }
+    });
+
+    uint32_t posted = 0;
+    auto core1_poll = [&] {
+        Fetch f;
+        if (d.pendingFetch(f) && f.id != posted && mailbox.post(f)) posted = f.id;
+        FetchResult r;
+        while (mailbox.takeResult(r)) d.fetchDone(r.id, r.ok);
+    };
+
+    std::vector<uint16_t> got;
+    bool ok = true;
+    for (uint32_t lba = 5000; lba < 5300 && ok; lba += 100) {
+        VirtualHost h{d};
+        h.setLba(lba, 100);
+        d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+        for (int s = 0; s < 100 && ok; ++s) {
+            int spins = 0;
+            while (h.altStatus() & ST_BSY) {
+                core1_poll();
+                if (++spins > 10000000) { ok = false; break; }
+            }
+            if (!(h.status() & ST_DRQ)) ok = false;
+            for (int i = 0; i < 256 && ok; ++i) got.push_back(d.read(Reg::Data));
+        }
+    }
+    stop.store(true);
+    core0.join();
+    CHECK(ok);
+    CHECK(sameAsDisk(got, 5000, 300));
+}
+
 void runAtaDeviceTests() {
     RUN(test_reg_mapping);
     RUN(test_power_on_state);
@@ -309,4 +601,15 @@ void runAtaDeviceTests() {
     RUN(test_intrq_masked_by_nien_and_device1);
     RUN(test_intrq_cleared_by_new_command);
     RUN(test_virtual_host_probe);
+    RUN(test_generated_disk_words);
+    RUN(test_read_one_sector);
+    RUN(test_read_busy_until_fetched);
+    RUN(test_read_multiple_sectors_interrupt_each);
+    RUN(test_read_count_zero_means_256);
+    RUN(test_read_last_sector_and_past_the_end);
+    RUN(test_read_chs);
+    RUN(test_read_fetch_failure);
+    RUN(test_reset_mid_read_makes_fetch_stale);
+    RUN(test_read_with_device1_selected_is_ignored);
+    RUN(test_read_across_cores);
 }

@@ -9,10 +9,17 @@ import shutil
 
 import pytest
 
+from conftest import require_build
 from hddproto import trace
 from hddproto.paths import REFERENCE
 
 pytestmark = pytest.mark.slice0
+
+
+@pytest.fixture(autouse=True)
+def listen_build(firmware_slice):
+    require_build(firmware_slice, drive_build=False)
+
 
 FIRST_ACTIVITY_TIMEOUT_S = 90  # covers a manual replug
 QUIET_S = 3                    # the probe is over once the bus is quiet this long

@@ -47,6 +47,4 @@ bool takeStall() {
     return true;
 }
 
-uint32_t pinsNow() { return gpio_get_all(); }
-
 }  // namespace listen

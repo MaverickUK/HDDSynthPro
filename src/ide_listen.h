@@ -15,7 +15,4 @@ bool pop(uint32_t& sample);
 // True once after the PIO stalled on a full FIFO (accesses were missed).
 bool takeStall();
 
-// Current level of GPIO 0-31.
-uint32_t pinsNow();
-
 }  // namespace listen

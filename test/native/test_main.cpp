@@ -101,6 +101,19 @@ TEST(test_format_other_kinds) {
     CHECK_STR(format(TraceRun{TraceEvent{7, 0, TraceKind::Stall}, 1, 7}), "STALL 7\n");
 }
 
+TEST(test_format_commands) {
+    CHECK_STR(format(TraceRun{commandStartEvent(100, 0x20, 131071, 256), 1, 100}),
+              "CMD 100 20 READ_SECTORS 131071 256\n");
+    CHECK_STR(format(TraceRun{commandEndEvent(950, 0x20, 0x50, 0x00, 850), 1, 950}),
+              "DONE 950 20 50 00 850\n");
+    CHECK_STR(format(TraceRun{commandStartEvent(5, 0x77, 0, 0), 1, 5}), "CMD 5 77 ? 0 0\n");
+    // Commands are never merged, even when identical.
+    TraceCoalescer c;
+    TraceRun done;
+    CHECK(!c.add(commandStartEvent(1, 0xEC, 0, 0), done));
+    CHECK(c.add(commandStartEvent(2, 0xEC, 0, 0), done));
+}
+
 TEST(test_format_truncates) {
     uint32_t s = sample(true, false, true, false, 7, 0x0050);
     char buf[10];
@@ -293,6 +306,7 @@ int main() {
     RUN(test_decode_invalid_combinations);
     RUN(test_format_bus_run);
     RUN(test_format_other_kinds);
+    RUN(test_format_commands);
     RUN(test_format_truncates);
     RUN(test_coalescer_merges_identical_accesses);
     RUN(test_coalescer_never_merges_resets);

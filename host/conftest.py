@@ -55,9 +55,23 @@ def drive(session_stamp):
     RUNS.mkdir(parents=True, exist_ok=True)
     log = DriveLog(raw_log_path=RUNS / f"{session_stamp}-serial.log")
     log.open()
-    log.command("h", "READY", timeout=5)
+    log.ready = log.command("h", "READY", timeout=5)  # "READY HDDSynthPro <version> slice<N>"
     yield log
     log.close()
+
+
+@pytest.fixture
+def firmware_slice(drive) -> int:
+    """Which build the board runs: 0 = listen only, 3 = the drive (slices 1-3)."""
+    return int(drive.ready.split()[-1].removeprefix("slice"))
+
+
+def require_build(firmware_slice: int, drive_build: bool):
+    """Skips unless the board runs the build the test needs."""
+    if drive_build and firmware_slice == 0:
+        pytest.skip("needs the drive build: PIO_ENV=bb48_drive scripts/rig.sh ...")
+    if not drive_build and firmware_slice != 0:
+        pytest.skip("needs the listen-only build: scripts/rig.sh ... (PIO_ENV=bb48)")
 
 
 @pytest.fixture

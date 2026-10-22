@@ -31,6 +31,7 @@ class DriveLog:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._raw = open(raw_log_path, "a", encoding="utf-8") if raw_log_path else None
+        self.ready = ""  # the board's READY line, once seen
 
     def open(self, timeout: float = 20.0):
         """Opens the port, waiting for it to appear (e.g. after a flash)."""

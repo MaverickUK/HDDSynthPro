@@ -14,6 +14,11 @@ LINES = [
     "EV 9000 WR CMD 6 DEVICE 00a0 x1 0 05f600a0",
     "STALL 9500",
     "DROP 12",
+    "CMD 10000 ec IDENTIFY 0 0",
+    "DONE 10400 ec 50 00 400",
+    "CMD 11000 20 READ_SECTORS 131071 1",
+    "DONE 11300 20 51 10 300",
+    "CMD 12000 20 READ_SECTORS 0 256",
 ]
 
 
@@ -43,3 +48,14 @@ def test_op_of_raw_samples():
     assert trace.op_of(idle & ~(1 << 22)) == "RD"
     assert trace.op_of(idle & ~(1 << 23)) == "WR"
     assert trace.op_of(0) == "BOTH"
+
+
+def test_parse_commands():
+    t = trace.parse(LINES)
+    assert [c.name for c in t.commands] == ["IDENTIFY", "READ_SECTORS", "READ_SECTORS"]
+    ident, bad, pending = t.commands
+    assert ident.ok and ident.duration_us == 400
+    assert (bad.lba, bad.count, bad.status, bad.error) == (131071, 1, 0x51, 0x10)
+    assert not bad.ok
+    assert pending.status is None and not pending.ok
+    assert "IDENTIFY x1" in trace.summary(t)

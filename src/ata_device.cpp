@@ -8,7 +8,8 @@ Reg regFor(bool command_block, bool control_block, unsigned address) {
     return Reg::None;
 }
 
-Device::Device(const IdentifyInfo& info) : info_(info) {
+Device::Device(const IdentifyInfo& info)
+    : info_(info), geometry_(defaultGeometry(info.total_sectors)) {
     buildIdentify(info_, identify_);
     resetToSignature();
 }
@@ -26,6 +27,10 @@ void Device::resetToSignature() {
     data_ = nullptr;
     data_count_ = data_index_ = 0;
     irq_pending_ = false;
+    // Abandon any read; a fetch still running on core 0 becomes stale.
+    reading_ = false;
+    fetch_pending_ = false;
+    ++fetch_id_;
 }
 
 uint16_t Device::read(Reg reg) {
@@ -98,6 +103,9 @@ void Device::hardReset(bool asserted) {
         status_ = ST_BSY;
         irq_pending_ = false;
         device_control_ = 0;
+        reading_ = false;
+        fetch_pending_ = false;
+        ++fetch_id_;
     } else if (in_reset_) {
         in_reset_ = false;
         resetToSignature();
@@ -109,8 +117,10 @@ bool Device::intrq() const {
     return irq_pending_ && !device1Selected() && !(device_control_ & DC_NIEN);
 }
 
+// ---- Commands ---------------------------------------------------------------
+
 void Device::startCommand(uint8_t command) {
-    last_command_ = command;
+    last_ = CommandInfo{command, 0, 0};
     ++commands_started_;
     irq_pending_ = false;  // writing Command clears a pending interrupt
     error_ = 0;
@@ -121,17 +131,108 @@ void Device::startCommand(uint8_t command) {
         case CMD_EXECUTE_DEVICE_DIAGNOSTIC:
             resetToSignature();  // signature, error 01h, and an interrupt
             irq_pending_ = true;
+            ++commands_completed_;
+            break;
+        case CMD_READ_SECTORS:
+        case CMD_READ_SECTORS_NO_RETRY:
+            startRead();
             break;
         default:
-            abortCommand();
+            fail(ER_ABRT);
             break;
     }
 }
 
-void Device::abortCommand() {
-    error_ = ER_ABRT;
+bool Device::decodeAddress(uint32_t& lba) const {
+    if (device_ & DEV_LBA) {
+        lba = (uint32_t(device_ & 0x0F) << 24) | (uint32_t(lba_high_) << 16) |
+              (uint32_t(lba_mid_) << 8) | lba_low_;
+        return true;
+    }
+    // CHS, in the default geometry (INITIALIZE DEVICE PARAMETERS comes in slice 6).
+    uint32_t cylinder = (uint32_t(lba_high_) << 8) | lba_mid_;
+    uint32_t head = device_ & 0x0F;
+    uint32_t sector = lba_low_;  // 1-based
+    if (sector == 0 || sector > geometry_.sectors_per_track || head >= geometry_.heads ||
+        cylinder >= geometry_.cylinders)
+        return false;
+    lba = (cylinder * geometry_.heads + head) * geometry_.sectors_per_track + (sector - 1);
+    return true;
+}
+
+void Device::startRead() {
+    uint32_t count = sector_count_ ? sector_count_ : 256;
+    uint32_t lba = 0;
+    bool valid = decodeAddress(lba);
+    last_.lba = lba;
+    last_.count = uint16_t(count);
+    if (!valid || lba >= info_.total_sectors || count > info_.total_sectors - lba) {
+        // Out of range: fail before transferring anything, with the first
+        // unreachable address in the task file.
+        if (valid) setTaskFileLba(lba < info_.total_sectors ? info_.total_sectors : lba);
+        fail(ER_IDNF);
+        return;
+    }
+    reading_ = true;
+    read_lba_ = lba;
+    read_left_ = count;
+    requestFetch();
+}
+
+void Device::requestFetch() {
+    status_ = ST_BSY | ST_DRDY | ST_DSC;
+    fetch_pending_ = true;
+    ++fetch_id_;
+}
+
+bool Device::pendingFetch(Fetch& fetch) {
+    if (!fetch_pending_) return false;
+    fetch = Fetch{fetch_id_, read_lba_, sector_};
+    return true;
+}
+
+void Device::fetchDone(uint32_t id, bool ok) {
+    if (!fetch_pending_ || id != fetch_id_) return;  // stale: a reset came first
+    fetch_pending_ = false;
+    if (!ok) {
+        setTaskFileLba(read_lba_);
+        reading_ = false;
+        fail(ER_UNC);
+        return;
+    }
+    ++read_lba_;
+    --read_left_;
+    startDataIn(sector_, SECTOR_WORDS);
+}
+
+void Device::setTaskFileLba(uint32_t lba) {
+    if (device_ & DEV_LBA) {
+        lba_low_ = uint8_t(lba);
+        lba_mid_ = uint8_t(lba >> 8);
+        lba_high_ = uint8_t(lba >> 16);
+        device_ = uint8_t((device_ & 0xF0) | ((lba >> 24) & 0x0F));
+    } else {
+        uint32_t per_cyl = uint32_t(geometry_.heads) * geometry_.sectors_per_track;
+        uint32_t cylinder = lba / per_cyl;
+        uint32_t rest = lba % per_cyl;
+        lba_low_ = uint8_t(rest % geometry_.sectors_per_track + 1);
+        lba_mid_ = uint8_t(cylinder);
+        lba_high_ = uint8_t(cylinder >> 8);
+        device_ = uint8_t((device_ & 0xF0) | (rest / geometry_.sectors_per_track));
+    }
+}
+
+void Device::fail(uint8_t error) {
+    error_ = error;
     status_ = ST_DRDY | ST_DSC | ST_ERR;
     irq_pending_ = true;
+    reading_ = false;
+    ++commands_completed_;
+}
+
+void Device::complete() {
+    status_ = ST_DRDY | ST_DSC;
+    ++commands_completed_;
 }
 
 void Device::startDataIn(const uint16_t* words, uint16_t count) {
@@ -145,7 +246,12 @@ void Device::startDataIn(const uint16_t* words, uint16_t count) {
 void Device::finishDataIn() {
     data_ = nullptr;
     data_count_ = data_index_ = 0;
-    status_ = ST_DRDY | ST_DSC;  // no interrupt at the end of a data-in transfer
+    if (reading_ && read_left_ > 0) {
+        requestFetch();  // next sector: BSY while core 0 fetches it
+        return;
+    }
+    reading_ = false;
+    complete();  // no interrupt at the end of a data-in transfer
 }
 
 }  // namespace ata

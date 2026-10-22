@@ -5,6 +5,9 @@
 //   EV <t_us> <op> <block> <addr> <reg> <data> x<count> <span_us> <pins>
 //   RESET <t_us> ASSERT|RELEASE
 //   STALL <t_us>
+//   CMD <t_us> <cmd> <name> <lba> <count>          a command started (drive builds)
+//   DONE <t_us> <cmd> <status> <error> <dur_us>    ...and completed
+// cmd, status and error are hex; lba and count decimal.
 // op is RD, WR or BOTH; block is CMD, CTL, NONE or BOTH; data and pins are hex.
 // A run of identical accesses becomes one EV line: <t_us> is the first one's
 // time, x<count> how many, <span_us> the time from the first to the last.
@@ -13,13 +16,30 @@
 #include <cstddef>
 #include <cstdint>
 
-enum class TraceKind : uint8_t { Bus, ResetAssert, ResetRelease, Stall };
+enum class TraceKind : uint8_t { Bus, ResetAssert, ResetRelease, Stall, CommandStart, CommandEnd };
 
 struct TraceEvent {
     uint32_t time_us;
-    uint32_t pins;  // bus sample (Bus) or the pins at the time (others)
+    // Bus: the pin sample. Reset/Stall: the pins at the time.
+    // CommandStart: the start LBA. CommandEnd: status | error << 8.
+    uint32_t pins;
     TraceKind kind;
+    // CommandStart: command | count << 8. CommandEnd: command | duration_us << 8.
+    uint32_t extra = 0;
 };
+
+// Builders for the command events, so both sides agree on the packing.
+inline TraceEvent commandStartEvent(uint32_t t_us, uint8_t command, uint32_t lba, uint16_t count) {
+    return TraceEvent{t_us, lba, TraceKind::CommandStart, uint32_t(command) | (uint32_t(count) << 8)};
+}
+inline TraceEvent commandEndEvent(uint32_t t_us, uint8_t command, uint8_t status, uint8_t error,
+                                  uint32_t duration_us) {
+    return TraceEvent{t_us, uint32_t(status) | (uint32_t(error) << 8), TraceKind::CommandEnd,
+                      uint32_t(command) | (duration_us << 8)};
+}
+
+// Short name of an ATA command for the trace ("?" if unknown).
+const char* commandName(uint8_t command);
 
 struct TraceRun {
     TraceEvent first;

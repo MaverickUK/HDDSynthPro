@@ -1,19 +1,38 @@
-// HDDSynthPro IDE drive emulator prototype: slice 0 (listen only).
+// HDDSynthPro IDE drive emulator prototype.
 //
-// Core 1 drains the PIO listener and watches RESET#, recording every event
-// with a timestamp into the trace ring. Core 0 owns USB serial: it prints the
-// trace and runs the console. Every bus pin stays an input.
+// Two builds (FIRMWARE_SLICE, set in platformio.ini):
+//   bb48        slice 0, listen only: core 1 drains the PIO listener and
+//               records every bus access. Every pin stays an input.
+//   bb48_drive  slices 1-3, the drive: core 1 serves the bus (ide_bus) and
+//               runs the ATA device; core 0 fetches sectors from the
+//               generated disk for it. Commands are traced; raw accesses
+//               on request (console `t`).
+// In both, core 1 records events into the trace ring and core 0 owns USB
+// serial: it prints the trace and runs the console.
 #include <Arduino.h>
+
+#include <hardware/gpio.h>
 
 #include <atomic>
 #include <cstdio>
 
 #include "bus_sample.h"
 #include "config.h"
-#include "ide_listen.h"
 #include "spsc_ring.h"
 #include "trace_format.h"
 #include "version.h"
+
+#if FIRMWARE_SLICE == 0
+#include "ide_listen.h"
+#else
+#include <hardware/clocks.h>
+#include <hardware/structs/m33.h>
+
+#include "ata_device.h"
+#include "block_source.h"
+#include "fetch_mailbox.h"
+#include "ide_bus.h"
+#endif
 
 static SpscRing<TraceEvent, cfg::TRACE_RING_EVENTS> g_trace;
 static std::atomic<uint32_t> g_events{0};   // recorded by core 1
@@ -21,15 +40,17 @@ static std::atomic<uint32_t> g_dropped{0};  // lost because the ring was full
 static std::atomic<uint32_t> g_stalls{0};   // PIO FIFO filled: accesses missed
 
 // Pins in sample layout (bit n = GPIO PIN_DD0 + n), for non-bus events.
-static uint32_t pinsAsSample() { return listen::pinsNow() >> cfg::PIN_DD0; }
+static uint32_t pinsAsSample() { return gpio_get_all() >> cfg::PIN_DD0; }
 
-// ---- Core 1 ---------------------------------------------------------------
-
-static void record(TraceKind kind, uint32_t pins) {
+static void record(const TraceEvent& e) {
     g_events.fetch_add(1, std::memory_order_relaxed);
-    if (!g_trace.push(TraceEvent{time_us_32(), pins, kind}))
-        g_dropped.fetch_add(1, std::memory_order_relaxed);
+    if (!g_trace.push(e)) g_dropped.fetch_add(1, std::memory_order_relaxed);
 }
+
+static void record(TraceKind kind, uint32_t pins) { record(TraceEvent{time_us_32(), pins, kind}); }
+
+// ---- Core 1: slice 0, listen only ---------------------------------------------
+#if FIRMWARE_SLICE == 0
 
 void setup1() { listen::begin(); }
 
@@ -56,16 +77,112 @@ void loop1() {
     }
 }
 
-// ---- Core 0 ---------------------------------------------------------------
+// ---- Core 1: the drive ----------------------------------------------------------
+#else
+
+static FetchMailbox g_mailbox;
+static std::atomic<bool> g_trace_bus{false};       // console `t`
+static std::atomic<uint32_t> g_loop_max_cycles{0}; // longest core 1 loop pass (console `s`)
+static std::atomic<bool> g_loop_max_reset{false};
+
+static const IdentifyInfo DRIVE_INFO{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
+                                     gen_disk::DEFAULT_SECTORS};
+
+void setup1() {
+    ide_bus::begin();
+    // The M33's cycle counter, to measure the loop: core 1 must answer a
+    // read within about 1 us (host/tests/test_pio_bus_sim.py).
+    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;
+    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
+}
+
+void loop1() {
+    // Never returns. Each pass serves at most one access and does a little
+    // bookkeeping; the longest pass is how late a read can be answered.
+    static ata::Device dev(DRIVE_INFO);
+    uint32_t started = dev.commandsStarted();
+    uint32_t completed = dev.commandsCompleted();
+    uint32_t command_start_us = 0;
+    uint32_t posted_fetch = 0;
+    bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
+    dev.hardReset(reset_low);
+    uint32_t last = m33_hw->dwt_cyccnt;
+
+    for (;;) {
+        uint32_t now = m33_hw->dwt_cyccnt;
+        uint32_t pass = now - last;
+        last = now;
+        if (g_loop_max_reset.exchange(false, std::memory_order_relaxed)) {
+            g_loop_max_cycles.store(0, std::memory_order_relaxed);
+        } else if (pass > g_loop_max_cycles.load(std::memory_order_relaxed)) {
+            g_loop_max_cycles.store(pass, std::memory_order_relaxed);
+        }
+
+        uint32_t sample;
+        if (ide_bus::serviceOnce(dev, sample) && g_trace_bus.load(std::memory_order_relaxed))
+            record(TraceKind::Bus, sample);
+
+        if (dev.commandsStarted() != started) {
+            started = dev.commandsStarted();
+            command_start_us = time_us_32();
+            const ata::CommandInfo& c = dev.lastCommand();
+            record(commandStartEvent(command_start_us, c.command, c.lba, c.count));
+        }
+        if (dev.commandsCompleted() != completed) {
+            completed = dev.commandsCompleted();
+            uint32_t t = time_us_32();
+            record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(),
+                                   t - command_start_us));
+        }
+
+        // Sector fetches: post each once; results may complete a DRQ block.
+        ata::Fetch fetch;
+        if (dev.pendingFetch(fetch) && fetch.id != posted_fetch && g_mailbox.post(fetch))
+            posted_fetch = fetch.id;
+        FetchResult result;
+        if (g_mailbox.takeResult(result)) {
+            dev.fetchDone(result.id, result.ok);
+            ide_bus::updateIntrq(dev.intrq());
+        }
+
+        uint32_t pins = pinsAsSample();
+        bool low = !bus::high(pins, cfg::PIN_RESET_N);
+        if (low != reset_low) {
+            reset_low = low;
+            dev.hardReset(low);
+            ide_bus::updateIntrq(dev.intrq());
+            record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
+        }
+    }
+}
+
+// Core 0's share of the drive: fetch the sectors core 1 asks for.
+static GeneratedDisk g_disk;
+
+static void serveFetches() {
+    ata::Fetch fetch;
+    while (g_mailbox.takeRequest(fetch)) {
+        bool ok = g_disk.read(fetch.lba, fetch.buffer);
+        while (!g_mailbox.postResult(FetchResult{fetch.id, ok})) {}
+    }
+}
+
+#endif
+
+// ---- Core 0 ---------------------------------------------------------------------
 
 static TraceCoalescer g_coalescer;
 static uint32_t g_last_event_ms = 0;
 static uint32_t g_reported_drops = 0;
 
-static void printRun(const TraceRun& run) {
-    char line[96];
-    size_t n = formatRun(run, line, sizeof line);
+// Prints a line only if USB serial can take it now. A blocked write would
+// hold up core 0, and in the drive build core 0 must keep serving fetches;
+// lines that can't be printed wait in the trace ring (and are counted as
+// dropped if it fills).
+static bool printLine(const char* line, size_t n) {
+    if (Serial && Serial.availableForWrite() < int(n)) return false;
     Serial.write(line, n);
+    return true;
 }
 
 static void printReady() {
@@ -85,9 +202,15 @@ static void printPins() {
 }
 
 static void printStats() {
-    Serial.printf("STATS events=%lu dropped=%lu stalls=%lu ring=%u\n",
+    Serial.printf("STATS events=%lu dropped=%lu stalls=%lu ring=%u",
                   (unsigned long)g_events.load(), (unsigned long)g_dropped.load(),
                   (unsigned long)g_stalls.load(), (unsigned)g_trace.size());
+#if FIRMWARE_SLICE != 0
+    // Cycles at clk_sys -> ns. Must stay well under ~1000 ns (see setup1).
+    uint32_t ns = uint32_t(uint64_t(g_loop_max_cycles.load()) * 1000000000ull / clock_get_hz(clk_sys));
+    Serial.printf(" loop_max_ns=%lu bus_trace=%d", (unsigned long)ns, (int)g_trace_bus.load());
+#endif
+    Serial.print("\n");
 }
 
 static void handleConsole() {
@@ -95,10 +218,24 @@ static void handleConsole() {
         switch (Serial.read()) {
             case 'h':
                 printReady();
+#if FIRMWARE_SLICE == 0
                 Serial.println("# h help, p pins, s stats, b reboot to bootloader");
+#else
+                Serial.println("# h help, p pins, s stats, r reset loop max, t raw bus trace on/off, "
+                               "b reboot to bootloader");
+#endif
                 break;
             case 'p': printPins(); break;
             case 's': printStats(); break;
+#if FIRMWARE_SLICE != 0
+            case 'r': g_loop_max_reset.store(true); break;
+            case 't': {
+                bool on = !g_trace_bus.load();
+                g_trace_bus.store(on);
+                Serial.printf("# raw bus trace %s\n", on ? "on" : "off");
+                break;
+            }
+#endif
             case 'b':
                 Serial.println("# rebooting to bootloader");
                 Serial.flush();
@@ -116,16 +253,41 @@ void setup() {
 }
 
 void loop() {
+#if FIRMWARE_SLICE != 0
+    serveFetches();
+#endif
     handleConsole();
 
-    // Print what core 1 recorded; a bounded batch so the console stays responsive.
-    TraceEvent e;
-    TraceRun run;
-    for (int i = 0; i < 512 && g_trace.pop(e); ++i) {
-        g_last_event_ms = millis();
-        if (g_coalescer.add(e, run)) printRun(run);
+    // Print what core 1 recorded; a bounded batch so fetches and the console
+    // stay responsive. A run that can't be printed yet is kept and retried.
+    static TraceRun pending;
+    static bool has_pending = false;
+    if (has_pending) {
+        char line[96];
+        size_t n = formatRun(pending, line, sizeof line);
+        if (!printLine(line, n)) return;
+        has_pending = false;
     }
-    if (millis() - g_last_event_ms >= cfg::TRACE_FLUSH_MS && g_coalescer.flush(run)) printRun(run);
+    TraceEvent e;
+    for (int i = 0; i < 64 && g_trace.pop(e); ++i) {
+        g_last_event_ms = millis();
+        if (g_coalescer.add(e, pending)) {
+            char line[96];
+            size_t n = formatRun(pending, line, sizeof line);
+            if (!printLine(line, n)) {
+                has_pending = true;
+                return;
+            }
+        }
+#if FIRMWARE_SLICE != 0
+        serveFetches();
+#endif
+    }
+    if (millis() - g_last_event_ms >= cfg::TRACE_FLUSH_MS && g_coalescer.flush(pending)) {
+        char line[96];
+        size_t n = formatRun(pending, line, sizeof line);
+        if (!printLine(line, n)) has_pending = true;
+    }
 
     uint32_t drops = g_dropped.load(std::memory_order_relaxed);
     if (drops != g_reported_drops) {

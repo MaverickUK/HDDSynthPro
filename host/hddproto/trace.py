@@ -33,16 +33,38 @@ class Access:
 
 
 @dataclass
+class Command:
+    """A command from CMD/DONE lines (drive builds)."""
+    t_us: int
+    command: int
+    name: str
+    lba: int
+    count: int
+    status: int | None = None   # None: not completed (yet)
+    error: int | None = None
+    duration_us: int | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.status is not None and not self.status & 0x01
+
+    def __str__(self):
+        end = "" if self.status is None else f" -> st={self.status:02x} err={self.error:02x} {self.duration_us} us"
+        return f"{self.name}({self.command:02x}) lba={self.lba} count={self.count}{end}"
+
+
+@dataclass
 class Trace:
     accesses: list[Access] = field(default_factory=list)
     resets: list[tuple[int, str]] = field(default_factory=list)  # (t_us, ASSERT|RELEASE)
     stalls: list[int] = field(default_factory=list)
     dropped: int = 0
+    commands: list[Command] = field(default_factory=list)
     other: list[str] = field(default_factory=list)  # anything else the drive printed
 
     @property
     def empty(self) -> bool:
-        return not self.accesses and not self.resets
+        return not self.accesses and not self.resets and not self.commands
 
     def total_accesses(self) -> int:
         return sum(a.count for a in self.accesses)
@@ -75,6 +97,17 @@ def parse(lines: list[str]) -> Trace:
             if kind == "DROP":
                 t.dropped += int(parts[1])
                 continue
+            if kind == "CMD" and len(parts) == 6:
+                t.commands.append(Command(int(parts[1]), int(parts[2], 16), parts[3],
+                                          int(parts[4]), int(parts[5])))
+                continue
+            if kind == "DONE" and len(parts) == 6:
+                command = int(parts[2], 16)
+                for c in reversed(t.commands):
+                    if c.command == command and c.status is None:
+                        c.status, c.error, c.duration_us = int(parts[3], 16), int(parts[4], 16), int(parts[5])
+                        break
+                continue
         except ValueError:
             pass
         t.other.append(line)
@@ -83,7 +116,7 @@ def parse(lines: list[str]) -> Trace:
 
 def summary(t: Trace, sequence_lines: int = 60) -> str:
     """A readable report: totals, a histogram per register and the opening sequence."""
-    out = [f"{len(t.accesses)} trace lines, {t.total_accesses()} accesses, "
+    out = [f"{len(t.accesses)} trace lines, {t.total_accesses()} accesses, {len(t.commands)} commands, "
            f"{len(t.resets)} reset edges, {len(t.stalls)} stalls, {t.dropped} dropped"]
     hist = Counter()
     for a in t.accesses:
@@ -91,8 +124,12 @@ def summary(t: Trace, sequence_lines: int = 60) -> str:
     out.append("By register:")
     for (op, block, reg), n in sorted(hist.items(), key=lambda kv: -kv[1]):
         out.append(f"  {op:4} {block}.{reg:9} {n}")
+    if t.commands:
+        names = Counter(c.name for c in t.commands)
+        out.append("Commands: " + ", ".join(f"{n} x{k}" for n, k in names.most_common()))
     out.append(f"Sequence (first {sequence_lines}):")
-    events = [(a.t_us, str(a)) for a in t.accesses] + [(ts, f"RESET {e}") for ts, e in t.resets]
+    events = ([(a.t_us, str(a)) for a in t.accesses] + [(ts, f"RESET {e}") for ts, e in t.resets]
+              + [(c.t_us, str(c)) for c in t.commands])
     events.sort(key=lambda e: e[0])
     start = events[0][0] if events else 0
     for ts, text in events[:sequence_lines]:

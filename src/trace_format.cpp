@@ -29,6 +29,25 @@ bool TraceCoalescer::flush(TraceRun& done) {
     return true;
 }
 
+const char* commandName(uint8_t command) {
+    switch (command) {
+        case 0x20: return "READ_SECTORS";
+        case 0x21: return "READ_SECTORS_NR";
+        case 0x90: return "EXEC_DIAGNOSTIC";
+        case 0xEC: return "IDENTIFY";
+        case 0xA1: return "IDENTIFY_PACKET";
+        case 0xEF: return "SET_FEATURES";
+        case 0x91: return "INIT_PARAMS";
+        case 0xC6: return "SET_MULTIPLE";
+        case 0xC4: return "READ_MULTIPLE";
+        case 0xC8: return "READ_DMA";
+        case 0x30: return "WRITE_SECTORS";
+        case 0xE7: return "FLUSH_CACHE";
+        case 0xE5: return "CHECK_POWER";
+        default: return "?";
+    }
+}
+
 static const char* opName(bus::Op op) {
     switch (op) {
         case bus::Op::Read: return "RD";
@@ -70,6 +89,18 @@ size_t formatRun(const TraceRun& run, char* buf, size_t size) {
             break;
         case TraceKind::Stall:
             n = std::snprintf(buf, size, "STALL %lu\n", (unsigned long)e.time_us);
+            break;
+        case TraceKind::CommandStart: {
+            uint8_t command = uint8_t(e.extra);
+            n = std::snprintf(buf, size, "CMD %lu %02x %s %lu %lu\n", (unsigned long)e.time_us,
+                              (unsigned)command, commandName(command), (unsigned long)e.pins,
+                              (unsigned long)(e.extra >> 8));
+            break;
+        }
+        case TraceKind::CommandEnd:
+            n = std::snprintf(buf, size, "DONE %lu %02x %02x %02x %lu\n", (unsigned long)e.time_us,
+                              (unsigned)(e.extra & 0xFF), (unsigned)(e.pins & 0xFF),
+                              (unsigned)((e.pins >> 8) & 0xFF), (unsigned long)(e.extra >> 8));
             break;
     }
     if (n < 0) return 0;

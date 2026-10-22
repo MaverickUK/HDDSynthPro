@@ -21,9 +21,16 @@ import time
 
 import pytest
 
-from hddproto import gen_disk
+from conftest import require_build
+from hddproto import gen_disk, trace
 
 pytestmark = pytest.mark.slice3
+
+
+@pytest.fixture(autouse=True)
+def drive_build(firmware_slice):
+    require_build(firmware_slice, drive_build=True)
+
 
 SECTOR = gen_disk.SECTOR_BYTES
 TOTAL = gen_disk.DEFAULT_SECTORS
@@ -51,8 +58,9 @@ def test_capacity(raw_disk):
     assert disk.size == TOTAL * SECTOR
 
 
-def test_full_disk(raw_disk):
+def test_full_disk(raw_disk, drive):
     _, fd = raw_disk
+    mark = drive.mark()
     started = time.monotonic()
     for lba in range(0, TOTAL, CHUNK_SECTORS):
         count = min(CHUNK_SECTORS, TOTAL - lba)
@@ -61,6 +69,12 @@ def test_full_disk(raw_disk):
     seconds = time.monotonic() - started
     print(f"\nRead {TOTAL * SECTOR // 2**20} MB in {seconds:.1f} s "
           f"({TOTAL * SECTOR / seconds / 1e6:.2f} MB/s)")
+
+    # The drive's view: every sector went out through READ SECTORS without an error.
+    drive.wait_quiet(1, timeout=30)
+    reads = [c for c in trace.parse(drive.lines_since(mark)).commands if c.command in (0x20, 0x21)]
+    assert all(c.ok for c in reads), [str(c) for c in reads if not c.ok][:5]
+    assert sum(c.count for c in reads) >= TOTAL
 
 
 def test_random_reads(raw_disk):

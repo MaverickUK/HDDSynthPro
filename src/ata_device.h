@@ -6,6 +6,14 @@
 // One device, configured as device 0 (master), with no device 1 on the
 // cable. ATA lets device 0 answer for an absent device 1, which this does:
 // see read() and write().
+//
+// Sector data comes from elsewhere (core 0: a generated disk now, the SD
+// card later). While it is being fetched the device shows BSY, as a real
+// drive does while it seeks:
+//   1. A read command sets BSY and posts a Fetch (pendingFetch()).
+//   2. Core 0 fills fetch.buffer with the sector, then calls fetchDone().
+//   3. The device sets DRQ and the host reads the 256 words.
+//   4. Repeat per sector; the last one ends the command.
 #pragma once
 
 #include <cstdint>
@@ -40,23 +48,47 @@ constexpr uint8_t ST_DRQ = 0x08;
 constexpr uint8_t ST_ERR = 0x01;
 
 // Error register bits
-constexpr uint8_t ER_ABRT = 0x04;
+constexpr uint8_t ER_UNC = 0x40;   // uncorrectable data error (the fetch failed)
+constexpr uint8_t ER_IDNF = 0x10;  // address not found (out of range)
+constexpr uint8_t ER_ABRT = 0x04;  // command aborted (not supported)
 
 // Device register bits
 constexpr uint8_t DEV_DEV = 0x10;  // 1 = device 1 (slave) selected
-constexpr uint8_t DEV_LBA = 0x40;
+constexpr uint8_t DEV_LBA = 0x40;  // 1 = LBA addressing, 0 = CHS
 
 // Device Control register bits
 constexpr uint8_t DC_SRST = 0x04;
 constexpr uint8_t DC_NIEN = 0x02;  // 1 = INTRQ disabled
 
 // Commands handled so far
+constexpr uint8_t CMD_READ_SECTORS = 0x20;
+constexpr uint8_t CMD_READ_SECTORS_NO_RETRY = 0x21;  // obsolete alias
 constexpr uint8_t CMD_EXECUTE_DEVICE_DIAGNOSTIC = 0x90;
 constexpr uint8_t CMD_IDENTIFY_DEVICE = 0xEC;
+
+constexpr uint16_t SECTOR_WORDS = 256;
+
+// A sector the device needs fetched. `id` changes with every request, so a
+// fetch that finishes after a reset (or a newer request) is recognised as
+// stale and ignored.
+struct Fetch {
+    uint32_t id;
+    uint32_t lba;
+    uint16_t* buffer;  // SECTOR_WORDS words, in bus order (low byte first on disk)
+};
+
+// What the trace reports about a command.
+struct CommandInfo {
+    uint8_t command;
+    uint32_t lba;    // decoded start address (LBA, or CHS converted)
+    uint16_t count;  // sectors (0 in the register means 256)
+};
 
 class Device {
 public:
     explicit Device(const IdentifyInfo& info);
+
+    // ---- Bus side -----------------------------------------------------------
 
     // Host reads a register. Reading DATA during a data-in transfer returns
     // the next word; reading STATUS clears a pending interrupt.
@@ -71,22 +103,42 @@ public:
     // Level the INTRQ line should have: true = assert.
     bool intrq() const;
 
-    // State for tests and the trace.
+    // ---- Sector fetches (handed to core 0) ---------------------------------
+
+    // True while a fetch is wanted; fills `fetch`. Stays true (same id)
+    // until fetchDone() or a reset.
+    bool pendingFetch(Fetch& fetch);
+
+    // Core 0 finished fetch `id`: the buffer is filled (ok) or the read failed.
+    void fetchDone(uint32_t id, bool ok);
+
+    // ---- State for tests and the trace ---------------------------------------
+
     uint8_t status() const { return status_; }
     uint8_t error() const { return error_; }
-    uint8_t lastCommand() const { return last_command_; }
+    // Counters: a change means a command started / completed since last look.
     uint32_t commandsStarted() const { return commands_started_; }
+    uint32_t commandsCompleted() const { return commands_completed_; }
+    const CommandInfo& lastCommand() const { return last_; }
+    const Geometry& geometry() const { return geometry_; }
 
 private:
     bool device1Selected() const { return (device_ & DEV_DEV) != 0; }
-    void resetToSignature();          // registers and status as after a reset
+    void resetToSignature();  // registers and status as after a reset
     void startCommand(uint8_t command);
-    void abortCommand();              // ABRT error, command complete
+    void startRead();
+    bool decodeAddress(uint32_t& lba) const;  // false if a CHS address is invalid
+    void requestFetch();
+    void fail(uint8_t error);  // ERR + error bits, command complete
+    void complete();           // success, no data left
     void startDataIn(const uint16_t* words, uint16_t count);
     void finishDataIn();
+    void setTaskFileLba(uint32_t lba);  // where an error happened
 
     IdentifyInfo info_;
+    Geometry geometry_;
     uint16_t identify_[256];
+    uint16_t sector_[SECTOR_WORDS];
 
     // Task file
     uint8_t features_ = 0;
@@ -104,11 +156,19 @@ private:
     uint16_t data_count_ = 0;
     uint16_t data_index_ = 0;
 
+    // Multi-sector read in progress
+    bool reading_ = false;
+    uint32_t read_lba_ = 0;       // next sector to fetch
+    uint32_t read_left_ = 0;      // sectors not yet fetched
+    bool fetch_pending_ = false;
+    uint32_t fetch_id_ = 0;
+
     bool irq_pending_ = false;
     bool in_reset_ = false;  // RESET# held or SRST set: BSY until released
 
-    uint8_t last_command_ = 0;
+    CommandInfo last_{};
     uint32_t commands_started_ = 0;
+    uint32_t commands_completed_ = 0;
 };
 
 }  // namespace ata

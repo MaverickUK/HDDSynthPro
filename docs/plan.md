@@ -57,7 +57,7 @@ The original map put DD2/DD3 on GPIO 2/3, which the BB48 pulls up to 3.3 V for I
 
 ## Automation loop
 
-`scripts/rig.sh -m sliceN` runs the host unit tests, then builds, flashes and runs the rig tests. Every code change gets the full suite with no hands on the rig (once a switchable hub is fitted). A failing run leaves its evidence in `host/runs/`.
+`scripts/rig.sh -m sliceN` runs the host unit tests, then builds, flashes and runs the rig tests. `PIO_ENV` picks the firmware: `bb48` (listen only) for slice 0, `bb48_drive` for slices 1–3. Every code change gets the full suite with no hands on the rig (once a switchable hub is fitted). A failing run leaves its evidence in `host/runs/`.
 
 - **Flash:** `pio run -t upload` resets the board into the bootloader over serial and loads it with picotool. The runner then waits for the `READY` line. USB power stays on throughout.
 - **Replug:** if a hub is configured, `uhubctl` power-cycles the adapter's port; otherwise the test asks for a manual replug and waits for bus activity.
@@ -78,7 +78,8 @@ Arduino-Pico (earlephilhower core, which runs on the Pico SDK) under PlatformIO,
 | `ide_listen` (slice 0), `ide_bus` (slice 1 on: PIO + C++ wrapper) | Sees strobes, captures register accesses, drives reads, controls IORDY | In a simulator: `host/hddproto/pio_sim.py` runs the real assembled program, and `ide_host_model.py` plays a mode 0 host against it |
 | `ata_device` | Task-file registers, status bits, the command state machine | Yes |
 | `identify` | The IDENTIFY DEVICE block | Yes |
-| `block_device` | RamDisk and SdImage backends | Yes, with a fake SD |
+| `block_source` | Where sectors come from: `GeneratedDisk` now, then RamDisk and SdImage | Yes, with a fake SD |
+| `fetch_mailbox` | Hands sector fetches from core 1 to core 0 and back | Yes, including a two-thread test |
 | `trace_format`, `spsc_ring` | Trace events, their text form, the core 1 → core 0 ring | Yes |
 | `main` | Console and core wiring | No |
 

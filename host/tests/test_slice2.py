@@ -11,9 +11,16 @@ import os
 
 import pytest
 
+from conftest import require_build
 from hddproto import gen_disk, trace
 
 pytestmark = pytest.mark.slice2
+
+
+@pytest.fixture(autouse=True)
+def drive_build(firmware_slice):
+    require_build(firmware_slice, drive_build=True)
+
 
 EXPECTED_BYTES = gen_disk.DEFAULT_SECTORS * gen_disk.SECTOR_BYTES
 IDENTIFY_COMMAND = 0xEC
@@ -36,7 +43,7 @@ def test_disk_appears_with_right_capacity(drive, rig, run_dir):
         lines = drive.lines_since(mark)
         (run_dir / f"trace-{n + 1}.txt").write_text("\n".join(lines) + "\n")
         t = trace.parse(lines)
-        identifies = [a for a in t.accesses
-                      if a.op == "WR" and a.reg == "COMMAND" and (a.data & 0xFF) == IDENTIFY_COMMAND]
+        identifies = [c for c in t.commands if c.command == IDENTIFY_COMMAND]
         assert identifies, f"replug {n + 1}: no IDENTIFY DEVICE in the trace"
+        assert all(c.ok for c in identifies), f"replug {n + 1}: {identifies}"
         assert not t.stalls and not t.dropped

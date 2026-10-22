@@ -8,10 +8,7 @@ At this stage it is a proof of concept on an Olimex RP2350-PICO2-BB48, tested th
 
 Slice 0 (listen only): the firmware records every IDE register access and reset it sees, without driving any pin, and streams the trace over USB serial.
 
-Ready for when the hardware arrives:
-- the drive logic for slices 1–2 (`ata_device`);
-- the bus program, with its timing proven in simulation (`ide_bus.pio`);
-- the slice 3 test disk and its rig tests.
+The drive build (`pio run -e bb48_drive`, slices 1–3) is ready for when the hardware arrives. It serves the bus and IDENTIFY, and reads sectors from a generated 64 MB disk. Its bus timing is proven in simulation; it has not run on hardware yet.
 
 ## Quick start
 

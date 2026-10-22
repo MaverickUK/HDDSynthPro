@@ -2,9 +2,25 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-22
 
 ### Added
+- **The drive build (`bb48_drive`)**, for slices 1–3. Core 1 serves the bus with `ide_bus` and runs the ATA device. Core 0 fetches sectors from the generated 64 MB disk through a cross-core mailbox, and never blocks on USB serial.
+  - It traces commands as `CMD`/`DONE` lines, with LBA, count, status, error and duration.
+  - Console `t` adds raw register accesses; `r` resets the loop-time maximum.
+  - `s` now reports `loop_max_ns`: core 1's longest loop pass, measured with the M33 cycle counter.
+- READ SECTORS (and its no-retry alias) in `ata_device`:
+  - core 1 shows BSY while core 0 fetches each sector, then one DRQ block and one interrupt per sector;
+  - a sector count of 0 means 256;
+  - LBA and default-geometry CHS addressing;
+  - IDNF for out-of-range addresses, before any data is sent;
+  - UNC when a fetch fails;
+  - stale fetches after a reset are ignored.
+- `BlockSource` with a `GeneratedDisk` backend, and `FetchMailbox`, the core 1 ↔ core 0 handoff. A two-thread test is clean under ThreadSanitizer.
+- Rig tests for slice 1 (gets past detection, plus core 1's loop time). The slice 2 and 3 tests now check the drive's trace as well as the Mac's view, and every rig test skips unless the board runs the build it needs.
+- `scripts/rig.sh` takes `PIO_ENV` to choose the build. CI builds both, and releases carry both UF2s.
+
+### Added (no firmware change)
 - `ata_device`: the drive's register file and command state machine for slices 1 and 2. It covers:
   - status and interrupts;
   - hard and soft reset with the ATA signature;
