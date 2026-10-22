@@ -169,11 +169,15 @@ Each slice ends in a passing automated test before the next starts.
   - macOS drives it with the standard Bulk-Only mass-storage driver (not UAS).
   - It exposes two units, `1081CS0` and `1081CS1`, presumably one per port.
   - The disk will probably be named after the bridge, not the drive's model, so the tests find it by size (or `HDDPRO_DISK`).
+- **The IDE port works with a real drive.** A SanDisk 256 MB CompactFlash card (`SDCFJ-256`) on a CF-to-IDE adapter appeared as a 501,760-sector disk and mounted.
+  - The bridge passes the ATA model through, split at the first space into the SCSI vendor and product: "SanDisk" / "SDCFJ-256".
+  - Our "HDDSYNTH PROTO" will arrive as "HDDSYNTH" / "PROTO", so `find_disk` matches on the full IORegistry name ("HDDSYNTH PROTO Media"), not diskutil's `MediaName`.
+- **The adapter's logic runs from its power brick.** Its blue LED stayed lit with the USB port switched off for 15 s (brick on).
 - **Hands-free replugs work.** The adapter sits on port 4 of a Realtek RTS5411 USB 3 hub (`0bda:0411`, with a USB 2 half `0bda:5411`), which `uhubctl` controls.
   - Switching both halves of the port off removes the adapter from USB within 2 s, and it re-enumerates within about 1 s of switching on.
   - The settings are in `host/rig.env` (see `host/rig.env.example`).
 
 **Open questions:**
-- **Does the hub really cut power to the port, or only disconnect it logically?** Watch the adapter's LED during a long off period (`uhubctl -l 0-2 -e -p 4 -a cycle -d 10`, plus the same for `0-1`). If the adapter's logic runs from the brick, a USB replug may not reset the IDE bus at all. The slice 0 trace will show whether the adapter probes again after a replug.
+- **Does a USB replug make the adapter probe the IDE bus again?** Its logic stays powered from the brick, so it may just report the drive it already knows. The slice 0 trace answers this: look for a reset and a fresh probe after each replug. If there isn't one, the replug tests need a relay or smart plug on the brick instead (for cold starts, as planned for slice 5). That means powering the brick off and on, never the BB48, to keep the power-order rule.
 - **Will the NS1081 accept a PIO-only drive?** It's mostly paired with modern disks. If it wants DMA, the slice 0 trace will show it sending SET FEATURES (`EF`) for a transfer mode or READ DMA (`C8`), then giving up. A second adapter with a different chipset is the fallback.
 - Is the BB48's RP2350 the A2 or A4 stepping?

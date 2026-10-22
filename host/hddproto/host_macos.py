@@ -66,14 +66,14 @@ class MacHost:
 
     def find_disk(self, expected_bytes: int | None = None, timeout: float = 60.0) -> Disk:
         """The emulated drive: $HDDPRO_DISK (e.g. disk4), or the external
-        physical disk whose media name says HDDSYNTH or whose size matches."""
+        physical disk whose name says HDDSYNTH or whose size matches."""
         deadline = time.monotonic() + timeout
         while True:
             for disk in self._candidates():
                 if os.environ.get("HDDPRO_DISK"):
                     if disk.name == os.environ["HDDPRO_DISK"].removeprefix("/dev/"):
                         return disk
-                elif "HDDSYNTH" in disk.media_name.upper() or (expected_bytes and disk.size == expected_bytes):
+                elif "HDDSYNTH" in disk.full_name.upper() or (expected_bytes and disk.size == expected_bytes):
                     return disk
             if time.monotonic() > deadline:
                 raise TimeoutError(f"no HDDSynthPro disk after {timeout:.0f} s:\n{self.disks()}")
@@ -88,7 +88,8 @@ class MacHost:
         for name in plistlib.loads(out).get("WholeDisks", []):
             info = plistlib.loads(subprocess.run(["diskutil", "info", "-plist", name],
                                                  capture_output=True).stdout)
-            disks.append(Disk(name, info.get("MediaName", ""), int(info.get("TotalSize", info.get("Size", 0)))))
+            disks.append(Disk(name, info.get("MediaName", ""), int(info.get("TotalSize", info.get("Size", 0))),
+                              info.get("IORegistryEntryName", "")))
         return disks
 
     def open_raw(self, disk: Disk, write: bool = False) -> int:
@@ -104,8 +105,12 @@ class MacHost:
 @dataclass
 class Disk:
     name: str          # e.g. "disk4"
-    media_name: str    # from the adapter's USB inquiry, often the ATA model
+    media_name: str    # the product half of the ATA model only, e.g. "PROTO"
     size: int          # bytes
+    # The full name, e.g. "HDDSYNTH PROTO Media". The NS1081 splits the ATA
+    # model at its first space into the SCSI vendor ("HDDSYNTH", 8 chars) and
+    # product ("PROTO"); diskutil's MediaName keeps only the product.
+    full_name: str = ''
 
     @property
     def raw(self) -> str:
