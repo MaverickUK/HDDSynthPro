@@ -4,6 +4,7 @@
 #include <hardware/pio.h>
 
 #include "config.h"
+#include "core1_ram.h"
 #include "ide_listen.pio.h"
 
 namespace listen {
@@ -34,13 +35,13 @@ void begin() {
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
-bool pop(uint32_t& sample) {
+CORE1_RAM bool pop(uint32_t& sample) {
     if (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) return false;
     sample = pio_sm_get(s_pio, s_sm);
     return true;
 }
 
-bool takeStall() {
+CORE1_RAM bool takeStall() {
     uint32_t mask = 1u << (PIO_FDEBUG_RXSTALL_LSB + s_sm);
     if (!(s_pio->fdebug & mask)) return false;
     s_pio->fdebug = mask;  // write 1 to clear

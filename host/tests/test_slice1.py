@@ -19,7 +19,9 @@ from hddproto import trace
 
 pytestmark = pytest.mark.slice1
 
-# Core 1 must answer a read within ~1070 ns (test_pio_bus_sim.py); leave margin.
+# Core 1 must answer a read within ~1070 ns (test_pio_bus_sim.py). loop_max_ns is
+# the longest gap between its bus checks, how long a read can wait to be seen;
+# answering it takes about 250 ns more.
 LOOP_MAX_NS = 800
 
 

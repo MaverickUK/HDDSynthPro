@@ -174,7 +174,7 @@ pre {
 
   <div class="warnings" aria-label="Before you wire">
     <div class="warn"><strong>Use a plain BB48, not the BB48R</strong><p>On the R, GPIO 8 is the PSRAM chip-select and GPIO 9–11 and 24 go to its SD slot. Here those pins carry DD4–DD7 and CS1#.</p></div>
-    <div class="warn"><strong>Power order</strong><p>BB48 on (USB-C) before the adapter's brick; brick off before unplugging the BB48. Its pins are 5 V tolerant only while powered. The adapter drives the IDE lines whenever its brick is on, even with nothing powered at the drive end, so an unpowered BB48 would be fed through its pins.</p></div>
+    <div class="warn"><strong>Power order</strong><p>BB48 on (USB-C) before the adapter's USB is plugged in; adapter unplugged before the BB48. Its pins are 5 V tolerant only while powered. The adapter drives the IDE lines whenever it is powered, even with nothing powered at the drive end, so an unpowered BB48 would be fed through its pins.</p></div>
     <div class="warn"><strong>One strip per header pin</strong><p>Before soldering the IDC helper, check with a meter that pins 1 and 2 (RESET# and GND) are on different Perma-Proto strips.</p></div>
     <div class="warn"><strong>Leave these unconnected</strong><p>BB48 +3.3V, 3V3_EN, VBUS and VSYS. IDE pins 20, 21, 28, 29, 32, 34 and 39.</p></div>
   </div>

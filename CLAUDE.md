@@ -16,7 +16,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 - **IORDY is open drain:** only pull it low or release it, never drive it high. The host pulls it up to 5 V.
 - **Slice 0 never drives a pin:** the bus pins stay under SIO control, so the PIO program cannot drive them even if it is wrong. Driving starts in slice 1, and only on DD (during reads), IORDY and INTRQ.
 - **Timing:** IORDY must go low within 35 ns (tA) of a strobe. Trigger on the chip-selects, which are valid 70 ns earlier (see the plan).
-- **Core split:** core 1 runs the bus loop and never touches USB, SD or anything slow. Slow work happens while STATUS shows BSY, never behind IORDY.
+- **Core split:** core 1 runs the bus loop and never touches USB, SD or anything slow. Everything it runs per access is marked `CORE1_RAM`, because code in flash can stall it for tens of µs. Slow work happens while STATUS shows BSY, never behind IORDY.
 
 ## Toolchain
 
@@ -36,10 +36,13 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 - **On the rig:** `scripts/rig.sh -m sliceN` runs the unit tests, builds, flashes and runs the rig tests.
   - Evidence goes to `host/runs/` (git-ignored); reference traces live in `host/reference/`.
 - **Rig:**
-  - The adapter is a Norelsys NS1081 (USB `2537:1081`, Bulk-Only, two units `1081CS0`/`1081CS1`). Its logic is powered by the brick, not USB.
+  - The adapter is a Norelsys NS1081 (USB `2537:1081`, Bulk-Only, two units `1081CS0`/`1081CS1`). It is powered by USB; its brick only powers a drive plugged into it.
   - It splits the ATA model at the first space into SCSI vendor/product, so match disks on diskutil's `IORegistryEntryName`, not `MediaName`.
   - A real CF card works through it.
   - It sits on port 4 of a Realtek RTS5411 hub that `uhubctl` controls; both USB 3 and USB 2 halves must be switched, and macOS needs `-e`.
+  - `uhubctl` makes it re-enumerate but doesn't cut VBUS, so its IDE side doesn't restart. A fresh probe (RESET# and IDENTIFY) needs a physical replug.
+  - With no drive answering, it probes forever (about one access per µs), so the listen build drops events and the bus is never quiet.
+  - It waits about 10 ms after each READ command before polling (it doesn't react to INTRQ); later sectors of the same command are polled at once.
   - `host/rig.env` (git-ignored, from `rig.env.example`) holds the replug settings, and `scripts/rig.sh` loads it.
 - **Host OS:** the dev machine is macOS. There's no `O_DIRECT` (use `/dev/rdiskN`), no `dmesg` (use `log show`), and no ATA pass-through. OS-specific code stays in `host/hddproto/host_macos.py`; slice 6 adds a Linux host for pass-through.
 
@@ -73,7 +76,7 @@ The Python parser is `host/hddproto/trace.py`; change both together.
 Console:
 - `h`: help, and the READY line with version and build;
 - `p`: pin levels (wiring check);
-- `s`: stats, including `loop_max_ns` on the drive build;
+- `s`: stats, including `loop_max_ns` on the drive build (the longest gap between core 1's bus checks);
 - `r`: reset the loop maximum;
 - `t`: raw bus trace on or off;
 - `m`: print a `MARK` timestamp (used by the activity rig test);
@@ -86,13 +89,13 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 
 ## Status
 
-- **Slice 0 (listen only):** written and tested on the Mac (unit tests, PIO simulation, a clean build). It is the running firmware. Waiting for the board.
-- **Slices 1–3: the `bb48_drive` build**, built and unit-tested, not yet run on hardware. It contains:
-  - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and the slice 1 test checks `loop_max_ns` < 800;
+- **Hardware (23 Oct 2026):** the board is wired and passes the solder-bridge test. On the drive build, the NS1081 sends IDENTIFY, SET FEATURES (PIO mode 0) and READ SECTORS, and macOS sees the 64 MB disk.
+- **Slice 0 (listen only):** runs on the board. Its rig test can't pass as written: the adapter never goes quiet without a drive.
+- **Slices 1–3: the `bb48_drive` build**, built, unit-tested and detected on hardware; the rig tests have not been run yet. It contains:
+  - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and the slice 1 test checks `loop_max_ns` < 800. That is the longest gap between core 1's bus checks (about 650 ns on hardware); `loop1()` checks the FIFO between each of its steps;
   - `ata_device`: IDENTIFY, READ SECTORS, DIAGNOSTIC, and the housekeeping commands bridges send during setup (SET FEATURES transfer mode, INITIALIZE DEVICE PARAMETERS, READ VERIFY, SEEK, RECALIBRATE, power commands, FLUSH CACHE). Everything else gets ABRT;
   - the generated disk, served through the mailbox.
 - **Next:** follow [docs/bringup.md](docs/bringup.md):
-  1. Wire the board and run `scripts/rig.sh -m slice0 --save-reference`.
-  2. Add the adapter's probe sequence as a virtual-host test.
-  3. Run `PIO_ENV=bb48_drive scripts/rig.sh -m slice1`, then slices 2 and 3.
-  4. WRITE SECTORS and the RAM disk (slice 4) reuse the same handshake in the other direction.
+  1. Add the adapter's probe sequence as a virtual-host test.
+  2. Run `PIO_ENV=bb48_drive scripts/rig.sh -m slice1`, then slices 2 and 3.
+  3. WRITE SECTORS and the RAM disk (slice 4) reuse the same handshake in the other direction.

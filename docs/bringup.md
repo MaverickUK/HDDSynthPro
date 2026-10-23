@@ -2,7 +2,7 @@
 
 Hardware day, in order. Each step either passes or tells you what to fix before the next one. The wiring itself is in [wiring.md](wiring.md) and the [interactive diagram](wiring.html).
 
-You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter with its brick, and a plain **BB48** (not the BB48R).
+You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter (USB-powered; its brick isn't needed), and a plain **BB48** (not the BB48R).
 
 ## 1. Before any power
 
@@ -25,21 +25,22 @@ You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter
 ## 3. Connect the adapter (power order)
 
 - [ ] The BB48 is powered **first**: it stays on USB from now on.
-- [ ] Plug the IDE cable into the BB48 side, then switch on the adapter's brick, then plug the adapter's USB into the hub.
+- [ ] Plug the IDE cable into the BB48 side, then plug the adapter's USB into the hub.
 - [ ] Type `p`. The expected levels:
   - DIOR#, DIOW#, CS0#, CS1# and RESET# = 1 (idle);
   - IORDY = 1 (the host's pull-up);
   - INTRQ = 0 and DD7 low (the host's pull-downs);
   - the other DD and DA lines may float.
   - A strobe or chip select reading 0 here usually means a wire on the wrong pin.
-- [ ] From now on: **brick off before the BB48 is unplugged**. The adapter drives the bus whenever its brick is on.
+- [ ] From now on: **adapter USB out before the BB48 is unplugged**. The adapter drives the bus whenever it is powered.
 
 ## 4. Slice 0: listen to the adapter
 
 - [ ] Check that `host/rig.env` exists (copy `host/rig.env.example`), so replugs are hands-free. `uhubctl` should still list the hub on port 4.
 - [ ] Run `scripts/rig.sh -m slice0 --save-reference`. It replugs the adapter and saves the trace and its summary to `host/reference/`.
 - [ ] Read the summary. Things to look for:
-  - **Is there a reset and a fresh probe after the replug?** If not, a USB replug doesn't reset the adapter's IDE side (it's powered by the brick). Replug tests then need the brick switched instead (a smart plug), keeping to the power-order rule.
+  - **Answered on 23 Oct 2026:** a physical replug gives a reset (two RESET# pulses) and a fresh probe; a `uhubctl` replug doesn't, because the hub doesn't cut VBUS.
+  - **Known problem:** with no drive answering, the NS1081 probes forever at about one access per µs. The bus never goes quiet and the trace drops events, so this test fails as written. The useful part is the first few thousand events after RESET#.
   - **Which registers does it touch, in what order?** Turn that into a virtual-host test in `test/native/test_ata_device.cpp`, next to `test_virtual_host_probe`.
   - **Any DMA commands?** Look for `COMMAND` writes of `c8` (READ DMA) or `ef` (SET FEATURES) with a DMA mode. Those mean the NS1081 wants more than PIO.
   - **DIOR# and DIOW# never low together** (the test checks this), and no `STALL` or `DROP` lines.
@@ -60,6 +61,6 @@ You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter
 - **Raw accesses.** On the drive build, type `t` to add raw register accesses to the trace, then replug.
 - **No bus activity at all.**
   - Check `p` with the adapter on; a strobe stuck low points at wiring.
-  - Check the brick is on.
+  - Check the adapter is plugged in and listed by `uhubctl`.
   - Run the solder-bridge test again with the cable unplugged.
 - **Detection fails on the drive build** but slice 0 looked fine: compare the slice 0 reference with the drive build's raw trace (`t`). The first register read whose value differs from what a real drive would return is usually the culprit.

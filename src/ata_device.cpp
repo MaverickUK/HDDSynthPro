@@ -1,8 +1,10 @@
 #include "ata_device.h"
 
+#include "core1_ram.h"
+
 namespace ata {
 
-Reg regFor(bool command_block, bool control_block, unsigned address) {
+CORE1_RAM Reg regFor(bool command_block, bool control_block, unsigned address) {
     if (command_block && !control_block) return static_cast<Reg>(address & 7);
     if (control_block && !command_block && address == 6) return Reg::AltStatusDevCtrl;
     return Reg::None;
@@ -14,7 +16,7 @@ Device::Device(const IdentifyInfo& info)
     resetToSignature();
 }
 
-void Device::resetToSignature() {
+CORE1_RAM void Device::resetToSignature() {
     // The ATA device signature: what a host checks after a reset to tell an
     // ATA drive (0000h in the LBA mid/high pair) from ATAPI (EB14h).
     sector_count_ = 1;
@@ -33,7 +35,7 @@ void Device::resetToSignature() {
     ++fetch_id_;
 }
 
-uint16_t Device::read(Reg reg) {
+CORE1_RAM uint16_t Device::read(Reg reg) {
     // ATA: with device 1 selected and absent, device 0 returns 00h for
     // Status and Alternate Status, so the host sees "no device".
     switch (reg) {
@@ -59,7 +61,7 @@ uint16_t Device::read(Reg reg) {
     }
 }
 
-void Device::write(Reg reg, uint16_t value) {
+CORE1_RAM void Device::write(Reg reg, uint16_t value) {
     uint8_t v = uint8_t(value);
     if (reg == Reg::AltStatusDevCtrl) {
         // Device Control is honoured even while busy: it is how a host
@@ -97,7 +99,7 @@ void Device::write(Reg reg, uint16_t value) {
     }
 }
 
-void Device::hardReset(bool asserted) {
+CORE1_RAM void Device::hardReset(bool asserted) {
     if (asserted) {
         in_reset_ = true;
         status_ = ST_BSY;
@@ -115,14 +117,14 @@ void Device::hardReset(bool asserted) {
     }
 }
 
-bool Device::intrq() const {
+CORE1_RAM bool Device::intrq() const {
     // INTRQ belongs to the selected device; nIEN masks it.
     return irq_pending_ && !device1Selected() && !(device_control_ & DC_NIEN);
 }
 
 // ---- Commands ---------------------------------------------------------------
 
-void Device::startCommand(uint8_t command) {
+CORE1_RAM void Device::startCommand(uint8_t command) {
     last_ = CommandInfo{command, 0, 0};
     ++commands_started_;
     irq_pending_ = false;  // writing Command clears a pending interrupt
@@ -190,13 +192,13 @@ void Device::startCommand(uint8_t command) {
     }
 }
 
-void Device::completeNoData() {
+CORE1_RAM void Device::completeNoData() {
     status_ = ST_DRDY | ST_DSC;
     irq_pending_ = true;
     ++commands_completed_;
 }
 
-bool Device::checkRange(uint32_t count, uint32_t& lba) {
+CORE1_RAM bool Device::checkRange(uint32_t count, uint32_t& lba) {
     bool valid = decodeAddress(lba);
     last_.lba = lba;
     last_.count = uint16_t(count);
@@ -210,19 +212,19 @@ bool Device::checkRange(uint32_t count, uint32_t& lba) {
     return true;
 }
 
-void Device::readVerify() {
+CORE1_RAM void Device::readVerify() {
     // Like READ SECTORS, but the data stays on the drive. Generated data
     // can't fail to read, so a range check is the whole job.
     uint32_t lba;
     if (checkRange(sector_count_ ? sector_count_ : 256, lba)) completeNoData();
 }
 
-void Device::seek() {
+CORE1_RAM void Device::seek() {
     uint32_t lba;
     if (checkRange(1, lba)) completeNoData();
 }
 
-void Device::setFeatures() {
+CORE1_RAM void Device::setFeatures() {
     if (features_ == SF_SET_TRANSFER_MODE &&
         (sector_count_ == XFER_PIO_DEFAULT || sector_count_ == XFER_PIO_FLOW_0)) {
         completeNoData();  // the only mode there is
@@ -233,7 +235,7 @@ void Device::setFeatures() {
     fail(ER_ABRT);
 }
 
-void Device::initializeDeviceParameters() {
+CORE1_RAM void Device::initializeDeviceParameters() {
     // Sector Count = sectors per track, Device bits 3-0 = heads - 1.
     uint16_t spt = sector_count_;
     uint16_t heads = uint16_t((device_ & 0x0F) + 1);
@@ -251,12 +253,12 @@ void Device::initializeDeviceParameters() {
     completeNoData();
 }
 
-void Device::setGeometry(const Geometry& g) {
+CORE1_RAM void Device::setGeometry(const Geometry& g) {
     geometry_ = g;
     setCurrentGeometry(identify_, g);
 }
 
-bool Device::decodeAddress(uint32_t& lba) const {
+CORE1_RAM bool Device::decodeAddress(uint32_t& lba) const {
     if (device_ & DEV_LBA) {
         lba = (uint32_t(device_ & 0x0F) << 24) | (uint32_t(lba_high_) << 16) |
               (uint32_t(lba_mid_) << 8) | lba_low_;
@@ -273,7 +275,7 @@ bool Device::decodeAddress(uint32_t& lba) const {
     return true;
 }
 
-void Device::startRead() {
+CORE1_RAM void Device::startRead() {
     uint32_t count = sector_count_ ? sector_count_ : 256;
     uint32_t lba = 0;
     if (!checkRange(count, lba)) return;
@@ -283,19 +285,19 @@ void Device::startRead() {
     requestFetch();
 }
 
-void Device::requestFetch() {
+CORE1_RAM void Device::requestFetch() {
     status_ = ST_BSY | ST_DRDY | ST_DSC;
     fetch_pending_ = true;
     ++fetch_id_;
 }
 
-bool Device::pendingFetch(Fetch& fetch) {
+CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
     fetch = Fetch{fetch_id_, read_lba_, sector_};
     return true;
 }
 
-void Device::fetchDone(uint32_t id, bool ok) {
+CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
     if (!fetch_pending_ || id != fetch_id_) return;  // stale: a reset came first
     fetch_pending_ = false;
     if (!ok) {
@@ -309,7 +311,7 @@ void Device::fetchDone(uint32_t id, bool ok) {
     startDataIn(sector_, SECTOR_WORDS);
 }
 
-void Device::setTaskFileLba(uint32_t lba) {
+CORE1_RAM void Device::setTaskFileLba(uint32_t lba) {
     if (device_ & DEV_LBA) {
         lba_low_ = uint8_t(lba);
         lba_mid_ = uint8_t(lba >> 8);
@@ -326,7 +328,7 @@ void Device::setTaskFileLba(uint32_t lba) {
     }
 }
 
-void Device::fail(uint8_t error) {
+CORE1_RAM void Device::fail(uint8_t error) {
     error_ = error;
     status_ = ST_DRDY | ST_DSC | ST_ERR;
     irq_pending_ = true;
@@ -334,12 +336,12 @@ void Device::fail(uint8_t error) {
     ++commands_completed_;
 }
 
-void Device::complete() {
+CORE1_RAM void Device::complete() {
     status_ = ST_DRDY | ST_DSC;
     ++commands_completed_;
 }
 
-void Device::startDataIn(const uint16_t* words, uint16_t count) {
+CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
     data_ = words;
     data_count_ = count;
     data_index_ = 0;
@@ -347,7 +349,7 @@ void Device::startDataIn(const uint16_t* words, uint16_t count) {
     irq_pending_ = true;  // PIO data-in: interrupt when each block is ready
 }
 
-void Device::finishDataIn() {
+CORE1_RAM void Device::finishDataIn() {
     data_ = nullptr;
     data_count_ = data_index_ = 0;
     if (reading_ && read_left_ > 0) {

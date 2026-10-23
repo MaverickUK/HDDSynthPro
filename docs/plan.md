@@ -48,11 +48,11 @@ The Mac that builds the firmware also flashes it, talks to the drive through the
 
 The original map put DD2/DD3 on GPIO 2/3, which the BB48 pulls up to 3.3 V for I2C. The new map also leaves out GPIO 25, the board's LED.
 
-**Power-order rule:** the BB48 is powered before the adapter's brick is switched on, and the brick goes off before the BB48 is unplugged. There are no buffers, and the RP2350's pins are only 5 V tolerant while it is powered.
+**Power-order rule:** the BB48 is powered before the adapter's USB is plugged in, and the adapter is unplugged before the BB48. There are no buffers, and the RP2350's pins are only 5 V tolerant while it is powered.
 
 **Worth adding if automation gets annoying:**
 - ~~A USB hub with per-port power switching that `uhubctl` supports~~: the rig's Realtek hub already does this (see below).
-- A smart plug or relay on the adapter's brick, for cold-start tests.
+- A USB hub that really switches VBUS (or a USB power switch), for hands-free cold starts of the adapter.
 - A Raspberry Pi Debug Probe for SWD.
 
 ## Automation loop
@@ -174,12 +174,13 @@ Each slice ends in a passing automated test before the next starts.
 - **The IDE port works with a real drive.** A SanDisk 256 MB CompactFlash card (`SDCFJ-256`) on a CF-to-IDE adapter appeared as a 501,760-sector disk and mounted.
   - The bridge passes the ATA model through, split at the first space into the SCSI vendor and product: "SanDisk" / "SDCFJ-256".
   - Our "HDDSYNTH PROTO" will arrive as "HDDSYNTH" / "PROTO", so `find_disk` matches on the full IORegistry name ("HDDSYNTH PROTO Media"), not diskutil's `MediaName`.
-- **The adapter's logic runs from its power brick.** Its blue LED stayed lit with the USB port switched off for 15 s (brick on).
-- **Hands-free replugs work.** The adapter sits on port 4 of a Realtek RTS5411 USB 3 hub (`0bda:0411`, with a USB 2 half `0bda:5411`), which `uhubctl` controls.
+- **The adapter is powered by USB**; its brick only powers a drive plugged into it. Its LED stays lit with the port switched off by `uhubctl`, because the hub doesn't cut VBUS.
+- **Hands-free replugs only re-enumerate.** The adapter sits on port 4 of a Realtek RTS5411 USB 3 hub (`0bda:0411`, with a USB 2 half `0bda:5411`), which `uhubctl` controls.
   - Switching both halves of the port off removes the adapter from USB within 2 s, and it re-enumerates within about 1 s of switching on.
   - The settings are in `host/rig.env` (see `host/rig.env.example`).
+  - The adapter keeps power, so its IDE side doesn't restart: no RESET#, no new IDENTIFY. A physical replug does both (23 Oct 2026).
 
 **Open questions:**
-- **Does a USB replug make the adapter probe the IDE bus again?** Its logic stays powered from the brick, so it may just report the drive it already knows. The slice 0 trace answers this: look for a reset and a fresh probe after each replug. If there isn't one, the replug tests need a relay or smart plug on the brick instead (for cold starts, as planned for slice 5). That means powering the brick off and on, never the BB48, to keep the power-order rule.
-- **Will the NS1081 accept a PIO-only drive?** It's mostly paired with modern disks. If it wants DMA, the slice 0 trace will show it sending SET FEATURES (`EF`) for a transfer mode or READ DMA (`C8`), then giving up. A second adapter with a different chipset is the fallback.
+- ~~Does a USB replug make the adapter probe the IDE bus again?~~ A physical one does; a `uhubctl` one doesn't (see above).
+- ~~Will the NS1081 accept a PIO-only drive?~~ Yes (23 Oct 2026): it sends IDENTIFY, SET FEATURES with transfer mode `0c` (rejected) then `08` (PIO mode 0, accepted), and reads with READ SECTORS.
 - Is the BB48's RP2350 the A2 or A4 stepping?

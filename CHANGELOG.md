@@ -2,6 +2,20 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.5.1] - 2026-10-23
+
+First run on hardware: the NS1081 adapter detects the drive build, and macOS sees the 64 MB disk.
+
+### Fixed
+- **Core 1 was too slow to answer reads on hardware** (up to 37 µs, against a budget of about 1 µs). The adapter gave up on reads, and the bus program fell out of step with the bus.
+  - Core 1's per-access code ran from flash, and core 0 kept evicting it from the shared cache. It now runs from RAM (`CORE1_RAM`, `src/core1_ram.h`).
+  - Arduino-Pico's periodic SysTick interrupt on core 1 is turned off.
+  - Core 1 now checks the bus FIFO between each step of its loop, not once per pass.
+  - `loop_max_ns` now reports the longest gap between those checks, which is how long a read can wait to be seen: about 650 ns (it was a whole pass).
+
+### Changed
+- Docs: the adapter is USB-powered (its brick only powers a drive), so the power-order rule is about its USB cable. `uhubctl` doesn't cut VBUS on the rig's hub, so only a physical replug restarts the adapter's IDE side.
+
 ## [0.5.0] - 2026-10-22
 
 ### Added

@@ -18,6 +18,7 @@
 
 #include "bus_sample.h"
 #include "config.h"
+#include "core1_ram.h"
 #include "short_test.h"
 #include "spsc_ring.h"
 #include "trace_format.h"
@@ -42,21 +43,25 @@ static std::atomic<uint32_t> g_dropped{0};  // lost because the ring was full
 static std::atomic<uint32_t> g_stalls{0};   // PIO FIFO filled: accesses missed
 
 // Pins in sample layout (bit n = GPIO PIN_DD0 + n), for non-bus events.
-static uint32_t pinsAsSample() { return gpio_get_all() >> cfg::PIN_DD0; }
+CORE1_RAM static uint32_t pinsAsSample() { return gpio_get_all() >> cfg::PIN_DD0; }
 
-static void record(const TraceEvent& e) {
+CORE1_RAM static void record(const TraceEvent& e) {
     g_events.fetch_add(1, std::memory_order_relaxed);
     if (!g_trace.push(e)) g_dropped.fetch_add(1, std::memory_order_relaxed);
 }
 
-static void record(TraceKind kind, uint32_t pins) { record(TraceEvent{time_us_32(), pins, kind}); }
+CORE1_RAM static void record(TraceKind kind, uint32_t pins) { record(TraceEvent{time_us_32(), pins, kind}); }
+
+// Arduino-Pico runs a periodic SysTick interrupt on core 1 unless told not
+// to; each one delays the bus loop by about 1 us. Core 1 needs no ticks.
+bool core1_disable_systick = true;
 
 // ---- Core 1: slice 0, listen only ---------------------------------------------
 #if FIRMWARE_SLICE == 0
 
 void setup1() { listen::begin(); }
 
-void loop1() {
+CORE1_RAM void loop1() {
     // Never returns: one tight loop, so nothing slow ever sits between a
     // FIFO word arriving and it being timestamped.
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
@@ -84,7 +89,7 @@ void loop1() {
 
 static FetchMailbox g_mailbox;
 static std::atomic<bool> g_trace_bus{false};       // console `t`
-static std::atomic<uint32_t> g_loop_max_cycles{0}; // longest core 1 loop pass (console `s`)
+static std::atomic<uint32_t> g_loop_max_cycles{0}; // longest gap between bus checks (console `s`)
 static std::atomic<bool> g_loop_max_reset{false};
 
 static const IdentifyInfo DRIVE_INFO{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
@@ -98,9 +103,25 @@ void setup1() {
     m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
 }
 
-void loop1() {
-    // Never returns. Each pass serves at most one access and does a little
-    // bookkeeping; the longest pass is how late a read can be answered.
+// Serves one bus access if the PIO has one waiting. loop1() calls this
+// between each of its steps, so a read never waits for a whole pass. It also
+// tracks the longest gap between two checks: how long a read can sit in the
+// FIFO before core 1 sees it.
+CORE1_RAM static void serveBus(ata::Device& dev, uint32_t& last_check) {
+    uint32_t now = m33_hw->dwt_cyccnt;
+    uint32_t gap = now - last_check;
+    last_check = now;
+    if (gap > g_loop_max_cycles.load(std::memory_order_relaxed))
+        g_loop_max_cycles.store(gap, std::memory_order_relaxed);
+
+    uint32_t sample;
+    if (ide_bus::serviceOnce(dev, sample) && g_trace_bus.load(std::memory_order_relaxed))
+        record(TraceKind::Bus, sample);
+}
+
+CORE1_RAM void loop1() {
+    // Never returns. Each pass does a little bookkeeping, with a bus check
+    // (serveBus) before every step.
     static ata::Device dev(DRIVE_INFO);
     uint32_t started = dev.commandsStarted();
     uint32_t completed = dev.commandsCompleted();
@@ -108,22 +129,13 @@ void loop1() {
     uint32_t posted_fetch = 0;
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
-    uint32_t last = m33_hw->dwt_cyccnt;
+    uint32_t last_check = m33_hw->dwt_cyccnt;
 
     for (;;) {
-        uint32_t now = m33_hw->dwt_cyccnt;
-        uint32_t pass = now - last;
-        last = now;
-        if (g_loop_max_reset.exchange(false, std::memory_order_relaxed)) {
+        if (g_loop_max_reset.exchange(false, std::memory_order_relaxed))
             g_loop_max_cycles.store(0, std::memory_order_relaxed);
-        } else if (pass > g_loop_max_cycles.load(std::memory_order_relaxed)) {
-            g_loop_max_cycles.store(pass, std::memory_order_relaxed);
-        }
 
-        uint32_t sample;
-        if (ide_bus::serviceOnce(dev, sample) && g_trace_bus.load(std::memory_order_relaxed))
-            record(TraceKind::Bus, sample);
-
+        serveBus(dev, last_check);
         if (dev.commandsStarted() != started) {
             started = dev.commandsStarted();
             command_start_us = time_us_32();
@@ -138,15 +150,18 @@ void loop1() {
         }
 
         // Sector fetches: post each once; results may complete a DRQ block.
+        serveBus(dev, last_check);
         ata::Fetch fetch;
         if (dev.pendingFetch(fetch) && fetch.id != posted_fetch && g_mailbox.post(fetch))
             posted_fetch = fetch.id;
+        serveBus(dev, last_check);
         FetchResult result;
         if (g_mailbox.takeResult(result)) {
             dev.fetchDone(result.id, result.ok);
             ide_bus::updateIntrq(dev.intrq());
         }
 
+        serveBus(dev, last_check);
         uint32_t pins = pinsAsSample();
         bool low = !bus::high(pins, cfg::PIN_RESET_N);
         if (low != reset_low) {
@@ -225,7 +240,8 @@ static void printStats() {
                   (unsigned long)g_events.load(), (unsigned long)g_dropped.load(),
                   (unsigned long)g_stalls.load(), (unsigned)g_trace.size());
 #if FIRMWARE_SLICE != 0
-    // Cycles at clk_sys -> ns. Must stay well under ~1000 ns (see setup1).
+    // Cycles at clk_sys -> ns. A read can wait this long to be seen, then takes about
+    // 250 ns to answer: the total must stay under ~1070 ns (see setup1).
     uint32_t ns = uint32_t(uint64_t(g_loop_max_cycles.load()) * 1000000000ull / clock_get_hz(clk_sys));
     Serial.printf(" loop_max_ns=%lu bus_trace=%d seq=%lu rand=%lu activity=%s", (unsigned long)ns,
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),

@@ -6,6 +6,7 @@
 #include "ata_device.h"
 #include "bus_sample.h"
 #include "config.h"
+#include "core1_ram.h"
 #include "ide_bus.pio.h"
 
 namespace ide_bus {
@@ -53,7 +54,7 @@ void begin() {
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
-bool serviceOnce(ata::Device& dev, uint32_t& sample) {
+CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
     if (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) return false;
     sample = pio_sm_get(s_pio, s_sm);
     bus::Block block = bus::block(sample);
@@ -69,6 +70,6 @@ bool serviceOnce(ata::Device& dev, uint32_t& sample) {
     return true;
 }
 
-void updateIntrq(bool asserted) { gpio_set_dir(cfg::PIN_INTRQ, asserted); }
+CORE1_RAM void updateIntrq(bool asserted) { gpio_set_dir(cfg::PIN_INTRQ, asserted); }
 
 }  // namespace ide_bus

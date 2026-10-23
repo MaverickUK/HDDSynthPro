@@ -2,7 +2,9 @@
 
 #include <cstring>
 
-Geometry defaultGeometry(uint32_t total_sectors) {
+#include "core1_ram.h"
+
+CORE1_RAM Geometry defaultGeometry(uint32_t total_sectors) {
     const uint32_t big_track = 16u * 63u;
     if (total_sectors >= 2 * big_track) {
         uint32_t cyl = total_sectors / big_track;
