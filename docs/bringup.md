@@ -48,7 +48,7 @@ You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter
 
 ## 5. The drive build
 
-- [ ] Run `PIO_ENV=bb48_drive scripts/rig.sh -m slice1`. The adapter should get past detection on 20 replugs, and `loop_max_ns` must stay under 800.
+- [ ] Run `PIO_ENV=bb48_drive scripts/rig.sh -m slice1`. The adapter should get past detection on 20 replugs, and `read_max_ns` must stay under 800.
 - [ ] Run `PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m slice2`. A 64 MB disk appears on every replug, and the trace shows IDENTIFY completing.
   - macOS will say the disk is not readable: choose **Ignore**.
   - The first raw read asks for your password (`sudo chown` on `/dev/rdiskN`).

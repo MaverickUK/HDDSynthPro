@@ -32,7 +32,9 @@ struct IdentifyInfo {
 void buildIdentify(const IdentifyInfo& info, uint16_t words[256]);
 
 // Rewrites the "current CHS translation" words (54-58), after INITIALIZE
-// DEVICE PARAMETERS, and fixes up the checksum.
+// DEVICE PARAMETERS, and fixes up the checksum. `words` must already hold a
+// valid IDENTIFY block (from buildIdentify): the checksum is adjusted for the
+// changed words only, because core 1 runs this while the host may be waiting.
 void setCurrentGeometry(uint16_t words[256], const Geometry& g);
 
 // ATA strings are space-padded and stored two characters per word with the

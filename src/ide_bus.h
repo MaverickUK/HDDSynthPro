@@ -19,6 +19,16 @@ void begin();
 // Returns true if there was one; `sample` gets the pin sample for the trace.
 bool serviceOnce(ata::Device& dev, uint32_t& sample);
 
+// True if no access is waiting in the PIO's FIFO.
+bool idle();
+
+// Starts the PIO program again with empty FIFOs and DD and IORDY released.
+// Call when the host releases RESET#. While the host is unplugged or powering
+// up its strobes float low, and the PIO can push a write-path sample with
+// DIOR# low too. Core 1 answers that as a read, the PIO never pulls the
+// answer, and every later read would get the previous read's data.
+void restart();
+
 // Drives INTRQ to match the device: asserted = driven high, otherwise
 // released (the host pulls it down).
 void updateIntrq(bool asserted);

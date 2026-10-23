@@ -89,34 +89,42 @@ CORE1_RAM void loop1() {
 
 static FetchMailbox g_mailbox;
 static std::atomic<bool> g_trace_bus{false};       // console `t`
-static std::atomic<uint32_t> g_loop_max_cycles{0}; // longest gap between bus checks (console `s`)
-static std::atomic<bool> g_loop_max_reset{false};
+static std::atomic<uint32_t> g_read_max_cycles{0}; // longest a read waited for its answer (console `s`)
+static std::atomic<bool> g_read_max_reset{false};
 
 static const IdentifyInfo DRIVE_INFO{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
                                      gen_disk::DEFAULT_SECTORS};
 
 void setup1() {
     ide_bus::begin();
-    // The M33's cycle counter, to measure the loop: core 1 must answer a
-    // read within about 1 us (host/tests/test_pio_bus_sim.py).
+    // The M33's cycle counter, to time reads: core 1 must answer one within
+    // about 1 us (host/tests/test_pio_bus_sim.py).
     m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;
     m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
 }
 
 // Serves one bus access if the PIO has one waiting. loop1() calls this
-// between each of its steps, so a read never waits for a whole pass. It also
-// tracks the longest gap between two checks: how long a read can sit in the
-// FIFO before core 1 sees it.
-CORE1_RAM static void serveBus(ata::Device& dev, uint32_t& last_check) {
+// between each of its steps, so a read never waits for a whole pass.
+//
+// It also times reads. `last_empty` is the last moment the FIFO was seen
+// empty. Any access in the FIFO arrived after it, so the time from then until
+// a read's answer has gone back to the PIO is an upper bound on how long the
+// host waited. (While a read waits, the PIO pushes nothing behind it.)
+CORE1_RAM static void serveBus(ata::Device& dev, uint32_t& last_empty) {
     uint32_t now = m33_hw->dwt_cyccnt;
-    uint32_t gap = now - last_check;
-    last_check = now;
-    if (gap > g_loop_max_cycles.load(std::memory_order_relaxed))
-        g_loop_max_cycles.store(gap, std::memory_order_relaxed);
-
     uint32_t sample;
-    if (ide_bus::serviceOnce(dev, sample) && g_trace_bus.load(std::memory_order_relaxed))
-        record(TraceKind::Bus, sample);
+    if (!ide_bus::serviceOnce(dev, sample)) {
+        last_empty = now;
+        return;
+    }
+    uint32_t done = m33_hw->dwt_cyccnt;
+    if (bus::op(sample) != bus::Op::Write) {  // serviceOnce answered it
+        uint32_t wait = done - last_empty;
+        if (wait > g_read_max_cycles.load(std::memory_order_relaxed))
+            g_read_max_cycles.store(wait, std::memory_order_relaxed);
+    }
+    if (ide_bus::idle()) last_empty = done;
+    if (g_trace_bus.load(std::memory_order_relaxed)) record(TraceKind::Bus, sample);
 }
 
 CORE1_RAM void loop1() {
@@ -129,13 +137,13 @@ CORE1_RAM void loop1() {
     uint32_t posted_fetch = 0;
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
-    uint32_t last_check = m33_hw->dwt_cyccnt;
+    uint32_t last_empty = m33_hw->dwt_cyccnt;
 
     for (;;) {
-        if (g_loop_max_reset.exchange(false, std::memory_order_relaxed))
-            g_loop_max_cycles.store(0, std::memory_order_relaxed);
+        if (g_read_max_reset.exchange(false, std::memory_order_relaxed))
+            g_read_max_cycles.store(0, std::memory_order_relaxed);
 
-        serveBus(dev, last_check);
+        serveBus(dev, last_empty);
         if (dev.commandsStarted() != started) {
             started = dev.commandsStarted();
             command_start_us = time_us_32();
@@ -150,23 +158,24 @@ CORE1_RAM void loop1() {
         }
 
         // Sector fetches: post each once; results may complete a DRQ block.
-        serveBus(dev, last_check);
+        serveBus(dev, last_empty);
         ata::Fetch fetch;
         if (dev.pendingFetch(fetch) && fetch.id != posted_fetch && g_mailbox.post(fetch))
             posted_fetch = fetch.id;
-        serveBus(dev, last_check);
+        serveBus(dev, last_empty);
         FetchResult result;
         if (g_mailbox.takeResult(result)) {
             dev.fetchDone(result.id, result.ok);
             ide_bus::updateIntrq(dev.intrq());
         }
 
-        serveBus(dev, last_check);
+        serveBus(dev, last_empty);
         uint32_t pins = pinsAsSample();
         bool low = !bus::high(pins, cfg::PIN_RESET_N);
         if (low != reset_low) {
             reset_low = low;
             dev.hardReset(low);
+            if (!low) ide_bus::restart();  // drop anything left from the bus going dead
             ide_bus::updateIntrq(dev.intrq());
             record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
         }
@@ -240,10 +249,9 @@ static void printStats() {
                   (unsigned long)g_events.load(), (unsigned long)g_dropped.load(),
                   (unsigned long)g_stalls.load(), (unsigned)g_trace.size());
 #if FIRMWARE_SLICE != 0
-    // Cycles at clk_sys -> ns. A read can wait this long to be seen, then takes about
-    // 250 ns to answer: the total must stay under ~1070 ns (see setup1).
-    uint32_t ns = uint32_t(uint64_t(g_loop_max_cycles.load()) * 1000000000ull / clock_get_hz(clk_sys));
-    Serial.printf(" loop_max_ns=%lu bus_trace=%d seq=%lu rand=%lu activity=%s", (unsigned long)ns,
+    // Cycles at clk_sys -> ns. Must stay under ~1070 ns (see setup1).
+    uint32_t ns = uint32_t(uint64_t(g_read_max_cycles.load()) * 1000000000ull / clock_get_hz(clk_sys));
+    Serial.printf(" read_max_ns=%lu bus_trace=%d seq=%lu rand=%lu activity=%s", (unsigned long)ns,
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
 #endif
@@ -307,7 +315,7 @@ static void handleConsole() {
                 Serial.println("# h help, p pins, s stats, m mark, x short test (cable unplugged), "
                                "b reboot to bootloader");
 #else
-                Serial.println("# h help, p pins, s stats, r reset loop max, t raw bus trace on/off, "
+                Serial.println("# h help, p pins, s stats, r reset read max, t raw bus trace on/off, "
                                "m mark, x short test (cable unplugged), b reboot to bootloader");
 #endif
                 break;
@@ -328,7 +336,7 @@ static void handleConsole() {
                 break;
             case 's': printStats(); break;
 #if FIRMWARE_SLICE != 0
-            case 'r': g_loop_max_reset.store(true); break;
+            case 'r': g_read_max_reset.store(true); break;
             case 't': {
                 bool on = !g_trace_bus.load();
                 g_trace_bus.store(on);

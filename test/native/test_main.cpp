@@ -259,6 +259,21 @@ TEST(test_identify_checksum) {
     CHECK_EQ(sum, 0);
 }
 
+TEST(test_identify_checksum_after_geometry_change) {
+    // setCurrentGeometry adjusts the checksum instead of recomputing it.
+    uint16_t w[256];
+    buildIdentify(IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", "0.1.0", 131072}, w);
+    for (const Geometry& g : {Geometry{1024, 8, 16}, Geometry{65535, 255, 255}, Geometry{1, 1, 1}}) {
+        setCurrentGeometry(w, g);
+        CHECK_EQ(w[54], g.cylinders);
+        CHECK_EQ(w[58], uint16_t(g.sectors() >> 16));
+        CHECK_EQ(w[255] & 0xFF, 0xA5);
+        uint8_t sum = 0;
+        for (int i = 0; i < 256; ++i) sum += uint8_t(w[i] & 0xFF) + uint8_t(w[i] >> 8);
+        CHECK_EQ(sum, 0);
+    }
+}
+
 // ---- Generated disk --------------------------------------------------------
 
 // zlib's CRC-32, to compare with Python's zlib.crc32.
@@ -318,6 +333,7 @@ int main() {
     RUN(test_default_geometry);
     RUN(test_identify_fields);
     RUN(test_identify_checksum);
+    RUN(test_identify_checksum_after_geometry_change);
     RUN(test_gen_disk_known_answers);
     RUN(test_gen_disk_sectors_differ);
     runAtaDeviceTests();

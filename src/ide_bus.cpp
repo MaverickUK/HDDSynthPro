@@ -13,6 +13,9 @@ namespace ide_bus {
 
 static PIO s_pio;
 static uint s_sm;
+static uint s_offset;
+
+static constexpr uint32_t DRIVEN_PINS = (0xFFFFu << cfg::PIN_DD0) | (1u << cfg::PIN_IORDY);
 
 void begin() {
     for (unsigned pin = cfg::BUS_FIRST_PIN; pin <= cfg::BUS_LAST_PIN; ++pin) {
@@ -24,9 +27,8 @@ void begin() {
     gpio_put(cfg::PIN_INTRQ, 1);
     gpio_set_dir(cfg::PIN_INTRQ, false);
 
-    uint offset;
     bool ok = pio_claim_free_sm_and_add_program_for_gpio_range(
-        &ide_bus_program, &s_pio, &s_sm, &offset, cfg::BUS_FIRST_PIN,
+        &ide_bus_program, &s_pio, &s_sm, &s_offset, cfg::BUS_FIRST_PIN,
         cfg::BUS_LAST_PIN - cfg::BUS_FIRST_PIN + 1, true);
     hard_assert(ok);
 
@@ -35,15 +37,15 @@ void begin() {
     for (unsigned i = 0; i < 16; ++i) pio_gpio_init(s_pio, cfg::PIN_DD0 + i);
     pio_gpio_init(s_pio, cfg::PIN_IORDY);
     pio_sm_set_pins_with_mask(s_pio, s_sm, 0, 1u << cfg::PIN_IORDY);
-    pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, (0xFFFFu << cfg::PIN_DD0) | (1u << cfg::PIN_IORDY));
+    pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);
 
-    pio_sm_config c = ide_bus_program_get_default_config(offset);
+    pio_sm_config c = ide_bus_program_get_default_config(s_offset);
     sm_config_set_in_pins(&c, cfg::PIN_DD0);
     sm_config_set_out_pins(&c, cfg::PIN_DD0, 16);
     sm_config_set_sideset_pins(&c, cfg::PIN_IORDY);
     sm_config_set_jmp_pin(&c, cfg::PIN_DIOR_N);
     sm_config_set_out_shift(&c, true, false, 32);  // `out` takes the low bits first
-    pio_sm_init(s_pio, s_sm, offset, &c);
+    pio_sm_init(s_pio, s_sm, s_offset, &c);
 
     // DIOR# skips the 2-cycle input synchroniser, so DD is released sooner
     // after DIOR# rises: about 10 ns instead of 24 (ATA allows 30, t6z), which
@@ -69,6 +71,17 @@ CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
     updateIntrq(dev.intrq());
     return true;
 }
+
+void restart() {
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    pio_sm_clear_fifos(s_pio, s_sm);
+    pio_sm_restart(s_pio, s_sm);
+    pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);  // release DD and IORDY
+    pio_sm_exec(s_pio, s_sm, pio_encode_jmp(s_offset));
+    pio_sm_set_enabled(s_pio, s_sm, true);
+}
+
+CORE1_RAM bool idle() { return pio_sm_is_rx_fifo_empty(s_pio, s_sm); }
 
 CORE1_RAM void updateIntrq(bool asserted) { gpio_set_dir(cfg::PIN_INTRQ, asserted); }
 

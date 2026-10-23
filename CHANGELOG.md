@@ -2,6 +2,19 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.5.2] - 2026-10-23
+
+### Fixed
+- **An 18 µs stall on core 1 at every hardware reset.** Restoring the default geometry recomputed the IDENTIFY checksum over all 512 bytes, from flash. It now adjusts the checksum for the five changed words, in RAM. INITIALIZE DEVICE PARAMETERS benefits too.
+- **The PIO program restarts when the host releases RESET#**, with empty FIFOs and DD and IORDY released. When the host is unplugged or powering up, its strobes float low. A write-path sample with DIOR# also low got an answer the PIO never pulled, which would leave every later read one answer behind.
+
+### Changed
+- Console `s`: `loop_max_ns` is now `read_max_ns`, the longest a read waited for its answer. It is measured from the last time core 1 saw the FIFO empty. Console `r` resets it.
+
+### Known problems
+- `read_max_ns` reports 7–10 µs on the rig, mostly during the adapter's register probe, although no read was answered after its strobe ended (0 in about 23,000). Not yet explained; a logic analyser on DIOR#, IORDY and CS0# should settle it.
+- After the NS1081 puts the drive in standby and wakes it (IDLE IMMEDIATE), it fails every read without touching the bus, until it is replugged. The drive answers both commands with status 50.
+
 ## [0.5.1] - 2026-10-23
 
 First run on hardware: the NS1081 adapter detects the drive build, and macOS sees the 64 MB disk.

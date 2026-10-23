@@ -44,7 +44,7 @@ class MacHost:
                 subprocess.run(["uhubctl", "-a", "on", *target], check=True, capture_output=True)
         else:
             self._ask("Replug the USB-IDE adapter now: unplug its USB cable and plug it back in "
-                      "(or switch its power brick off and on; the BB48 stays powered).")
+                      "(the BB48 stays powered).")
 
     def system_log(self, last: str = "3m") -> str:
         """Kernel messages about USB and disks, for the failure folder."""

@@ -35,14 +35,21 @@ static void fixChecksum(uint16_t w[256]) {
     w[255] = uint16_t((uint8_t(-sum) << 8) | 0xA5);
 }
 
-void setCurrentGeometry(uint16_t w[256], const Geometry& g) {
+static uint8_t byteSum(uint16_t word) { return uint8_t((word & 0xFF) + (word >> 8)); }
+
+CORE1_RAM void setCurrentGeometry(uint16_t w[256], const Geometry& g) {
     uint32_t sectors = g.sectors();
-    w[54] = g.cylinders;
-    w[55] = g.heads;
-    w[56] = g.sectors_per_track;
-    w[57] = uint16_t(sectors & 0xFFFF);
-    w[58] = uint16_t(sectors >> 16);
-    fixChecksum(w);
+    const uint16_t current[5] = {g.cylinders, g.heads, g.sectors_per_track,
+                                 uint16_t(sectors & 0xFFFF), uint16_t(sectors >> 16)};
+    // All 512 bytes sum to zero, so the checksum byte goes up by what leaves
+    // the sum and down by what joins it.
+    uint8_t checksum = uint8_t(w[255] >> 8);
+    for (int i = 0; i < 5; ++i) {
+        checksum += byteSum(w[54 + i]);
+        w[54 + i] = current[i];
+        checksum -= byteSum(current[i]);
+    }
+    w[255] = uint16_t((checksum << 8) | 0xA5);
 }
 
 void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
