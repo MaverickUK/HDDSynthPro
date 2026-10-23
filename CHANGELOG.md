@@ -2,6 +2,22 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.5.3] - 2026-10-23
+
+### Fixed
+- **The NS1081 hung after waking the drive from standby**, failing every read until it was replugged. When IDLE IMMEDIATE (or IDLE) wakes the drive from standby, it now shows BSY for 50 µs (`cfg::WAKE_BUSY_US`) and then completes with an interrupt, as a CF card does.
+  - The adapter reads Status straight after the command, so an interrupt raised at once was cleared before it waited for it.
+  - Found by listening to a CF card on the adapter's 44-pin header with the listen build.
+  - After the wake the adapter waits about 2.5 s, as it does with the CF card, then reads normally.
+
+### Verified on the rig
+- **Slice 3 passes:** a full 64 MB read (0.65 MB/s) and random reads, with no mismatches, resets or errors.
+- With the raw bus trace off, `read_max_ns` is about 1.9 µs. The 7–10 µs in 0.5.2 was measured with the trace on, which records every access on core 1.
+
+### Known problems
+- With the raw bus trace (`t`) on, one full-disk read stalled: the adapter set nIEN, waited 30 s, then reset the drive, and later dropped off USB. The trace slows core 0's sector fetches. Keep it off for data tests.
+- `read_max_ns` (about 1.9 µs) is still over the slice 1 limit of 800 ns.
+
 ## [0.5.2] - 2026-10-23
 
 ### Fixed

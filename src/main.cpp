@@ -135,6 +135,7 @@ CORE1_RAM void loop1() {
     uint32_t completed = dev.commandsCompleted();
     uint32_t command_start_us = 0;
     uint32_t posted_fetch = 0;
+    uint32_t wake_start_us = 0;  // 0: not timing a wake
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
     uint32_t last_empty = m33_hw->dwt_cyccnt;
@@ -166,6 +167,15 @@ CORE1_RAM void loop1() {
         FetchResult result;
         if (g_mailbox.takeResult(result)) {
             dev.fetchDone(result.id, result.ok);
+            ide_bus::updateIntrq(dev.intrq());
+        }
+        // Waking from standby: BSY for WAKE_BUSY_US, timed from when it was first seen.
+        if (!dev.waking()) {
+            wake_start_us = 0;
+        } else if (wake_start_us == 0) {
+            wake_start_us = time_us_32() | 1;  // never 0 while timing
+        } else if (time_us_32() - wake_start_us >= cfg::WAKE_BUSY_US) {
+            dev.finishWake();
             ide_bus::updateIntrq(dev.intrq());
         }
 

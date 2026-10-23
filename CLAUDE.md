@@ -42,7 +42,9 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - It sits on port 4 of a Realtek RTS5411 hub that `uhubctl` controls; both USB 3 and USB 2 halves must be switched, and macOS needs `-e`.
   - `uhubctl` makes it re-enumerate but doesn't cut VBUS, so its IDE side doesn't restart. A fresh probe (RESET# and IDENTIFY) needs a physical replug.
   - With no drive answering, it probes forever (about one access per µs), so the listen build drops events and the bus is never quiet.
-  - It waits about 10 ms after each READ command before polling (it doesn't react to INTRQ); later sectors of the same command are polled at once.
+  - It waits about 10 ms after each READ command before polling; later sectors of the same command are polled at once.
+  - After about 40 s idle it sends CHECK POWER MODE, then STANDBY if the drive says active. Waking (IDLE IMMEDIATE) must show BSY before the interrupt, or the adapter hangs.
+  - It uses DMA with drives that support it. Its 44-pin header shares the bus with the 40-pin one, so the listen build on the 40-pin header can record a real drive on the 44-pin.
   - `host/rig.env` (git-ignored, from `rig.env.example`) holds the replug settings, and `scripts/rig.sh` loads it.
 - **Host OS:** the dev machine is macOS. There's no `O_DIRECT` (use `/dev/rdiskN`), no `dmesg` (use `log show`), and no ATA pass-through. OS-specific code stays in `host/hddproto/host_macos.py`; slice 6 adds a Linux host for pass-through.
 
@@ -90,7 +92,7 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 ## Status
 
 - **Hardware (23 Oct 2026):** the board is wired and passes the solder-bridge test. On the drive build, the NS1081 sends IDENTIFY, SET FEATURES (PIO mode 0) and READ SECTORS, and macOS sees the 64 MB disk.
-- **Open on hardware:** after the NS1081 puts the drive in standby and wakes it, it fails every read until replugged; and `read_max_ns` reports 7–10 µs (see `CHANGELOG.md`, 0.5.2).
+- **On hardware (0.5.3):** slice 3 passes (64 MB, 0.65 MB/s, no mismatches), and standby and wake work. Open: `read_max_ns` is about 1.9 µs against slice 1's 800 ns, and each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
 - **Slice 0 (listen only):** runs on the board. Its rig test can't pass as written: the adapter never goes quiet without a drive.
 - **Slices 1–3: the `bb48_drive` build**, built, unit-tested and detected on hardware; the rig tests have not been run yet. It contains:
   - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and the slice 1 test checks `read_max_ns` < 800: the longest a read waited for its answer, measured on hardware. `loop1()` checks the FIFO between each of its steps;

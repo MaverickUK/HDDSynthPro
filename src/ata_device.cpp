@@ -29,6 +29,7 @@ CORE1_RAM void Device::resetToSignature() {
     data_ = nullptr;
     data_count_ = data_index_ = 0;
     irq_pending_ = false;
+    waking_ = false;
     // Abandon any read; a fetch still running on core 0 becomes stale.
     reading_ = false;
     fetch_pending_ = false;
@@ -104,6 +105,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         in_reset_ = true;
         status_ = ST_BSY;
         irq_pending_ = false;
+        waking_ = false;
         device_control_ = 0;
         reading_ = false;
         fetch_pending_ = false;
@@ -170,8 +172,16 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
         case CMD_IDLE:
         case CMD_IDLE_IMMEDIATE_OLD:
         case CMD_IDLE_OLD:
-            standby_ = false;
-            completeNoData();
+            if (standby_) {
+                // Waking: busy for a moment, then the interrupt, as a CF card
+                // does. The NS1081 reads Status straight after the command, so
+                // an interrupt raised at once is cleared before it waits for it.
+                standby_ = false;
+                waking_ = true;
+                status_ = ST_BSY | ST_DRDY | ST_DSC;
+            } else {
+                completeNoData();
+            }
             break;
         case CMD_CHECK_POWER_MODE:
         case CMD_CHECK_POWER_MODE_OLD:
@@ -190,6 +200,12 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
             }
             break;
     }
+}
+
+CORE1_RAM void Device::finishWake() {
+    if (!waking_) return;
+    waking_ = false;
+    completeNoData();
 }
 
 CORE1_RAM void Device::completeNoData() {

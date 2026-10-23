@@ -141,6 +141,14 @@ public:
     // Core 0 finished fetch `id`: the buffer is filled (ok) or the read failed.
     void fetchDone(uint32_t id, bool ok);
 
+    // ---- Waking from standby -------------------------------------------------
+
+    // True while IDLE (IMMEDIATE) is waking the drive from standby. The drive
+    // shows BSY, as a real one does while it spins up, until finishWake()
+    // completes the command; the caller times it (cfg::WAKE_BUSY_US).
+    bool waking() const { return waking_; }
+    void finishWake();
+
     // ---- State for tests and the trace ---------------------------------------
 
     uint8_t status() const { return status_; }
@@ -206,6 +214,7 @@ private:
     bool irq_pending_ = false;
     bool in_reset_ = false;  // RESET# held or SRST set: BSY until released
     bool standby_ = false;   // after STANDBY; any media access wakes it
+    bool waking_ = false;    // IDLE from standby: BSY until finishWake()
 
     CommandInfo last_{};
     uint32_t commands_started_ = 0;

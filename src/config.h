@@ -33,4 +33,8 @@ constexpr size_t TRACE_RING_EVENTS = 8192;
 // Core 0 prints a run of identical accesses once it has been quiet this long.
 constexpr unsigned TRACE_FLUSH_MS = 20;
 
+// How long IDLE IMMEDIATE shows BSY when it wakes the drive from standby. A CF
+// card on the rig took about 25 us; a spinning disk takes seconds.
+constexpr uint32_t WAKE_BUSY_US = 50;
+
 }  // namespace cfg

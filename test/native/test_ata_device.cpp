@@ -720,7 +720,16 @@ TEST(test_power_commands) {
     CHECK(d.standby());
     command(d, CMD_CHECK_POWER_MODE);
     CHECK_EQ(d.read(Reg::SectorCount), POWER_STANDBY);
-    command(d, CMD_IDLE_IMMEDIATE);
+    // Waking from standby: BSY and no interrupt until finishWake().
+    CHECK_EQ(command(d, CMD_IDLE_IMMEDIATE), ST_BSY | ST_DRDY | ST_DSC);
+    CHECK(d.waking());
+    CHECK(!d.intrq());
+    command(d, CMD_CHECK_POWER_MODE);  // ignored while BSY
+    d.finishWake();
+    CHECK(!d.waking());
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    CHECK(d.intrq());
+    CHECK_EQ(command(d, CMD_IDLE_IMMEDIATE), ST_DRDY | ST_DSC);  // already awake: at once
     command(d, CMD_CHECK_POWER_MODE_OLD);
     CHECK_EQ(d.read(Reg::SectorCount), POWER_ACTIVE_OR_IDLE);
     // A read wakes a drive in standby.
@@ -731,7 +740,27 @@ TEST(test_power_commands) {
     CHECK(!d.standby());
     const uint8_t also_ok[] = {CMD_STANDBY_OLD, CMD_IDLE, CMD_IDLE_OLD, CMD_IDLE_IMMEDIATE_OLD,
                                CMD_STANDBY_IMMEDIATE_OLD, CMD_FLUSH_CACHE};
-    for (uint8_t c : also_ok) CHECK_EQ(command(d, c), ST_DRDY | ST_DSC);
+    for (uint8_t c : also_ok) {
+        uint8_t status = command(d, c);
+        if (d.waking()) {  // IDLE after STANDBY
+            CHECK_EQ(status, ST_BSY | ST_DRDY | ST_DSC);
+            d.finishWake();
+            status = h.altStatus();
+        }
+        CHECK_EQ(status, ST_DRDY | ST_DSC);
+    }
+}
+
+TEST(test_reset_cancels_waking) {
+    Device d(INFO);
+    command(d, CMD_STANDBY_IMMEDIATE);
+    command(d, CMD_IDLE_IMMEDIATE);
+    CHECK(d.waking());
+    d.hardReset(true);
+    d.hardReset(false);
+    CHECK(!d.waking());
+    d.finishWake();  // too late: nothing happens
+    CHECK(!d.intrq());
 }
 
 TEST(test_set_multiple_mode_aborts) {
@@ -814,6 +843,7 @@ void runAtaDeviceTests() {
     RUN(test_read_verify);
     RUN(test_seek_and_recalibrate);
     RUN(test_power_commands);
+    RUN(test_reset_cancels_waking);
     RUN(test_set_multiple_mode_aborts);
     RUN(test_housekeeping_commands_complete_for_the_trace);
     RUN(test_virtual_host_bridge_setup);
