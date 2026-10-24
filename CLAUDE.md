@@ -8,7 +8,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 
 ## Rules that keep the bus safe
 
-- **Pins:** the pin map in `src/config.h`, `docs/wiring.md` and the `IDE` table in `docs/wiring.html` (the interactive diagram) must agree.
+- **Pins:** the pin map in `src/config.h`, `docs/wiring.md` and the tables in `docs/wiring.html` (IDE) and `docs/wiring-sd.html` (microSD), the interactive diagrams, must agree.
   - GPIO 0–3 stay off the bus: the BB48 pulls GPIO 2/3 up to 3.3 V (R17/R18).
   - GPIO 25 is the LED.
   - DD/DA/CS# must stay on consecutive pins (one PIO read).
@@ -88,6 +88,7 @@ Console:
 - `r`: reset the read timings (they also restart when the host releases RESET#);
 - `t`: raw bus trace on or off;
 - `m`: print a `MARK` timestamp (used by the activity rig test);
+- `S`: start the microSD card and report it (drive build; only reads);
 - `x` then `Y`: the solder-bridge test, IDE cable unplugged (`short_test.*`; the board reboots afterwards);
 - `b`: reboot to the bootloader.
 

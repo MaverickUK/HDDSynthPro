@@ -1,0 +1,417 @@
+<title>BB48 SD Wiring</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a bench sheet, as for the IDE wiring. Warnings first, then the
+   pin-to-pin drawing and the pull-ups, then the checklist ticked off while
+   soldering. Signal colours = suggested wire colours. */
+:root {
+  --bg: #f4f6f3;
+  --panel: #ffffff;
+  --fg: #1c2125;
+  --muted: #5d6870;
+  --line: #d3d9d4;
+  --accent: #0e6a87;
+  --warn-bg: #fff4e5;
+  --warn-fg: #7a3d00;
+  --c-pwr: #c0262d;
+  --c-gnd: #3c444a;
+  --c-clk: #c2410c;
+  --c-cmd: #7b3aec;
+  --c-dat: #2457d6;
+  --c-res: #a87700;
+  --c-nc: #a3acb2;
+  --font-display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121518; --panel: #1a1e22; --fg: #e3e7ea; --muted: #94a0a8; --line: #2c3338;
+    --accent: #5cc3e0; --warn-bg: #33240f; --warn-fg: #ffcf94;
+    --c-pwr: #ff6b70; --c-gnd: #aab3ba; --c-clk: #ff8a4f; --c-cmd: #b598ff; --c-dat: #79a6ff;
+    --c-res: #e7b94c; --c-nc: #5b656c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121518; --panel: #1a1e22; --fg: #e3e7ea; --muted: #94a0a8; --line: #2c3338;
+  --accent: #5cc3e0; --warn-bg: #33240f; --warn-fg: #ffcf94;
+  --c-pwr: #ff6b70; --c-gnd: #aab3ba; --c-clk: #ff8a4f; --c-cmd: #b598ff; --c-dat: #79a6ff;
+  --c-res: #e7b94c; --c-nc: #5b656c;
+  color-scheme: dark;
+}
+
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+.wrap {
+  max-width: 1040px; margin: 0 auto;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 32px;
+}
+h1, h2 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: 2.1rem; font-weight: 700; letter-spacing: 0.01em; }
+h2 { font-size: 1.35rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+header { display: grid; gap: 10px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+
+.warnings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.warn { background: var(--warn-bg); color: var(--warn-fg); border-radius: 6px; padding: 12px 14px; display: grid; gap: 4px; min-width: 0; }
+.warn strong { font-family: var(--font-display); font-size: 1.02rem; font-weight: 600; }
+.warn p { font-size: 0.92rem; }
+
+section { display: grid; gap: 14px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 18px; height: 4px; border-radius: 2px; background: var(--c); display: inline-block; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; cursor: pointer; }
+.toggle input { accent-color: var(--accent); width: 16px; height: 16px; }
+button { font: inherit; font-size: 0.85rem; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 5px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible, tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.figs { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 1.3fr); gap: 16px; }
+@media (max-width: 760px) { .figs { grid-template-columns: minmax(0, 1fr); } }
+figure { margin: 0; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.drawing { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; padding: 8px; }
+#map { display: block; width: 100%; min-width: 620px; height: auto; color: var(--fg); }
+#pulls { display: block; width: 100%; min-width: 240px; height: auto; color: var(--fg); }
+figcaption { font-size: 0.88rem; color: var(--muted); max-width: 80ch; }
+
+.g-pwr { --c: var(--c-pwr); } .g-gnd { --c: var(--c-gnd); } .g-clk { --c: var(--c-clk); }
+.g-cmd { --c: var(--c-cmd); } .g-dat { --c: var(--c-dat); } .g-res { --c: var(--c-res); } .g-nc { --c: var(--c-nc); }
+.board { fill: var(--bg); stroke: var(--muted); stroke-width: 1.2; }
+.slot { fill: var(--line); stroke: var(--muted); }
+.pin { fill: var(--c); stroke: var(--panel); stroke-width: 1.5; }
+.pin.nc { fill: none; stroke: var(--c-nc); stroke-width: 1.2; }
+.tagbox { fill: color-mix(in srgb, var(--c) 14%, transparent); }
+.tagtext { fill: var(--c); font: 600 11.5px var(--font-mono); }
+.num { fill: var(--muted); font: 400 10px var(--font-mono); }
+.title { fill: currentColor; font: 600 13px var(--font-display); letter-spacing: 0.04em; }
+.sub { fill: var(--muted); font: 400 11px var(--font-body); }
+.wire { fill: none; stroke: var(--c); stroke-width: 2.4; stroke-linecap: round; opacity: 0.55; }
+.wire.on { opacity: 1; stroke-width: 3.4; }
+.rail { stroke: var(--c-pwr); stroke-width: 2.4; }
+.res rect { fill: var(--panel); stroke: var(--c-res); stroke-width: 1.6; }
+.res text { fill: var(--c-res); font: 600 10px var(--font-mono); }
+.lead { stroke: var(--c); stroke-width: 2; }
+.hit { cursor: pointer; }
+.hit.on .tagbox { fill: color-mix(in srgb, var(--c) 32%, transparent); }
+.hit.on .pin { stroke: var(--fg); stroke-width: 2; }
+.res.on rect { fill: color-mix(in srgb, var(--c-res) 25%, var(--panel)); }
+
+.progress { font-family: var(--font-mono); font-size: 0.9rem; }
+.progress b { color: var(--accent); }
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; min-width: 600px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); background: var(--panel); }
+tbody tr { cursor: pointer; }
+tbody tr:hover, tbody tr.on { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+tbody tr.done td:not(:first-child) { color: var(--muted); }
+tbody tr.done .sig { text-decoration: line-through; text-decoration-color: var(--muted); }
+td.mono { font-family: var(--font-mono); font-size: 0.86rem; }
+.sig { font-family: var(--font-mono); font-weight: 600; font-size: 0.88rem; color: var(--c); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--c); margin-right: 8px; vertical-align: -1px; }
+td input { accent-color: var(--accent); width: 17px; height: 17px; cursor: pointer; }
+.note { font-size: 0.88rem; color: var(--muted); }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+.cols > div { display: grid; gap: 10px; align-content: start; min-width: 0; }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+pre { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; overflow-x: auto; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.6; }
+@media (prefers-reduced-motion: no-preference) { .wire { transition: opacity 120ms ease, stroke-width 120ms ease; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">HDDSynthPro · slice 5 · microSD breakout · SPI now, 4-bit SDIO later</div>
+    <h1>Adafruit microSD breakout to the BB48</h1>
+    <p>Six signal wires, 3.3 V and ground, plus five 10 kΩ pull-ups. CLK, CMD and DAT0 land on the RP2350's SPI0 pins, DAT3 is the SPI chip select, and DAT0–DAT3 sit on consecutive pins, so the same wiring later runs in 4-bit SDIO mode. Pick any pin or row to see its wire.</p>
+  </header>
+
+  <div class="warnings" aria-label="Before you wire">
+    <div class="warn"><strong>Everything unplugged while soldering</strong><p>Adapter USB out first, then the BB48. The SD card has nothing to do with the IDE bus, so the power-order rule is unchanged.</p></div>
+    <div class="warn"><strong>The breakout has no pull-ups</strong><p>Fit 10 kΩ from CMD, DAT0, DAT1, DAT2 and DAT3 to 3.3 V, close to the breakout. CLK needs none: the RP2350 always drives it.</p></div>
+    <div class="warn"><strong>3 V only</strong><p>Power it from the BB48's +3.3V (EXT1-1). Never from VBUS or VSYS: those are 5 V and would damage the card.</p></div>
+    <div class="warn"><strong>Check the breakout's pin order</strong><p>The breakout is drawn here in signal order. Match the labels printed on your board, not the positions.</p></div>
+  </div>
+
+  <section aria-labelledby="map-h">
+    <h2 id="map-h">Pin to pin</h2>
+    <div class="toolbar">
+      <label class="toggle"><input type="checkbox" id="showAll"> Show all wires</label>
+      <div class="legend" aria-label="Signal groups (suggested wire colours)">
+        <span class="g-pwr"><i></i>3.3 V</span>
+        <span class="g-gnd"><i></i>Ground</span>
+        <span class="g-clk"><i></i>CLK</span>
+        <span class="g-cmd"><i></i>CMD</span>
+        <span class="g-dat"><i></i>DAT0–3</span>
+        <span class="g-res"><i></i>10 kΩ pull-up</span>
+      </div>
+    </div>
+    <div class="figs">
+      <figure>
+        <div class="drawing">
+          <svg id="map" viewBox="0 0 720 640" role="img"
+               aria-label="The microSD breakout wired to the BB48: 3V to EXT1 pin 1, GND to EXT2 pin 3, CLK to GPIO 34, CMD to GPIO 35, DAT0 to DAT3 to GPIO 36 to 39 on EXT2 pins 14 to 19."></svg>
+        </div>
+        <figcaption>Left: the breakout, drawn in signal order with the card slot at the top. Right: the BB48 as drawn in Olimex's pinout, USB-C at the top; EXT1 (GPIO 0–23) is the left row and EXT2 (GPIO 24–47) the right. Every SD signal lands on EXT2 except 3.3 V, which comes from EXT1-1.</figcaption>
+      </figure>
+      <figure>
+        <div class="drawing">
+          <svg id="pulls" viewBox="0 0 260 330" role="img"
+               aria-label="Five 10 kilohm resistors, each from the 3.3 volt rail to one of CMD, DAT0, DAT1, DAT2 and DAT3."></svg>
+        </div>
+        <figcaption>The pull-ups, on the Perma-Proto beside the breakout: one 10 kΩ from the 3.3 V rail to each of CMD and DAT0–DAT3. They hold the lines high before the card is selected; DAT3 high also means "not selected" in SPI mode.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section aria-labelledby="list-h">
+    <div class="toolbar">
+      <h2 id="list-h">Wiring checklist</h2>
+      <span class="progress" id="progress" aria-live="polite"></span>
+      <button type="button" id="clear">Clear ticks</button>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th scope="col">Done</th><th scope="col">Breakout pin</th><th scope="col">To</th><th scope="col">GPIO</th><th scope="col">Notes</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="note">The ticks are saved in this browser only.</p>
+  </section>
+
+  <section class="cols" aria-label="Layout and checks">
+    <div>
+      <h2>Before power</h2>
+      <ul>
+        <li>Continuity: each breakout pin beeps to its BB48 pin in the table.</li>
+        <li>No beep between neighbouring pins EXT2-14 to EXT2-19, or from any of them to GND or 3.3 V.</li>
+        <li>Resistance (Ω, 20 kΩ range): each of CMD and DAT0–DAT3 reads about 10 kΩ to the breakout's 3V pin.</li>
+        <li>Keep the signal wires short, ideally under 10 cm: SPI runs at 12–25 MHz, SDIO faster.</li>
+        <li>Leave DET (card detect) unconnected for now.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>First check</h2>
+      <p>With the BB48 on USB and a FAT32 microSD (up to 32 GB) in the slot, type <code>S</code> in the serial console. It only reads the card.</p>
+<pre>SD ok type=SDHC/SDXC size_mb=30436 fs=FAT32</pre>
+      <ul>
+        <li><code>SD error: no card, or it doesn't answer</code>: check the card is in, then the CLK, CMD, DAT0 and DAT3 wires.</li>
+        <li><code>fs=none</code>: the card answers but isn't FAT; format it FAT32 on the Mac.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  // Breakout pins in signal order: [label, group, gpio or null, BB48 target]
+  const SD = [
+    ["3V",   "pwr", null, "EXT1-1"],
+    ["GND",  "gnd", null, "EXT2-3"],
+    ["CLK",  "clk", 34],
+    ["CMD",  "cmd", 35],
+    ["DAT0", "dat", 36],
+    ["DAT1", "dat", 37],
+    ["DAT2", "dat", 38],
+    ["DAT3", "dat", 39],
+    ["DET",  "nc",  null],
+  ];
+  const ROLE = {
+    "3V": "3.3 V supply, from the BB48 only", "GND": "Ground",
+    "CLK": "SPI0 SCK; no pull-up", "CMD": "SPI0 TX (card DI); 10 kΩ pull-up",
+    "DAT0": "SPI0 RX (card DO); 10 kΩ pull-up", "DAT1": "SDIO only; 10 kΩ pull-up",
+    "DAT2": "SDIO only; 10 kΩ pull-up", "DAT3": "SPI chip select; 10 kΩ pull-up",
+  };
+  const PULLED = ["CMD", "DAT0", "DAT1", "DAT2", "DAT3"];
+
+  const bbOf = s => s[2] != null ? { ext: s[2] <= 23 ? 1 : 2, n: s[2] <= 23 ? s[2] + 4 : s[2] - 20 }
+                                   : (s[3] ? { ext: +s[3][3], n: +s[3].split("-")[1] } : null);
+  const bbName = b => `EXT${b.ext}-${b.n}`;
+  const EXT1 = ["+3.3V", "GND", "3V3_EN"].concat(Array.from({ length: 24 }, (_, i) => `GP${i}`));
+  const EXT2 = ["VBUS", "VSYS", "GND"].concat(Array.from({ length: 24 }, (_, i) => `GP${i + 24}`));
+
+  const NS = "http://www.w3.org/2000/svg";
+  const mk = (svg, tag, attrs, parent, text) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (text != null) e.textContent = text;
+    (parent || svg).appendChild(e);
+    return e;
+  };
+  const tagWidth = s => s.length * 7.1 + 12;
+  function tag(svg, parent, x, y, text, anchor) {
+    const w = tagWidth(text), x0 = anchor === "end" ? x - w : x;
+    mk(svg, "rect", { x: x0, y: y - 8.5, width: w, height: 17, rx: 3, class: "tagbox" }, parent);
+    mk(svg, "text", { x: x0 + w / 2, y: y + 4, "text-anchor": "middle", class: "tagtext" }, parent, text);
+  }
+
+  // ---- Main drawing ----
+  const svg = document.getElementById("map");
+  const P = 20, SD_X = 200, SD_Y0 = 150, X_EXT1 = 520, X_EXT2 = 620, BB_Y0 = 60;
+  const sdPos = i => ({ x: SD_X, y: SD_Y0 + i * (P + 8) });
+  const bbPos = (ext, n) => ({ x: ext === 1 ? X_EXT1 : X_EXT2, y: BB_Y0 + (n - 1) * P });
+  const gBody = mk(svg, "g", {}), gWires = mk(svg, "g", {}), gPins = mk(svg, "g", {});
+  const hits = {}, wires = {};
+  const addHit = (k, g) => { (hits[k] = hits[k] || []).push(g); };
+
+  mk(svg, "text", { x: SD_X - 50, y: 96, "text-anchor": "middle", class: "title" }, gBody, "MICROSD BREAKOUT");
+  mk(svg, "text", { x: SD_X - 50, y: 112, "text-anchor": "middle", class: "sub" }, gBody, "Adafruit, SPI or SDIO, 3 V only");
+  mk(svg, "rect", { x: SD_X - 110, y: SD_Y0 - 22, width: 124, height: (SD.length - 1) * (P + 8) + 44, rx: 6, class: "board" }, gBody);
+  mk(svg, "rect", { x: SD_X - 92, y: SD_Y0 - 36, width: 70, height: 18, rx: 3, class: "slot" }, gBody);
+  mk(svg, "text", { x: SD_X - 57, y: SD_Y0 - 23, "text-anchor": "middle", class: "num" }, gBody, "card");
+
+  mk(svg, "text", { x: 570, y: 14, "text-anchor": "middle", class: "title" }, gBody, "OLIMEX RP2350-PICO2-BB48");
+  mk(svg, "rect", { x: X_EXT1 - 14, y: BB_Y0 - 30, width: X_EXT2 - X_EXT1 + 28, height: 27 * P + 34, rx: 6, class: "board" }, gBody);
+  mk(svg, "rect", { x: 552, y: BB_Y0 - 38, width: 36, height: 16, rx: 4, class: "slot" }, gBody);
+  mk(svg, "text", { x: 570, y: BB_Y0 - 27, "text-anchor": "middle", class: "num" }, gBody, "USB");
+  mk(svg, "text", { x: X_EXT1 - 16, y: BB_Y0 - 14, "text-anchor": "end", class: "num" }, gBody, "EXT1");
+  mk(svg, "text", { x: X_EXT2 + 16, y: BB_Y0 - 14, class: "num" }, gBody, "EXT2");
+
+  const bbUse = {};
+  SD.forEach(s => { const b = bbOf(s); if (b) bbUse[bbName(b)] = { sig: s[0], grp: s[1] }; });
+
+  SD.forEach((s, i) => {
+    const [label, grp] = s, { x, y } = sdPos(i);
+    const g = mk(svg, "g", { class: `g-${grp}` + (grp === "nc" ? "" : " hit"), "data-key": label }, gPins);
+    if (grp === "nc") {
+      mk(svg, "circle", { cx: x, cy: y, r: 4.5, class: "pin nc" }, g);
+      mk(svg, "text", { x: x - 16, y: y + 3.5, "text-anchor": "end", class: "num" }, g, "DET (not wired)");
+    } else {
+      mk(svg, "circle", { cx: x, cy: y, r: 5, class: "pin" }, g);
+      tag(svg, g, x - 16, y, label, "end");
+      addHit(label, g);
+    }
+  });
+
+  [[1, EXT1], [2, EXT2]].forEach(([ext, names]) => {
+    names.forEach((lbl, i) => {
+      const n = i + 1, { x, y } = bbPos(ext, n), use = bbUse[bbName({ ext, n })];
+      const g = mk(svg, "g", { class: `g-${use ? use.grp : "nc"}` + (use ? " hit" : ""), "data-key": use ? use.sig : "" }, gPins);
+      mk(svg, "text", { x: ext === 1 ? x + 12 : x - 12, y: y + 3.5, "text-anchor": ext === 1 ? "start" : "end", class: "num" }, g, lbl);
+      if (use) {
+        mk(svg, "circle", { cx: x, cy: y, r: 5, class: "pin" }, g);
+        tag(svg, g, ext === 1 ? x - 22 : x + 22, y, use.sig, ext === 1 ? "end" : "start");
+        addHit(use.sig, g);
+      } else {
+        mk(svg, "circle", { cx: x, cy: y, r: 4, class: "pin nc" }, g);
+      }
+    });
+  });
+
+  SD.forEach((s, i) => {
+    const b = bbOf(s);
+    if (!b) return;
+    const a = sdPos(i), t = bbPos(b.ext, b.n);
+    // EXT2 targets route around the outside of the BB48's right row.
+    let d;
+    if (b.ext === 2) {
+      const lane = X_EXT2 + 70 + i * 6;
+      d = `M ${a.x} ${a.y} C ${a.x + 150} ${a.y}, ${X_EXT1 - 150} ${BB_Y0 + 27 * P + 10}, ${X_EXT1} ${BB_Y0 + 27 * P + 14 + i * 4}` +
+          ` L ${lane} ${BB_Y0 + 27 * P + 14 + i * 4} L ${lane} ${t.y} L ${t.x} ${t.y}`;
+    } else {
+      d = `M ${a.x} ${a.y} C ${a.x + 160} ${a.y}, ${t.x - 160} ${t.y}, ${t.x} ${t.y}`;
+    }
+    const g = mk(svg, "g", { class: `g-${s[1]}`, visibility: "hidden" }, gWires);
+    mk(svg, "path", { d, class: "wire" }, g);
+    wires[s[0]] = g;
+  });
+
+  // ---- Pull-ups ----
+  const ps = document.getElementById("pulls");
+  const RAIL_X = 40, NET_X = 230, PY0 = 60;
+  const resG = {};
+  mk(ps, "text", { x: 130, y: 22, "text-anchor": "middle", class: "title" }, null, "PULL-UPS");
+  mk(ps, "line", { x1: RAIL_X, y1: PY0 - 14, x2: RAIL_X, y2: PY0 + 4 * 56 + 14, class: "rail" });
+  const railTag = mk(ps, "g", { class: "g-pwr" });
+  tag(ps, railTag, RAIL_X - 14, PY0 - 28, "3.3 V rail", "start");
+  PULLED.forEach((sig, i) => {
+    const y = PY0 + i * 56, grp = sig === "CMD" ? "cmd" : "dat";
+    const g = mk(ps, "g", { class: `res g-${grp} hit`, "data-key": sig });
+    mk(ps, "circle", { cx: RAIL_X, cy: y, r: 3.5, fill: "var(--c-pwr)" }, g);
+    mk(ps, "line", { x1: RAIL_X, y1: y, x2: 80, y2: y, class: "lead", style: "--c: var(--c-pwr)" }, g);
+    mk(ps, "rect", { x: 80, y: y - 9, width: 58, height: 18, rx: 2 }, g);
+    mk(ps, "text", { x: 109, y: y + 3.5, "text-anchor": "middle" }, g, "10 kΩ");
+    mk(ps, "line", { x1: 138, y1: y, x2: NET_X - 52, y2: y, class: "lead" }, g);
+    tag(ps, g, NET_X - 50, y, sig, "start");
+    addHit(sig, g); resG[sig] = g;
+  });
+
+  // ---- Checklist ----
+  const entries = SD.filter(s => s[1] !== "nc").map(s => {
+    const b = bbOf(s);
+    return { key: s[0], label: s[0], grp: s[1], to: bbName(b), gpio: s[2] != null ? s[2] : "—", note: ROLE[s[0]] };
+  }).concat(PULLED.map(sig => ({
+    key: "R-" + sig, hl: sig, label: "10 kΩ", grp: "res", to: `${sig} to 3.3 V`, gpio: "—", note: "Close to the breakout",
+  })));
+
+  const STORE = "bb48-sd-wiring-v1";
+  let done = {};
+  try { done = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) { done = {}; }
+  const save = () => { try { localStorage.setItem(STORE, JSON.stringify(done)); } catch (e) {} };
+
+  const rows = document.getElementById("rows"), rowEls = {};
+  for (const e of entries) {
+    const tr = document.createElement("tr");
+    tr.className = `g-${e.grp}`; tr.dataset.key = e.hl || e.key; tr.tabIndex = 0;
+    tr.innerHTML =
+      `<td><input type="checkbox" id="w-${e.key}" aria-label="${e.label} to ${e.to} done"></td>` +
+      `<td><span class="swatch"></span><span class="sig">${e.label}</span></td>` +
+      `<td class="mono">${e.to}</td><td class="mono">${e.gpio}</td><td class="note">${e.note}</td>`;
+    const cb = tr.querySelector("input");
+    cb.checked = !!done[e.key]; tr.classList.toggle("done", cb.checked);
+    cb.addEventListener("click", ev => ev.stopPropagation());
+    cb.addEventListener("change", () => { done[e.key] = cb.checked; tr.classList.toggle("done", cb.checked); save(); progress(); });
+    rows.appendChild(tr); rowEls[e.key] = tr;
+  }
+  const prog = document.getElementById("progress");
+  function progress() { prog.innerHTML = `<b>${entries.filter(e => done[e.key]).length}</b> of ${entries.length} done`; }
+  progress();
+  document.getElementById("clear").addEventListener("click", () => {
+    done = {}; save();
+    for (const e of entries) { const tr = rowEls[e.key]; tr.querySelector("input").checked = false; tr.classList.remove("done"); }
+    progress();
+  });
+
+  // ---- Selection: hover previews, click pins it ----
+  const showAll = document.getElementById("showAll");
+  let pinned = null, hovered = null;
+  function render() {
+    const active = hovered || pinned, all = showAll.checked;
+    for (const [k, g] of Object.entries(wires)) {
+      const on = k === active;
+      g.setAttribute("visibility", all || on ? "visible" : "hidden");
+      g.querySelector(".wire").classList.toggle("on", on);
+    }
+    for (const [k, gs] of Object.entries(hits)) gs.forEach(g => g.classList.toggle("on", k === active));
+    for (const e of entries) rowEls[e.key].classList.toggle("on", (e.hl || e.key) === active);
+  }
+  const keyOf = t => { const g = t.closest && t.closest(".hit"); return g ? g.getAttribute("data-key") : null; };
+  for (const s of [svg, ps]) {
+    s.addEventListener("mouseover", ev => { hovered = keyOf(ev.target); render(); });
+    s.addEventListener("mouseleave", () => { hovered = null; render(); });
+    s.addEventListener("click", ev => { const k = keyOf(ev.target); pinned = k && k !== pinned ? k : null; render(); });
+  }
+  rows.addEventListener("mouseover", ev => { const tr = ev.target.closest("tr"); hovered = tr ? tr.dataset.key : null; render(); });
+  rows.addEventListener("mouseleave", () => { hovered = null; render(); });
+  rows.addEventListener("click", ev => { const tr = ev.target.closest("tr"); if (!tr) return; pinned = tr.dataset.key === pinned ? null : tr.dataset.key; render(); });
+  rows.addEventListener("keydown", ev => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    const tr = ev.target.closest("tr"); if (!tr || ev.target.tagName === "INPUT") return;
+    ev.preventDefault(); pinned = tr.dataset.key === pinned ? null : tr.dataset.key; render();
+  });
+  showAll.addEventListener("change", render);
+
+  // Open on a real example: DAT0, so the first view shows a wire and its pull-up.
+  pinned = "DAT0";
+  render();
+})();
+</script>

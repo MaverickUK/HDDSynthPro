@@ -26,6 +26,15 @@ constexpr unsigned PIN_RESET_N = 30;
 constexpr unsigned BUS_FIRST_PIN = PIN_DD0;
 constexpr unsigned BUS_LAST_PIN = PIN_RESET_N;
 
+// The microSD breakout (slice 5). The same wires serve SPI now and 4-bit
+// SDIO later: CLK, CMD and DAT0 are on SPI0's SCK, TX and RX pins, DAT3 is
+// the SPI chip select, and DAT0-3 are consecutive, as PIO SDIO needs.
+// CMD and DAT0-3 have 10k pull-ups to 3.3 V on the breakout's side.
+constexpr unsigned PIN_SD_CLK = 34;   // SPI0 SCK
+constexpr unsigned PIN_SD_CMD = 35;   // SPI0 TX (card DI)
+constexpr unsigned PIN_SD_DAT0 = 36;  // SPI0 RX (card DO); DAT1-3 on 37-39
+constexpr unsigned PIN_SD_DAT3 = 39;  // SPI chip select
+
 // Trace ring between core 1 (producer) and core 0 (consumer):
 // 8192 events x 12 bytes = 96 KB.
 constexpr size_t TRACE_RING_EVENTS = 8192;

@@ -2,6 +2,18 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.6.4] - 2026-10-24
+
+The first step of slice 5: the microSD card answers.
+
+### Added
+- **The microSD breakout's pin map** (`cfg::PIN_SD_*`): CLK, CMD and DAT0–DAT3 on GPIO 34–39, so the same leads serve SPI now (SPI0's pins, DAT3 as chip select) and 4-bit SDIO later (DAT0–3 consecutive). The breakout has no pull-ups; 10 kΩ ones are fitted on CMD and DAT0–DAT3.
+- **Console `S`** (drive build): starts the card over SPI at 12 MHz with SdFat and reports its type, size and filesystem. It only reads. It refuses to start if SPI0 rejects the SD pins, because SPI0's default pins on this board are IDE data lines (GPIO 4–7).
+- `docs/wiring-sd.html` (interactive) and a section in `docs/wiring.md`.
+
+### On the rig
+- `SD ok type=SDHC/SDXC size_mb=30436 fs=FAT32` on a 32 GB card, first time.
+
 ## [0.6.3] - 2026-10-24
 
 ### Fixed

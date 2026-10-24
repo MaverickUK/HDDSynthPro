@@ -74,6 +74,26 @@ Never connect the adapter's +5 V (its Molex power) to the BB48. The two boards s
   - An unpowered BB48 on the cable would be fed the same way, through its pins' protection diodes, at up to 5 V. This is why the power-order rule matters.
   - The adapter is powered by its USB cable; its brick only powers a drive plugged into it. Switching its hub port off with `uhubctl` does not cut its power (seen on 23 Oct 2026), so "adapter off" means its USB cable unplugged.
 
+## microSD breakout (slice 5)
+
+The Adafruit microSD breakout (SPI or SDIO, 3 V only), wired so the same leads serve SPI now and 4-bit SDIO later: CLK, CMD and DAT0 are on SPI0's SCK, TX and RX pins, DAT3 is the SPI chip select, and DAT0–DAT3 are consecutive, as PIO SDIO needs. The pin map is in [src/config.h](../src/config.h); [wiring-sd.html](wiring-sd.html) is the interactive version.
+
+| Breakout pin | Signal | GPIO | BB48 pin |
+|---|---|---|---|
+| 3V | 3.3 V supply | | EXT1-1 (+3.3V) |
+| GND | Ground | | EXT2-3 |
+| CLK | SPI0 SCK | 34 | EXT2-14 |
+| CMD | SPI0 TX (card DI) | 35 | EXT2-15 |
+| DAT0 | SPI0 RX (card DO) | 36 | EXT2-16 |
+| DAT1 | SDIO only | 37 | EXT2-17 |
+| DAT2 | SDIO only | 38 | EXT2-18 |
+| DAT3 | SPI chip select | 39 | EXT2-19 |
+| DET | card detect | | not connected |
+
+- **Pull-ups:** the breakout has none. Fit 10 kΩ from CMD and DAT0–DAT3 to 3.3 V, close to the breakout. CLK needs none.
+- **Power:** from the BB48's +3.3V only, never VBUS or VSYS (5 V).
+- **SPI0's default pins on this board are GPIO 4–7, which are IDE data lines.** The firmware refuses to start the card if SPI0 rejects the SD pins, rather than fall back to them.
+
 ## Wiring check
 
 The full order for hardware day, including the solder-bridge test (console `x`), is in [bringup.md](bringup.md).

@@ -35,6 +35,7 @@
 #include "fetch_mailbox.h"
 #include "ide_bus.h"
 #include "iordy_timer.h"
+#include "sd_card.h"
 #endif
 
 static SpscRing<TraceEvent, cfg::TRACE_RING_EVENTS> g_trace;
@@ -348,7 +349,8 @@ static void handleConsole() {
                                "b reboot to bootloader");
 #else
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
-                               "m mark, x short test (cable unplugged), b reboot to bootloader");
+                               "m mark, S SD card check, x short test (cable unplugged), "
+                               "b reboot to bootloader");
 #endif
                 break;
             case 'p': printPins(); break;
@@ -375,6 +377,9 @@ static void handleConsole() {
                 Serial.printf("# raw bus trace %s\n", on ? "on" : "off");
                 break;
             }
+#endif
+#if FIRMWARE_SLICE != 0
+            case 'S': sd_card::printInfo(Serial); break;
 #endif
             case 'b':
                 Serial.println("# rebooting to bootloader");
