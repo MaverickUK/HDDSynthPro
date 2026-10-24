@@ -77,7 +77,11 @@ CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
     sample = pio_sm_get(s_pio, s_sm);
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (bus::op(sample) == bus::Op::Write) {
-        dev.write(reg, bus::data(sample));
+        // A command only sets BSY here; core 1 runs it next (Device::queueCommand).
+        if (reg == ata::Reg::StatusCommand)
+            dev.queueCommand(uint8_t(bus::data(sample)));
+        else
+            dev.write(reg, bus::data(sample));
     } else {
         // Every read must be answered, or the PIO holds IORDY low forever.
         // The host waits until it is, so answer first and catch up after.

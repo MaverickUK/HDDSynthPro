@@ -147,6 +147,15 @@ public:
     // Host writes a register (only the low byte matters except for DATA).
     void write(Reg reg, uint16_t value);
 
+    // The bus layer's way in for a Command write: queueCommand() only sets BSY
+    // and keeps the command (nanoseconds), and runQueuedCommand() runs it as
+    // core 1's next job. A status poll straight after the write then sees BSY
+    // at once instead of waiting for the command to start, as with a real
+    // drive. write(StatusCommand, ...) does both at once.
+    void queueCommand(uint8_t command);
+    bool commandQueued() const { return command_queued_; }
+    void runQueuedCommand();
+
     // RESET# asserted (true) or released (false).
     void hardReset(bool asserted);
 
@@ -181,9 +190,12 @@ public:
     // The CHS translation in use: the default, or set by INITIALIZE DEVICE PARAMETERS.
     const Geometry& geometry() const { return geometry_; }
     bool standby() const { return standby_; }
+    // True mid-sector: the host is reading or writing the 256 words of a DRQ block.
+    bool transferring() const { return data_ != nullptr || receiving_; }
 
 private:
     bool device1Selected() const { return (device_ & DEV_DEV) != 0; }
+    bool acceptsCommand(uint8_t command) const;
     void resetToSignature();  // registers and status as after a reset
     void startCommand(uint8_t command);
     void startRead();
@@ -245,6 +257,8 @@ private:
     uint32_t fetch_id_ = 0;
 
     bool irq_pending_ = false;
+    bool command_queued_ = false;  // see queueCommand()
+    uint8_t queued_command_ = 0;
     bool in_reset_ = false;  // RESET# held or SRST set: BSY until released
     bool standby_ = false;   // after STANDBY; any media access wakes it
     bool waking_ = false;    // IDLE from standby: BSY until finishWake()

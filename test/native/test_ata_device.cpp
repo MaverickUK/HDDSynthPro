@@ -563,6 +563,7 @@ TEST(test_write_one_sector) {
     CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);
     CHECK(!d.intrq());
     CHECK_EQ(d.read(Reg::Data), 0);  // nothing to read during a write
+    CHECK(d.transferring());
     for (int i = 0; i < 255; ++i) d.write(Reg::Data, words[size_t(i)]);
     CHECK(h.altStatus() & ST_DRQ);
     d.write(Reg::Data, words[255]);
@@ -574,6 +575,7 @@ TEST(test_write_one_sector) {
     CHECK_EQ(f.lba, 100u);
     h.pump();
     CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);  // complete
+    CHECK(!d.transferring());
     CHECK(d.intrq());
     CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
     CHECK_EQ(d.lastCommand().command, CMD_WRITE_SECTORS);
@@ -937,6 +939,61 @@ TEST(test_power_commands) {
     }
 }
 
+TEST(test_queued_command) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    h.setLba(7, 1);
+    d.queueCommand(CMD_READ_SECTORS);
+    // At once: BSY, nothing started, no interrupt.
+    CHECK(d.commandQueued());
+    CHECK_EQ(h.altStatus(), ST_BSY | ST_DRDY | ST_DSC);
+    CHECK_EQ(d.commandsStarted(), 0u);
+    CHECK(!d.intrq());
+    d.write(Reg::LbaLow, 99);  // ignored while BSY
+    d.queueCommand(CMD_IDENTIFY_DEVICE);  // ignored while BSY
+    d.runQueuedCommand();
+    CHECK(!d.commandQueued());
+    CHECK_EQ(d.lastCommand().command, CMD_READ_SECTORS);
+    CHECK_EQ(d.lastCommand().lba, 7u);
+    std::vector<uint16_t> got;
+    CHECK(h.waitNotBusy());
+    CHECK(h.status() & ST_DRQ);
+    for (int i = 0; i < 256; ++i) got.push_back(d.read(Reg::Data));
+    CHECK(sameAsDisk(got, 7, 1));
+    d.runQueuedCommand();  // nothing queued: nothing happens
+    CHECK_EQ(d.commandsStarted(), 1u);
+}
+
+TEST(test_queued_command_rules) {
+    Device d(INFO);
+    VirtualHost h{d};
+    // Device 1 selected: not ours, except EXECUTE DEVICE DIAGNOSTIC.
+    h.select(1);
+    d.queueCommand(CMD_IDENTIFY_DEVICE);
+    CHECK(!d.commandQueued());
+    d.queueCommand(CMD_EXECUTE_DEVICE_DIAGNOSTIC);
+    CHECK(d.commandQueued());
+    d.runQueuedCommand();
+    CHECK_EQ(d.lastCommand().command, CMD_EXECUTE_DEVICE_DIAGNOSTIC);
+    // A soft or hard reset drops a queued command.
+    h.select(0);
+    d.queueCommand(CMD_IDENTIFY_DEVICE);
+    h.softReset();
+    CHECK(!d.commandQueued());
+    d.queueCommand(CMD_IDENTIFY_DEVICE);
+    d.write(Reg::AltStatusDevCtrl, DC_SRST);  // reset held: still dropped before release
+    CHECK(!d.commandQueued());
+    d.write(Reg::AltStatusDevCtrl, 0);
+    d.queueCommand(CMD_IDENTIFY_DEVICE);
+    d.hardReset(true);
+    d.hardReset(false);
+    CHECK(!d.commandQueued());
+    uint32_t started = d.commandsStarted();
+    d.runQueuedCommand();
+    CHECK_EQ(d.commandsStarted(), started);
+}
+
 TEST(test_reset_cancels_waking) {
     Device d(INFO);
     command(d, CMD_STANDBY_IMMEDIATE);
@@ -1037,6 +1094,8 @@ void runAtaDeviceTests() {
     RUN(test_read_verify);
     RUN(test_seek_and_recalibrate);
     RUN(test_power_commands);
+    RUN(test_queued_command);
+    RUN(test_queued_command_rules);
     RUN(test_reset_cancels_waking);
     RUN(test_set_multiple_mode_aborts);
     RUN(test_housekeeping_commands_complete_for_the_trace);

@@ -98,14 +98,14 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 ## Status
 
 - **Hardware (23 Oct 2026):** the board is wired and passes the solder-bridge test. On the drive build, the NS1081 sends IDENTIFY, SET FEATURES (PIO mode 0) and READ SECTORS, and macOS sees the 64 MB disk.
-- **On hardware (0.6.0):** slices 2, 3 and 4 and the activity test pass: a read/write PIO mode 0 disk (64 MB generated, writes in a 256 KB RAM overlay). Standby and wake work. Open: reads are held 0.4–1 µs typically; the worst, 1.28 µs, is around detection (ATA allows 1.25 µs, which slice 1 checks); each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
+- **On hardware (0.6.0):** slices 2, 3 and 4 and the activity test pass: a read/write PIO mode 0 disk (64 MB generated, writes in a 256 KB RAM overlay). Standby and wake work. Open: reads are held 0.4–1 µs typically; around detection the worst varies from 1.03 to 1.35 µs between replugs, cause unknown (ATA allows 1.25 µs, which slice 1 checks); each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
 - **Slice 0 (listen only):** runs on the board. Its rig test can't pass as written: the adapter never goes quiet without a drive.
 - **Slices 1–3: the `bb48_drive` build**, built, unit-tested and detected on hardware; the rig tests have not been run yet. It contains:
   - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and on hardware the slice 1 test checks that IORDY never holds a read past 1250 ns (`iordy_timer.pio`). `loop1()` serves the FIFO first and does one bookkeeping step at a time;
   - `ata_device`: IDENTIFY, READ SECTORS, DIAGNOSTIC, and the housekeeping commands bridges send during setup (SET FEATURES transfer mode, INITIALIZE DEVICE PARAMETERS, READ VERIFY, SEEK, RECALIBRATE, power commands, FLUSH CACHE). Everything else gets ABRT;
   - the generated disk, served through the mailbox.
 - **Next, to make PIO solid** (DMA, faster modes and clocks wait until then):
-  1. Bring the worst read under 1.25 µs: the status poll right after a command, around detection.
+  1. Bring the worst read under 1.25 µs. The outliers are around detection, not in traffic, and not the status poll after a command (0.6.1 ruled that out).
   2. Partition and format the disk from macOS (the 512-sector overlay may be too small for a format).
   3. An overnight soak of mixed reads and writes (slice 6's exit test), and repeated replugs.
   4. Add the adapter's probe sequence as a virtual-host test.

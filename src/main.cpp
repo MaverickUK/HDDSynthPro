@@ -117,15 +117,24 @@ CORE1_RAM void loop1() {
             if (g_trace_bus.load(std::memory_order_relaxed)) record(TraceKind::Bus, sample);
             continue;
         }
+        if (dev.commandQueued()) {  // a Command write: the first job, ahead of the rest
+            dev.runQueuedCommand();
+            ide_bus::updateIntrq(dev.intrq());
+            if (dev.commandsStarted() != started) {  // the trace's CMD line, as it starts
+                started = dev.commandsStarted();
+                command_start_us = time_us_32();
+                const ata::CommandInfo& c = dev.lastCommand();
+                record(commandStartEvent(command_start_us, c.command, c.lba, c.count));
+            }
+            continue;
+        }
+
+        // Mid-sector the host streams 256 words and nothing else can happen
+        // but a reset, so only RESET# is checked between them.
+        if (dev.transferring()) step = 4;
 
         switch (step) {
-            case 0:  // the trace's CMD and DONE lines, in that order
-                if (dev.commandsStarted() != started) {
-                    started = dev.commandsStarted();
-                    command_start_us = time_us_32();
-                    const ata::CommandInfo& c = dev.lastCommand();
-                    record(commandStartEvent(command_start_us, c.command, c.lba, c.count));
-                }
+            case 0:  // the trace's DONE line (commands only start from the queue, above)
                 if (dev.commandsCompleted() != completed) {
                     completed = dev.commandsCompleted();
                     uint32_t t = time_us_32();

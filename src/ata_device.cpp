@@ -30,6 +30,7 @@ CORE1_RAM void Device::resetToSignature() {
     data_count_ = data_index_ = 0;
     irq_pending_ = false;
     waking_ = false;
+    command_queued_ = false;
     // Abandon any read or write; a fetch still running on core 0 becomes stale.
     reading_ = false;
     writing_ = false;
@@ -59,6 +60,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
             in_reset_ = true;
             status_ = ST_BSY;
             irq_pending_ = false;
+            command_queued_ = false;
         } else if (was_srst) {
             in_reset_ = false;
             resetToSignature();
@@ -81,13 +83,32 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
         case Reg::LbaHigh: lba_high_ = v; break;
         case Reg::Device: device_ = v; break;
         case Reg::StatusCommand:
-            // Commands for the absent device 1 are not ours to run, except
-            // EXECUTE DEVICE DIAGNOSTIC, which both devices act on.
-            if (device1Selected() && v != CMD_EXECUTE_DEVICE_DIAGNOSTIC) return;
-            startCommand(v);
+            if (acceptsCommand(v)) startCommand(v);
             break;
         default: break;
     }
+}
+
+CORE1_RAM bool Device::acceptsCommand(uint8_t command) const {
+    // Not while BSY (the host must not write the command block then), and
+    // commands for the absent device 1 are not ours to run, except EXECUTE
+    // DEVICE DIAGNOSTIC, which both devices act on.
+    if (status_ & ST_BSY) return false;
+    return !device1Selected() || command == CMD_EXECUTE_DEVICE_DIAGNOSTIC;
+}
+
+CORE1_RAM void Device::queueCommand(uint8_t command) {
+    if (!acceptsCommand(command)) return;
+    queued_command_ = command;
+    command_queued_ = true;
+    status_ = ST_BSY | ST_DRDY | ST_DSC;
+    irq_pending_ = false;  // writing Command clears a pending interrupt
+}
+
+CORE1_RAM void Device::runQueuedCommand() {
+    if (!command_queued_) return;
+    command_queued_ = false;
+    startCommand(queued_command_);
 }
 
 CORE1_RAM void Device::hardReset(bool asserted) {
@@ -96,6 +117,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         status_ = ST_BSY;
         irq_pending_ = false;
         waking_ = false;
+        command_queued_ = false;
         device_control_ = 0;
         reading_ = false;
         writing_ = false;

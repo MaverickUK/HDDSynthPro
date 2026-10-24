@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.6.1] - 2026-10-24
+
+### Changed
+- **A Command write only sets BSY on the bus** (`Device::queueCommand`); core 1 runs the command as its next job (`runQueuedCommand`). A status poll straight after the write sees BSY at once, as with a real drive. `write(StatusCommand, ...)` still runs a command at once, for tests and other callers.
+- **Mid-sector, core 1 only serves the bus and watches RESET#.** While the host streams a DRQ block's 256 words (`Device::transferring()`), the other bookkeeping waits.
+- The trace's CMD line is recorded when the command starts, from the queue.
+
+### Measured on the rig
+- Slices 1–4 and the activity test pass. Slice 1's IORDY check passes on some replugs and not others: the worst read around detection varies from 1.03 to 1.35 µs between runs (ATA allows 1.25 µs). In heavy traffic it stays at about 1 µs. The cause of the detection outliers is not yet known; these changes didn't move them.
+
 ## [0.6.0] - 2026-10-24
 
 The drive is now a read/write IDE disk in PIO mode 0 (slice 4).
