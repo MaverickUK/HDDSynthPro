@@ -36,29 +36,13 @@ CORE1_RAM void Device::resetToSignature() {
     ++fetch_id_;
 }
 
-CORE1_RAM uint16_t Device::read(Reg reg) {
-    // ATA: with device 1 selected and absent, device 0 returns 00h for
-    // Status and Alternate Status, so the host sees "no device".
-    switch (reg) {
-        case Reg::Data: {
-            if (device1Selected() || !(status_ & ST_DRQ) || !data_) return 0;
-            uint16_t word = data_[data_index_++];
-            if (data_index_ >= data_count_) finishDataIn();
-            return word;
-        }
-        case Reg::ErrorFeatures: return error_;
-        case Reg::SectorCount: return sector_count_;
-        case Reg::LbaLow: return lba_low_;
-        case Reg::LbaMid: return lba_mid_;
-        case Reg::LbaHigh: return lba_high_;
-        case Reg::Device: return device_;
-        case Reg::StatusCommand:
-            if (device1Selected()) return 0;
-            irq_pending_ = false;  // reading Status acknowledges the interrupt
-            return status_;
-        case Reg::AltStatusDevCtrl:
-            return device1Selected() ? 0 : status_;  // no side effects
-        default: return 0;
+CORE1_RAM void Device::consumeRead(Reg reg) {
+    if (device1Selected()) return;  // device 0 answers 00h and keeps its state
+    if (reg == Reg::Data) {
+        if (!(status_ & ST_DRQ) || !data_) return;
+        if (++data_index_ >= data_count_) finishDataIn();
+    } else if (reg == Reg::StatusCommand) {
+        irq_pending_ = false;  // reading Status acknowledges the interrupt
     }
 }
 

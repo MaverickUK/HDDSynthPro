@@ -27,9 +27,6 @@
 #if FIRMWARE_SLICE == 0
 #include "ide_listen.h"
 #else
-#include <hardware/clocks.h>
-#include <hardware/structs/m33.h>
-
 #include "activity.h"
 #include "ata_device.h"
 #include "block_source.h"
@@ -89,9 +86,7 @@ CORE1_RAM void loop1() {
 #else
 
 static FetchMailbox g_mailbox;
-static std::atomic<bool> g_trace_bus{false};       // console `t`
-static std::atomic<uint32_t> g_read_max_cycles{0}; // longest a read waited for its answer (console `s`)
-static std::atomic<bool> g_read_max_reset{false};
+static std::atomic<bool> g_trace_bus{false};  // console `t`
 
 static const IdentifyInfo DRIVE_INFO{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
                                      gen_disk::DEFAULT_SECTORS};
@@ -99,39 +94,13 @@ static const IdentifyInfo DRIVE_INFO{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VE
 void setup1() {
     ide_bus::begin();
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so the two never race to claim a PIO
-    // The M33's cycle counter, to time reads: core 1 must answer one within
-    // about 1 us (host/tests/test_pio_bus_sim.py).
-    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;
-    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
-}
-
-// Serves one bus access if the PIO has one waiting. loop1() calls this
-// between each of its steps, so a read never waits for a whole pass.
-//
-// It also times reads. `last_empty` is the last moment the FIFO was seen
-// empty. Any access in the FIFO arrived after it, so the time from then until
-// a read's answer has gone back to the PIO is an upper bound on how long the
-// host waited. (While a read waits, the PIO pushes nothing behind it.)
-CORE1_RAM static void serveBus(ata::Device& dev, uint32_t& last_empty) {
-    uint32_t now = m33_hw->dwt_cyccnt;
-    uint32_t sample;
-    if (!ide_bus::serviceOnce(dev, sample)) {
-        last_empty = now;
-        return;
-    }
-    uint32_t done = m33_hw->dwt_cyccnt;
-    if (bus::op(sample) != bus::Op::Write) {  // serviceOnce answered it
-        uint32_t wait = done - last_empty;
-        if (wait > g_read_max_cycles.load(std::memory_order_relaxed))
-            g_read_max_cycles.store(wait, std::memory_order_relaxed);
-    }
-    if (ide_bus::idle()) last_empty = done;
-    if (g_trace_bus.load(std::memory_order_relaxed)) record(TraceKind::Bus, sample);
 }
 
 CORE1_RAM void loop1() {
-    // Never returns. Each pass does a little bookkeeping, with a bus check
-    // (serveBus) before every step.
+    // Never returns. The bus comes first: every access waiting in the FIFO is
+    // served back to back, and only when it is empty does core 1 do one small
+    // bookkeeping step before looking again. So a read waits for one step at
+    // most; iordy_timer.pio measures how long the host actually waits.
     static ata::Device dev(DRIVE_INFO);
     uint32_t started = dev.commandsStarted();
     uint32_t completed = dev.commandsCompleted();
@@ -140,63 +109,73 @@ CORE1_RAM void loop1() {
     uint32_t wake_start_us = 0;  // 0: not timing a wake
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
-    uint32_t last_empty = m33_hw->dwt_cyccnt;
+    unsigned step = 0;
 
     for (;;) {
-        if (g_read_max_reset.exchange(false, std::memory_order_relaxed))
-            g_read_max_cycles.store(0, std::memory_order_relaxed);
-
-        serveBus(dev, last_empty);
-        if (dev.commandsStarted() != started) {
-            started = dev.commandsStarted();
-            command_start_us = time_us_32();
-            const ata::CommandInfo& c = dev.lastCommand();
-            record(commandStartEvent(command_start_us, c.command, c.lba, c.count));
-        }
-        if (dev.commandsCompleted() != completed) {
-            completed = dev.commandsCompleted();
-            uint32_t t = time_us_32();
-            record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(),
-                                   t - command_start_us));
+        uint32_t sample;
+        if (ide_bus::serviceOnce(dev, sample)) {
+            if (g_trace_bus.load(std::memory_order_relaxed)) record(TraceKind::Bus, sample);
+            continue;
         }
 
-        // Sector fetches: post each once; results may complete a DRQ block.
-        serveBus(dev, last_empty);
-        ata::Fetch fetch;
-        if (dev.pendingFetch(fetch) && fetch.id != posted_fetch && g_mailbox.post(fetch))
-            posted_fetch = fetch.id;
-        serveBus(dev, last_empty);
-        FetchResult result;
-        if (g_mailbox.takeResult(result)) {
-            dev.fetchDone(result.id, result.ok);
-            ide_bus::updateIntrq(dev.intrq());
-        }
-        // Waking from standby: BSY for WAKE_BUSY_US, timed from when it was first seen.
-        if (!dev.waking()) {
-            wake_start_us = 0;
-        } else if (wake_start_us == 0) {
-            wake_start_us = time_us_32() | 1;  // never 0 while timing
-        } else if (time_us_32() - wake_start_us >= cfg::WAKE_BUSY_US) {
-            dev.finishWake();
-            ide_bus::updateIntrq(dev.intrq());
-        }
-
-        serveBus(dev, last_empty);
-        uint32_t pins = pinsAsSample();
-        bool low = !bus::high(pins, cfg::PIN_RESET_N);
-        if (low != reset_low) {
-            reset_low = low;
-            dev.hardReset(low);
-            if (!low) {
-                ide_bus::restart();  // drop anything left from the bus going dead
-                // Time only real traffic: while the host powers up, its strobes
-                // float low, which looks like one long read.
-                g_read_max_reset.store(true, std::memory_order_relaxed);
-                iordy_timer::requestReset();
+        switch (step) {
+            case 0:  // the trace's CMD and DONE lines, in that order
+                if (dev.commandsStarted() != started) {
+                    started = dev.commandsStarted();
+                    command_start_us = time_us_32();
+                    const ata::CommandInfo& c = dev.lastCommand();
+                    record(commandStartEvent(command_start_us, c.command, c.lba, c.count));
+                }
+                if (dev.commandsCompleted() != completed) {
+                    completed = dev.commandsCompleted();
+                    uint32_t t = time_us_32();
+                    record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(),
+                                           t - command_start_us));
+                }
+                break;
+            case 1: {  // a sector fetch, posted once
+                ata::Fetch fetch;
+                if (dev.pendingFetch(fetch) && fetch.id != posted_fetch && g_mailbox.post(fetch))
+                    posted_fetch = fetch.id;
+                break;
             }
-            ide_bus::updateIntrq(dev.intrq());
-            record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
+            case 2: {  // a fetch result, which may complete a DRQ block
+                FetchResult result;
+                if (g_mailbox.takeResult(result)) {
+                    dev.fetchDone(result.id, result.ok);
+                    ide_bus::updateIntrq(dev.intrq());
+                }
+                break;
+            }
+            case 3:  // waking from standby: BSY for WAKE_BUSY_US, timed from when it was first seen
+                if (!dev.waking()) {
+                    wake_start_us = 0;
+                } else if (wake_start_us == 0) {
+                    wake_start_us = time_us_32() | 1;  // never 0 while timing
+                } else if (time_us_32() - wake_start_us >= cfg::WAKE_BUSY_US) {
+                    dev.finishWake();
+                    ide_bus::updateIntrq(dev.intrq());
+                }
+                break;
+            default: {  // RESET#
+                uint32_t pins = pinsAsSample();
+                bool low = !bus::high(pins, cfg::PIN_RESET_N);
+                if (low != reset_low) {
+                    reset_low = low;
+                    dev.hardReset(low);
+                    if (!low) {
+                        ide_bus::restart();  // drop anything left from the bus going dead
+                        // Time only real traffic: while the host powers up, its
+                        // strobes float low, which looks like one long read.
+                        iordy_timer::requestReset();
+                    }
+                    ide_bus::updateIntrq(dev.intrq());
+                    record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
+                }
+                break;
+            }
         }
+        step = step == 4 ? 0 : step + 1;
     }
 }
 
@@ -267,11 +246,9 @@ static void printStats() {
                   (unsigned long)g_events.load(), (unsigned long)g_dropped.load(),
                   (unsigned long)g_stalls.load(), (unsigned)g_trace.size());
 #if FIRMWARE_SLICE != 0
-    // Cycles at clk_sys -> ns. Must stay under ~1070 ns (see setup1).
-    uint32_t ns = uint32_t(uint64_t(g_read_max_cycles.load()) * 1000000000ull / clock_get_hz(clk_sys));
     iordy_timer::poll();
-    Serial.printf(" read_max_ns=%lu iordy_slow=%lu iordy_max_ns=%lu", (unsigned long)ns,
-                  (unsigned long)iordy_timer::slowReads(), (unsigned long)iordy_timer::maxNs());
+    Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu", (unsigned long)iordy_timer::slowReads(),
+                  (unsigned long)iordy_timer::maxNs());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
@@ -336,7 +313,7 @@ static void handleConsole() {
                 Serial.println("# h help, p pins, s stats, m mark, x short test (cable unplugged), "
                                "b reboot to bootloader");
 #else
-                Serial.println("# h help, p pins, s stats, r reset read max, t raw bus trace on/off, "
+                Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
                                "m mark, x short test (cable unplugged), b reboot to bootloader");
 #endif
                 break;
@@ -357,10 +334,7 @@ static void handleConsole() {
                 break;
             case 's': printStats(); break;
 #if FIRMWARE_SLICE != 0
-            case 'r':
-                g_read_max_reset.store(true);
-                iordy_timer::reset();
-                break;
+            case 'r': iordy_timer::reset(); break;
             case 't': {
                 bool on = !g_trace_bus.load();
                 g_trace_bus.store(on);

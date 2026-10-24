@@ -18,9 +18,9 @@ from hddproto import trace
 
 pytestmark = pytest.mark.slice1
 
-# Core 1 must answer a read within ~1070 ns (test_pio_bus_sim.py); leave margin.
-# read_max_ns is the longest a read waited for its answer.
-READ_MAX_NS = 800
+# ATA lets IORDY hold a read for at most 1250 ns (tB). iordy_max_ns is the
+# longest hold, measured on the bus by iordy_timer.pio.
+IORDY_MAX_NS = 1250
 
 
 @pytest.fixture(autouse=True)
@@ -30,7 +30,7 @@ def drive_build(firmware_slice):
 
 def test_adapter_gets_past_detection(drive, rig, run_dir):
     replugs = int(os.environ.get("HDDPRO_REPLUGS", 20 if rig.automatic_replug else 1))
-    drive.send("r")  # reset the read-time maximum
+    drive.send("r")  # reset the read timings
     for n in range(replugs):
         mark = drive.mark()
         rig.replug()
@@ -45,6 +45,6 @@ def test_adapter_gets_past_detection(drive, rig, run_dir):
         assert not t.stalls and not t.dropped
 
     stats = drive.command("s", "STATS")
-    read_ns = int(re.search(r"read_max_ns=(\d+)", stats).group(1))
+    iordy_ns = int(re.search(r"iordy_max_ns=(\d+)", stats).group(1))
     print(stats)
-    assert read_ns < READ_MAX_NS, f"a read waited up to {read_ns} ns for its answer"
+    assert iordy_ns < IORDY_MAX_NS, f"IORDY held a read for {iordy_ns} ns"

@@ -121,7 +121,17 @@ public:
 
     // Host reads a register. Reading DATA during a data-in transfer returns
     // the next word; reading STATUS clears a pending interrupt.
-    uint16_t read(Reg reg);
+    uint16_t read(Reg reg) {
+        uint16_t value = peek(reg);
+        consumeRead(reg);
+        return value;
+    }
+
+    // read() in two halves, so the bus layer can answer the host first
+    // (peek: what the read returns, no side effects) and catch up afterwards
+    // (consumeRead: the next DATA word, or acknowledging the interrupt).
+    uint16_t peek(Reg reg) const;
+    void consumeRead(Reg reg);
 
     // Host writes a register (only the low byte matters except for DATA).
     void write(Reg reg, uint16_t value);
@@ -220,5 +230,25 @@ private:
     uint32_t commands_started_ = 0;
     uint32_t commands_completed_ = 0;
 };
+
+// Inline: on core 1 it sits between a read arriving and its answer.
+// ATA: with device 1 selected and absent, device 0 returns 00h for Status and
+// Alternate Status, so the host sees "no device".
+inline uint16_t Device::peek(Reg reg) const {
+    switch (reg) {
+        case Reg::Data:
+            if (device1Selected() || !(status_ & ST_DRQ) || !data_) return 0;
+            return data_[data_index_];
+        case Reg::ErrorFeatures: return error_;
+        case Reg::SectorCount: return sector_count_;
+        case Reg::LbaLow: return lba_low_;
+        case Reg::LbaMid: return lba_mid_;
+        case Reg::LbaHigh: return lba_high_;
+        case Reg::Device: return device_;
+        case Reg::StatusCommand:
+        case Reg::AltStatusDevCtrl: return device1Selected() ? 0 : status_;
+        default: return 0;
+    }
+}
 
 }  // namespace ata

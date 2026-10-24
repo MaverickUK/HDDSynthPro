@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.5.5] - 2026-10-24
+
+### Changed
+- **Core 1 puts the bus first.** It serves every access waiting in the FIFO back to back, and only when the FIFO is empty does it do one small bookkeeping step before looking again.
+- **Reads are answered before their side effects.** `Device::read()` is split into `peek()` (inline, no side effects) and `consumeRead()`. The bus layer hands `peek()`'s value to the PIO, then calls `consumeRead()`. The register is looked up from a 32-entry table instead of being decoded on every access.
+- Slice 1 checks the IORDY timer against ATA's 1250 ns (tB). Core 1's own `read_max_ns` estimate is gone, with its cycle-counter setup.
+
+### Measured on the rig
+- The longest read went from 3.7 µs to 1.79 µs (tight loop), then to 1.28 µs (lean read path). Typical reads are still over 400 ns: what is left is fixed overhead around core 1. The next step is DMA-fed data reads, which would bypass core 1.
+
 ## [0.5.4] - 2026-10-24
 
 ### Added

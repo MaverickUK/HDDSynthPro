@@ -17,7 +17,22 @@ static uint s_offset;
 
 static constexpr uint32_t DRIVEN_PINS = (0xFFFFu << cfg::PIN_DD0) | (1u << cfg::PIN_IORDY);
 
+// The register an access is for, looked up from its sample's DA2-0, CS0# and
+// CS1# bits (5 consecutive pins), so serviceOnce() needn't decode them.
+static_assert(cfg::PIN_CS0_N == cfg::PIN_DA0 + 3 && cfg::PIN_CS1_N == cfg::PIN_DA0 + 4,
+              "DA2-0, CS0#, CS1# must be consecutive");
+static constexpr unsigned REG_INDEX_SHIFT = bus::bitOf(cfg::PIN_DA0);
+static ata::Reg s_reg_for[32];
+
+static unsigned regIndex(uint32_t sample) { return (sample >> REG_INDEX_SHIFT) & 31u; }
+
 void begin() {
+    for (unsigned i = 0; i < 32; ++i) {
+        uint32_t sample = i << REG_INDEX_SHIFT;
+        bus::Block block = bus::block(sample);
+        s_reg_for[i] = ata::regFor(block == bus::Block::Command, block == bus::Block::Control,
+                                   bus::address(sample));
+    }
     for (unsigned pin = cfg::BUS_FIRST_PIN; pin <= cfg::BUS_LAST_PIN; ++pin) {
         if (pin == cfg::PIN_BOARD_LED) continue;
         gpio_init(pin);           // input until claimed below
@@ -59,14 +74,14 @@ void begin() {
 CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
     if (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) return false;
     sample = pio_sm_get(s_pio, s_sm);
-    bus::Block block = bus::block(sample);
-    ata::Reg reg = ata::regFor(block == bus::Block::Command, block == bus::Block::Control,
-                               bus::address(sample));
+    ata::Reg reg = s_reg_for[regIndex(sample)];
     if (bus::op(sample) == bus::Op::Write) {
         dev.write(reg, bus::data(sample));
     } else {
         // Every read must be answered, or the PIO holds IORDY low forever.
-        pio_sm_put(s_pio, s_sm, dev.read(reg));
+        // The host waits until it is, so answer first and catch up after.
+        pio_sm_put(s_pio, s_sm, dev.peek(reg));
+        dev.consumeRead(reg);
     }
     updateIntrq(dev.intrq());
     return true;
@@ -80,8 +95,6 @@ void restart() {
     pio_sm_exec(s_pio, s_sm, pio_encode_jmp(s_offset));
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
-
-CORE1_RAM bool idle() { return pio_sm_is_rx_fifo_empty(s_pio, s_sm); }
 
 CORE1_RAM void updateIntrq(bool asserted) { gpio_set_dir(cfg::PIN_INTRQ, asserted); }
 
