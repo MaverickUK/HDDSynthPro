@@ -30,7 +30,8 @@ def program(assemble):
 def make_sim(program, bypass_dior=True) -> PioSim:
     """Configured as src/ide_bus.cpp configures the state machine."""
     return PioSim(program, out_base=0, out_count=16, sideset_base=24, jmp_pin=DIOR_BIT,
-                  fifo_depth=4, tx_depth=4, bypass_mask=(1 << DIOR_BIT) if bypass_dior else 0)
+                  fifo_depth=4, tx_depth=4, bypass_mask=(1 << DIOR_BIT) if bypass_dior else 0,
+                  status_rx_below=4)
 
 
 def registers(values: dict):
@@ -121,6 +122,21 @@ def test_write_then_read_back(program):
     check_clean(run)
     check_read(run.results[2], 0x55)
     check_read(run.results[3], 0xAA)
+
+
+def test_sector_write_with_a_slow_core1(program):
+    # WRITE SECTORS: 256 data words back to back, while core 1 takes 1 us per
+    # access. Writes don't wait for an answer, so without flow control the
+    # FIFO fills and words are lost; IORDY must hold the host instead.
+    words = [(i * 7919) & 0xFFFF for i in range(256)]
+    core1 = Core1(200, registers({}), service_ns=1000)
+    accesses = [Access(True, "CMD", 0, w, hold_cs=True) for w in words]
+    run = run_host(make_sim(program), core1, accesses, tail_ns=10000)
+    check_clean(run)
+    assert [v for (_, _, v) in core1.writes] == words
+    waits = [r.wait_ns for r in run.results if r.wait_ns is not None]
+    assert waits, "the host never had to wait: the test isn't exercising flow control"
+    assert max(waits) < MODE0.iordy_max
 
 
 def test_core1_reply_budget(program):

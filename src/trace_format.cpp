@@ -50,6 +50,7 @@ const char* commandName(uint8_t command) {
         case 0xC4: return "READ_MULTIPLE";
         case 0xC8: return "READ_DMA";
         case 0x30: return "WRITE_SECTORS";
+        case 0x31: return "WRITE_SECTORS_NR";
         case 0xE7: return "FLUSH_CACHE";
         case 0xE5: case 0x98: return "CHECK_POWER";
         default: return "?";

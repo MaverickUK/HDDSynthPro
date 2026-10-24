@@ -56,7 +56,13 @@ Core 1 owns `ata::Device` and never waits. For a read:
 3. Core 0 fills the buffer from a `BlockSource` and posts the result.
 4. Core 1 calls `fetchDone()`, which sets DRQ, unless the id is stale after a reset.
 
-The device doesn't touch the buffer while BSY. Core 0 must never block for long: it serves fetches before and between trace prints, and only prints when USB serial has room. The SD card (slice 5) becomes another `BlockSource`.
+A write (WRITE SECTORS) runs the other way: DRQ first, the host writes 256 words into the buffer, then BSY and a `Fetch` with `store` set, which core 0 writes to the `BlockSource`.
+
+The device doesn't touch the buffer while BSY. Core 0 must never block for long: it serves fetches before and between trace prints, and only prints when USB serial has room.
+
+The disk is `RamOverlayDisk` over `GeneratedDisk`: writes stay in RAM, up to 512 sectors, until the board reboots. The SD card (slice 5) becomes another `BlockSource`.
+
+The bus program holds IORDY on a write while its RX FIFO is full, so a write burst can't outrun core 1. `ide_bus.pio` fills its PIO block's 32 instructions.
 
 ## Activity classification
 
@@ -92,13 +98,14 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 ## Status
 
 - **Hardware (23 Oct 2026):** the board is wired and passes the solder-bridge test. On the drive build, the NS1081 sends IDENTIFY, SET FEATURES (PIO mode 0) and READ SECTORS, and macOS sees the 64 MB disk.
-- **On hardware (0.5.3):** slice 3 passes (64 MB, 0.65 MB/s, no mismatches), and standby and wake work. Open: reads are held over 400 ns typically and 1.28 µs at worst (IORDY timer), against ATA's 1.25 µs, which slice 1 checks; next is DMA-fed data reads; each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
+- **On hardware (0.6.0):** slices 2, 3 and 4 and the activity test pass: a read/write PIO mode 0 disk (64 MB generated, writes in a 256 KB RAM overlay). Standby and wake work. Open: reads are held 0.4–1 µs typically; the worst, 1.28 µs, is around detection (ATA allows 1.25 µs, which slice 1 checks); each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
 - **Slice 0 (listen only):** runs on the board. Its rig test can't pass as written: the adapter never goes quiet without a drive.
 - **Slices 1–3: the `bb48_drive` build**, built, unit-tested and detected on hardware; the rig tests have not been run yet. It contains:
   - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and on hardware the slice 1 test checks that IORDY never holds a read past 1250 ns (`iordy_timer.pio`). `loop1()` serves the FIFO first and does one bookkeeping step at a time;
   - `ata_device`: IDENTIFY, READ SECTORS, DIAGNOSTIC, and the housekeeping commands bridges send during setup (SET FEATURES transfer mode, INITIALIZE DEVICE PARAMETERS, READ VERIFY, SEEK, RECALIBRATE, power commands, FLUSH CACHE). Everything else gets ABRT;
   - the generated disk, served through the mailbox.
-- **Next:** follow [docs/bringup.md](docs/bringup.md):
-  1. Add the adapter's probe sequence as a virtual-host test.
-  2. Run `PIO_ENV=bb48_drive scripts/rig.sh -m slice1`, then slices 2 and 3.
-  3. WRITE SECTORS and the RAM disk (slice 4) reuse the same handshake in the other direction.
+- **Next, to make PIO solid** (DMA, faster modes and clocks wait until then):
+  1. Bring the worst read under 1.25 µs: the status poll right after a command, around detection.
+  2. Partition and format the disk from macOS (the 512-sector overlay may be too small for a format).
+  3. An overnight soak of mixed reads and writes (slice 6's exit test), and repeated replugs.
+  4. Add the adapter's probe sequence as a virtual-host test.

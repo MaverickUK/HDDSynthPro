@@ -60,6 +60,7 @@ void begin() {
     sm_config_set_sideset_pins(&c, cfg::PIN_IORDY);
     sm_config_set_jmp_pin(&c, cfg::PIN_DIOR_N);
     sm_config_set_out_shift(&c, true, false, 32);  // `out` takes the low bits first
+    sm_config_set_mov_status(&c, STATUS_RX_LESSTHAN, 4);  // STATUS: room in the 4-deep RX FIFO
     pio_sm_init(s_pio, s_sm, s_offset, &c);
 
     // DIOR# skips the 2-cycle input synchroniser, so DD is released sooner

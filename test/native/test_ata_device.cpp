@@ -1,5 +1,6 @@
 // Tests for the ATA register file and command state machine (ata_device),
 // including a "virtual host" that plays a typical start-up probe.
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <thread>
@@ -22,10 +23,11 @@ struct VirtualHost {
     BlockSource* source = nullptr;  // stands in for core 0: serves fetches when polled
     uint32_t polls = 0;
 
-    // Core 0's share: fetch whatever the device is waiting for.
+    // Core 0's share: fetch (or store) whatever the device is waiting for.
     void pump() {
         Fetch f;
-        if (source && dev.pendingFetch(f)) dev.fetchDone(f.id, source->read(f.lba, f.buffer));
+        if (source && dev.pendingFetch(f))
+            dev.fetchDone(f.id, f.store ? source->write(f.lba, f.buffer) : source->read(f.lba, f.buffer));
     }
 
     uint8_t status() { return uint8_t(dev.read(Reg::StatusCommand)); }
@@ -86,6 +88,23 @@ struct VirtualHost {
         }
         if (!waitNotBusy()) return false;
         uint8_t st = altStatus();
+        return !(st & (ST_ERR | ST_DRQ));
+    }
+
+    // WRITE SECTORS the polled way, one DRQ block per sector; `words` holds
+    // 256 per sector. Returns false on an error or a missing data phase.
+    bool writeSectors(uint32_t lba, uint8_t count, const std::vector<uint16_t>& words) {
+        setLba(lba, count);
+        dev.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
+        int sectors = count ? count : 256;
+        for (int s = 0; s < sectors; ++s) {
+            if (!waitNotBusy()) return false;
+            uint8_t st = status();
+            if ((st & ST_ERR) || !(st & ST_DRQ)) return false;
+            for (int i = 0; i < 256; ++i) dev.write(Reg::Data, words[size_t(s) * 256 + size_t(i)]);
+        }
+        if (!waitNotBusy()) return false;
+        uint8_t st = status();
         return !(st & (ST_ERR | ST_DRQ));
     }
 
@@ -500,6 +519,173 @@ TEST(test_read_fetch_failure) {
     CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
 }
 
+// ---- WRITE SECTORS -------------------------------------------------------------
+
+static std::vector<uint16_t> pattern(uint32_t sectors, uint16_t seed) {
+    std::vector<uint16_t> words(size_t(sectors) * 256);
+    for (size_t i = 0; i < words.size(); ++i) words[i] = uint16_t(seed * 31 + i * 7);
+    return words;
+}
+
+TEST(test_overlay_disk) {
+    GeneratedDisk base;
+    static RamOverlayDisk<2> disk(base);
+    uint16_t got[256], want[256];
+    // Unwritten sectors read from the disk underneath.
+    CHECK(disk.read(5, got));
+    base.read(5, want);
+    CHECK(std::equal(got, got + 256, want));
+    // Written ones read back.
+    std::vector<uint16_t> a = pattern(1, 1), b = pattern(1, 2), c = pattern(1, 3);
+    CHECK(disk.write(5, a.data()));
+    CHECK(disk.write(9, b.data()));
+    CHECK(disk.read(5, got) && std::equal(got, got + 256, a.begin()));
+    CHECK(disk.read(9, got) && std::equal(got, got + 256, b.begin()));
+    // Full: a new sector is refused; one already held can still be rewritten.
+    CHECK(!disk.write(10, c.data()));
+    CHECK(disk.write(5, c.data()));
+    CHECK(disk.read(5, got) && std::equal(got, got + 256, c.begin()));
+    CHECK_EQ(disk.used(), 2u);
+    CHECK(!disk.write(base.sectors(), a.data()));  // past the end
+    // The generated disk itself is read-only.
+    CHECK(!base.write(5, a.data()));
+}
+
+TEST(test_write_one_sector) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<8> disk(base);
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> words = pattern(1, 7);
+    h.setLba(100, 1);
+    d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
+    // Ready for data at once, without an interrupt (ATA PIO data-out).
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);
+    CHECK(!d.intrq());
+    CHECK_EQ(d.read(Reg::Data), 0);  // nothing to read during a write
+    for (int i = 0; i < 255; ++i) d.write(Reg::Data, words[size_t(i)]);
+    CHECK(h.altStatus() & ST_DRQ);
+    d.write(Reg::Data, words[255]);
+    // The sector is in: BSY while core 0 stores it.
+    CHECK(h.altStatus() & ST_BSY);
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    CHECK(f.store);
+    CHECK_EQ(f.lba, 100u);
+    h.pump();
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);  // complete
+    CHECK(d.intrq());
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+    CHECK_EQ(d.lastCommand().command, CMD_WRITE_SECTORS);
+    CHECK_EQ(d.lastCommand().lba, 100u);
+
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(100, 1, got));
+    CHECK(got == words);
+}
+
+TEST(test_write_multiple_sectors_interrupt_each) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<8> disk(base);
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> words = pattern(3, 9);
+    h.setLba(2000, 3);
+    d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
+    CHECK(!d.intrq());  // no interrupt before the first block
+    for (int s = 0; s < 3; ++s) {
+        CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);
+        CHECK_EQ(d.intrq(), s > 0);  // each later block is announced
+        h.status();  // acknowledge
+        for (int i = 0; i < 256; ++i) d.write(Reg::Data, words[size_t(s) * 256 + size_t(i)]);
+        CHECK(h.altStatus() & ST_BSY);
+        h.pump();
+    }
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    CHECK(d.intrq());  // and the end of the command
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(2000, 3, got));
+    CHECK(got == words);
+    CHECK(h.readSectors(2003, 1, got));  // the next sector is untouched
+    CHECK(sameAsDisk(got, 2003, 1));
+}
+
+TEST(test_write_count_zero_means_256) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<256> disk(base);
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> words = pattern(256, 3);
+    CHECK(h.writeSectors(4096, 0, words));
+    CHECK_EQ(disk.used(), 256u);
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(4096, 0, got));
+    CHECK(got == words);
+}
+
+TEST(test_write_past_the_end) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<8> disk(base);
+    VirtualHost h{d, &disk};
+    h.setLba(INFO.total_sectors - 1, 2);
+    d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK(!(h.altStatus() & ST_DRQ));
+    CHECK_EQ(d.error(), ER_IDNF);
+    CHECK_EQ(disk.used(), 0u);
+}
+
+TEST(test_write_store_failure) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<1> disk(base);  // room for one sector only
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> words = pattern(2, 5);
+    CHECK(!h.writeSectors(300, 2, words));
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK_EQ(d.error(), ER_ABRT);
+    CHECK_EQ(d.read(Reg::LbaLow), 301 & 0xFF);  // where it failed
+    CHECK_EQ(d.read(Reg::LbaMid), 301 >> 8);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+    std::vector<uint16_t> got;  // the first sector made it
+    CHECK(h.readSectors(300, 1, got));
+    CHECK(std::equal(got.begin(), got.end(), words.begin()));
+}
+
+TEST(test_data_writes_outside_a_write_are_ignored) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<8> disk(base);
+    VirtualHost h{d, &disk};
+    for (int i = 0; i < 300; ++i) d.write(Reg::Data, 0xBEEF);
+    Fetch f;
+    CHECK(!d.pendingFetch(f));
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    CHECK_EQ(disk.used(), 0u);
+}
+
+TEST(test_reset_mid_write_makes_store_stale) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<8> disk(base);
+    VirtualHost h{d, &disk};
+    h.setLba(40, 2);
+    d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
+    for (int i = 0; i < 256; ++i) d.write(Reg::Data, uint16_t(i));
+    Fetch old;
+    CHECK(d.pendingFetch(old));
+    CHECK(old.store);
+    d.hardReset(true);  // the host resets while core 0 is still storing
+    d.hardReset(false);
+    Fetch f;
+    CHECK(!d.pendingFetch(f));
+    d.fetchDone(old.id, true);  // core 0 finishes late: ignored
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    for (int i = 0; i < 256; ++i) d.write(Reg::Data, 0xBEEF);  // no data phase now
+    CHECK(!d.pendingFetch(f));
+}
+
 TEST(test_reset_mid_read_makes_fetch_stale) {
     Device d(INFO);
     GeneratedDisk disk;
@@ -832,6 +1018,14 @@ void runAtaDeviceTests() {
     RUN(test_read_last_sector_and_past_the_end);
     RUN(test_read_chs);
     RUN(test_read_fetch_failure);
+    RUN(test_overlay_disk);
+    RUN(test_write_one_sector);
+    RUN(test_write_multiple_sectors_interrupt_each);
+    RUN(test_write_count_zero_means_256);
+    RUN(test_write_past_the_end);
+    RUN(test_write_store_failure);
+    RUN(test_data_writes_outside_a_write_are_ignored);
+    RUN(test_reset_mid_write_makes_store_stale);
     RUN(test_reset_mid_read_makes_fetch_stale);
     RUN(test_read_with_device1_selected_is_ignored);
     RUN(test_read_across_cores);

@@ -2,6 +2,28 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.6.0] - 2026-10-24
+
+The drive is now a read/write IDE disk in PIO mode 0 (slice 4).
+
+### Added
+- **WRITE SECTORS** (30h, and the obsolete 31h). The data-out handshake follows ATA:
+  - DRQ without an interrupt for the first sector;
+  - BSY while core 0 stores each sector;
+  - then DRQ and an interrupt for the next sector, or, after the last, completion with an interrupt.
+  - A store that fails ends the command with ABRT and the failing LBA in the task file.
+  - The handshake runs through the same `Fetch` and mailbox as reads, with `Fetch::store` set.
+- **A RAM overlay disk** (`RamOverlayDisk`, `src/block_source.h`): writes are kept in RAM on top of the generated disk, for up to 512 distinct sectors (256 KB, `cfg::RAM_DISK_SECTORS`). Everything else reads the generated pattern; a write to a new sector when the overlay is full fails. `BlockSource` gains `write()`.
+- **Write flow control in the bus program.** Writes don't wait for core 1, so a 256-word sector could outrun it and lose words. If the PIO's RX FIFO is full, IORDY now stays low until it has room, so the host waits instead.
+  - In simulation, a core 1 taking 1 µs per word lost 98 of 256 words before this change and none after; the longest IORDY hold is 906 ns.
+  - `ide_bus.pio` is now 32 instructions, a PIO block's whole instruction memory.
+- Slice 4 rig test (`-m slice4`): 1,000 write-then-read cycles of random data in a 256-sector window, a long write, and the sectors around the window unchanged. It writes the generated content back afterwards, so slice 3 still passes.
+- The PIO simulator models `mov x, status` (the RX FIFO level), and core 1 taking time over each access (`Core1(service_ns=...)`).
+
+### Measured on the rig
+- **Slice 4 passes:** 16,000 sectors written and read back at random, no mismatches, 0.5 MB/s each way.
+- **Slices 3 and 4 pass together.** Over about 245 million reads, the longest IORDY hold was 986 ns, inside ATA's 1250 ns. The 1.28 µs seen in 0.5.5 happens only around detection.
+
 ## [0.5.5] - 2026-10-24
 
 ### Changed

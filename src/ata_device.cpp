@@ -30,8 +30,10 @@ CORE1_RAM void Device::resetToSignature() {
     data_count_ = data_index_ = 0;
     irq_pending_ = false;
     waking_ = false;
-    // Abandon any read; a fetch still running on core 0 becomes stale.
+    // Abandon any read or write; a fetch still running on core 0 becomes stale.
     reading_ = false;
+    writing_ = false;
+    receiving_ = false;
     fetch_pending_ = false;
     ++fetch_id_;
 }
@@ -67,7 +69,11 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
     if (status_ & ST_BSY) return;
 
     switch (reg) {
-        case Reg::Data: break;  // no data-out commands yet
+        case Reg::Data:
+            if (!receiving_ || device1Selected()) break;  // no data-out phase: ignored
+            sector_[received_++] = value;
+            if (received_ >= SECTOR_WORDS) finishDataOut();
+            break;
         case Reg::ErrorFeatures: features_ = v; break;
         case Reg::SectorCount: sector_count_ = v; break;
         case Reg::LbaLow: lba_low_ = v; break;
@@ -92,6 +98,8 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         waking_ = false;
         device_control_ = 0;
         reading_ = false;
+        writing_ = false;
+        receiving_ = false;
         fetch_pending_ = false;
         ++fetch_id_;
         // A hardware reset (not a soft one) restores the power-on CHS translation.
@@ -128,6 +136,11 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
         case CMD_READ_SECTORS_NO_RETRY:
             standby_ = false;
             startRead();
+            break;
+        case CMD_WRITE_SECTORS:
+        case CMD_WRITE_SECTORS_NO_RETRY:
+            standby_ = false;
+            startWrite();
             break;
         case CMD_READ_VERIFY:
         case CMD_READ_VERIFY_NO_RETRY:
@@ -285,6 +298,27 @@ CORE1_RAM void Device::startRead() {
     requestFetch();
 }
 
+CORE1_RAM void Device::startWrite() {
+    uint32_t count = sector_count_ ? sector_count_ : 256;
+    uint32_t lba = 0;
+    if (!checkRange(count, lba)) return;
+    writing_ = true;
+    write_lba_ = lba;
+    write_left_ = count;
+    startDataOut();  // no interrupt before the first block
+}
+
+CORE1_RAM void Device::startDataOut() {
+    receiving_ = true;
+    received_ = 0;
+    status_ = ST_DRDY | ST_DSC | ST_DRQ;
+}
+
+CORE1_RAM void Device::finishDataOut() {
+    receiving_ = false;
+    requestFetch();  // BSY while core 0 stores the sector
+}
+
 CORE1_RAM void Device::requestFetch() {
     status_ = ST_BSY | ST_DRDY | ST_DSC;
     fetch_pending_ = true;
@@ -293,13 +327,29 @@ CORE1_RAM void Device::requestFetch() {
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
-    fetch = Fetch{fetch_id_, read_lba_, sector_};
+    fetch = Fetch{fetch_id_, writing_ ? write_lba_ : read_lba_, sector_, writing_};
     return true;
 }
 
 CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
     if (!fetch_pending_ || id != fetch_id_) return;  // stale: a reset came first
     fetch_pending_ = false;
+    if (writing_) {
+        if (!ok) {
+            setTaskFileLba(write_lba_);
+            fail(ER_ABRT);
+            return;
+        }
+        ++write_lba_;
+        if (--write_left_ > 0) {
+            startDataOut();
+            irq_pending_ = true;  // PIO data-out: interrupt when each later block is wanted
+        } else {
+            writing_ = false;
+            completeNoData();  // written: the command ends with an interrupt
+        }
+        return;
+    }
     if (!ok) {
         setTaskFileLba(read_lba_);
         reading_ = false;
@@ -333,6 +383,8 @@ CORE1_RAM void Device::fail(uint8_t error) {
     status_ = ST_DRDY | ST_DSC | ST_ERR;
     irq_pending_ = true;
     reading_ = false;
+    writing_ = false;
+    receiving_ = false;
     ++commands_completed_;
 }
 

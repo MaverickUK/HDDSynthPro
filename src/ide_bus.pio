@@ -6,6 +6,7 @@
 ;   SIDE-SET = GPIO28 (IORDY), as a pin direction: 1 = pull low, 0 = release.
 ;              Its output value is preset to 0, so the pin is never driven high.
 ;   JMP_PIN  = GPIO26 (DIOR#)
+;   STATUS   = all ones while the RX FIFO has room for another word
 ;
 ; The timing problem: IORDY must be low within 35 ns (tA) of DIOR# falling,
 ; or the host will not wait. Chip selects and DA2-0 are valid at least 70 ns
@@ -18,6 +19,9 @@
 ;   Read:  sample with DIOR# low. Core 1 must answer with one TX FIFO word,
 ;          the value to drive on DD0-15. IORDY stays low until it arrives.
 ;   Write: the last sample taken with DIOW# low (data valid). No reply.
+;          A write doesn't wait for core 1, so a burst (256 data words for
+;          WRITE SECTORS) can outrun it. If the RX FIFO is full, IORDY stays
+;          low until it has room: the host waits instead of words being lost.
 
 .pio_version 1
 .program ide_bus
@@ -40,7 +44,9 @@ armed:
     out x, 1                        ; DIOW# asserted?
     jmp !x armed
 write:
-    mov isr, pins           side 0  ; writes never wait: release IORDY
+    mov x, status                   ; room in the RX FIFO for this write?
+    jmp !x write                    ; not yet: IORDY stays low and the host waits
+    mov isr, pins           side 0  ; room: release IORDY
 write_low:
     mov y, pins                     ; keep sampling while DIOW# is low
     mov osr, ~y

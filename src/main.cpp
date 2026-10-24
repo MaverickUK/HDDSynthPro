@@ -179,8 +179,10 @@ CORE1_RAM void loop1() {
     }
 }
 
-// Core 0's share of the drive: fetch the sectors core 1 asks for.
-static GeneratedDisk g_disk;
+// Core 0's share of the drive: move the sectors core 1 asks for. The disk is
+// the generated one, with writes kept in a RAM overlay on top.
+static GeneratedDisk g_generated;
+static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_disk(g_generated);
 
 // Activity classification for the HDD Synth (activity.h), fed from the
 // command events on their way to the trace. Prints an ACT line on each change.
@@ -202,7 +204,7 @@ static void noteActivity(const TraceEvent& e) {
 static void serveFetches() {
     ata::Fetch fetch;
     while (g_mailbox.takeRequest(fetch)) {
-        bool ok = g_disk.read(fetch.lba, fetch.buffer);
+        bool ok = fetch.store ? g_disk.write(fetch.lba, fetch.buffer) : g_disk.read(fetch.lba, fetch.buffer);
         while (!g_mailbox.postResult(FetchResult{fetch.id, ok})) {}
     }
 }

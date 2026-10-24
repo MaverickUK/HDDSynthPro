@@ -54,13 +54,24 @@ class Result:
 
 
 class Core1:
-    """Core 1: answers reads after `latency_ns`, records writes."""
+    """Core 1: answers reads after `latency_ns`, records writes. With
+    `service_ns`, it takes at most one word from the RX FIFO per that long, as
+    the real one spends time on each access; otherwise it drains it at once."""
 
-    def __init__(self, latency_ns: float, read_value):
+    def __init__(self, latency_ns: float, read_value, service_ns: float = 0):
         self.latency_ps = int(latency_ns * 1000)
         self.read_value = read_value  # (block, addr) -> value
+        self.service_ps = int(service_ns * 1000)
         self.writes: list[tuple[str, int, int]] = []
         self._pending: list[tuple[int, int]] = []
+        self._busy_until = 0
+
+    def ready(self, t_ps: int) -> bool:
+        """True if core 1 can take a word now (and is then busy with it)."""
+        if t_ps < self._busy_until:
+            return False
+        self._busy_until = t_ps + self.service_ps
+        return True
 
     def on_word(self, t_ps: int, sample: int):
         block = {(1, 0): "CMD", (0, 1): "CTL"}.get(
@@ -217,7 +228,7 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
                     | (diow << B_DIOW) | ((0 if iordy_low else 1) << B_IORDY) | (1 << B_RESET))
             history.append(pins)
             sim.step(synced(history, k, sim.bypass_mask))
-            while sim.rx_fifo:
+            while sim.rx_fifo and core1.ready(t):
                 rx_words += 1
                 core1.on_word(t, sim.rx_fifo.pop(0))
             core1.deliver(t, sim)

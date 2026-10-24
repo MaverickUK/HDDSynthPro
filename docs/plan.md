@@ -129,8 +129,8 @@ Each slice ends in a passing automated test before the next starts.
 - **Slice 3: read from a generated disk.**
   - READ SECTORS from a disk whose content is computed from the LBA (64 MB). Sector count 0 means 256, and reads past the end fail cleanly.
   - **Exit:** a full-disk read and random reads with zero mismatches.
-- **Slice 4: write to a RAM disk.**
-  - WRITE SECTORS into a 256 KB RAM disk.
+- **Slice 4: write to a RAM disk.** Done in 0.6.0.
+  - WRITE SECTORS into a 256 KB RAM disk. **(amended)** It is an overlay on the 64 MB generated disk, so the disk keeps its size and slice 3 still applies; the bus program holds IORDY when a write burst outruns core 1.
   - **Exit:** 1,000 write-then-read cycles clean.
 - **Slice 5: image file on SD.**
   - FatFs in SPI mode, a contiguous image, every SD access under BSY.

@@ -7,7 +7,8 @@ built. Modelled:
   - side-set (optional, to pin values or directions), applied when an
     instruction issues, even if it then stalls;
   - OUT shifting right, PUSH/PULL with blocking, and joined or 4-deep FIFOs;
-  - WAIT on gpio/pin/jmppin, JMP conditions including pin.
+  - WAIT on gpio/pin/jmppin, JMP conditions including pin;
+  - MOV from STATUS, as the RX FIFO level test (EXECCTRL STATUS_SEL = RX).
 Anything else raises NotImplementedError rather than guessing.
 
 Pins use the sample layout of src/bus_sample.h throughout: bit n is GPIO
@@ -76,6 +77,9 @@ class PioSim:
     fifo_depth: int = 8          # 8 = RX (or TX) joined; the slice 1 program uses 4 each way
     tx_depth: int = 4
     bypass_mask: int = 0         # pins that skip the input synchroniser
+    # STATUS (for MOV): all ones while the RX FIFO holds fewer than this many
+    # words, else 0. None: the program isn't expected to read STATUS.
+    status_rx_below: int | None = None
     x: int = 0
     y: int = 0
     isr: int = 0
@@ -195,7 +199,12 @@ class PioSim:
 
         if opcode == 0b101:  # MOV
             dest, op, src = (instr >> 5) & 7, (instr >> 3) & 3, instr & 7
-            value = {0: pins, 1: self.x, 2: self.y, 3: 0, 6: self.isr, 7: self.osr}.get(src)
+            if src == 5:  # STATUS
+                if self.status_rx_below is None:
+                    raise NotImplementedError("mov from STATUS without status_rx_below")
+                value = MASK32 if len(self.rx_fifo) < self.status_rx_below else 0
+            else:
+                value = {0: pins, 1: self.x, 2: self.y, 3: 0, 6: self.isr, 7: self.osr}.get(src)
             if value is None:
                 raise NotImplementedError(f"mov source {src}")
             if op == 1:

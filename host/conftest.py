@@ -87,6 +87,17 @@ def raw_disk(drive):
 
 
 @pytest.fixture
+def raw_disk_rw(drive):
+    """The drive's raw device opened for reading and writing: (Disk, fd)."""
+    from hddproto import gen_disk
+    rig = MacHost(lambda m: print(f"\n>>> {m}"))
+    disk = rig.find_disk(gen_disk.DEFAULT_SECTORS * gen_disk.SECTOR_BYTES)
+    fd = rig.open_raw(disk, write=True)
+    yield disk, fd
+    os.close(fd)
+
+
+@pytest.fixture
 def ask(request):
     """Shows a message to the person at the rig, even while pytest captures output."""
     capman = request.config.pluginmanager.getplugin("capturemanager")

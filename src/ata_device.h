@@ -7,13 +7,20 @@
 // cable. ATA lets device 0 answer for an absent device 1, which this does:
 // see read() and write().
 //
-// Sector data comes from elsewhere (core 0: a generated disk now, the SD
-// card later). While it is being fetched the device shows BSY, as a real
-// drive does while it seeks:
+// Sector data lives elsewhere (core 0: a generated disk with a RAM overlay
+// now, the SD card later). While core 0 moves a sector the device shows BSY,
+// as a real drive does while it seeks.
+// Reads:
 //   1. A read command sets BSY and posts a Fetch (pendingFetch()).
 //   2. Core 0 fills fetch.buffer with the sector, then calls fetchDone().
 //   3. The device sets DRQ and the host reads the 256 words.
 //   4. Repeat per sector; the last one ends the command.
+// Writes (WRITE SECTORS) run the other way:
+//   1. The command sets DRQ (no interrupt) and the host writes 256 words.
+//   2. The device sets BSY and posts a Fetch with `store` set.
+//   3. Core 0 writes fetch.buffer to the disk, then calls fetchDone().
+//   4. DRQ and an interrupt for the next sector, or, after the last, the
+//      command completes with an interrupt.
 #pragma once
 
 #include <cstdint>
@@ -48,9 +55,9 @@ constexpr uint8_t ST_DRQ = 0x08;
 constexpr uint8_t ST_ERR = 0x01;
 
 // Error register bits
-constexpr uint8_t ER_UNC = 0x40;   // uncorrectable data error (the fetch failed)
+constexpr uint8_t ER_UNC = 0x40;   // uncorrectable data error (a read's fetch failed)
 constexpr uint8_t ER_IDNF = 0x10;  // address not found (out of range)
-constexpr uint8_t ER_ABRT = 0x04;  // command aborted (not supported)
+constexpr uint8_t ER_ABRT = 0x04;  // command aborted (not supported, or a write's store failed)
 
 // Device register bits
 constexpr uint8_t DEV_DEV = 0x10;  // 1 = device 1 (slave) selected
@@ -64,6 +71,8 @@ constexpr uint8_t DC_NIEN = 0x02;  // 1 = INTRQ disabled
 constexpr uint8_t CMD_RECALIBRATE = 0x10;  // 10h-1Fh: obsolete, all alike
 constexpr uint8_t CMD_READ_SECTORS = 0x20;
 constexpr uint8_t CMD_READ_SECTORS_NO_RETRY = 0x21;  // obsolete alias
+constexpr uint8_t CMD_WRITE_SECTORS = 0x30;
+constexpr uint8_t CMD_WRITE_SECTORS_NO_RETRY = 0x31;  // obsolete alias
 constexpr uint8_t CMD_READ_VERIFY = 0x40;
 constexpr uint8_t CMD_READ_VERIFY_NO_RETRY = 0x41;
 constexpr uint8_t CMD_SEEK = 0x70;  // 70h-7Fh: obsolete, all alike
@@ -97,13 +106,15 @@ constexpr uint8_t POWER_ACTIVE_OR_IDLE = 0xFF;
 
 constexpr uint16_t SECTOR_WORDS = 256;
 
-// A sector the device needs fetched. `id` changes with every request, so a
-// fetch that finishes after a reset (or a newer request) is recognised as
+// A sector the device needs core 0 to move: fetched into `buffer` for a read,
+// or stored from it for a write (`store`). `id` changes with every request,
+// so one that finishes after a reset (or a newer request) is recognised as
 // stale and ignored.
 struct Fetch {
     uint32_t id;
     uint32_t lba;
     uint16_t* buffer;  // SECTOR_WORDS words, in bus order (low byte first on disk)
+    bool store;        // true: write `buffer` to `lba`; false: fill it from `lba`
 };
 
 // What the trace reports about a command.
@@ -144,11 +155,11 @@ public:
 
     // ---- Sector fetches (handed to core 0) ---------------------------------
 
-    // True while a fetch is wanted; fills `fetch`. Stays true (same id)
-    // until fetchDone() or a reset.
+    // True while a fetch (or store) is wanted; fills `fetch`. Stays true
+    // (same id) until fetchDone() or a reset.
     bool pendingFetch(Fetch& fetch);
 
-    // Core 0 finished fetch `id`: the buffer is filled (ok) or the read failed.
+    // Core 0 finished fetch `id`: the sector was moved (ok), or it failed.
     void fetchDone(uint32_t id, bool ok);
 
     // ---- Waking from standby -------------------------------------------------
@@ -176,6 +187,7 @@ private:
     void resetToSignature();  // registers and status as after a reset
     void startCommand(uint8_t command);
     void startRead();
+    void startWrite();
     void readVerify();
     void seek();
     void setFeatures();
@@ -191,6 +203,8 @@ private:
     void complete();           // success, no data left
     void startDataIn(const uint16_t* words, uint16_t count);
     void finishDataIn();
+    void startDataOut();   // DRQ for the next sector of a write
+    void finishDataOut();  // all 256 words in: BSY while core 0 stores them
     void setTaskFileLba(uint32_t lba);  // where an error happened
 
     IdentifyInfo info_;
@@ -214,10 +228,19 @@ private:
     uint16_t data_count_ = 0;
     uint16_t data_index_ = 0;
 
+    // Data-out transfer (host to device), into sector_
+    bool receiving_ = false;
+    uint16_t received_ = 0;  // words of the current sector so far
+
     // Multi-sector read in progress
     bool reading_ = false;
     uint32_t read_lba_ = 0;       // next sector to fetch
     uint32_t read_left_ = 0;      // sectors not yet fetched
+    // Multi-sector write in progress
+    bool writing_ = false;
+    uint32_t write_lba_ = 0;      // next sector to store
+    uint32_t write_left_ = 0;     // sectors not yet stored
+
     bool fetch_pending_ = false;
     uint32_t fetch_id_ = 0;
 
