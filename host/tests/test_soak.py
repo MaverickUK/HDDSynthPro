@@ -2,8 +2,10 @@
   - random reads anywhere on the generated disk, compared with its pattern;
   - random writes into the RAM overlay window, each read back, with a shadow
     copy of the window checked whole at the end;
-  - now and then an idle pause long enough for the adapter to put the drive
-    in standby, so the next access has to wake it.
+  - every hour an 11-minute idle pause, with the raw device closed, long
+    enough for the drive to be put in standby (macOS's disk sleep is 10
+    minutes), so the next access has to wake it. The progress lines count
+    standbys and wakes. HDDPRO_SOAK_IDLE_EVERY_S and _IDLE_PAUSE_S change it.
 
 Every few minutes the drive's own view is checked as well: no failed
 commands, no resets, no lost trace events, and IORDY never holding a read
@@ -30,6 +32,7 @@ import pytest
 
 from conftest import require_build, require_generated_disk
 from hddproto import gen_disk, trace
+from hddproto.host_macos import MacHost
 
 pytestmark = pytest.mark.slice6
 
@@ -50,8 +53,12 @@ WINDOW_START = 100_000  # as in test_slice4.py
 WINDOW = 256
 IORDY_MAX_NS = 1250
 CHECK_EVERY_S = 300     # the drive's view
-IDLE_EVERY_S = 600      # a pause for the adapter's standby
-IDLE_PAUSE_S = 60       # it sends STANDBY after about 40 s of quiet
+# Idle pauses, for standby and wake. macOS's disk sleep (pmset disksleep) is
+# 10 minutes on the rig, so a pause has to be longer than that.
+IDLE_EVERY_S = float(os.environ.get("HDDPRO_SOAK_IDLE_EVERY_S", 3600))
+IDLE_PAUSE_S = float(os.environ.get("HDDPRO_SOAK_IDLE_PAUSE_S", 660))
+STANDBY_COMMANDS = (0xE0, 0xE2, 0x94, 0x96)  # STANDBY (IMMEDIATE), both opcodes
+WAKE_COMMANDS = (0xE1, 0x95)                 # IDLE IMMEDIATE
 
 
 def read(fd: int, lba: int, count: int) -> bytes:
@@ -104,12 +111,28 @@ def check_drive(drive, start_mark: int) -> str:
     assert not t.resets, f"the host reset the drive: {t.resets[:4]}"
     failed = [str(c) for c in t.commands if c.status is not None and not c.ok]
     assert not failed, f"failed commands: {failed[:5]}"
-    wakes = sum(1 for c in t.commands if c.command in (0xE1, 0x95))
-    return f"commands {len(t.commands)}, wakes {wakes}, IORDY max {iordy_ns} ns ({fields['iordy_max_reg']})"
+    standbys = sum(1 for c in t.commands if c.command in STANDBY_COMMANDS)
+    wakes = sum(1 for c in t.commands if c.command in WAKE_COMMANDS)
+    return (f"commands {len(t.commands)}, standbys {standbys}, wakes {wakes}, "
+            f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']})")
+
+
+def pause(disk, fd: int):
+    """An idle pause, long enough for the drive to be put in standby, with
+    the raw device closed so nothing on the Mac holds it. Meanwhile `fd`
+    points at /dev/null rather than being freed: another thread could take
+    a freed number. The device is then reopened on the same descriptor."""
+    placeholder = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(placeholder, fd)  # closes the raw device
+    os.close(placeholder)
+    time.sleep(IDLE_PAUSE_S)
+    reopened = MacHost(print).open_raw(disk, write=True)
+    os.dup2(reopened, fd)
+    os.close(reopened)
 
 
 def test_soak(raw_disk_rw, drive, run_dir):
-    _, fd = raw_disk_rw
+    disk, fd = raw_disk_rw
     minutes = float(os.environ.get("HDDPRO_SOAK_MINUTES", "60"))
     seed = int(os.environ.get("HDDPRO_SEED", time.time_ns() % 2**32))
     rng = random.Random(seed)
@@ -136,8 +159,9 @@ def test_soak(raw_disk_rw, drive, run_dir):
         while time.monotonic() < end:
             now = time.monotonic()
             if now >= next_idle:
-                time.sleep(IDLE_PAUSE_S)
-                next_idle = time.monotonic() + IDLE_EVERY_S
+                pause(disk, fd)
+                now = time.monotonic()
+                next_idle = now + IDLE_EVERY_S
             if now >= next_check:
                 summary = check_drive(drive, start_mark)
                 elapsed = (now - started) / 60

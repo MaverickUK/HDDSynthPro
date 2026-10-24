@@ -43,7 +43,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - `uhubctl` makes it re-enumerate but doesn't cut VBUS, so its IDE side doesn't restart. A fresh probe (RESET# and IDENTIFY) needs a physical replug; nothing the drive does can trigger one (see `CHANGELOG.md`, 0.6.2).
   - With no drive answering, it probes forever (about one access per µs), so the listen build drops events and the bus is never quiet.
   - It waits about 10 ms after each READ command before polling; later sectors of the same command are polled at once.
-  - After about 40 s idle it sends CHECK POWER MODE, then STANDBY if the drive says active. Waking (IDLE IMMEDIATE) must show BSY before the interrupt, or the adapter hangs.
+  - It sends CHECK POWER MODE, then STANDBY if the drive says active. What triggers it isn't settled: once it came straight after macOS probed a new disk, and a 60 s idle didn't trigger it (macOS's `disksleep` is 10 minutes). Waking (IDLE IMMEDIATE) must show BSY before the interrupt, or the adapter hangs.
   - It uses DMA with drives that support it. Its 44-pin header shares the bus with the 40-pin one, so the listen build on the 40-pin header can record a real drive on the 44-pin.
   - `host/rig.env` (git-ignored, from `rig.env.example`) holds the replug settings, and `scripts/rig.sh` loads it.
 - **Host OS:** the dev machine is macOS. There's no `O_DIRECT` (use `/dev/rdiskN`), no `dmesg` (use `log show`), and no ATA pass-through. OS-specific code stays in `host/hddproto/host_macos.py`; slice 6 adds a Linux host for pass-through.
