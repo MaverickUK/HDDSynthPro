@@ -2,6 +2,15 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.6.2] - 2026-10-24
+
+### Changed
+- **The IORDY timer names the slow read.** Each report carries the register the read was for (DA2–0, CS0#, CS1#, sampled as DIOR# falls), and console `s` adds `iordy_max_reg` and `iordy_max_at_us` (when core 0 collected the worst report). The PIO simulator models `in`.
+
+### Found on the rig
+- The worst read around detection is a DATA read (2.2 µs on one replug), not a status poll. An earlier marker also put a slow read at the start of IDENTIFY's data.
+- The NS1081 can't be made to re-detect the drive without a physical replug. A `uhubctl` replug doesn't reset its IDE side. A drive that only answers BSY makes it soft-reset at once. If the drive also ignores the soft reset, the adapter gives up on it until replugged.
+
 ## [0.6.1] - 2026-10-24
 
 ### Changed

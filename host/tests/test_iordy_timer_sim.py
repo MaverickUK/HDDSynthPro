@@ -1,6 +1,6 @@
 """Runs the real src/iordy_timer.pio in the simulator: a read that IORDY holds
-longer than the threshold is reported with its length; a quick one is not.
-No hardware needed."""
+longer than the threshold is reported with its length and its register; a
+quick one is not. No hardware needed."""
 from __future__ import annotations
 
 import pytest
@@ -16,6 +16,8 @@ NS = 1000  # ps
 DIOR = 1 << 22
 IORDY_BIT = 24
 IORDY = 1 << IORDY_BIT
+CS1 = 1 << 20      # CS1# high: a command-block access (with CS0# low)
+STATUS_ADDR = 7
 
 THRESHOLD_ITERATIONS = 30  # 2 cycles each: 400 ns at 150 MHz, as iordy_timer.cpp sets it
 
@@ -31,7 +33,7 @@ def read_held(start_ns: float, hold_ns: float):
     rises 150 ns after that."""
     def wave(t_ps: int) -> int:
         t = t_ps / NS
-        pins = DIOR | IORDY
+        pins = DIOR | IORDY | CS1 | (STATUS_ADDR << 16)
         if start_ns - 100 <= t < start_ns + hold_ns:
             pins &= ~IORDY
         if start_ns <= t < start_ns + hold_ns + 150:
@@ -42,12 +44,22 @@ def read_held(start_ns: float, hold_ns: float):
 
 def held_ns(word: int) -> float:
     """What iordy_timer.cpp makes of a report (its iterationsToNs)."""
-    iterations = THRESHOLD_ITERATIONS + word
-    return (2 * iterations + 2) * CYCLE_PS / NS
+    iterations = THRESHOLD_ITERATIONS + (0xFFFF - (word >> 16))
+    return (2 * iterations + 3) * CYCLE_PS / NS
+
+
+def register_bits(word: int) -> int:
+    """DA2-0, CS0#, CS1#: bits 16-20 of the sample, in the report's low bits."""
+    return word & 0x1F
+
+
+def make_sim(program) -> PioSim:
+    """Configured as src/iordy_timer.cpp configures the state machine."""
+    return PioSim(program, jmp_pin=IORDY_BIT, fifo_depth=4, tx_fifo=[THRESHOLD_ITERATIONS])
 
 
 def run_one(program, hold_ns: float) -> list[int]:
-    sim = PioSim(program, jmp_pin=IORDY_BIT, fifo_depth=4, tx_fifo=[THRESHOLD_ITERATIONS])
+    sim = make_sim(program)
     return pio_sim.run(sim, read_held(200, hold_ns), int((hold_ns + 1000) * NS))
 
 
@@ -62,12 +74,12 @@ def test_slow_read_is_timed(program, hold_ns):
     assert len(words) == 1
     # Within the input synchroniser and loop granularity: a few cycles.
     assert held_ns(words[0]) == pytest.approx(hold_ns, abs=30)
+    assert register_bits(words[0]) == STATUS_ADDR | 0x10  # STATUS: DA 7, CS0# low, CS1# high
 
 
 def test_each_slow_read_reported_once(program):
     def wave(t_ps: int) -> int:
         t = t_ps / NS
         return read_held(200, 900)(t_ps) if t < 1500 else read_held(2000, 600)(t_ps)
-    sim = PioSim(program, jmp_pin=IORDY_BIT, fifo_depth=4, tx_fifo=[THRESHOLD_ITERATIONS])
-    words = pio_sim.run(sim, wave, 4000 * NS)
+    words = pio_sim.run(make_sim(program), wave, 4000 * NS)
     assert [round(held_ns(w), -2) for w in words] == [900, 600]

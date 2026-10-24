@@ -4,19 +4,23 @@
 ; only reads pins, so it can run alongside ide_bus and never drives anything.
 ;
 ; Pin mapping (see iordy_timer.cpp):
+;   IN_BASE      = GPIO4 (DD0), as in bus_sample.h
 ;   wait gpio 26 = DIOR#
 ;   JMP_PIN      = GPIO28 (IORDY)
 ;
 ; Only reads slower than a threshold are reported, so the RX FIFO stays empty
 ; while all is well. The threshold, in loop iterations of 2 cycles, is put in
-; the TX FIFO once at start. Each report is the number of further 2-cycle
-; iterations IORDY stayed low.
+; the TX FIFO once at start. Each report is one word:
+;   bits 31-16  0xFFFF minus the further 2-cycle iterations IORDY stayed low
+;   bits 15-0   pin sample bits 31-16, taken as DIOR# fell: DA2-0 in bits
+;               2-0, CS0# in bit 3, CS1# in bit 4 (which register was read)
 
 .pio_version 1
 .program iordy_timer
     pull block              ; the threshold, once
 .wrap_target
     wait 0 gpio 26          ; DIOR# falls: the host starts a read
+    mov isr, pins           ; which register (kept for a report)
     mov y, osr
 fast:
     jmp pin done            ; IORDY high: the host has its data
@@ -26,7 +30,7 @@ slow:
     jmp pin report
     jmp x-- slow
 report:
-    mov isr, ~x             ; the iterations past the threshold
+    in x, 16                ; the count's low half on top of the register bits
     push noblock            ; a full FIFO drops it; core 0 drains it often
 done:
     wait 1 gpio 26          ; DIOR# rises

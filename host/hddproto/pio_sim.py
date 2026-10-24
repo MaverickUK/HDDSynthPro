@@ -6,7 +6,7 @@ built. Modelled:
   - the two-cycle input synchroniser, bypassable per pin;
   - side-set (optional, to pin values or directions), applied when an
     instruction issues, even if it then stalls;
-  - OUT shifting right, PUSH/PULL with blocking, and joined or 4-deep FIFOs;
+  - OUT and IN shifting right, PUSH/PULL with blocking, and joined or 4-deep FIFOs;
   - WAIT on gpio/pin/jmppin, JMP conditions including pin;
   - MOV from STATUS, as the RX FIFO level test (EXECCTRL STATUS_SEL = RX).
 Anything else raises NotImplementedError rather than guessing.
@@ -177,6 +177,16 @@ class PioSim:
                 raise NotImplementedError("wait irq")
             if ((pins >> bit) & 1) != polarity:
                 return False  # stall
+            self._advance()
+            return True
+
+        if opcode == 0b010:  # IN, shifting right: new bits enter at the top
+            src, count = (instr >> 5) & 7, (instr & 0x1F) or 32
+            value = {0: pins, 1: self.x, 2: self.y, 3: 0, 6: self.isr, 7: self.osr}.get(src)
+            if value is None:
+                raise NotImplementedError(f"in source {src}")
+            value &= (1 << count) - 1
+            self.isr = ((self.isr >> count) | (value << (32 - count))) & MASK32 if count < 32 else value
             self._advance()
             return True
 

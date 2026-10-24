@@ -258,8 +258,9 @@ static void printStats() {
                   (unsigned long)g_stalls.load(), (unsigned)g_trace.size());
 #if FIRMWARE_SLICE != 0
     iordy_timer::poll();
-    Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu", (unsigned long)iordy_timer::slowReads(),
-                  (unsigned long)iordy_timer::maxNs());
+    Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu iordy_max_reg=%s iordy_max_at_us=%lu",
+                  (unsigned long)iordy_timer::slowReads(), (unsigned long)iordy_timer::maxNs(),
+                  iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));

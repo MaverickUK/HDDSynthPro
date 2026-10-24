@@ -40,7 +40,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - It splits the ATA model at the first space into SCSI vendor/product, so match disks on diskutil's `IORegistryEntryName`, not `MediaName`.
   - A real CF card works through it.
   - It sits on port 4 of a Realtek RTS5411 hub that `uhubctl` controls; both USB 3 and USB 2 halves must be switched, and macOS needs `-e`.
-  - `uhubctl` makes it re-enumerate but doesn't cut VBUS, so its IDE side doesn't restart. A fresh probe (RESET# and IDENTIFY) needs a physical replug.
+  - `uhubctl` makes it re-enumerate but doesn't cut VBUS, so its IDE side doesn't restart. A fresh probe (RESET# and IDENTIFY) needs a physical replug; nothing the drive does can trigger one (see `CHANGELOG.md`, 0.6.2).
   - With no drive answering, it probes forever (about one access per µs), so the listen build drops events and the bus is never quiet.
   - It waits about 10 ms after each READ command before polling; later sectors of the same command are polled at once.
   - After about 40 s idle it sends CHECK POWER MODE, then STANDBY if the drive says active. Waking (IDLE IMMEDIATE) must show BSY before the interrupt, or the adapter hangs.
@@ -84,7 +84,7 @@ The Python parser is `host/hddproto/trace.py`; change both together.
 Console:
 - `h`: help, and the READY line with version and build;
 - `p`: pin levels (wiring check);
-- `s`: stats; on the drive build also `iordy_slow`/`iordy_max_ns` (reads IORDY held over 400 ns, and the longest, measured by `iordy_timer.pio`);
+- `s`: stats; on the drive build also `iordy_slow`/`iordy_max_ns`/`iordy_max_reg`/`iordy_max_at_us` (reads IORDY held over 400 ns, and the longest: how long, which register, when; measured by `iordy_timer.pio`);
 - `r`: reset the read timings (they also restart when the host releases RESET#);
 - `t`: raw bus trace on or off;
 - `m`: print a `MARK` timestamp (used by the activity rig test);
@@ -98,7 +98,7 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 ## Status
 
 - **Hardware (23 Oct 2026):** the board is wired and passes the solder-bridge test. On the drive build, the NS1081 sends IDENTIFY, SET FEATURES (PIO mode 0) and READ SECTORS, and macOS sees the 64 MB disk.
-- **On hardware (0.6.0):** slices 2, 3 and 4 and the activity test pass: a read/write PIO mode 0 disk (64 MB generated, writes in a 256 KB RAM overlay). Standby and wake work. Open: reads are held 0.4–1 µs typically; around detection the worst varies from 1.03 to 1.35 µs between replugs, cause unknown (ATA allows 1.25 µs, which slice 1 checks); each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
+- **On hardware (0.6.0):** slices 2, 3 and 4 and the activity test pass: a read/write PIO mode 0 disk (64 MB generated, writes in a 256 KB RAM overlay). Standby and wake work. Open: reads are held 0.4–1 µs typically; around detection the worst varies from 1.03 to 2.2 µs between replugs, on a DATA read early in IDENTIFY; cause unknown (ATA allows 1.25 µs, which slice 1 checks); each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
 - **Slice 0 (listen only):** runs on the board. Its rig test can't pass as written: the adapter never goes quiet without a drive.
 - **Slices 1–3: the `bb48_drive` build**, built, unit-tested and detected on hardware; the rig tests have not been run yet. It contains:
   - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and on hardware the slice 1 test checks that IORDY never holds a read past 1250 ns (`iordy_timer.pio`). `loop1()` serves the FIFO first and does one bookkeeping step at a time;
