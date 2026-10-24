@@ -46,6 +46,10 @@ constexpr unsigned TRACE_FLUSH_MS = 20;
 // card on the rig took about 25 us; a spinning disk takes seconds.
 constexpr uint32_t WAKE_BUSY_US = 50;
 
+// The BB48's LED is the drive's activity light: lit while a command runs, and
+// for at least this long, so a command of a few microseconds still shows.
+constexpr uint32_t LED_MIN_MS = 25;
+
 // The RAM overlay on the generated disk (block_source.h): how many distinct
 // sectors can be written, at 512 bytes each.
 constexpr size_t RAM_DISK_SECTORS = 512;

@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.7.1] - 2026-10-24
+
+### Added
+- **The BB48's LED (GPIO 25) is the drive's activity light**, like a hard disk's: lit while a command runs, and for at least 25 ms after any command starts (`cfg::LED_MIN_MS`), so a command of a few microseconds still shows. Core 1 counts commands as they start; core 0 drives the LED, so the bus loop gains two relaxed atomic stores per command.
+
+### Documentation
+- Brought the docs up to date with slices 4–5 on hardware: the README status, `docs/bringup.md` (the slice 1 IORDY limit, slice 4, the soak, an SD card section, the adapter's quirks), `docs/plan.md` (SD pins, slice status), `docs/wiring.md` (GPIO 25) and CLAUDE.md.
+
 ## [0.7.0] - 2026-10-24
 
 The drive's disk can now live on the SD card (slice 5): macOS formatted it, mounted it, and the files survived a power cycle.

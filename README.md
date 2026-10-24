@@ -16,15 +16,26 @@ The logo? The pro part is meant to be an IDE cable, with pin 1 being red :)
 
 <img src="media/prototype2.jpg" >
 
-Currently I'm creating a proof of concept on a BB48 dev board that exposes all of the GPIO lines of the RP2350 chip so that I'm able to hook them up to the IDE bus. Once this has resulted in working firmware, I'll move onto dedicated hardware design.
+Currently I'm creating a proof of concept on a BB48 dev board that exposes all of the GPIO lines of the RP2350 chip so that I'm able to hook them up to the IDE bus.
+
+<img src="media/success1.jpg" >
+
+<img src="media/success2.jpg" >
+
+Which means it's possible to create an emulated IDE drive mounted on an SD card.
 
 I'm not yet sure if this will exist alongside the original HDD Synth or will supersede it, time will tell
 
 ## Status
 
-Slice 0 (listen only): the firmware records every IDE register access and reset it sees, without driving any pin, and streams the trace over USB serial.
+The BB48 works as a read/write IDE hard disk (PIO mode 0) behind a USB-IDE adapter: the Mac sees it, partitions and formats it, and copies files to and from it.
 
-The drive build (`pio run -e bb48_drive`, slices 1–3) is ready for when the hardware arrives. It serves the bus and IDENTIFY, and reads sectors from a generated 64 MB disk. Its bus timing is proven in simulation; it has not run on hardware yet.
+- **The drive build** (`pio run -e bb48_drive`) serves `HDDSYNTH.IMG` from a microSD card as the disk, so files survive a power cycle. Without a card it serves a generated 64 MB test disk, with writes kept in RAM until reboot.
+- **Tested on hardware:** detection, IDENTIFY, reads, writes, standby and wake, and a 1-hour soak of mixed reads and writes (2.3 GB, no mismatches). Every read is answered within ATA's 1.25 µs limit.
+- **The board's LED** lights for drive activity, as a hard disk's would.
+- **Next:** an overnight soak, then speed (about 0.5 MB/s today), DMA and faster PIO modes.
+
+The listen-only build (`pio run -e bb48`) records every IDE register access it sees without driving any pin, for studying what a host does.
 
 ## Quick start
 
@@ -33,13 +44,14 @@ test/run_native_tests.sh                 # C++ unit tests (no hardware)
 cd host && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/pytest -m sim                  # simulator and parser tests (no hardware)
 
-pio run -t upload                        # build and flash the BB48
-pio device monitor                       # h help, p pin levels, s stats
+pio run -e bb48_drive -t upload          # build and flash the drive
+pio run -t upload                        # or the listen-only build
+pio device monitor                       # h help, p pin levels, s stats, S SD card
 
-scripts/rig.sh -m slice0                 # everything, against the real adapter
+PIO_ENV=bb48_drive scripts/rig.sh -m slice3   # tests, build, flash, rig test
 ```
 
-Read the power-order rule in [docs/wiring.md](docs/wiring.md) before connecting the adapter.
+Read the power-order rule in [docs/wiring.md](docs/wiring.md) before connecting the adapter. The SD card's wiring is in [docs/wiring-sd.html](docs/wiring-sd.html).
 
 ## Licence
 

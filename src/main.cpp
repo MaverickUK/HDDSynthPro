@@ -91,6 +91,11 @@ CORE1_RAM void loop1() {
 static FetchMailbox g_mailbox;
 static std::atomic<bool> g_trace_bus{false};  // console `t`
 
+// For the activity LED (core 0's updateLed): core 1 counts commands as they
+// start and says whether one is running.
+static std::atomic<uint32_t> g_command_starts{0};
+static std::atomic<bool> g_command_active{false};
+
 // The disk's size, set by core 0 once it has chosen the disk (setup()).
 // Core 1 starts first, so it waits for it: IDENTIFY reports the real size.
 static std::atomic<uint32_t> g_disk_sectors{0};
@@ -148,6 +153,8 @@ CORE1_RAM void loop1() {
                 command_start_us = time_us_32();
                 start_info = dev.lastCommand();
                 start_unrecorded = true;
+                g_command_starts.fetch_add(1, std::memory_order_relaxed);
+                g_command_active.store(true, std::memory_order_relaxed);
             }
             continue;
         }
@@ -163,6 +170,7 @@ CORE1_RAM void loop1() {
                     start_unrecorded = false;
                 } else if (dev.commandsCompleted() != completed) {
                     completed = dev.commandsCompleted();
+                    if (completed == started) g_command_active.store(false, std::memory_order_relaxed);
                     uint32_t t = time_us_32();
                     record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(),
                                            t - command_start_us));
@@ -222,6 +230,20 @@ static GeneratedDisk g_generated;
 static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_overlay(g_generated);
 static BlockSource* g_disk = &g_overlay;
 static const char* g_disk_name = "generated";
+
+// The BB48's LED as the drive's activity light, like a hard disk's: lit while
+// a command runs, and for at least LED_MIN_MS after any command starts.
+static void updateLed() {
+    static uint32_t seen = 0;
+    static uint32_t off_ms = 0;
+    uint32_t starts = g_command_starts.load(std::memory_order_relaxed);
+    uint32_t now = millis();
+    if (starts != seen || g_command_active.load(std::memory_order_relaxed)) {
+        seen = starts;
+        off_ms = now + cfg::LED_MIN_MS;
+    }
+    gpio_put(cfg::PIN_BOARD_LED, int32_t(off_ms - now) > 0);
+}
 
 static void chooseDisk() {
     if (ImageFile* file = sd_card::openImage(Serial)) {
@@ -417,6 +439,8 @@ static void handleConsole() {
 void setup() {
     Serial.begin(115200);
 #if FIRMWARE_SLICE != 0
+    gpio_init(cfg::PIN_BOARD_LED);
+    gpio_set_dir(cfg::PIN_BOARD_LED, true);
     chooseDisk();
 #endif
     printReady();
@@ -426,6 +450,7 @@ void loop() {
 #if FIRMWARE_SLICE != 0
     serveFetches();
     iordy_timer::poll();
+    updateLed();
 
     // Re-evaluate the activity state once a millisecond, before anything
     // below can return early on a busy serial link.

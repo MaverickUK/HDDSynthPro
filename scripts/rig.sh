@@ -9,7 +9,7 @@
 #   PIO_ENV=bb48_drive scripts/rig.sh -m "slice1 or slice2 or slice3"   # the drive build
 #
 # PIO_ENV picks the build: bb48 (default, listen only) for slice 0,
-# bb48_drive for slices 1-3. Tests that need the other build skip themselves.
+# bb48_drive for slice 1 onwards. Tests that need the other build skip themselves.
 # Rig settings (hands-free replugs etc.) come from host/rig.env if it exists:
 # see host/rig.env.example and host/hddproto/host_macos.py.
 set -euo pipefail

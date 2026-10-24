@@ -29,8 +29,8 @@ The Mac that builds the firmware also flashes it, talks to the drive through the
 |---|---|
 | Olimex RP2350-PICO2-BB48 on a Perma-Proto board | The emulated drive |
 | IDC breakout + IDE ribbon | Host connection, wired per [wiring.md](wiring.md) |
-| Adafruit SDIO microSD breakout + five 10 kΩ pull-ups | Image storage from slice 5 (GPIO 32–37) |
-| USB-IDE adapter with its own Molex power brick | The host under test |
+| Adafruit SPI/SDIO microSD breakout + five 10 kΩ pull-ups | Image storage from slice 5 (GPIO 34–39; see [wiring-sd.html](wiring-sd.html)) |
+| USB-IDE adapter (Norelsys NS1081; USB-powered, its brick only powers a real drive) | The host under test |
 | Mac (slices 0–5), Raspberry Pi 5 (slice 6) | Test runner, flashing, log capture |
 | Spare Pico 2 as a logic analyser (sigrok) | Bus traces when a test fails |
 
@@ -57,7 +57,7 @@ The original map put DD2/DD3 on GPIO 2/3, which the BB48 pulls up to 3.3 V for I
 
 ## Automation loop
 
-`scripts/rig.sh -m sliceN` runs the host unit tests, then builds, flashes and runs the rig tests. `PIO_ENV` picks the firmware: `bb48` (listen only) for slice 0, `bb48_drive` for slices 1–3. Every code change gets the full suite with no hands on the rig (once a switchable hub is fitted). A failing run leaves its evidence in `host/runs/`.
+`scripts/rig.sh -m sliceN` runs the host unit tests, then builds, flashes and runs the rig tests. `PIO_ENV` picks the firmware: `bb48` (listen only) for slice 0, `bb48_drive` for slice 1 onwards. Every code change gets the full suite with no hands on the rig (once a switchable hub is fitted). A failing run leaves its evidence in `host/runs/`.
 
 - **Flash:** `pio run -t upload` resets the board into the bootloader over serial and loads it with picotool. The runner then waits for the `READY` line. USB power stays on throughout.
 - **Replug:** if a hub is configured, `uhubctl` power-cycles the adapter's port; otherwise the test asks for a manual replug and waits for bus activity.
@@ -118,15 +118,16 @@ Each slice ends in a passing automated test before the next starts.
   - Every pin is an input under SIO control, so PIO cannot drive it.
   - The trace shows every access and reset.
   - **Exit:** a clean, repeatable trace of the adapter's probe sequence, saved with `--save-reference`.
-- **Slice 1: answer status.**
+  - **(amended)** Runs on the board, but the test can't pass as written: with no drive answering, the NS1081 probes forever and the trace drops events. The first few thousand events after RESET# are what's useful.
+- **Slice 1: answer status.** Done on hardware; reads are within ATA's limit since 0.6.3.
   - The register file, with status reads returning ready after reset, and soft reset through Device Control.
   - This is the first use of the IORDY read path.
-  - **Exit:** the adapter gets past detection on 20 replugs in a row.
-- **Slice 2: IDENTIFY DEVICE.**
+  - **Exit:** the adapter gets past detection on 20 replugs in a row. **(amended)** And IORDY never holds a read past ATA's 1250 ns (tB), measured by a second PIO program (`iordy_timer.pio`) rather than estimated from core 1's loop time.
+- **Slice 2: IDENTIFY DEVICE.** Done on hardware.
   - Model `HDDSYNTH PROTO`, LBA28 capacity, default CHS, PIO 0 only, IORDY, no DMA, no MULTIPLE.
   - The trace must show the same IDENTIFY sequence as the saved reference. Adapters can retry, and macOS can add commands, so this checks against the reference rather than for exactly one IDENTIFY. **(amended)**
   - **Exit:** a disk of the right capacity appears on 20 replugs out of 20.
-- **Slice 3: read from a generated disk.**
+- **Slice 3: read from a generated disk.** Done on hardware.
   - READ SECTORS from a disk whose content is computed from the LBA (64 MB). Sector count 0 means 256, and reads past the end fail cleanly.
   - **Exit:** a full-disk read and random reads with zero mismatches.
 - **Slice 4: write to a RAM disk.** Done in 0.6.0.
@@ -135,12 +136,12 @@ Each slice ends in a passing automated test before the next starts.
 - **Slice 5: image file on SD.** Done in 0.7.0.
   - FatFs in SPI mode, a contiguous image, every SD access under BSY. **(amended)** SdFat (bundled with Arduino-Pico) instead of FatFs; the card is on GPIO 34–39 so the same wiring later runs 4-bit SDIO.
   - **Exit:** the full file-system cycle passes and the image survives a power cycle.
-- **Slice 6: housekeeping commands and soak.** The housekeeping commands were pulled forward into 0.3.0, so a bridge's setup can't stall slice 2. They're unit-tested and still need checking against a real host. Slice 6 keeps the soak and the pass-through tests.
+- **Slice 6: housekeeping commands and soak.** The housekeeping commands were pulled forward into 0.3.0, so a bridge's setup can't stall slice 2. They're unit-tested and still need checking against a real host. Slice 6 keeps the soak and the pass-through tests. A 1-hour soak passed on 0.7.0 (2.3 GB, 79,309 commands, no mismatches, worst read 953 ns); the overnight run is next.
   - CHS addressing, INITIALIZE DEVICE PARAMETERS, SET FEATURES, READ VERIFY, SEEK, RECALIBRATE, EXECUTE DEVICE DIAGNOSTIC, IDLE, STANDBY, CHECK POWER MODE, FLUSH CACHE. Anything unknown gets ABRT.
   - Pass-through tests run from the Pi 5.
   - **Exit:** an overnight soak with zero mismatches and zero hangs.
 
-**After slice 3: activity classification.** Can the drive tell sequential from random activity, for the HDD Synth's sounds? The classifier and its tests are done; `-m activity` on the rig proves it on the generated disk. Real workloads (file copies, OS boots) follow once slices 4 and 5 give it a file system. See [activity.md](activity.md).
+**After slice 3: activity classification.** Can the drive tell sequential from random activity, for the HDD Synth's sounds? The classifier and its tests are done; `-m activity` on the rig proves it on the generated disk. Real workloads (file copies, OS boots) can follow now that slice 5 gives it a file system. See [activity.md](activity.md).
 
 ## Later layers
 

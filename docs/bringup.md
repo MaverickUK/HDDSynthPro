@@ -1,6 +1,6 @@
 # Bring-up checklist
 
-Hardware day, in order. Each step either passes or tells you what to fix before the next one. The wiring itself is in [wiring.md](wiring.md) and the [interactive diagram](wiring.html).
+Hardware day, in order; it is also the checklist for a rebuilt or rewired rig. Each step either passes or tells you what to fix before the next one. The wiring itself is in [wiring.md](wiring.md) and the [interactive diagram](wiring.html).
 
 You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter (USB-powered; its brick isn't needed), and a plain **BB48** (not the BB48R).
 
@@ -15,7 +15,7 @@ You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter
 ## 2. First power: BB48 only, IDE cable unplugged
 
 - [ ] Plug the BB48 into the Mac and flash the listen build: `pio run -e bb48 -t upload`.
-- [ ] Open the console: `pio device monitor`. Type `h`; it should answer `READY HDDSynthPro 0.5.0 slice0`.
+- [ ] Open the console: `pio device monitor`. Type `h`; it should answer `READY HDDSynthPro <version> slice0`.
 - [ ] **Solder-bridge test.** Type `x`, then `Y`. With the cable unplugged, every pin should read high on its pull-up, and pulling each one low should move no other pin.
   - `SHORTTEST OK 26 pins`: no solder bridges.
   - `SHORT GPIO9 (DD5) GPIO10 (DD6)`: those two are bridged. Fix it, then run the test again.
@@ -48,14 +48,34 @@ You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter
 
 ## 5. The drive build
 
-- [ ] Run `PIO_ENV=bb48_drive scripts/rig.sh -m slice1`. The adapter should get past detection on 20 replugs, and `read_max_ns` must stay under 800.
+- [ ] Run `PIO_ENV=bb48_drive scripts/rig.sh -m slice1`. The adapter should get past detection on 20 replugs, and IORDY must never hold a read past ATA's 1250 ns (`iordy_max_ns` in `s`, measured by the IORDY timer PIO program). About 1 µs around detection is normal.
 - [ ] Run `PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m slice2`. A 64 MB disk appears on every replug, and the trace shows IDENTIFY completing.
   - macOS will say the disk is not readable: choose **Ignore**.
-  - The first raw read asks for your password (`sudo chown` on `/dev/rdiskN`).
+  - The raw tests need `/dev/rdiskN` to be yours: run `sudo chown $USER /dev/rdiskN` after every replug.
 - [ ] Run `PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m slice3`. Full-disk and random reads with zero mismatches.
 - [ ] Run `PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m activity`. The drive tells sequential from random reads: each phase spends at least 90% of its time in the right state (see [activity.md](activity.md)).
+- [ ] Run `PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m slice4`. 1,000 write-then-read cycles in sectors 100,000–100,255 of the RAM overlay, with zero mismatches.
+- [ ] Run the soak: `HDDPRO_SOAK_MINUTES=60 PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m slice6`. Mixed random reads and writes, every byte checked. The exit test is overnight (`HDDPRO_SOAK_MINUTES=480`); add `HDDPRO_SOAK_MAX_ERRORS=5` to diagnose mismatches rather than stop at the first.
+- [ ] Watch the BB48's LED: it flickers with every command, like a hard disk's activity light.
+
+Slices 3 and 4 and the soak compare against the generated disk and write to it, so they skip when the drive serves an SD image. Run them with no `HDDSYNTH.IMG` on the card, or with the card out.
+
+## 6. The SD card
+
+Never format the card or touch its other files: the firmware only ever creates and uses `HDDSYNTH.IMG`.
+
+- [ ] Wire the breakout per [wiring-sd.html](wiring-sd.html): GPIO 34–39, with 10 kΩ pull-ups on CMD and DAT0–DAT3. Power the BB48 off while wiring.
+- [ ] On the drive build, type `S`. Expect `SD ok type=SDHC/SDXC size_mb=... fs=FAT32 image=none`. An `SD error` line gives SdFat's code: check the wiring, the pull-ups and that the card has a FAT or exFAT volume.
+- [ ] Type `I` to create `HDDSYNTH.IMG` (64 MB of zeros, about 50 s). It refuses if the file is already there or the card lacks room.
+- [ ] Reboot the BB48 and replug the adapter. `s` shows `disk=image`, and `S` shows `image=open`.
+- [ ] On the Mac, use Disk Utility to erase the new disk as MS-DOS (FAT) with a Master Boot Record. (`diskutil eraseDisk` from the terminal failed with "Couldn't open device"; Disk Utility works.)
+- [ ] Copy a file to the `HDDSYNTH` volume, eject it, power everything off and on in the right order, and check the file is intact.
 
 ## If something fails
+
+- **The adapter is stuck** (no disk after a replug, a loop of failed writes, or no bus activity after the Mac slept): only a physical replug of the adapter's USB resets it. `uhubctl` doesn't cut VBUS on this hub.
+- **Power order slipped** (the adapter powered while the BB48 was off): power the BB48, then replug the adapter.
+- **Data tests stall or fail** with the raw trace on: turn `t` off. It slows core 0's fetches enough to stall the adapter.
 
 - **Evidence.** Each failing test leaves a folder in `host/runs/` with the drive's trace, the macOS log and the disk list.
 - **Raw accesses.** On the drive build, type `t` to add raw register accesses to the trace, then replug.

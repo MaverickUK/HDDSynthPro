@@ -62,7 +62,7 @@ def drive(session_stamp):
 
 @pytest.fixture
 def firmware_slice(drive) -> int:
-    """Which build the board runs: 0 = listen only, 3 = the drive (slices 1-3)."""
+    """Which build the board runs: 0 = listen only, 3 = the drive (slices 1-5)."""
     return int(drive.ready.split()[-1].removeprefix("slice"))
 
 

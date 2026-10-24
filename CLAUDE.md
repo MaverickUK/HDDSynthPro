@@ -10,7 +10,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 
 - **Pins:** the pin map in `src/config.h`, `docs/wiring.md` and the tables in `docs/wiring.html` (IDE) and `docs/wiring-sd.html` (microSD), the interactive diagrams, must agree.
   - GPIO 0–3 stay off the bus: the BB48 pulls GPIO 2/3 up to 3.3 V (R17/R18).
-  - GPIO 25 is the LED.
+  - GPIO 25 is the LED: the drive build's activity light (core 0's `updateLed()`, `cfg::LED_MIN_MS`).
   - DD/DA/CS# must stay on consecutive pins (one PIO read).
 - **Never use internal pull-downs** (RP2350 erratum E9). The host provides the bus pulls.
 - **IORDY is open drain:** only pull it low or release it, never drive it high. The host pulls it up to 5 V.
@@ -22,7 +22,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 
 - **Build:** `pio run` (PlatformIO lives in `~/.platformio-venv/bin/pio` on the dev Mac). The board is `olimex_pico2bb48`. There are two builds, selected by `FIRMWARE_SLICE`:
   - `bb48` (0): listen only;
-  - `bb48_drive` (3): the drive, slices 1–3.
+  - `bb48_drive` (3): the drive, slices 1–5.
 
   `main.cpp` holds both. Rig tests skip unless the board runs the build they need, and `scripts/rig.sh` takes `PIO_ENV`.
   - The variant defines `PIN_LED` as a macro, so don't reuse Arduino pin-macro names for constants.
@@ -100,14 +100,15 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 ## Status
 
 - **Hardware (23 Oct 2026):** the board is wired and passes the solder-bridge test. On the drive build, the NS1081 sends IDENTIFY, SET FEATURES (PIO mode 0) and READ SECTORS, and macOS sees the 64 MB disk.
-- **On hardware (0.7.0):** slices 2–5 and the activity test pass: a read/write PIO mode 0 disk, either 64 MB generated with a 256 KB RAM overlay, or an image file on the SD card that macOS formats and that survives a power cycle. Standby and wake work. Open: reads are held 0.4–1 µs typically; the worst, around detection, is about 1 µs since 0.6.3 (ATA allows 1.25 µs, which slice 1 checks); each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
+- **On hardware (0.7.1):** slices 1–5, the activity test and a 1-hour soak (2.3 GB, no mismatches) pass: a read/write PIO mode 0 disk, either 64 MB generated with a 256 KB RAM overlay, or an image file on the SD card that macOS formats and that survives a power cycle. Standby and wake work, and the BB48's LED shows drive activity. Reads are held 0.4–1 µs typically; the worst, around detection, is about 1 µs since 0.6.3 (ATA allows 1.25 µs, which slice 1 checks). Each READ waits about 10 ms before the adapter polls. Throughput is about 0.5 MB/s; speeding it up is deferred. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
 - **Slice 0 (listen only):** runs on the board. Its rig test can't pass as written: the adapter never goes quiet without a drive.
-- **Slices 1–3: the `bb48_drive` build**, built, unit-tested and detected on hardware; the rig tests have not been run yet. It contains:
-  - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and on hardware the slice 1 test checks that IORDY never holds a read past 1250 ns (`iordy_timer.pio`). `loop1()` serves the FIFO first and does one bookkeeping step at a time;
-  - `ata_device`: IDENTIFY, READ SECTORS, DIAGNOSTIC, and the housekeeping commands bridges send during setup (SET FEATURES transfer mode, INITIALIZE DEVICE PARAMETERS, READ VERIFY, SEEK, RECALIBRATE, power commands, FLUSH CACHE). Everything else gets ABRT;
-  - the generated disk, served through the mailbox.
-- **Next, to make PIO solid** (DMA, faster modes and clocks wait until then):
-  1. Confirm the worst read stays under 1.25 µs over more replugs (0.6.3: about 1 µs).
-  2. Partition and format the disk from macOS (the 512-sector overlay may be too small for a format).
-  3. An overnight soak of mixed reads and writes (slice 6's exit test), and repeated replugs.
-  4. Add the adapter's probe sequence as a virtual-host test.
+- **The `bb48_drive` build** (slices 1–5) contains:
+  - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and on hardware the slice 1 test checks that IORDY never holds a read past 1250 ns (`iordy_timer.pio`). `loop1()` serves the FIFO first and does one bookkeeping step at a time. The program holds IORDY when a write burst outruns core 1;
+  - `ata_device`: IDENTIFY, READ and WRITE SECTORS, DIAGNOSTIC, and the housekeeping commands bridges send during setup (SET FEATURES transfer mode, INITIALIZE DEVICE PARAMETERS, READ VERIFY, SEEK, RECALIBRATE, power commands, FLUSH CACHE). Everything else gets ABRT;
+  - the disk, served through the mailbox: the SD image, or the generated disk with its RAM overlay.
+- **Next, to make PIO solid** (DMA, faster modes, clocks and throughput wait until then):
+  1. An overnight soak (slice 6's exit test), with `HDDPRO_SOAK_MINUTES=480` and `HDDPRO_SOAK_MAX_ERRORS` above 1 so a mismatch is diagnosed. It needs the generated disk: rename `HDDSYNTH.IMG` or take the card out. The 1-hour soak saw one unexplained transient mismatch in an earlier run.
+  2. Make the soak's idle pauses close the raw device, so the adapter actually sends STANDBY and the wake path is exercised.
+  3. SD follow-ups: boot with no card, a card removed or failing mid-use, FLUSH CACHE syncing the image file.
+  4. Add the adapter's probe sequence as a virtual-host test, and rework the slice 0 test around it.
+  5. Later: throughput (SPI clock, read-ahead), DMA, PIO modes 3–4, SDIO, then slice 6's pass-through tests from a Pi 5.
