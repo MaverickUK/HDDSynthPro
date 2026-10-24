@@ -4,6 +4,7 @@
 
 #include <hardware/clocks.h>
 #include <hardware/pio.h>
+#include <hardware/structs/busctrl.h>
 #include <pico/time.h>
 
 #include "bus_sample.h"
@@ -45,6 +46,10 @@ void begin(uint32_t threshold_ns) {
     s_threshold_iterations = uint32_t(cycles / 2);
     pio_sm_put(s_pio, s_sm, s_threshold_iterations);
     pio_sm_set_enabled(s_pio, s_sm, true);
+
+    busctrl_hw->counter[0].sel = BUSCTRL_PERFSEL0_VALUE_FASTPERI_ACCESS_CONTESTED;
+    busctrl_hw->counter[1].sel = BUSCTRL_PERFSEL0_VALUE_FASTPERI_STALL_UPSTREAM;
+    busctrl_hw->perfctr_en = 1;
     s_started.store(true, std::memory_order_release);
 }
 
@@ -68,6 +73,8 @@ uint32_t slowReads() { return s_slow; }
 uint32_t maxNs() { return s_max_iterations ? iterationsToNs(s_max_iterations) : 0; }
 const char* maxRegister() { return s_max_register; }
 uint32_t maxAtUs() { return s_max_at_us; }
+uint32_t contestedAccesses() { return busctrl_hw->counter[0].value; }
+uint32_t stallCycles() { return busctrl_hw->counter[1].value; }
 
 void requestReset() { s_reset_requested.store(true, std::memory_order_relaxed); }
 
@@ -76,6 +83,8 @@ void reset() {
     s_max_iterations = 0;
     s_max_register = "-";
     s_max_at_us = 0;
+    busctrl_hw->counter[0].value = 0;  // any write clears a counter
+    busctrl_hw->counter[1].value = 0;
 }
 
 }  // namespace iordy_timer

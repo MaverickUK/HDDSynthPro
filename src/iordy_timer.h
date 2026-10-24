@@ -1,6 +1,10 @@
 // Drive build: the iordy_timer PIO program, which times reads from the host's
 // side (how long IORDY holds each one) and reports the slow ones. Core 0
 // drains the reports; console `s` shows them and `r` clears them.
+//
+// Alongside, two bus fabric performance counters count contested accesses
+// and stall cycles on the fast peripheral bus (where the PIO is), to show
+// whether the other core, USB or DMA is delaying core 1's PIO accesses.
 #pragma once
 
 #include <cstdint>
@@ -21,6 +25,8 @@ uint32_t slowReads();
 uint32_t maxNs();
 const char* maxRegister();
 uint32_t maxAtUs();
+uint32_t contestedAccesses();  // fast peripheral bus, since the last reset
+uint32_t stallCycles();
 void reset();
 
 // Asks for a reset from either core; the next poll() does it.

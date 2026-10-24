@@ -6,3 +6,6 @@ host/runs/
 host/.venv/
 src/*.pio.h
 host/rig.env
+
+# Personal Claude Code settings
+.claude/settings.local.json

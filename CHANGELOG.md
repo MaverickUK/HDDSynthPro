@@ -2,6 +2,18 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.6.3] - 2026-10-24
+
+### Fixed
+- **The status poll straight after a command could wait up to 1.6 µs** (ATA allows 1.25 µs). The IORDY timer's register field showed it was always a STATUS read just after IDENTIFY or SET FEATURES.
+  - Core 1 now runs a queued command and goes straight back to the bus. The CMD trace line is recorded later, with the time taken when the command ran.
+  - Core 1 records at most one trace line per bookkeeping step, so a fast command's CMD and DONE lines no longer come back to back.
+  - On the rig the worst read around detection is now 993–1006 ns over the last replugs, down from 1.03–2.2 µs.
+
+### Changed
+- Core 1 has high priority on the bus fabric (`BUSCTRL_BUS_PRIORITY`), so core 0's USB and other traffic can't delay its PIO accesses.
+- Console `s` adds `bus_contested` and `bus_stalls`: contested accesses and stall cycles on the fast peripheral bus (where the PIO is), from the bus fabric's performance counters. They reset with the read timings. During detection they total about 3,000 stall cycles (20 µs), too few to matter.
+
 ## [0.6.2] - 2026-10-24
 
 ### Changed

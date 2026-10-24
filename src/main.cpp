@@ -27,6 +27,8 @@
 #if FIRMWARE_SLICE == 0
 #include "ide_listen.h"
 #else
+#include <hardware/structs/busctrl.h>
+
 #include "activity.h"
 #include "ata_device.h"
 #include "block_source.h"
@@ -94,6 +96,13 @@ static const IdentifyInfo DRIVE_INFO{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VE
 void setup1() {
     ide_bus::begin();
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so the two never race to claim a PIO
+    // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
+    // delay its PIO accesses while the host waits on a read.
+    busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
+}
+
+CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
+    record(commandStartEvent(t_us, c.command, c.lba, c.count));
 }
 
 CORE1_RAM void loop1() {
@@ -105,6 +114,8 @@ CORE1_RAM void loop1() {
     uint32_t started = dev.commandsStarted();
     uint32_t completed = dev.commandsCompleted();
     uint32_t command_start_us = 0;
+    ata::CommandInfo start_info{};  // the command whose CMD line is still to record
+    bool start_unrecorded = false;
     uint32_t posted_fetch = 0;
     uint32_t wake_start_us = 0;  // 0: not timing a wake
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
@@ -118,13 +129,19 @@ CORE1_RAM void loop1() {
             continue;
         }
         if (dev.commandQueued()) {  // a Command write: the first job, ahead of the rest
+            // The host polls status about 1 us after writing a command, so run
+            // it and get back to the bus; its CMD line waits for step 0.
+            if (start_unrecorded) {  // rare: two commands with no quiet moment between
+                recordCommandStart(command_start_us, start_info);
+                start_unrecorded = false;
+            }
             dev.runQueuedCommand();
             ide_bus::updateIntrq(dev.intrq());
-            if (dev.commandsStarted() != started) {  // the trace's CMD line, as it starts
+            if (dev.commandsStarted() != started) {
                 started = dev.commandsStarted();
                 command_start_us = time_us_32();
-                const ata::CommandInfo& c = dev.lastCommand();
-                record(commandStartEvent(command_start_us, c.command, c.lba, c.count));
+                start_info = dev.lastCommand();
+                start_unrecorded = true;
             }
             continue;
         }
@@ -134,8 +151,11 @@ CORE1_RAM void loop1() {
         if (dev.transferring()) step = 4;
 
         switch (step) {
-            case 0:  // the trace's DONE line (commands only start from the queue, above)
-                if (dev.commandsCompleted() != completed) {
+            case 0:  // the trace's CMD and DONE lines, in that order, at most one per pass
+                if (start_unrecorded) {
+                    recordCommandStart(command_start_us, start_info);
+                    start_unrecorded = false;
+                } else if (dev.commandsCompleted() != completed) {
                     completed = dev.commandsCompleted();
                     uint32_t t = time_us_32();
                     record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(),
@@ -261,6 +281,8 @@ static void printStats() {
     Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu iordy_max_reg=%s iordy_max_at_us=%lu",
                   (unsigned long)iordy_timer::slowReads(), (unsigned long)iordy_timer::maxNs(),
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
+    Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
+                  (unsigned long)iordy_timer::stallCycles());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
