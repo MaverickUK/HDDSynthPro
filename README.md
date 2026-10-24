@@ -1,6 +1,6 @@
 # HDD Synth Pro
 
-<img src="media/HDDSynthProWide.png" alt="HDD Synth Pro logo" width="300" align="left">
+<img src="media/HDDSynthProWide3.png" alt="HDD Synth Pro logo" width="300" align="left">
 
 An RP2350 that pretends to be an IDE hard disk, as the base for a future HDD Synth that *is* the drive rather than one that listens to it.
 
@@ -9,6 +9,16 @@ At this stage it is a proof of concept on an Olimex RP2350-PICO2-BB48, tested th
 The logo? The pro part is meant to be an IDE cable, with pin 1 being red :)
 
 <br clear="left">
+
+## Prototyping
+
+<img src="media/prototype1.jpg" >
+
+<img src="media/prototype2.jpg" >
+
+Currently I'm creating a proof of concept on a BB48 dev board that exposes all of the GPIO lines of the RP2350 chip so that I'm able to hook them up to the IDE bus. Once this has resulted in working firmware, I'll move onto dedicated hardware design.
+
+I'm not yet sure if this will exist alongside the original HDD Synth or will supersede it, time will tell
 
 ## Status
 
