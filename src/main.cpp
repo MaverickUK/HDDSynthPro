@@ -91,10 +91,14 @@ CORE1_RAM void loop1() {
 static FetchMailbox g_mailbox;
 static std::atomic<bool> g_trace_bus{false};  // console `t`
 
-static const IdentifyInfo DRIVE_INFO{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
-                                     gen_disk::DEFAULT_SECTORS};
+// The disk's size, set by core 0 once it has chosen the disk (setup()).
+// Core 1 starts first, so it waits for it: IDENTIFY reports the real size.
+static std::atomic<uint32_t> g_disk_sectors{0};
 
 void setup1() {
+    // Until core 0 has chosen the disk the bus pins stay inputs, so the host
+    // sees no drive for that moment (well under a second with an SD card).
+    while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
     ide_bus::begin();
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so the two never race to claim a PIO
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
@@ -111,7 +115,8 @@ CORE1_RAM void loop1() {
     // served back to back, and only when it is empty does core 1 do one small
     // bookkeeping step before looking again. So a read waits for one step at
     // most; iordy_timer.pio measures how long the host actually waits.
-    static ata::Device dev(DRIVE_INFO);
+    static ata::Device dev(IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
+                                        g_disk_sectors.load(std::memory_order_acquire)});
     uint32_t started = dev.commandsStarted();
     uint32_t completed = dev.commandsCompleted();
     uint32_t command_start_us = 0;
@@ -211,8 +216,23 @@ CORE1_RAM void loop1() {
 
 // Core 0's share of the drive: move the sectors core 1 asks for. The disk is
 // the generated one, with writes kept in a RAM overlay on top.
+// The disk is HDDSYNTH.IMG on the SD card if it is there (slice 5), else the
+// generated one with writes kept in a RAM overlay on top.
 static GeneratedDisk g_generated;
-static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_disk(g_generated);
+static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_overlay(g_generated);
+static BlockSource* g_disk = &g_overlay;
+static const char* g_disk_name = "generated";
+
+static void chooseDisk() {
+    if (ImageFile* file = sd_card::openImage(Serial)) {
+        static ImageDisk image(*file);
+        if (image.sectors() > 0) {
+            g_disk = &image;
+            g_disk_name = "image";
+        }
+    }
+    g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);
+}
 
 // Activity classification for the HDD Synth (activity.h), fed from the
 // command events on their way to the trace. Prints an ACT line on each change.
@@ -234,7 +254,7 @@ static void noteActivity(const TraceEvent& e) {
 static void serveFetches() {
     ata::Fetch fetch;
     while (g_mailbox.takeRequest(fetch)) {
-        bool ok = fetch.store ? g_disk.write(fetch.lba, fetch.buffer) : g_disk.read(fetch.lba, fetch.buffer);
+        bool ok = fetch.store ? g_disk->write(fetch.lba, fetch.buffer) : g_disk->read(fetch.lba, fetch.buffer);
         while (!g_mailbox.postResult(FetchResult{fetch.id, ok})) {}
     }
 }
@@ -284,6 +304,7 @@ static void printStats() {
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
+    Serial.printf(" disk=%s sectors=%lu", g_disk_name, (unsigned long)g_disk->sectors());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
@@ -349,7 +370,7 @@ static void handleConsole() {
                                "b reboot to bootloader");
 #else
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
-                               "m mark, S SD card check, x short test (cable unplugged), "
+                               "m mark, S SD card check, I create SD image, x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
                 break;
@@ -380,6 +401,7 @@ static void handleConsole() {
 #endif
 #if FIRMWARE_SLICE != 0
             case 'S': sd_card::printInfo(Serial); break;
+            case 'I': sd_card::createImage(gen_disk::DEFAULT_SECTORS, Serial); break;
 #endif
             case 'b':
                 Serial.println("# rebooting to bootloader");
@@ -394,6 +416,9 @@ static void handleConsole() {
 
 void setup() {
     Serial.begin(115200);
+#if FIRMWARE_SLICE != 0
+    chooseDisk();
+#endif
     printReady();
 }
 

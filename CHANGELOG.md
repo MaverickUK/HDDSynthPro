@@ -2,6 +2,23 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.7.0] - 2026-10-24
+
+The drive's disk can now live on the SD card (slice 5): macOS formatted it, mounted it, and the files survived a power cycle.
+
+### Added
+- **A disk image on the SD card, `HDDSYNTH.IMG`.** At boot core 0 mounts the card and, if the image is there, serves it as the disk (`ImageDisk`, over the `ImageFile` interface; SdFat over SPI underneath). Without a card or an image the drive uses the generated disk with its RAM overlay, as before.
+  - Core 1 waits at boot for core 0 to choose the disk, so IDENTIFY reports the image's real size. Until then the bus pins stay inputs.
+  - Console `s` shows `disk=image|generated` and `sectors=`; `S` adds `image=open|present|none`.
+- **Console `I`** creates `HDDSYNTH.IMG`: 64 MB, one contiguous run, zero-filled (about 50 s). It refuses if the file exists or the card lacks room, and never touches any other file. The card's other contents are never formatted, deleted or changed.
+- Host tests for `ImageDisk`: byte order, the last sector, out-of-range access, SD errors as failed fetches, and a write-then-read through the drive.
+
+### Changed
+- Slice 3, slice 4 and the soak skip when the drive serves an image. Their reads compare against the generated pattern, and slice 4 and the soak write to sectors 100,000–100,255, which would corrupt a formatted image. The read-write raw-disk fixture refuses an image outright.
+
+### On the rig
+- macOS partitioned and formatted the image (MBR, FAT32), mounted `HDDSYNTH`, and two files written to it, one a byte-exact copy of the README, were intact after a full power cycle. Worst read throughout: 993 ns.
+
 ## [0.6.4] - 2026-10-24
 
 The first step of slice 5: the microSD card answers.

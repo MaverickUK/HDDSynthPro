@@ -132,8 +132,8 @@ Each slice ends in a passing automated test before the next starts.
 - **Slice 4: write to a RAM disk.** Done in 0.6.0.
   - WRITE SECTORS into a 256 KB RAM disk. **(amended)** It is an overlay on the 64 MB generated disk, so the disk keeps its size and slice 3 still applies; the bus program holds IORDY when a write burst outruns core 1.
   - **Exit:** 1,000 write-then-read cycles clean.
-- **Slice 5: image file on SD.**
-  - FatFs in SPI mode, a contiguous image, every SD access under BSY.
+- **Slice 5: image file on SD.** Done in 0.7.0.
+  - FatFs in SPI mode, a contiguous image, every SD access under BSY. **(amended)** SdFat (bundled with Arduino-Pico) instead of FatFs; the card is on GPIO 34–39 so the same wiring later runs 4-bit SDIO.
   - **Exit:** the full file-system cycle passes and the image survives a power cycle.
 - **Slice 6: housekeeping commands and soak.** The housekeeping commands were pulled forward into 0.3.0, so a bridge's setup can't stall slice 2. They're unit-tested and still need checking against a real host. Slice 6 keeps the soak and the pass-through tests.
   - CHS addressing, INITIALIZE DEVICE PARAMETERS, SET FEATURES, READ VERIFY, SEEK, RECALIBRATE, EXECUTE DEVICE DIAGNOSTIC, IDLE, STANDBY, CHECK POWER MODE, FLUSH CACHE. Anything unknown gets ABRT.

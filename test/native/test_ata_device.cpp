@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <thread>
 #include <vector>
 
@@ -551,6 +552,63 @@ TEST(test_overlay_disk) {
     CHECK(!base.write(5, a.data()));
 }
 
+// An image file in memory, standing in for HDDSYNTH.IMG on the SD card.
+struct MemoryImage : ImageFile {
+    std::vector<uint8_t> bytes;
+    bool fail = false;
+    explicit MemoryImage(size_t size) : bytes(size) {}
+    uint64_t size() const override { return bytes.size(); }
+    bool readAt(uint64_t offset, void* data, size_t n) override {
+        if (fail || offset + n > bytes.size()) return false;
+        std::memcpy(data, bytes.data() + offset, n);
+        return true;
+    }
+    bool writeAt(uint64_t offset, const void* data, size_t n) override {
+        if (fail || offset + n > bytes.size()) return false;
+        std::memcpy(bytes.data() + offset, data, n);
+        return true;
+    }
+};
+
+TEST(test_image_disk) {
+    MemoryImage file(16 * 512 + 100);  // a stray tail that isn't a whole sector
+    ImageDisk disk(file);
+    CHECK_EQ(disk.sectors(), 16u);
+    // The file's bytes are the disk's bytes: word n is bytes 2n (low) and 2n+1.
+    file.bytes[3 * 512 + 0] = 0x34;
+    file.bytes[3 * 512 + 1] = 0x12;
+    uint16_t got[256];
+    CHECK(disk.read(3, got));
+    CHECK_EQ(got[0], 0x1234);
+    std::vector<uint16_t> words = pattern(1, 4);
+    CHECK(disk.write(15, words.data()));  // the last whole sector
+    CHECK(disk.read(15, got) && std::equal(got, got + 256, words.begin()));
+    CHECK_EQ(file.bytes[15 * 512], uint8_t(words[0]));
+    CHECK(!disk.read(16, got));  // past the end, the partial tail included
+    CHECK(!disk.write(16, words.data()));
+    file.fail = true;  // an SD error reaches the device as a failed fetch
+    CHECK(!disk.read(0, got));
+    CHECK(!disk.write(0, words.data()));
+}
+
+TEST(test_read_and_write_through_an_image) {
+    // The drive end to end on an image: what the host writes, it reads back,
+    // and the image file holds it.
+    MemoryImage file(256 * 512);
+    ImageDisk disk(file);
+    IdentifyInfo info{"HDDSYNTH PROTO", "HSP-000001", "0.2.0", disk.sectors()};
+    Device d(info);
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> words = pattern(3, 8);
+    CHECK(h.writeSectors(100, 3, words));
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(100, 3, got));
+    CHECK(got == words);
+    CHECK_EQ(file.bytes[100 * 512 + 1], uint8_t(words[0] >> 8));
+    CHECK(h.readSectors(0, 1, got));  // a fresh image reads as zeros
+    CHECK(std::all_of(got.begin(), got.end(), [](uint16_t w) { return w == 0; }));
+}
+
 TEST(test_write_one_sector) {
     Device d(INFO);
     GeneratedDisk base;
@@ -1076,6 +1134,8 @@ void runAtaDeviceTests() {
     RUN(test_read_chs);
     RUN(test_read_fetch_failure);
     RUN(test_overlay_disk);
+    RUN(test_image_disk);
+    RUN(test_read_and_write_through_an_image);
     RUN(test_write_one_sector);
     RUN(test_write_multiple_sectors_interrupt_each);
     RUN(test_write_count_zero_means_256);

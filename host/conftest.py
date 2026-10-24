@@ -74,6 +74,15 @@ def require_build(firmware_slice: int, drive_build: bool):
         pytest.skip("needs the listen-only build: scripts/rig.sh ... (PIO_ENV=bb48)")
 
 
+def require_generated_disk(drive):
+    """Skips unless the drive serves the generated disk. Tests that compare
+    reads with its pattern, or write to it, must never run on an SD image
+    (slice 5): their writes would corrupt the filesystem on it."""
+    if "disk=image" in drive.command("s", "STATS"):
+        pytest.skip("the drive serves HDDSYNTH.IMG from the SD card; these tests need the "
+                    "generated disk (rename the image on the card, or remove the card)")
+
+
 @pytest.fixture(scope="module")
 def raw_disk(drive):
     """The drive's raw device (/dev/rdiskN) opened read-only: (Disk, fd).
@@ -88,8 +97,10 @@ def raw_disk(drive):
 
 @pytest.fixture
 def raw_disk_rw(drive):
-    """The drive's raw device opened for reading and writing: (Disk, fd)."""
+    """The drive's raw device opened for reading and writing: (Disk, fd).
+    Never on an SD image: the tests that write would corrupt it."""
     from hddproto import gen_disk
+    require_generated_disk(drive)
     rig = MacHost(lambda m: print(f"\n>>> {m}"))
     disk = rig.find_disk(gen_disk.DEFAULT_SECTORS * gen_disk.SECTOR_BYTES)
     fd = rig.open_raw(disk, write=True)

@@ -84,3 +84,37 @@ private:
     uint16_t data_[SLOTS][256];
     size_t used_ = 0;
 };
+
+// A disk image file, as ImageDisk sees it: byte-addressed reads and writes
+// of a fixed-size file. On the drive it is HDDSYNTH.IMG on the SD card
+// (sd_card.cpp); host tests use an in-memory one.
+class ImageFile {
+public:
+    virtual ~ImageFile() = default;
+    virtual uint64_t size() const = 0;
+    virtual bool readAt(uint64_t offset, void* data, size_t bytes) = 0;
+    virtual bool writeAt(uint64_t offset, const void* data, size_t bytes) = 0;
+};
+
+// Slice 5: the disk is an image file, sector n at byte n * 512. The file's
+// bytes are the disk's bytes, and the bus words are stored little-endian, so
+// a sector moves straight between the file and the 256-word buffer (byte 2n
+// is word n's low byte, as ATA transfers it, on any little-endian CPU).
+class ImageDisk : public BlockSource {
+public:
+    explicit ImageDisk(ImageFile& file) : file_(file) {}
+    uint32_t sectors() const override { return uint32_t(file_.size() / gen_disk::SECTOR_BYTES); }
+
+    bool read(uint32_t lba, uint16_t words[256]) override {
+        if (lba >= sectors()) return false;
+        return file_.readAt(uint64_t(lba) * gen_disk::SECTOR_BYTES, words, gen_disk::SECTOR_BYTES);
+    }
+
+    bool write(uint32_t lba, const uint16_t words[256]) override {
+        if (lba >= sectors()) return false;
+        return file_.writeAt(uint64_t(lba) * gen_disk::SECTOR_BYTES, words, gen_disk::SECTOR_BYTES);
+    }
+
+private:
+    ImageFile& file_;
+};

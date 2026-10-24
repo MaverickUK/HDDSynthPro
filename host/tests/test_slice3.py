@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from conftest import require_build
+from conftest import require_build, require_generated_disk
 from hddproto import gen_disk, trace
 
 pytestmark = pytest.mark.slice3
@@ -30,6 +30,11 @@ pytestmark = pytest.mark.slice3
 @pytest.fixture(autouse=True)
 def drive_build(firmware_slice):
     require_build(firmware_slice, drive_build=True)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def generated_disk(drive):
+    require_generated_disk(drive)  # before the raw disk is opened
 
 
 SECTOR = gen_disk.SECTOR_BYTES
