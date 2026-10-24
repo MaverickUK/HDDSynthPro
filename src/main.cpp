@@ -35,6 +35,7 @@
 #include "block_source.h"
 #include "fetch_mailbox.h"
 #include "ide_bus.h"
+#include "iordy_timer.h"
 #endif
 
 static SpscRing<TraceEvent, cfg::TRACE_RING_EVENTS> g_trace;
@@ -97,6 +98,7 @@ static const IdentifyInfo DRIVE_INFO{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VE
 
 void setup1() {
     ide_bus::begin();
+    iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so the two never race to claim a PIO
     // The M33's cycle counter, to time reads: core 1 must answer one within
     // about 1 us (host/tests/test_pio_bus_sim.py).
     m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;
@@ -185,7 +187,13 @@ CORE1_RAM void loop1() {
         if (low != reset_low) {
             reset_low = low;
             dev.hardReset(low);
-            if (!low) ide_bus::restart();  // drop anything left from the bus going dead
+            if (!low) {
+                ide_bus::restart();  // drop anything left from the bus going dead
+                // Time only real traffic: while the host powers up, its strobes
+                // float low, which looks like one long read.
+                g_read_max_reset.store(true, std::memory_order_relaxed);
+                iordy_timer::requestReset();
+            }
             ide_bus::updateIntrq(dev.intrq());
             record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
         }
@@ -261,7 +269,10 @@ static void printStats() {
 #if FIRMWARE_SLICE != 0
     // Cycles at clk_sys -> ns. Must stay under ~1070 ns (see setup1).
     uint32_t ns = uint32_t(uint64_t(g_read_max_cycles.load()) * 1000000000ull / clock_get_hz(clk_sys));
-    Serial.printf(" read_max_ns=%lu bus_trace=%d seq=%lu rand=%lu activity=%s", (unsigned long)ns,
+    iordy_timer::poll();
+    Serial.printf(" read_max_ns=%lu iordy_slow=%lu iordy_max_ns=%lu", (unsigned long)ns,
+                  (unsigned long)iordy_timer::slowReads(), (unsigned long)iordy_timer::maxNs());
+    Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
 #endif
@@ -346,7 +357,10 @@ static void handleConsole() {
                 break;
             case 's': printStats(); break;
 #if FIRMWARE_SLICE != 0
-            case 'r': g_read_max_reset.store(true); break;
+            case 'r':
+                g_read_max_reset.store(true);
+                iordy_timer::reset();
+                break;
             case 't': {
                 bool on = !g_trace_bus.load();
                 g_trace_bus.store(on);
@@ -373,6 +387,7 @@ void setup() {
 void loop() {
 #if FIRMWARE_SLICE != 0
     serveFetches();
+    iordy_timer::poll();
 
     // Re-evaluate the activity state once a millisecond, before anything
     // below can return early on a busy serial link.

@@ -37,4 +37,8 @@ constexpr unsigned TRACE_FLUSH_MS = 20;
 // card on the rig took about 25 us; a spinning disk takes seconds.
 constexpr uint32_t WAKE_BUSY_US = 50;
 
+// The IORDY timer (iordy_timer.pio) counts and times reads that IORDY holds
+// longer than this. ATA's limit is 1250 ns (tB).
+constexpr uint32_t IORDY_REPORT_NS = 400;
+
 }  // namespace cfg

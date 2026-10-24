@@ -1,0 +1,33 @@
+; Drive build: times each read from the host's side, as a check on the bus
+; program. The host waits from DIOR# falling until IORDY is high again, and
+; ATA allows IORDY to hold a read for at most 1250 ns (tB). This program
+; only reads pins, so it can run alongside ide_bus and never drives anything.
+;
+; Pin mapping (see iordy_timer.cpp):
+;   wait gpio 26 = DIOR#
+;   JMP_PIN      = GPIO28 (IORDY)
+;
+; Only reads slower than a threshold are reported, so the RX FIFO stays empty
+; while all is well. The threshold, in loop iterations of 2 cycles, is put in
+; the TX FIFO once at start. Each report is the number of further 2-cycle
+; iterations IORDY stayed low.
+
+.pio_version 1
+.program iordy_timer
+    pull block              ; the threshold, once
+.wrap_target
+    wait 0 gpio 26          ; DIOR# falls: the host starts a read
+    mov y, osr
+fast:
+    jmp pin done            ; IORDY high: the host has its data
+    jmp y-- fast
+    mov x, ~null            ; slower than the threshold: count on
+slow:
+    jmp pin report
+    jmp x-- slow
+report:
+    mov isr, ~x             ; the iterations past the threshold
+    push noblock            ; a full FIFO drops it; core 0 drains it often
+done:
+    wait 1 gpio 26          ; DIOR# rises
+.wrap

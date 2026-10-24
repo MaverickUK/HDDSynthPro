@@ -78,8 +78,8 @@ The Python parser is `host/hddproto/trace.py`; change both together.
 Console:
 - `h`: help, and the READY line with version and build;
 - `p`: pin levels (wiring check);
-- `s`: stats, including `read_max_ns` on the drive build (the longest a read waited for core 1's answer);
-- `r`: reset the read maximum;
+- `s`: stats; on the drive build also `iordy_slow`/`iordy_max_ns` (reads IORDY held over 400 ns, and the longest, measured by `iordy_timer.pio`) and `read_max_ns` (core 1's own estimate, which overestimates);
+- `r`: reset the read timings (they also restart when the host releases RESET#);
 - `t`: raw bus trace on or off;
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `x` then `Y`: the solder-bridge test, IDE cable unplugged (`short_test.*`; the board reboots afterwards);
@@ -92,7 +92,7 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 ## Status
 
 - **Hardware (23 Oct 2026):** the board is wired and passes the solder-bridge test. On the drive build, the NS1081 sends IDENTIFY, SET FEATURES (PIO mode 0) and READ SECTORS, and macOS sees the 64 MB disk.
-- **On hardware (0.5.3):** slice 3 passes (64 MB, 0.65 MB/s, no mismatches), and standby and wake work. Open: `read_max_ns` is about 1.9 µs against slice 1's 800 ns, and each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
+- **On hardware (0.5.3):** slice 3 passes (64 MB, 0.65 MB/s, no mismatches), and standby and wake work. Open: reads are held about 0.5–1 µs typically and 3.7 µs at worst (IORDY timer), against ATA's 1.25 µs and slice 1's 800 ns; each READ waits about 10 ms before the adapter polls. Keep the raw trace (`t`) off for data tests: it slows core 0's fetches enough to stall the adapter.
 - **Slice 0 (listen only):** runs on the board. Its rig test can't pass as written: the adapter never goes quiet without a drive.
 - **Slices 1–3: the `bb48_drive` build**, built, unit-tested and detected on hardware; the rig tests have not been run yet. It contains:
   - `ide_bus.pio`, the bus program, with its timing proven in simulation: core 1 must answer a read within about 1,070 ns, and the slice 1 test checks `read_max_ns` < 800: the longest a read waited for its answer, measured on hardware. `loop1()` checks the FIFO between each of its steps;

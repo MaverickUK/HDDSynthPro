@@ -2,6 +2,19 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.5.4] - 2026-10-24
+
+### Added
+- **An IORDY timer** (`src/iordy_timer.pio`, drive build): a second PIO program that only reads pins and times each read from the host's side, from DIOR# falling until IORDY is high again. Reads held longer than `cfg::IORDY_REPORT_NS` (400 ns) are counted and timed; console `s` shows `iordy_slow` and `iordy_max_ns`.
+  - It runs in simulation too (`tests/test_iordy_timer_sim.py`).
+
+### Changed
+- `read_max_ns` and the IORDY timer both restart when the host releases RESET#. While the host powers up its strobes float low, which looked like one long read (up to 11 µs).
+
+### Measured on the rig
+- Nearly every read is held over 400 ns, and about 45% over 1 µs; the worst is 3.7 µs, against ATA's 1250 ns (tB). The NS1081 waits for IORDY, so nothing fails, but core 1 is too slow to answer reads.
+- `read_max_ns`, core 1's own estimate, reads about 7 µs: it overestimates and will be replaced by the timer.
+
 ## [0.5.3] - 2026-10-23
 
 ### Fixed
