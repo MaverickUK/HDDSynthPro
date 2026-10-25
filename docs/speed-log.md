@@ -50,6 +50,16 @@ While the host reads a DRQ block, core 1 spins on the bus program's FIFO and ans
 
 Splitting the general access handling out of `serviceOnce` for the fast lane had cost every access a function call: about 100 ns of register saves and restores. Forcing it inline again brought the worst read from 1,146 to a steady 1,026-1,053 ns over six trials, lane on or off, about 200 ns inside ATA's 1,250. Throughput is unchanged. Inlining it made GCC call the small decode helpers out of line, from flash, which `check_core1_ram.py` caught; those are always inlined now too.
 
+### Tried: READ/WRITE MULTIPLE (not kept)
+
+A probe build offered up to 16 sectors per DRQ block in IDENTIFY (word 47) and accepted SET MULTIPLE MODE. The NS1081 ignored it: at detection it sent IDENTIFY and two SET FEATURES, and every read after that was a plain READ SECTORS. So multiple mode can't remove its pause between sectors on this rig. Retro PCs often use it, so it stays on the list for them.
+
+### Where the time goes now (0.8.2)
+
+A sector takes about 400 µs: about 330 µs for the 256 words (1.29 µs each) and about 70 µs of the adapter's pause before the next one. Only about 3% of words are now held past 400 ns, so most of each word's 1.29 µs is the adapter's own PIO mode 0 cycle, not us. On this rig the remaining levers are:
+- faster PIO modes, which the adapter would use if IDENTIFY offered them (it sets the mode with SET FEATURES at detection). That changes the bus timing, so it waits for the bus observer's answer on the rare mismatch;
+- the SD card path, for the image disk: core 0's fetches from the card are slower than from the generated disk.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:
