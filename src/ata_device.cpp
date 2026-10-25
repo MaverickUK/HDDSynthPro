@@ -79,7 +79,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
     switch (reg) {
         case Reg::Data:
             if (!receiving_ || device1Selected()) break;  // no data-out phase: ignored
-            sector_[received_++] = value;
+            sectors_[0][received_++] = value;
             if (received_ >= SECTOR_WORDS) finishDataOut();
             break;
         case Reg::ErrorFeatures: features_ = v; break;
@@ -323,6 +323,7 @@ CORE1_RAM void Device::startRead() {
     reading_ = true;
     read_lba_ = lba;
     read_left_ = count;
+    ahead_ok_ = ahead_failed_ = false;
     requestFetch();
 }
 
@@ -347,15 +348,34 @@ CORE1_RAM void Device::finishDataOut() {
     requestFetch();  // BSY while core 0 stores the sector
 }
 
-CORE1_RAM void Device::requestFetch() {
-    status_ = ST_BSY | ST_DRDY | ST_DSC;
+CORE1_RAM void Device::requestFetch(bool busy) {
+    if (busy) status_ = ST_BSY | ST_DRDY | ST_DSC;
     fetch_pending_ = true;
     ++fetch_id_;
+    fetch_lba_ = writing_ ? write_lba_ : read_lba_;
+    // A read fills the buffer the host isn't reading; a write stores the one
+    // it was written into.
+    fetch_buf_ = writing_ ? 0 : (data_ == sectors_[0] ? 1 : 0);
+}
+
+CORE1_RAM void Device::readAhead() {
+    if (reading_ && read_left_ > 0) requestFetch(false);  // no BSY: the host carries on reading
+}
+
+CORE1_RAM void Device::deliverSector(bool ok) {
+    if (!ok) {
+        setTaskFileLba(fetch_lba_);
+        reading_ = false;
+        fail(ER_UNC);
+        return;
+    }
+    startDataIn(sectors_[fetch_buf_], SECTOR_WORDS);
+    readAhead();
 }
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
-    fetch = Fetch{fetch_id_, writing_ ? write_lba_ : read_lba_, sector_, writing_};
+    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_};
     return true;
 }
 
@@ -378,15 +398,14 @@ CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
         }
         return;
     }
-    if (!ok) {
-        setTaskFileLba(read_lba_);
-        reading_ = false;
-        fail(ER_UNC);
-        return;
-    }
     ++read_lba_;
     --read_left_;
-    startDataIn(sector_, SECTOR_WORDS);
+    if (data_) {  // a read-ahead, done while the host reads the previous sector
+        ahead_ok_ = ok;
+        ahead_failed_ = !ok;
+        return;
+    }
+    deliverSector(ok);  // the host is waiting for it (BSY)
 }
 
 CORE1_RAM void Device::setTaskFileLba(uint32_t lba) {
@@ -432,8 +451,14 @@ CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
 CORE1_RAM void Device::finishDataIn() {
     data_ = nullptr;
     data_count_ = data_index_ = 0;
-    if (reading_ && read_left_ > 0) {
-        requestFetch();  // next sector: BSY while core 0 fetches it
+    if (reading_ && (ahead_ok_ || ahead_failed_)) {  // the next sector is in: on at once
+        bool ok = ahead_ok_;
+        ahead_ok_ = ahead_failed_ = false;
+        deliverSector(ok);  // or its error, at the sector it belongs to
+        return;
+    }
+    if (reading_ && fetch_pending_) {
+        status_ = ST_BSY | ST_DRDY | ST_DSC;  // the read-ahead isn't in yet: wait for it
         return;
     }
     reading_ = false;

@@ -23,6 +23,7 @@ MB/s here means 10^6 bytes per second. Worst read is the longest IORDY held a re
 | 2026-10-25 | 0.8.2 | Access handling inlined again | PIO 0, 150 MHz | generated | 1.05 MB/s | 73 IOPS (13.7 ms) | 10.8 ms + 400 µs/sector | 1.56 MB/s | 1080 ns (1026-1053) |
 | 2026-10-25 | 0.8.2 | (the same firmware) | PIO 0, 150 MHz, SD at 12 MHz | SD image | 0.59 MB/s | 61 IOPS (16.3 ms) | 10.4 ms + 780 µs/sector | (not run) | 1173 ns |
 | 2026-10-25 | 0.8.3 | SD card's SPI clock 12 → 25 MHz | PIO 0, 150 MHz, SD at 25 MHz | SD image | 0.84 MB/s | 69 IOPS (14.5 ms) | 10.7 ms + 519 µs/sector | (not run) | 1186 ns (1026-1053) |
+| 2026-10-25 | 0.8.6 | Read-ahead into a second sector buffer | PIO 0, 150 MHz, SD at 25 MHz | SD image | 1.26 MB/s | 76 IOPS (13.1 ms) | 10.9 ms + 318 µs/sector | (not run) | 1173 ns (1160-1173) |
 
 ## Where the time goes (0.7.3 baseline)
 
@@ -69,6 +70,14 @@ On the image disk each sector took 780 µs, 380 more than on the generated disk:
 - Not 37.5 MHz, the next step SPI0 can divide 150 MHz into: it would save only ~55 µs a sector on hand-wired leads, and reading ahead can hide the card's time completely.
 - The worst read on the image looked like 1,173-1,186 ns, but those came from the detection after a replug, which the test then included. During traffic it's 1,026-1,053 ns, as on the generated disk: SD traffic doesn't slow core 1. The test now resets the read timings first.
 - Between sectors the adapter waits for INTRQ rather than polling, so its pause is the fetch time plus its ~70 µs reaction: about 240 µs per sector here, against 73 on the generated disk. Reading ahead removes the fetch part.
+
+### 0.8.6: read-ahead
+
+The device has two sector buffers. While the host reads one, core 0 fills the other with the read's next sector, so when the host finishes, DRQ and INTRQ for the next sector come at once, with no BSY. A failed read-ahead is reported at the sector it belongs to.
+- Image-disk reads: 1.26 MB/s, from 0.84; 318 µs a sector, from 519. Faster than the generated disk without read-ahead (400 µs): with no BSY between sectors, the adapter's pause shrinks too.
+- It took three goes to keep the worst read inside 1,250 ns. 0.8.4 left the read-ahead's result in the mailbox until the block ended, so the device went BSY and an ALTSTATUS waited behind the bookkeeping (1,466 ns). 0.8.5 took results inside the fast lane (1,266 ns). 0.8.6 also posts the read-ahead from inside the lane, one small job per pass while the FIFO is empty, instead of between the adapter's ALTSTATUS and STATUS reads.
+- The worst read on the image is now 1,160-1,173 ns, about 80 ns inside the limit; on the generated disk it was about 1,040 before read-ahead. To measure on the generated disk.
+- Data: two full reads of the image identical; against the copy from before, only directory timestamps and macOS's own housekeeping files differ, which macOS rewrites at each mount.
 
 ## Ceilings on this adapter
 

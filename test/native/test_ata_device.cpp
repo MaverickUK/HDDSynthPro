@@ -487,6 +487,87 @@ TEST(test_fast_lane_only_for_a_data_in_block) {
     CHECK_EQ(left, 256);
 }
 
+TEST(test_read_ahead_hides_the_fetch) {
+    // While the host reads a sector, the next one is fetched into the other
+    // buffer; when the host finishes, DRQ and INTRQ for it come at once.
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d};
+    h.setLba(3000, 3);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+    std::vector<uint16_t> got;
+    for (int s = 0; s < 3; ++s) {
+        CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);
+        CHECK(d.intrq());
+        h.status();
+        const uint16_t* next;
+        uint16_t left;
+        CHECK(d.dataInRemaining(next, left));
+        Fetch ahead;
+        bool more = s < 2;
+        CHECK_EQ(d.pendingFetch(ahead), more);
+        if (more) {
+            CHECK_EQ(ahead.lba, 3001u + s);
+            CHECK(ahead.buffer != next);  // never the buffer the host is reading
+            d.fetchDone(ahead.id, disk.read(ahead.lba, ahead.buffer));
+            CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);  // the host's sector is untouched
+        }
+        for (int i = 0; i < 256; ++i) got.push_back(d.read(Reg::Data));
+    }
+    CHECK(sameAsDisk(got, 3000, 3));
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+}
+
+TEST(test_read_ahead_failure_reported_at_its_sector) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d};
+    h.setLba(4000, 3);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+    h.status();
+    CHECK(d.pendingFetch(f));
+    CHECK_EQ(f.lba, 4001u);
+    d.fetchDone(f.id, false);  // the card failed on the next sector
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);  // sector 4000 still reads
+    std::vector<uint16_t> got;
+    for (int i = 0; i < 256; ++i) got.push_back(d.read(Reg::Data));
+    CHECK(sameAsDisk(got, 4000, 1));
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC | ST_ERR);
+    CHECK_EQ(d.read(Reg::ErrorFeatures), ER_UNC);
+    CHECK_EQ(d.read(Reg::LbaLow), 4001 & 0xFF);  // the failing sector
+    CHECK_EQ(d.read(Reg::LbaMid), (4001 >> 8) & 0xFF);
+    CHECK(!d.pendingFetch(f));
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+}
+
+TEST(test_read_ahead_stale_after_reset) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d};
+    h.setLba(5000, 2);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+    Fetch ahead;
+    CHECK(d.pendingFetch(ahead));
+    d.hardReset(true);
+    d.hardReset(false);
+    d.fetchDone(ahead.id, disk.read(ahead.lba, ahead.buffer));  // late: ignored
+    CHECK(!(h.altStatus() & ST_DRQ));
+    const uint16_t* next;
+    uint16_t left;
+    CHECK(!d.dataInRemaining(next, left));
+    CHECK(!d.pendingFetch(f));
+}
+
 TEST(test_read_count_zero_means_256) {
     Device d(INFO);
     GeneratedDisk disk;
@@ -1186,6 +1267,9 @@ void runAtaDeviceTests() {
     RUN(test_read_multiple_sectors_interrupt_each);
     RUN(test_fast_lane_matches_data_reads);
     RUN(test_fast_lane_only_for_a_data_in_block);
+    RUN(test_read_ahead_hides_the_fetch);
+    RUN(test_read_ahead_failure_reported_at_its_sector);
+    RUN(test_read_ahead_stale_after_reset);
     RUN(test_read_count_zero_means_256);
     RUN(test_read_last_sector_and_past_the_end);
     RUN(test_read_chs);

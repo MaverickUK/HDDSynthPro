@@ -2,6 +2,15 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.8.6] - 2026-10-25
+
+### Added
+- **Read-ahead.** The device keeps two sector buffers: while the host reads one, core 0 fills the other with the read's next sector, and DRQ for it comes as soon as the host finishes. A failed read-ahead is reported at its own sector; a late one after a reset is ignored. Core 1's fast lane posts the read-ahead and takes its result while it waits between words, one small job per pass.
+- Unit tests for read-ahead (hidden fetch, separate buffers, failure at the right sector, stale after reset); also clean under ThreadSanitizer.
+
+### On the rig
+- Image-disk reads 1.26 MB/s (from 0.84), 318 µs a sector (from 519). Worst read 1,160-1,173 ns. Two full reads of the image identical.
+
 ## [0.8.3] - 2026-10-25
 
 ### Changed

@@ -114,6 +114,12 @@ void setup1() {
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
 }
 
+// Posts the device's fetch to core 0, once per fetch.
+CORE1_RAM static void postFetch(ata::Device& dev, uint32_t& posted_fetch) {
+    ata::Fetch fetch;
+    if (dev.pendingFetch(fetch) && fetch.id != posted_fetch && g_mailbox.post(fetch)) posted_fetch = fetch.id;
+}
+
 CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
     record(commandStartEvent(t_us, c.command, c.lba, c.count));
 }
@@ -146,10 +152,13 @@ CORE1_RAM void loop1() {
         // between. Not while the raw trace or the debug delay is on.
         const uint16_t* next;
         uint16_t left;
-        if (dev.dataInRemaining(next, left) && g_fast_lane.load() &&
-            !g_trace_bus.load() && !ide_bus::dataReadDelayed() &&
-            ide_bus::serveDataIn(dev, reset_low))
-            continue;
+        if (dev.dataInRemaining(next, left)) {
+            if (g_fast_lane.load() && !g_trace_bus.load() && !ide_bus::dataReadDelayed()) {
+                if (ide_bus::serveDataIn(dev, reset_low, g_mailbox, posted_fetch)) continue;
+            } else {
+                postFetch(dev, posted_fetch);  // the read-ahead, without the lane
+            }
+        }
         if (dev.commandQueued()) {  // a Command write: the first job, ahead of the rest
             // The host polls status about 1 us after writing a command, so run
             // it and get back to the bus; its CMD line waits for step 0.
@@ -187,12 +196,9 @@ CORE1_RAM void loop1() {
                                            t - command_start_us));
                 }
                 break;
-            case 1: {  // a sector fetch, posted once
-                ata::Fetch fetch;
-                if (dev.pendingFetch(fetch) && fetch.id != posted_fetch && g_mailbox.post(fetch))
-                    posted_fetch = fetch.id;
+            case 1:  // a sector fetch, posted once
+                postFetch(dev, posted_fetch);
                 break;
-            }
             case 2: {  // a fetch result, which may complete a DRQ block
                 FetchResult result;
                 if (g_mailbox.takeResult(result)) {

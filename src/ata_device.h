@@ -223,7 +223,9 @@ private:
     bool checkRange(uint32_t count, uint32_t& lba);
     bool decodeAddress(uint32_t& lba) const;  // false if a CHS address is invalid
     void completeNoData();  // success, with an interrupt
-    void requestFetch();
+    void requestFetch(bool busy = true);  // busy: BSY until it's done
+    void readAhead();                     // fetch the read's next sector, if any
+    void deliverSector(bool ok);          // a fetched sector to the host, or its error
     void fail(uint8_t error);  // ERR + error bits, command complete
     void complete();           // success, no data left
     void startDataIn(const uint16_t* words, uint16_t count);
@@ -235,7 +237,9 @@ private:
     IdentifyInfo info_;
     Geometry geometry_;
     uint16_t identify_[256];
-    uint16_t sector_[SECTOR_WORDS];
+    // Two sector buffers: while the host reads one, core 0 fills the other
+    // with the next sector of the read (read-ahead). Writes use the first.
+    uint16_t sectors_[2][SECTOR_WORDS];
 
     // Task file
     uint8_t features_ = 0;
@@ -253,7 +257,7 @@ private:
     uint16_t data_count_ = 0;
     uint16_t data_index_ = 0;
 
-    // Data-out transfer (host to device), into sector_
+    // Data-out transfer (host to device), into sectors_[0]
     bool receiving_ = false;
     uint16_t received_ = 0;  // words of the current sector so far
 
@@ -266,8 +270,14 @@ private:
     uint32_t write_lba_ = 0;      // next sector to store
     uint32_t write_left_ = 0;     // sectors not yet stored
 
-    bool fetch_pending_ = false;
+    bool fetch_pending_ = false;  // a fetch or store is wanted, or under way
     uint32_t fetch_id_ = 0;
+    uint32_t fetch_lba_ = 0;
+    uint8_t fetch_buf_ = 0;       // which of sectors_ it fills or stores
+    // A read-ahead that finished while the host was still reading the
+    // previous sector, waiting to be handed over: it worked, or it failed.
+    bool ahead_ok_ = false;
+    bool ahead_failed_ = false;
 
     bool irq_pending_ = false;
     bool command_queued_ = false;  // see queueCommand()

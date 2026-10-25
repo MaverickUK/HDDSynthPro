@@ -10,6 +10,7 @@
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"
+#include "fetch_mailbox.h"
 #include "ide_bus.pio.h"
 
 namespace ide_bus {
@@ -110,18 +111,27 @@ CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
     return true;
 }
 
-CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low) {
+CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
     const uint16_t* next;
     uint16_t left;
     if (!dev.dataInRemaining(next, left)) return true;
     uint16_t served = 0;
     bool reset_changed = false;
+    ata::Fetch fetch;
+    bool to_post = dev.pendingFetch(fetch) && fetch.id != posted_fetch;
     while (served < left) {
         while (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
             if (gpio_get(cfg::PIN_RESET_N) == reset_low) {  // high when it was low, or low when high
                 reset_changed = true;
                 break;
             }
+            if (to_post) {  // the read-ahead, so core 0 fetches while the host reads
+                if (mailbox.post(fetch)) posted_fetch = fetch.id;
+                to_post = false;
+                continue;
+            }
+            FetchResult result;
+            if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);  // the read-ahead is in
         }
         if (reset_changed) break;
         uint32_t sample = pio_sm_get(s_pio, s_sm);
