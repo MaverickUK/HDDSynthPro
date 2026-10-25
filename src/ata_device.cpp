@@ -35,6 +35,7 @@ CORE1_RAM void Device::resetToSignature() {
     reading_ = false;
     writing_ = false;
     receiving_ = false;
+    out_hold_ = false;
     flushing_ = false;
     fetch_pending_ = false;
     ++fetch_id_;
@@ -80,7 +81,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
     switch (reg) {
         case Reg::Data:
             if (!receiving_ || device1Selected()) break;  // no data-out phase: ignored
-            sectors_[0][received_++] = value;
+            sectors_[recv_buf_][received_++] = value;
             if (received_ >= SECTOR_WORDS) finishDataOut();
             break;
         case Reg::ErrorFeatures: features_ = v; break;
@@ -129,6 +130,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         reading_ = false;
         writing_ = false;
         receiving_ = false;
+        out_hold_ = false;
         flushing_ = false;
         fetch_pending_ = false;
         ++fetch_id_;
@@ -350,6 +352,11 @@ CORE1_RAM void Device::startWrite() {
     writing_ = true;
     write_lba_ = lba;
     write_left_ = count;
+    recv_left_ = count;
+    filled_ = false;
+    store_failed_ = false;
+    out_hold_ = false;
+    recv_buf_ = 0;
     startDataOut();  // no interrupt before the first block
 }
 
@@ -361,7 +368,53 @@ CORE1_RAM void Device::startDataOut() {
 
 CORE1_RAM void Device::finishDataOut() {
     receiving_ = false;
-    requestFetch();  // BSY while core 0 stores the sector
+    --recv_left_;
+    filled_ = true;
+    filled_buf_ = recv_buf_;
+    if (recv_left_ > 0) out_hold_ = true;  // BSY before the next block is wanted
+    settleWrite();
+}
+
+CORE1_RAM void Device::releaseDataOut() {
+    if (!out_hold_) return;
+    out_hold_ = false;
+    if (writing_) settleWrite();
+}
+
+// A write's next step, after the host finishes a sector or core 0 a store:
+// start the waiting store, ask for the next sector if a buffer is free, or
+// finish. One store at a time; with write-behind the host fills the other
+// buffer meanwhile. The command ends only when every sector is stored.
+CORE1_RAM void Device::settleWrite() {
+    if (store_failed_) {
+        filled_ = false;  // nothing after the failed sector is stored
+        out_hold_ = false;
+        if (receiving_ || fetch_pending_) return;  // the block or store under way ends first
+        writing_ = false;
+        setTaskFileLba(store_failed_lba_);
+        fail(ER_ABRT);
+        return;
+    }
+    if (filled_ && !fetch_pending_) {  // its store, without BSY
+        filled_ = false;
+        fetch_buf_ = filled_buf_;
+        fetch_lba_ = write_lba_;
+        fetch_pending_ = true;
+        if (++fetch_id_ == 0) ++fetch_id_;
+    }
+    if (!receiving_ && !out_hold_ && recv_left_ > 0 && !filled_ && (write_behind_ || !fetch_pending_)) {
+        recv_buf_ = fetch_pending_ ? uint8_t(fetch_buf_ ^ 1) : 0;  // the buffer not being stored
+        startDataOut();
+        irq_pending_ = true;  // PIO data-out: interrupt when each later block is wanted
+        return;
+    }
+    if (receiving_) return;
+    if (write_left_ == 0) {
+        writing_ = false;
+        completeNoData();  // all stored: the command ends with an interrupt
+        return;
+    }
+    status_ = ST_BSY | ST_DRDY | ST_DSC;  // waiting for a store
 }
 
 CORE1_RAM void Device::requestFetch(bool busy) {
@@ -407,19 +460,14 @@ CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
         return;
     }
     if (writing_) {
-        if (!ok) {
-            setTaskFileLba(write_lba_);
-            fail(ER_ABRT);
-            return;
-        }
-        ++write_lba_;
-        if (--write_left_ > 0) {
-            startDataOut();
-            irq_pending_ = true;  // PIO data-out: interrupt when each later block is wanted
+        if (ok) {
+            ++write_lba_;
+            --write_left_;
         } else {
-            writing_ = false;
-            completeNoData();  // written: the command ends with an interrupt
+            store_failed_ = true;
+            store_failed_lba_ = write_lba_;
         }
+        settleWrite();
         return;
     }
     ++read_lba_;

@@ -2,6 +2,23 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.8.22] - 2026-10-25
+
+A scratch image for benchmarks, and write-behind (built, measured, off by default). 0.8.16 to 0.8.21 were rig builds, not released.
+
+### Added
+- **`HDDBENCH.IMG`, a scratch image for tests that write freely.** Console `K` creates it (64 MB, zeros; refuses if it exists or there's no room). Console `J` restarts the drive serving it, or back: the choice is kept in a watchdog scratch register, which a power cycle clears, so after power-off the drive always serves `HDDSYNTH.IMG`. `s` shows `disk=bench`; `S` shows `image=` and `bench=` (open, present or none). The speed test measures writes on it; the soak and slices 3-4 still need the generated disk, and `require_generated_disk` now insists on it.
+- **Write-behind** (`Device::setWriteBehind`, console `W`): the host sends the next sector into the other buffer while core 0 stores the last, and the command completes only when every sector is stored. A failed store is reported, at its sector, once the block in progress ends. Unit-tested, including under ThreadSanitizer. **Off by default**: on the rig it lifts writes to the SD card from 0.92 to 1.51 MB/s with every byte intact, but it holds some status reads during writes 1.5-2.0 µs (ATA allows 1.25), not yet understood.
+- After each data-out block but the last, the drive shows BSY for at least 10 µs (`cfg::DATA_OUT_BSY_US`) before DRQ and INTRQ ask for the next one. The NS1081 reads Status straight after a block, clearing any interrupt, then waits for INTRQ; without the hold, write-behind sometimes left it waiting forever.
+
+### Fixed
+- `SpscRing::push`/`pop` and `FetchMailbox::post`/`takeResult` are always inlined; a new call site made GCC call copies in flash (caught by `check_core1_ram.py`).
+
+### On the rig
+- SD card writes on the bench image: 0.92 MB/s (553 µs a sector), against 1.55 MB/s into the RAM overlay. Creating the 64 MB image took 30 s.
+- Generated disk, write-behind off: reads 1.27 MB/s, writes 1.55 MB/s, worst read 1,106-1,120 ns; 5-minute soak clean, 434,799 sectors checked on the cable.
+- Handling the mailbox in the middle of every block (0.8.17) made the adapter stop after SET FEATURES at detection, twice; posting stores only (0.8.19) didn't. Not understood.
+
 ## [0.8.15] - 2026-10-25
 
 The SD path made safe for real use, and the worst read back near 1 µs with read-ahead kept. 0.8.7 to 0.8.14 were rig builds, not released.

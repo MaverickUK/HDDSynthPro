@@ -9,6 +9,7 @@ namespace sd_card {
 
 static SdFs s_sd;
 static FsFile s_image;
+static const char* s_open_name = nullptr;  // which image s_image is
 
 static const char* cardType(uint8_t type) {
     switch (type) {
@@ -53,15 +54,21 @@ static bool mount(Print& out) {
     return true;
 }
 
+// "open" (being served), "present" or "none".
+static const char* imageState(const char* name) {
+    if (s_image.isOpen() && s_open_name == name) return "open";
+    return s_sd.exists(name) ? "present" : "none";
+}
+
 void printInfo(Print& out) {
     if (!mount(out)) return;
     uint32_t sectors = s_sd.card()->sectorCount();
-    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s\n", cardType(s_sd.card()->type()),
+    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s\n", cardType(s_sd.card()->type()),
                (unsigned long)(sectors / 2048), fsType(s_sd.fatType()),
-               s_image.isOpen() ? "open" : (s_sd.exists(IMAGE_NAME) ? "present" : "none"));
+               imageState(IMAGE_NAME), imageState(BENCH_IMAGE_NAME));
 }
 
-// HDDSYNTH.IMG as the drive's ImageFile.
+// The open image as the drive's ImageFile.
 class SdImageFile : public ImageFile {
 public:
     uint64_t size() const override { return s_image.fileSize(); }
@@ -76,20 +83,21 @@ public:
 };
 static SdImageFile s_image_file;
 
-ImageFile* openImage(Print& log) {
+ImageFile* openImage(const char* name, Print& log) {
     if (!mount(log)) return nullptr;
-    if (!s_sd.exists(IMAGE_NAME)) return nullptr;
-    if (!s_image.open(IMAGE_NAME, O_RDWR)) {
-        log.printf("SD error: can't open %s\n", IMAGE_NAME);
+    if (!s_sd.exists(name)) return nullptr;
+    if (!s_image.open(name, O_RDWR)) {
+        log.printf("SD error: can't open %s\n", name);
         return nullptr;
     }
+    s_open_name = name;
     return &s_image_file;
 }
 
-bool createImage(uint32_t sectors, Print& out) {
+bool createImage(const char* name, uint32_t sectors, Print& out) {
     if (!mount(out)) return false;
-    if (s_sd.exists(IMAGE_NAME)) {
-        out.printf("# %s already exists: left as it is\n", IMAGE_NAME);
+    if (s_sd.exists(name)) {
+        out.printf("# %s already exists: left as it is\n", name);
         return false;
     }
     uint64_t bytes = uint64_t(sectors) * 512;
@@ -100,8 +108,8 @@ bool createImage(uint32_t sectors, Print& out) {
         return false;
     }
     FsFile file;
-    if (!file.open(IMAGE_NAME, O_RDWR | O_CREAT | O_EXCL)) {
-        out.printf("SD error: can't create %s\n", IMAGE_NAME);
+    if (!file.open(name, O_RDWR | O_CREAT | O_EXCL)) {
+        out.printf("SD error: can't create %s\n", name);
         return false;
     }
     // One contiguous run of clusters, then zeros: a blank disk, which is
@@ -117,12 +125,12 @@ bool createImage(uint32_t sectors, Print& out) {
     ok = ok && file.sync();
     file.close();
     if (!ok) {
-        s_sd.remove(IMAGE_NAME);  // our own half-made file, nothing else
-        out.printf("SD error: writing %s failed (code %u); removed it\n", IMAGE_NAME,
+        s_sd.remove(name);  // our own half-made file, nothing else
+        out.printf("SD error: writing %s failed (code %u); removed it\n", name,
                    unsigned(s_sd.sdErrorCode()));
         return false;
     }
-    out.printf("# created %s, %lu sectors; reboot the drive to use it\n", IMAGE_NAME,
+    out.printf("# created %s, %lu sectors; reboot the drive to use it\n", name,
                (unsigned long)sectors);
     return true;
 }

@@ -33,6 +33,7 @@
 #include "ata_device.h"
 #include "block_source.h"
 #include "bus_observer.h"
+#include <hardware/watchdog.h>
 #include "fetch_mailbox.h"
 #include "ide_bus.h"
 #include "iordy_timer.h"
@@ -93,6 +94,9 @@ static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
 static SharedFlag g_read_ahead{true};  // console `A` (debug)
+// Off by default: with it on, writes hold some status reads 1.5-2 us (ATA
+// allows 1.25), not yet understood. Console `W` turns it on to work on that.
+static SharedFlag g_write_behind{false};  // console `W`
 
 // For the activity LED (core 0's updateLed): core 1 counts commands as they
 // start and says whether one is running.
@@ -141,6 +145,7 @@ CORE1_RAM void loop1() {
     bool start_unrecorded = false;
     uint32_t posted_fetch = 0;
     uint32_t wake_start_us = 0;  // 0: not timing a wake
+    uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
     unsigned step = 0;
@@ -170,6 +175,7 @@ CORE1_RAM void loop1() {
                 start_unrecorded = false;
             }
             dev.setReadAhead(g_read_ahead.load());
+            dev.setWriteBehind(g_write_behind.load());
             dev.runQueuedCommand();
             ide_bus::updateIntrq(dev.intrq());
             if (dev.commandsStarted() != started) {
@@ -184,8 +190,13 @@ CORE1_RAM void loop1() {
         }
 
         // Mid-sector the host streams 256 words and nothing else can happen
-        // but a reset, so only RESET# is checked between them.
-        if (dev.transferring()) step = 4;
+        // but a reset, so only RESET# is checked between them, plus the
+        // write-behind's store: posted, and its result passed back, while the
+        // host sends the next sector.
+        if (dev.transferring()) {
+            postFetch(dev, posted_fetch);  // the write-behind's store, while the host sends the next sector
+            step = 4;
+        }
 
         switch (step) {
             case 0:  // the trace's CMD and DONE lines, in that order, at most one per pass
@@ -211,7 +222,15 @@ CORE1_RAM void loop1() {
                 }
                 break;
             }
-            case 3:  // waking from standby: BSY for WAKE_BUSY_US, timed from when it was first seen
+            case 3:  // BSY for a while: waking from standby, or after a data-out block
+                if (!dev.dataOutHeld()) {
+                    hold_start_us = 0;
+                } else if (hold_start_us == 0) {
+                    hold_start_us = time_us_32() | 1;
+                } else if (time_us_32() - hold_start_us >= cfg::DATA_OUT_BSY_US) {
+                    dev.releaseDataOut();
+                    ide_bus::updateIntrq(dev.intrq());
+                }
                 if (!dev.waking()) {
                     wake_start_us = 0;
                 } else if (wake_start_us == 0) {
@@ -268,13 +287,20 @@ static void updateLed() {
 
 static uint32_t g_disk_ms = 0;  // how long choosing the disk took at boot (console `s`)
 
+// Console `J`: serve HDDBENCH.IMG after the restart it triggers. Kept in a
+// watchdog scratch register, which a restart keeps and a power cycle clears,
+// so the drive is always back on HDDSYNTH.IMG after power-off.
+static constexpr uint32_t BENCH_MAGIC = 0x48444442;  // "HDDB"
+static bool benchRequested() { return watchdog_hw->scratch[0] == BENCH_MAGIC; }
+
 static void chooseDisk() {
     uint32_t start = millis();
-    if (ImageFile* file = sd_card::openImage(Serial)) {
+    bool bench = benchRequested();
+    if (ImageFile* file = sd_card::openImage(bench ? sd_card::BENCH_IMAGE_NAME : sd_card::IMAGE_NAME, Serial)) {
         static ImageDisk image(*file);
         if (image.sectors() > 0) {
             g_disk = &image;
-            g_disk_name = "image";
+            g_disk_name = bench ? "bench" : "image";
         }
     }
     g_disk_ms = millis() - start;
@@ -438,7 +464,8 @@ static void handleConsole() {
                                "b reboot to bootloader");
 #else
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
-                               "m mark, S SD card check, I create SD image, x short test (cable unplugged), "
+                               "m mark, S SD card check, I create SD image, K create bench image, "
+                               "J serve the bench image or back (restarts), x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
                 break;
@@ -464,6 +491,12 @@ static void handleConsole() {
                 bus_observer::resetCounts();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
+            case 'W': {  // debug: write-behind on or off, to compare
+                bool on = !g_write_behind.load();
+                g_write_behind.store(on);
+                Serial.printf("WRITEBEHIND %s\n", on ? "on" : "off");
+                break;
+            }
             case 'A': {  // debug: read-ahead on or off, to compare
                 bool on = !g_read_ahead.load();
                 g_read_ahead.store(on);
@@ -485,7 +518,17 @@ static void handleConsole() {
 #endif
 #if FIRMWARE_SLICE != 0
             case 'S': sd_card::printInfo(Serial); break;
-            case 'I': sd_card::createImage(gen_disk::DEFAULT_SECTORS, Serial); break;
+            case 'I': sd_card::createImage(sd_card::IMAGE_NAME, gen_disk::DEFAULT_SECTORS, Serial); break;
+            case 'K': sd_card::createImage(sd_card::BENCH_IMAGE_NAME, gen_disk::DEFAULT_SECTORS, Serial); break;
+            case 'J': {  // serve the other image after a restart (replug the adapter afterwards)
+                bool bench = !benchRequested();
+                watchdog_hw->scratch[0] = bench ? BENCH_MAGIC : 0;
+                Serial.printf("# restarting to serve %s\n", bench ? sd_card::BENCH_IMAGE_NAME : sd_card::IMAGE_NAME);
+                Serial.flush();
+                delay(50);
+                watchdog_reboot(0, 0, 10);
+                break;
+            }
 #endif
             case 'b':
                 Serial.println("# rebooting to bootloader");

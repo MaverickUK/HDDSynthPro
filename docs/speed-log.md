@@ -25,6 +25,9 @@ MB/s here means 10^6 bytes per second. Worst read is the longest IORDY held a re
 | 2026-10-25 | 0.8.3 | SD card's SPI clock 12 → 25 MHz | PIO 0, 150 MHz, SD at 25 MHz | SD image | 0.84 MB/s | 69 IOPS (14.5 ms) | 10.7 ms + 519 µs/sector | (not run) | 1186 ns (1026-1053) |
 | 2026-10-25 | 0.8.6 | Read-ahead into a second sector buffer | PIO 0, 150 MHz, SD at 25 MHz | SD image | 1.26 MB/s | 76 IOPS (13.1 ms) | 10.9 ms + 318 µs/sector | (not run) | 1173 ns (1160-1173) |
 | 2026-10-25 | 0.8.15 | Read-ahead's handover reworked for the worst read | PIO 0, 150 MHz | generated | 1.24 MB/s | 76 IOPS (13.1 ms) | 10.9 ms + 323 µs/sector | 1.56 MB/s | 1080 ns (1053-1080) |
+| 2026-10-25 | 0.8.16 | Scratch image on the card (baseline for writes) | PIO 0, 150 MHz, SD at 25 MHz | SD bench image | 1.23 MB/s | 76 IOPS (13.2 ms) | 10.9 ms + 328 µs/sector | 0.92 MB/s | 1080 ns |
+| 2026-10-25 | 0.8.20 | Write-behind on (not kept as the default) | PIO 0, 150 MHz, SD at 25 MHz | SD bench image | 1.26 MB/s | 76 IOPS (13.1 ms) | 10.9 ms + 318 µs/sector | 1.51 MB/s | 1546 ns |
+| 2026-10-25 | 0.8.22 | Write-behind off by default | PIO 0, 150 MHz | generated | 1.27 MB/s | 76 IOPS (13.1 ms) | 11.0 ms + 314 µs/sector | 1.55 MB/s | 1106 ns |
 
 ## Where the time goes (0.7.3 baseline)
 
@@ -96,6 +99,10 @@ Worst reads now, generated disk, three trials each:
 | on (default) | on (default) | 1,053-1,080 ns |
 | off | on | 1,053-1,066 ns |
 | off | off | 1,226-1,240 ns (debug only) |
+
+### Write-behind (0.8.16-0.8.22)
+
+Writes to the SD card ran at 0.92 MB/s, 553 µs a sector against 327 into RAM: each store held the host under BSY. With write-behind the host sends the next sector into the other buffer while the last is stored, and writes reach 1.51 MB/s, every byte intact (300 mixed writes read back). But during writes some status reads were held 1.5-2.0 µs, over ATA's 1.25. Two theories didn't hold: deferring store results until the post-block hold ended made it worse (1,960 ns), which suggests the NS1081 polls Status during the hold. So it ships off (console `W` turns it on), until instrumentation shows what core 1 is doing when the slow read lands.
 
 ## Ceilings on this adapter
 

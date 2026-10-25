@@ -106,8 +106,9 @@ def test_speed(raw_disk, drive, run_dir):
     lines.append(f"read command      {fixed:6.2f} ms fixed + {per_sector * 1000:.0f} us per sector "
                  f"(the bus and fetches: {SECTOR / per_sector / 1000:.2f} MB/s)")
 
-    # Sequential writes, generated disk only
-    if disk == "generated":
+    # Sequential writes: on the generated disk (its RAM overlay) or the scratch
+    # image HDDBENCH.IMG, never on HDDSYNTH.IMG
+    if disk in ("generated", "bench"):
         wfd = MacHost(print).open_raw(raw_disk[0], write=True)
         try:
             mark = drive.mark()
@@ -128,7 +129,7 @@ def test_speed(raw_disk, drive, run_dir):
             os.pwrite(wfd, gen_disk.sectors(WINDOW_START, WINDOW), WINDOW_START * SECTOR)
             os.close(wfd)
     else:
-        lines.append("sequential write  (skipped: only on the generated disk)")
+        lines.append("sequential write  (skipped: not on HDDSYNTH.IMG; use the bench image)")
 
     f = stats(drive)
     lines.append(f"worst read {f.get('iordy_max_ns')} ns ({f.get('iordy_max_reg')}), early {f.get('iordy_early')}")

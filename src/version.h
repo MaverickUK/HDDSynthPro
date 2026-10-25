@@ -1,7 +1,7 @@
 #pragma once
 
 // SemVer. Bump in the same commit as any firmware change (see CLAUDE.md).
-#define FIRMWARE_VERSION "0.8.15"
+#define FIRMWARE_VERSION "0.8.22"
 
 // What this build does, set per environment in platformio.ini:
 //   0  listen only (slice 0): every pin an input, raw bus trace

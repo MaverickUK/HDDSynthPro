@@ -62,7 +62,7 @@ A write (WRITE SECTORS) runs the other way: DRQ first, the host writes 256 words
 
 The device doesn't touch the buffer while BSY. Core 0 must never block for long: it serves fetches before and between trace prints, and only prints when USB serial has room.
 
-The disk is `HDDSYNTH.IMG` on the SD card (`ImageDisk` over SdFat, `src/sd_card.*`) if it exists, else `RamOverlayDisk` over `GeneratedDisk` (writes stay in RAM, up to 512 sectors, until reboot). Core 1 waits at boot for core 0 to choose it. Never format the SD card or touch files on it other than `HDDSYNTH.IMG`: it holds the owner's data. Slices 3–4 and the soak skip on an image, since they write to it.
+The disk is `HDDSYNTH.IMG` on the SD card (`ImageDisk` over SdFat, `src/sd_card.*`) if it exists, else `RamOverlayDisk` over `GeneratedDisk` (writes stay in RAM, up to 512 sectors, until reboot). Core 1 waits at boot for core 0 to choose it. Never format the SD card or touch files on it other than `HDDSYNTH.IMG` and the scratch `HDDBENCH.IMG`: it holds the owner's data. Benchmarks that write use `HDDBENCH.IMG` (`disk=bench`). Slices 3–4 and the soak skip on an image, since they write to it.
 
 The bus program holds IORDY on a write while its RX FIFO is full, so a write burst can't outrun core 1. `ide_bus.pio` fills its PIO block's 32 instructions.
 
@@ -95,6 +95,8 @@ Console:
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it (drive build; only reads);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
+- `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`);
+- `W`: debug, write-behind on or off (off by default: it holds some status reads past 1.25 µs during writes);
 - `x` then `Y`: the solder-bridge test, IDE cable unplugged (`short_test.*`; the board reboots afterwards);
 - `b`: reboot to the bootloader.
 

@@ -14,7 +14,9 @@ class SpscRing {
 
 public:
     // Producer side. Returns false (and drops the item) when full.
-    bool push(const T& item) {
+    // Always inlined: core 1 calls them, and an out-of-line copy would be in
+    // flash (scripts/check_core1_ram.py).
+    __attribute__((always_inline)) bool push(const T& item) {
         uint32_t head = head_.load(std::memory_order_relaxed);
         if (head - tail_.load(std::memory_order_acquire) >= N) return false;
         items_[head & (N - 1)] = item;
@@ -23,7 +25,7 @@ public:
     }
 
     // Consumer side. Returns false when empty.
-    bool pop(T& item) {
+    __attribute__((always_inline)) bool pop(T& item) {
         uint32_t tail = tail_.load(std::memory_order_relaxed);
         if (tail == head_.load(std::memory_order_acquire)) return false;
         item = items_[tail & (N - 1)];

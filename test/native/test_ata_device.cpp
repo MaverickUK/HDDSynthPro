@@ -27,6 +27,7 @@ struct VirtualHost {
     // Core 0's share: fetch (or store) whatever the device is waiting for.
     void pump() {
         Fetch f;
+        if (dev.dataOutHeld()) dev.releaseDataOut();  // core 1's timer
         if (source && dev.pendingFetch(f)) {
             bool ok = f.store ? source->write(f.lba, f.buffer) : f.flush ? true : source->read(f.lba, f.buffer);
             dev.fetchDone(f.id, ok && (!f.flush || source->flush()));
@@ -814,7 +815,9 @@ TEST(test_write_one_sector) {
 }
 
 TEST(test_write_multiple_sectors_interrupt_each) {
+    // Write-behind off: BSY while each sector is stored, as before 0.8.16.
     Device d(INFO);
+    d.setWriteBehind(false);
     GeneratedDisk base;
     static RamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
@@ -837,6 +840,100 @@ TEST(test_write_multiple_sectors_interrupt_each) {
     CHECK(got == words);
     CHECK(h.readSectors(2003, 1, got));  // the next sector is untouched
     CHECK(sameAsDisk(got, 2003, 1));
+}
+
+TEST(test_write_behind_overlaps_the_store) {
+    // The host sends sector 2 into the other buffer while sector 1 is stored.
+    Device d(INFO);
+    VirtualHost h{d};
+    std::vector<uint16_t> words = pattern(3, 21);
+    GeneratedDisk base;
+    RamOverlayDisk<8> disk(base);
+    h.setLba(3000, 3);
+    d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
+    for (int i = 0; i < 256; ++i) d.write(Reg::Data, words[size_t(i)]);
+    Fetch store1;
+    CHECK(d.pendingFetch(store1));  // sector 1's store is under way...
+    CHECK(store1.store);
+    CHECK_EQ(store1.lba, 3000u);
+    // The NS1081 reads Status straight after a block: BSY, and no interrupt
+    // yet for it to clear. Sector 2 is wanted once core 1 releases the hold.
+    CHECK_EQ(h.status(), ST_BSY | ST_DRDY | ST_DSC);
+    CHECK(d.dataOutHeld());
+    d.releaseDataOut();
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);  // ...while sector 1 is still storing
+    CHECK(d.intrq());
+    h.status();
+    for (int i = 0; i < 100; ++i) d.write(Reg::Data, words[256 + size_t(i)]);
+    CHECK(disk.write(store1.lba, store1.buffer));
+    d.fetchDone(store1.id, true);  // stored while the host is mid-sector
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);
+    for (int i = 100; i < 256; ++i) d.write(Reg::Data, words[256 + size_t(i)]);
+    Fetch store2;
+    CHECK(d.pendingFetch(store2));
+    CHECK_EQ(store2.lba, 3001u);
+    CHECK(store2.buffer != store1.buffer);
+    CHECK_EQ(h.altStatus(), ST_BSY | ST_DRDY | ST_DSC);  // the hold, though a buffer is free
+    CHECK(!d.intrq());
+    d.releaseDataOut();
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);  // sector 3, into the buffer just stored
+    CHECK(d.intrq());
+    h.status();
+    for (int i = 0; i < 256; ++i) d.write(Reg::Data, words[512 + size_t(i)]);
+    CHECK(h.altStatus() & ST_BSY);  // both buffers busy: sector 2 storing, sector 3 waiting
+    CHECK(disk.write(store2.lba, store2.buffer));
+    d.fetchDone(store2.id, true);
+    Fetch store3;
+    CHECK(d.pendingFetch(store3));
+    CHECK_EQ(store3.lba, 3002u);
+    CHECK(h.altStatus() & ST_BSY);  // no more sectors to receive: BSY until the last store
+    CHECK(!d.intrq());
+    CHECK(disk.write(store3.lba, store3.buffer));
+    d.fetchDone(store3.id, true);
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);  // all stored: done
+    CHECK(d.intrq());
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+    std::vector<uint16_t> got(256 * 3);
+    for (uint32_t s2 = 0; s2 < 3; ++s2) CHECK(disk.read(3000 + s2, got.data() + 256 * s2));
+    CHECK(got == words);
+}
+
+TEST(test_write_behind_store_failure) {
+    // Sector 1's store fails while the host sends sector 2: the error comes
+    // when that block ends, at sector 1, and sector 2 is never stored.
+    Device d(INFO);
+    VirtualHost h{d};
+    std::vector<uint16_t> words = pattern(3, 22);
+    h.setLba(3100, 3);
+    d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
+    for (int i = 0; i < 256; ++i) d.write(Reg::Data, words[size_t(i)]);
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    d.releaseDataOut();
+    for (int i = 0; i < 50; ++i) d.write(Reg::Data, words[256 + size_t(i)]);
+    d.fetchDone(f.id, false);
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);  // the host finishes its block
+    for (int i = 50; i < 256; ++i) d.write(Reg::Data, words[256 + size_t(i)]);
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC | ST_ERR);
+    CHECK_EQ(d.error(), ER_ABRT);
+    CHECK_EQ(d.read(Reg::LbaLow), 3100 & 0xFF);
+    CHECK_EQ(d.read(Reg::LbaMid), (3100 >> 8) & 0xFF);
+    CHECK(!d.pendingFetch(f));  // nothing more stored
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+}
+
+TEST(test_write_behind_through_the_virtual_host) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<64> disk(base);
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> words = pattern(40, 23);
+    CHECK(h.writeSectors(9000, 40, words));
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(9000, 40, got));
+    CHECK(got == words);
+    CHECK(h.readSectors(9040, 1, got));
+    CHECK(sameAsDisk(got, 9040, 1));
 }
 
 TEST(test_write_count_zero_means_256) {
@@ -1409,6 +1506,9 @@ void runAtaDeviceTests() {
     RUN(test_read_and_write_through_an_image);
     RUN(test_write_one_sector);
     RUN(test_write_multiple_sectors_interrupt_each);
+    RUN(test_write_behind_overlaps_the_store);
+    RUN(test_write_behind_store_failure);
+    RUN(test_write_behind_through_the_virtual_host);
     RUN(test_write_count_zero_means_256);
     RUN(test_write_past_the_end);
     RUN(test_write_store_failure);

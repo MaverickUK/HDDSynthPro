@@ -50,6 +50,12 @@ constexpr unsigned TRACE_FLUSH_MS = 20;
 // card on the rig took about 25 us; a spinning disk takes seconds.
 constexpr uint32_t WAKE_BUSY_US = 50;
 
+// After each data-out block but the last, BSY for at least this long before
+// DRQ and INTRQ ask for the next one. The NS1081 reads Status straight after
+// a block, clearing any interrupt, and then waits for INTRQ: with write-behind
+// the next block could be wanted at once, and it would wait forever.
+constexpr uint32_t DATA_OUT_BSY_US = 10;
+
 // The BB48's LED is the drive's activity light: lit while a command runs, and
 // for at least this long, so a command of a few microseconds still shows.
 constexpr uint32_t LED_MIN_MS = 25;

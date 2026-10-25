@@ -78,9 +78,10 @@ def require_generated_disk(drive):
     """Skips unless the drive serves the generated disk. Tests that compare
     reads with its pattern, or write to it, must never run on an SD image
     (slice 5): their writes would corrupt the filesystem on it."""
-    if "disk=image" in drive.command("s", "STATS"):
-        pytest.skip("the drive serves HDDSYNTH.IMG from the SD card; these tests need the "
-                    "generated disk (rename the image on the card, or remove the card)")
+    stats = drive.command("s", "STATS")
+    if "disk=generated" not in stats:
+        pytest.skip("the drive serves an image from the SD card; these tests need the "
+                    "generated disk (remove the card)")
 
 
 @pytest.fixture(scope="module")

@@ -20,9 +20,9 @@ struct FetchResult {
 
 class FetchMailbox {
 public:
-    // Core 1
-    bool post(const ata::Fetch& fetch) { return requests_.push(fetch); }
-    bool takeResult(FetchResult& result) { return results_.pop(result); }
+    // Core 1 (always inlined: an out-of-line copy would be in flash)
+    __attribute__((always_inline)) bool post(const ata::Fetch& fetch) { return requests_.push(fetch); }
+    __attribute__((always_inline)) bool takeResult(FetchResult& result) { return results_.pop(result); }
 
     // Core 0
     bool takeRequest(ata::Fetch& fetch) { return requests_.pop(fetch); }

@@ -177,6 +177,16 @@ public:
     // sector after the first is fetched under BSY once the host has read the
     // previous one, as before read-ahead (console `A`, for comparisons).
     void setReadAhead(bool on) { read_ahead_ = on; }
+    // Write-behind on (the default) or off, from the next write on. On, the
+    // host sends the next sector into the other buffer while core 0 stores the
+    // last one; off, it waits (BSY) for each store (console `W`).
+    void setWriteBehind(bool on) { write_behind_ = on; }
+
+    // After a data-out block (not the last) the device holds BSY until the
+    // caller releases it, at least cfg::DATA_OUT_BSY_US later: a host that
+    // reads Status straight after the block must see BSY, then get INTRQ.
+    bool dataOutHeld() const { return out_hold_; }
+    void releaseDataOut();
 
     // RESET# asserted (true) or released (false).
     void hardReset(bool asserted);
@@ -237,6 +247,7 @@ private:
     void requestFetch(bool busy = true);  // busy: BSY until it's done
     void readAhead();                     // fetch the read's next sector, if any
     void deliverSector(bool ok);          // a fetched sector to the host, or its error
+    void settleWrite();                   // next step of a write: a store, a block, or the end
     void fail(uint8_t error);  // ERR + error bits, command complete
     void complete();           // success, no data left
     void startDataIn(const uint16_t* words, uint16_t count);
@@ -249,7 +260,8 @@ private:
     Geometry geometry_;
     uint16_t identify_[256];
     // Two sector buffers: while the host reads one, core 0 fills the other
-    // with the next sector of the read (read-ahead). Writes use the first.
+    // with the next sector of the read (read-ahead); while the host writes
+    // one, core 0 stores the other (write-behind).
     uint16_t sectors_[2][SECTOR_WORDS];
 
     // Task file
@@ -268,9 +280,10 @@ private:
     uint16_t data_count_ = 0;
     uint16_t data_index_ = 0;
 
-    // Data-out transfer (host to device), into sectors_[0]
+    // Data-out transfer (host to device), into sectors_[recv_buf_]
     bool receiving_ = false;
     uint16_t received_ = 0;  // words of the current sector so far
+    uint8_t recv_buf_ = 0;
 
     // Multi-sector read in progress
     bool reading_ = false;
@@ -280,6 +293,12 @@ private:
     bool writing_ = false;
     uint32_t write_lba_ = 0;      // next sector to store
     uint32_t write_left_ = 0;     // sectors not yet stored
+    uint32_t recv_left_ = 0;      // sectors the host has still to send
+    bool filled_ = false;         // a received sector waiting for its store
+    uint8_t filled_buf_ = 0;
+    bool store_failed_ = false;   // reported once the block in progress ends
+    bool out_hold_ = false;       // BSY after a block until releaseDataOut()
+    uint32_t store_failed_lba_ = 0;
 
     bool fetch_pending_ = false;  // a fetch or store is wanted, or under way
     uint32_t fetch_id_ = 0;
@@ -291,7 +310,8 @@ private:
     bool ahead_failed_ = false;
     bool flushing_ = false;  // FLUSH CACHE: its fetch is a flush
     bool write_cache_ = true;
-    bool read_ahead_ = true;  // SET FEATURES 02h/82h; off: each sector synced as it's stored
+    bool read_ahead_ = true;
+    bool write_behind_ = true;  // SET FEATURES 02h/82h; off: each sector synced as it's stored
 
     bool irq_pending_ = false;
     bool command_queued_ = false;  // see queueCommand()
