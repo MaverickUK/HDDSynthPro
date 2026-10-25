@@ -117,8 +117,10 @@ void setup1() {
 
 // Posts the device's fetch to core 0, once per fetch.
 CORE1_RAM static void postFetch(ata::Device& dev, uint32_t& posted_fetch) {
+    uint32_t id = dev.pendingFetchId();
+    if (id == 0 || id == posted_fetch) return;  // the common case, without a call
     ata::Fetch fetch;
-    if (dev.pendingFetch(fetch) && fetch.id != posted_fetch && g_mailbox.post(fetch)) posted_fetch = fetch.id;
+    if (dev.pendingFetch(fetch) && g_mailbox.post(fetch)) posted_fetch = fetch.id;
 }
 
 CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {

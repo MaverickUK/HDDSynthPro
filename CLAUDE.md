@@ -44,6 +44,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - With no drive answering, it probes forever (about one access per µs), so the listen build drops events and the bus is never quiet.
   - It waits about 10 ms after each READ command before polling; later sectors of the same command are polled at once.
   - It sends CHECK POWER MODE, then STANDBY if the drive says active. What triggers it isn't settled: once it came straight after macOS probed a new disk, and a 60 s idle didn't trigger it (macOS's `disksleep` is 10 minutes). Waking (IDLE IMMEDIATE) must show BSY before the interrupt, or the adapter hangs.
+  - At detection it asks for PIO flow-control mode 4 (SET FEATURES 03h, 0Ch) before mode 0, even though IDENTIFY only offers mode 0. It never sends FLUSH CACHE, not even for `F_FULLFSYNC`, and ignores multiple mode.
   - It uses DMA with drives that support it. Its 44-pin header shares the bus with the 40-pin one, so the listen build on the 40-pin header can record a real drive on the 44-pin.
   - `host/rig.env` (git-ignored, from `rig.env.example`) holds the replug settings, and `scripts/rig.sh` loads it.
 - **Host OS:** the dev machine is macOS. There's no `O_DIRECT` (use `/dev/rdiskN`), no `dmesg` (use `log show`), and no ATA pass-through. OS-specific code stays in `host/hddproto/host_macos.py`; slice 6 adds a Linux host for pass-through.
@@ -89,6 +90,7 @@ Console:
 - `t`: raw bus trace on or off;
 - `D` then a digit: debug, answer data reads that many × 250 ns late (`-m timing`; `D0` is off);
 - `F`: debug, core 1's fast lane for data reads off or on (to compare);
+- `A`: debug, read-ahead off or on (to compare);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it (drive build; only reads);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;

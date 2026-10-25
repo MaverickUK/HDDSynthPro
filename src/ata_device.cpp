@@ -4,11 +4,6 @@
 
 namespace ata {
 
-// The handover from one sector to the next runs between two of the host's
-// reads (the last data word and ALTSTATUS), so it is one straight run of code
-// in consumeDataWords, not a chain of calls each saving registers.
-#define HANDOVER CORE1_RAM __attribute__((always_inline)) inline
-
 CORE1_RAM Reg regFor(bool command_block, bool control_block, unsigned address) {
     if (command_block && !control_block) return static_cast<Reg>(address & 7);
     if (control_block && !command_block && address == 6) return Reg::AltStatusDevCtrl;
@@ -369,21 +364,21 @@ CORE1_RAM void Device::finishDataOut() {
     requestFetch();  // BSY while core 0 stores the sector
 }
 
-HANDOVER void Device::requestFetch(bool busy) {
+CORE1_RAM void Device::requestFetch(bool busy) {
     if (busy) status_ = ST_BSY | ST_DRDY | ST_DSC;
     fetch_pending_ = true;
-    ++fetch_id_;
+    if (++fetch_id_ == 0) ++fetch_id_;  // never 0: pendingFetchId() uses it for "none"
     fetch_lba_ = writing_ ? write_lba_ : read_lba_;
     // A read fills the buffer the host isn't reading; a write stores the one
     // it was written into.
     fetch_buf_ = writing_ ? 0 : (data_ == sectors_[0] ? 1 : 0);
 }
 
-HANDOVER void Device::readAhead() {
+CORE1_RAM void Device::readAhead() {
     if (read_ahead_ && reading_ && read_left_ > 0) requestFetch(false);  // no BSY: the host carries on reading
 }
 
-HANDOVER void Device::deliverSector(bool ok) {
+CORE1_RAM void Device::deliverSector(bool ok) {
     if (!ok) {
         setTaskFileLba(fetch_lba_);
         reading_ = false;
@@ -469,7 +464,7 @@ CORE1_RAM void Device::complete() {
     ++commands_completed_;
 }
 
-HANDOVER void Device::startDataIn(const uint16_t* words, uint16_t count) {
+CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
     data_ = words;
     data_count_ = count;
     data_index_ = 0;
@@ -477,7 +472,7 @@ HANDOVER void Device::startDataIn(const uint16_t* words, uint16_t count) {
     irq_pending_ = true;  // PIO data-in: interrupt when each block is ready
 }
 
-HANDOVER void Device::finishDataIn() {
+CORE1_RAM void Device::finishDataIn() {
     data_ = nullptr;
     data_count_ = data_index_ = 0;
     if (reading_ && (ahead_ok_ || ahead_failed_)) {  // the next sector is in: on at once

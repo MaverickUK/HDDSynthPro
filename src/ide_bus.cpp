@@ -111,6 +111,25 @@ CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
     return true;
 }
 
+// The lane's rare case: an access mid-block that isn't a data read. Kept out
+// of line so the lane's loop keeps its values in registers (0.8.12 inline:
+// a third of data words held past 400 ns, against 2%).
+__attribute__((noinline)) CORE1_RAM static void serveOther(ata::Device& dev, uint32_t sample, uint16_t served) {
+    if (bus::op(sample) == bus::Op::Read) {
+        // A status poll (every sector boundary, with read-ahead): answer
+        // first. Catching the device up can't change it: the block isn't
+        // finished, so it's still DRQ.
+        ata::Reg reg = s_reg_for[regIndex(sample)];
+        pio_sm_put(s_pio, s_sm, dev.peek(reg));
+        dev.consumeDataWords(served);
+        dev.consumeRead(reg);
+        updateIntrq(dev.intrq());
+        return;
+    }
+    dev.consumeDataWords(served);  // a write: catch the device up first
+    serve(dev, sample);
+}
+
 CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
     const uint16_t* next;
     uint16_t left;
@@ -139,8 +158,7 @@ CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailb
         if (reset_changed) break;
         uint32_t sample = pio_sm_get(s_pio, s_sm);
         if ((sample & ACCESS_BITS) != DATA_READ) {
-            dev.consumeDataWords(served);  // catch the device up first
-            serve(dev, sample);
+            serveOther(dev, sample, served);
             return true;
         }
         pio_sm_put(s_pio, s_sm, next[served]);  // answer first, as serve() does

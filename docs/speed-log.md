@@ -24,6 +24,7 @@ MB/s here means 10^6 bytes per second. Worst read is the longest IORDY held a re
 | 2026-10-25 | 0.8.2 | (the same firmware) | PIO 0, 150 MHz, SD at 12 MHz | SD image | 0.59 MB/s | 61 IOPS (16.3 ms) | 10.4 ms + 780 µs/sector | (not run) | 1173 ns |
 | 2026-10-25 | 0.8.3 | SD card's SPI clock 12 → 25 MHz | PIO 0, 150 MHz, SD at 25 MHz | SD image | 0.84 MB/s | 69 IOPS (14.5 ms) | 10.7 ms + 519 µs/sector | (not run) | 1186 ns (1026-1053) |
 | 2026-10-25 | 0.8.6 | Read-ahead into a second sector buffer | PIO 0, 150 MHz, SD at 25 MHz | SD image | 1.26 MB/s | 76 IOPS (13.1 ms) | 10.9 ms + 318 µs/sector | (not run) | 1173 ns (1160-1173) |
+| 2026-10-25 | 0.8.15 | Read-ahead's handover reworked for the worst read | PIO 0, 150 MHz | generated | 1.24 MB/s | 76 IOPS (13.1 ms) | 10.9 ms + 323 µs/sector | 1.56 MB/s | 1080 ns (1053-1080) |
 
 ## Where the time goes (0.7.3 baseline)
 
@@ -78,6 +79,23 @@ The device has two sector buffers. While the host reads one, core 0 fills the ot
 - It took three goes to keep the worst read inside 1,250 ns. 0.8.4 left the read-ahead's result in the mailbox until the block ended, so the device went BSY and an ALTSTATUS waited behind the bookkeeping (1,466 ns). 0.8.5 took results inside the fast lane (1,266 ns). 0.8.6 also posts the read-ahead from inside the lane, one small job per pass while the FIFO is empty, instead of between the adapter's ALTSTATUS and STATUS reads.
 - The worst read on the image is now 1,160-1,173 ns, about 80 ns inside the limit; on the generated disk it was about 1,040 before read-ahead. To measure on the generated disk.
 - Data: two full reads of the image identical; against the copy from before, only directory timestamps and macOS's own housekeeping files differ, which macOS rewrites at each mount.
+
+### 0.8.15: the worst read back near 1 µs, read-ahead kept
+
+With read-ahead the worst read had crept to 1,160-1,240 ns, too close to 1,250 for an overnight soak that fails at 1,250. Bisecting on the day: 0.8.2 still measured 960-1,053 ns, 0.8.6 1,160-1,173, so the cost came with read-ahead, yet switching read-ahead off (console `A`) didn't remove it. What did:
+- posting the read-ahead after the block's first data word: at a sector boundary the adapter reads ALTSTATUS then STATUS straight after, and a post begun between them held the STATUS read;
+- answering a status poll in the fast lane before catching the device up (which can't change the answer mid-block);
+- keeping the lane's loop small: its rare case (an access that isn't a data read) out of line, so GCC keeps the loop's values in registers.
+
+Two things that looked right made it worse, and were reverted: forcing the sector handover inline (it made `fetchDone` big, and the BSY path slower: 1,306-1,480 ns), and copying the PIO handles into locals (they spilled to the stack). Small changes to core 1's code move its timing by 100 ns or more through register allocation alone, so each one is measured on the rig.
+
+Worst reads now, generated disk, three trials each:
+
+| Read-ahead | Fast lane | Worst read |
+|---|---|---|
+| on (default) | on (default) | 1,053-1,080 ns |
+| off | on | 1,053-1,066 ns |
+| off | off | 1,226-1,240 ns (debug only) |
 
 ## Ceilings on this adapter
 

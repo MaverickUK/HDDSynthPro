@@ -189,6 +189,8 @@ public:
     // True while a fetch (or store) is wanted; fills `fetch`. Stays true
     // (same id) until fetchDone() or a reset.
     bool pendingFetch(Fetch& fetch);
+    // The same question, cheaply: the id of the wanted fetch, or 0.
+    uint32_t pendingFetchId() const { return fetch_pending_ ? fetch_id_ : 0; }
 
     // Core 0 finished fetch `id`: the sector was moved (ok), or it failed.
     void fetchDone(uint32_t id, bool ok);

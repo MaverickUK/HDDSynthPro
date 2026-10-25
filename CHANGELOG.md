@@ -2,6 +2,29 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.8.15] - 2026-10-25
+
+The SD path made safe for real use, and the worst read back near 1 µs with read-ahead kept. 0.8.7 to 0.8.14 were rig builds, not released.
+
+### Added
+- **FLUSH CACHE flushes the storage.** The device goes BSY and core 0 calls `BlockSource::flush()`; on the image that is SdFat's `sync()`, which also waits for the card. A failed flush aborts.
+- **IDENTIFY declares a write cache and FLUSH CACHE** (words 82/85 bit 5, 83/86 bit 12), so hosts that flush know to. **SET FEATURES 02h/82h** turn the write cache on and off; off, each written sector is synced before the write completes. A hardware reset turns it back on.
+- SET FEATURES trace lines show the subcommand and its count.
+- `disk_ms` in `s`: how long choosing the disk took at boot.
+- Console `A` switches read-ahead (debug, for comparisons, like `F`).
+
+### Changed
+- Core 1's fast lane posts the read-ahead only after the block's first data word, answers a status poll before catching the device up, and handles anything but a data read out of line, so its loop keeps its values in registers.
+
+### Fixed
+- The worst read with read-ahead was 1,160-1,240 ns; it's 1,053-1,080 again (0.8.2: 960-1,053), with read-ahead on or off. Found by bisecting: 0.8.2 still measured 960-1,053 on the day, 0.8.6 1,160-1,173.
+
+### On the rig
+- The NS1081 never sends FLUSH CACHE, not on unmount and not for `F_FULLFSYNC`: the flush is for other hosts.
+- At detection it asks for PIO flow-control mode 4 (SET FEATURES 03h, 0Ch) before falling back to mode 0, which we refuse because IDENTIFY doesn't offer it.
+- With no card the drive gives up after 2.0 s (SdFat's timeout) and serves the generated disk.
+- Generated disk: 1.24 MB/s, worst read 1,080 ns; 5-minute soak clean, the bus observer checked 431,217 sectors.
+
 ## [0.8.6] - 2026-10-25
 
 ### Added
