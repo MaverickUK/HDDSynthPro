@@ -27,8 +27,10 @@ struct VirtualHost {
     // Core 0's share: fetch (or store) whatever the device is waiting for.
     void pump() {
         Fetch f;
-        if (source && dev.pendingFetch(f))
-            dev.fetchDone(f.id, f.store ? source->write(f.lba, f.buffer) : source->read(f.lba, f.buffer));
+        if (source && dev.pendingFetch(f)) {
+            bool ok = f.store ? source->write(f.lba, f.buffer) : f.flush ? true : source->read(f.lba, f.buffer);
+            dev.fetchDone(f.id, ok && (!f.flush || source->flush()));
+        }
     }
 
     uint8_t status() { return uint8_t(dev.read(Reg::StatusCommand)); }
@@ -568,6 +570,29 @@ TEST(test_read_ahead_stale_after_reset) {
     CHECK(!d.pendingFetch(f));
 }
 
+TEST(test_read_ahead_off) {
+    // Off, the next sector is fetched under BSY after the host reads one.
+    Device d(INFO);
+    d.setReadAhead(false);
+    GeneratedDisk disk;
+    VirtualHost h{d};
+    h.setLba(6000, 2);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+    CHECK(!d.pendingFetch(f));  // nothing ahead
+    std::vector<uint16_t> got;
+    for (int i = 0; i < 256; ++i) got.push_back(d.read(Reg::Data));
+    CHECK(h.altStatus() & ST_BSY);
+    CHECK(d.pendingFetch(f));
+    CHECK_EQ(f.lba, 6001u);
+    d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+    for (int i = 0; i < 256; ++i) got.push_back(d.read(Reg::Data));
+    CHECK(sameAsDisk(got, 6000, 2));
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC);
+}
+
 TEST(test_read_count_zero_means_256) {
     Device d(INFO);
     GeneratedDisk disk;
@@ -704,6 +729,11 @@ struct MemoryImage : ImageFile {
         std::memcpy(bytes.data() + offset, data, n);
         return true;
     }
+    int syncs = 0;
+    bool sync() override {
+        ++syncs;
+        return !fail;
+    }
 };
 
 TEST(test_image_disk) {
@@ -722,9 +752,12 @@ TEST(test_image_disk) {
     CHECK_EQ(file.bytes[15 * 512], uint8_t(words[0]));
     CHECK(!disk.read(16, got));  // past the end, the partial tail included
     CHECK(!disk.write(16, words.data()));
+    CHECK(disk.flush());  // FLUSH CACHE syncs the file
+    CHECK_EQ(file.syncs, 1);
     file.fail = true;  // an SD error reaches the device as a failed fetch
     CHECK(!disk.read(0, got));
     CHECK(!disk.write(0, words.data()));
+    CHECK(!disk.flush());
 }
 
 TEST(test_read_and_write_through_an_image) {
@@ -994,13 +1027,68 @@ TEST(test_set_features_transfer_mode) {
     }
 }
 
+TEST(test_set_features_traced_with_its_subcommand) {
+    Device d(INFO);
+    command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_PIO_FLOW_0);
+    CHECK_EQ(d.lastCommand().command, CMD_SET_FEATURES);
+    CHECK_EQ(d.lastCommand().lba, uint32_t(SF_SET_TRANSFER_MODE));
+    CHECK_EQ(d.lastCommand().count, XFER_PIO_FLOW_0);
+}
+
 TEST(test_set_features_other_subcommands_abort) {
     Device d(INFO);
-    const uint8_t refused[] = {0x02, 0x82, 0x55, 0xAA, 0x66, 0xCC};  // cache, look-ahead, defaults
+    const uint8_t refused[] = {0x55, 0xAA, 0x66, 0xCC};  // look-ahead, power-on defaults
     for (uint8_t f : refused) {
         CHECK(command(d, CMD_SET_FEATURES, f, 0) & ST_ERR);
         CHECK_EQ(d.error(), ER_ABRT);
     }
+}
+
+// Writable storage that counts flushes, and can fail them.
+struct FlushCounter : BlockSource {
+    GeneratedDisk base;
+    RamOverlayDisk<16> ram{base};
+    uint32_t sectors() const override { return ram.sectors(); }
+    bool read(uint32_t lba, uint16_t words[256]) override { return ram.read(lba, words); }
+    bool write(uint32_t lba, const uint16_t words[256]) override { return ram.write(lba, words); }
+    int flushes = 0;
+    bool fail = false;
+    bool flush() override {
+        ++flushes;
+        return !fail;
+    }
+};
+
+static bool identifyChecksumOk(const uint16_t w[256]) {
+    uint8_t sum = 0;
+    for (int i = 0; i < 256; ++i) sum = uint8_t(sum + (w[i] & 0xFF) + (w[i] >> 8));
+    return sum == 0 && (w[255] & 0xFF) == 0xA5;
+}
+
+TEST(test_write_cache_on_and_off) {
+    Device d(INFO);
+    FlushCounter disk;
+    VirtualHost h{d, &disk};
+    uint16_t id[256];
+    CHECK(h.identify(id));
+    CHECK(id[85] & (1u << 5));  // on after power-up
+    CHECK_EQ(command(d, CMD_SET_FEATURES, SF_DISABLE_WRITE_CACHE, 0), ST_DRDY | ST_DSC);
+    CHECK(h.identify(id));
+    CHECK(!(id[85] & (1u << 5)));
+    CHECK(identifyChecksumOk(id));
+    // Off: each sector is synced as it's stored.
+    std::vector<uint16_t> words = pattern(2, 512);
+    CHECK(h.writeSectors(7000, 2, words));
+    CHECK_EQ(disk.flushes, 2);
+    CHECK_EQ(command(d, CMD_SET_FEATURES, SF_ENABLE_WRITE_CACHE, 0), ST_DRDY | ST_DSC);
+    CHECK(h.writeSectors(7000, 2, words));
+    CHECK_EQ(disk.flushes, 2);  // on: stored, flushed only on FLUSH CACHE
+    command(d, CMD_SET_FEATURES, SF_DISABLE_WRITE_CACHE, 0);
+    d.hardReset(true);
+    d.hardReset(false);
+    CHECK(h.identify(id));
+    CHECK(id[85] & (1u << 5));  // a hardware reset turns it back on
+    CHECK(identifyChecksumOk(id));
 }
 
 TEST(test_initialize_device_parameters) {
@@ -1121,7 +1209,7 @@ TEST(test_power_commands) {
     d.write(Reg::StatusCommand, CMD_READ_VERIFY);
     CHECK(!d.standby());
     const uint8_t also_ok[] = {CMD_STANDBY_OLD, CMD_IDLE, CMD_IDLE_OLD, CMD_IDLE_IMMEDIATE_OLD,
-                               CMD_STANDBY_IMMEDIATE_OLD, CMD_FLUSH_CACHE};
+                               CMD_STANDBY_IMMEDIATE_OLD};
     for (uint8_t c : also_ok) {
         uint8_t status = command(d, c);
         if (d.waking()) {  // IDLE after STANDBY
@@ -1208,11 +1296,52 @@ TEST(test_set_multiple_mode_aborts) {
 
 TEST(test_housekeeping_commands_complete_for_the_trace) {
     Device d(INFO);
-    const uint8_t cmds[] = {CMD_FLUSH_CACHE, CMD_CHECK_POWER_MODE, CMD_IDLE_IMMEDIATE, 0x10, 0x70,
-                            CMD_SET_MULTIPLE_MODE};
+    const uint8_t cmds[] = {CMD_CHECK_POWER_MODE, CMD_IDLE_IMMEDIATE, 0x10, 0x70, CMD_SET_MULTIPLE_MODE};
     for (uint8_t c : cmds) command(d, c);
-    CHECK_EQ(d.commandsStarted(), 6u);
-    CHECK_EQ(d.commandsCompleted(), 6u);  // each ends with a DONE line
+    CHECK_EQ(d.commandsStarted(), 5u);
+    CHECK_EQ(d.commandsCompleted(), 5u);  // each ends with a DONE line
+}
+
+TEST(test_flush_cache_flushes_the_storage) {
+    Device d(INFO);
+    FlushCounter disk;
+    VirtualHost h{d};
+    CHECK_EQ(command(d, CMD_FLUSH_CACHE), ST_BSY | ST_DRDY | ST_DSC);  // BSY while core 0 flushes
+    CHECK(!d.intrq());
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    CHECK(f.flush);
+    CHECK(!f.store);
+    d.fetchDone(f.id, disk.flush());
+    CHECK_EQ(disk.flushes, 1);
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    CHECK(d.intrq());
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+
+    disk.fail = true;  // the card couldn't
+    command(d, CMD_FLUSH_CACHE);
+    CHECK(d.pendingFetch(f));
+    d.fetchDone(f.id, disk.flush());
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC | ST_ERR);
+    CHECK_EQ(d.error(), ER_ABRT);
+
+    command(d, CMD_FLUSH_CACHE);  // a reset makes a late flush result stale
+    CHECK(d.pendingFetch(f));
+    d.hardReset(true);
+    d.hardReset(false);
+    d.fetchDone(f.id, true);
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    CHECK(!d.pendingFetch(f));
+}
+
+TEST(test_flush_cache_through_the_virtual_host) {
+    Device d(INFO);
+    FlushCounter disk;
+    VirtualHost h{d, &disk};  // serves fetches, flushes included, when polled
+    d.write(Reg::StatusCommand, CMD_FLUSH_CACHE);
+    CHECK(h.waitNotBusy());
+    CHECK_EQ(disk.flushes, 1);
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC);
 }
 
 // What a USB bridge typically does once it has found a drive: IDENTIFY, pick
@@ -1270,6 +1399,7 @@ void runAtaDeviceTests() {
     RUN(test_read_ahead_hides_the_fetch);
     RUN(test_read_ahead_failure_reported_at_its_sector);
     RUN(test_read_ahead_stale_after_reset);
+    RUN(test_read_ahead_off);
     RUN(test_read_count_zero_means_256);
     RUN(test_read_last_sector_and_past_the_end);
     RUN(test_read_chs);
@@ -1288,6 +1418,7 @@ void runAtaDeviceTests() {
     RUN(test_read_with_device1_selected_is_ignored);
     RUN(test_read_across_cores);
     RUN(test_set_features_transfer_mode);
+    RUN(test_set_features_traced_with_its_subcommand);
     RUN(test_set_features_other_subcommands_abort);
     RUN(test_initialize_device_parameters);
     RUN(test_initialize_device_parameters_survives_soft_reset_not_hard);
@@ -1300,5 +1431,8 @@ void runAtaDeviceTests() {
     RUN(test_reset_cancels_waking);
     RUN(test_set_multiple_mode_aborts);
     RUN(test_housekeeping_commands_complete_for_the_trace);
+    RUN(test_flush_cache_flushes_the_storage);
+    RUN(test_flush_cache_through_the_virtual_host);
+    RUN(test_write_cache_on_and_off);
     RUN(test_virtual_host_bridge_setup);
 }

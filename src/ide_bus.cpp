@@ -117,8 +117,11 @@ CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailb
     if (!dev.dataInRemaining(next, left)) return true;
     uint16_t served = 0;
     bool reset_changed = false;
+    // The read-ahead is posted only once the host is reading data words: at a
+    // sector boundary it reads ALTSTATUS then STATUS straight after, and a
+    // post started between them held the STATUS read (0.8.8: 1,240 ns).
     ata::Fetch fetch;
-    bool to_post = dev.pendingFetch(fetch) && fetch.id != posted_fetch;
+    bool to_post = false;
     while (served < left) {
         while (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
             if (gpio_get(cfg::PIN_RESET_N) == reset_low) {  // high when it was low, or low when high
@@ -141,7 +144,7 @@ CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailb
             return true;
         }
         pio_sm_put(s_pio, s_sm, next[served]);  // answer first, as serve() does
-        ++served;
+        if (served++ == 0) to_post = dev.pendingFetch(fetch) && fetch.id != posted_fetch;
     }
     dev.consumeDataWords(served);  // the block may be done: BSY for the next fetch
     updateIntrq(dev.intrq());

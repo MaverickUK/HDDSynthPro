@@ -2,7 +2,9 @@
 //
 // It advertises a deliberately plain drive: LBA28 plus a default CHS
 // geometry, PIO mode 0 only, IORDY supported, no DMA, no READ/WRITE MULTIPLE,
-// no 48-bit addressing.
+// no 48-bit addressing. It does declare a write cache and FLUSH CACHE: the
+// storage behind it (SdFat, the card) buffers writes, so hosts should flush
+// before power goes.
 #pragma once
 
 #include <cstdint>
@@ -36,6 +38,10 @@ void buildIdentify(const IdentifyInfo& info, uint16_t words[256]);
 // valid IDENTIFY block (from buildIdentify): the checksum is adjusted for the
 // changed words only, because core 1 runs this while the host may be waiting.
 void setCurrentGeometry(uint16_t words[256], const Geometry& g);
+
+// Sets the "write cache enabled" bit (word 85 bit 5) after SET FEATURES 02h
+// or 82h, and fixes up the checksum, as setCurrentGeometry does.
+void setWriteCacheEnabled(uint16_t words[256], bool on);
 
 // ATA strings are space-padded and stored two characters per word with the
 // first character in the high byte. Writes `len_words` words.

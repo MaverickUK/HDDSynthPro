@@ -71,6 +71,8 @@ public:
     bool writeAt(uint64_t offset, const void* data, size_t bytes) override {
         return s_image.seekSet(offset) && s_image.write(data, bytes) == bytes;
     }
+    // SdFat's cache to the card, then waits until the card isn't busy.
+    bool sync() override { return s_image.sync(); }
 };
 static SdImageFile s_image_file;
 

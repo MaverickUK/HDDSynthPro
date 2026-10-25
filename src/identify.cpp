@@ -52,6 +52,13 @@ CORE1_RAM void setCurrentGeometry(uint16_t w[256], const Geometry& g) {
     w[255] = uint16_t((checksum << 8) | 0xA5);
 }
 
+CORE1_RAM void setWriteCacheEnabled(uint16_t w[256], bool on) {
+    uint16_t word = on ? uint16_t(w[85] | (1u << 5)) : uint16_t(w[85] & ~(1u << 5));
+    uint8_t checksum = uint8_t(uint8_t(w[255] >> 8) + byteSum(w[85]) - byteSum(word));
+    w[85] = word;
+    w[255] = uint16_t((checksum << 8) | 0xA5);
+}
+
 void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     std::memset(w, 0, 256 * sizeof(uint16_t));
     Geometry g = defaultGeometry(info.total_sectors);
@@ -81,11 +88,11 @@ void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     w[67] = 600;     // minimum PIO cycle time without IORDY, ns (mode 0)
     w[68] = 600;     // minimum PIO cycle time with IORDY, ns
     w[80] = 0x001E;  // supports ATA-1 to ATA-4
-    w[82] = 0x0000;  // no optional command sets (SMART, write cache, ...)
-    w[83] = 0x4000;  // bit 14 shall be set; no 48-bit addressing
+    w[82] = 1u << 5;               // write cache supported; no SMART or other sets
+    w[83] = 0x4000 | (1u << 12);   // bit 14 shall be set; FLUSH CACHE; no 48-bit addressing
     w[84] = 0x4000;
-    w[85] = 0x0000;
-    w[86] = 0x0000;
+    w[85] = 1u << 5;   // write cache enabled (SET FEATURES 02h/82h change it)
+    w[86] = 1u << 12;  // FLUSH CACHE
     w[87] = 0x4000;
     fixChecksum(w);
 }

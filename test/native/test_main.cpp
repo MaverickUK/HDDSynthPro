@@ -248,6 +248,10 @@ TEST(test_identify_fields) {
     CHECK(!(w[53] & 4));         // word 88 (UDMA) not valid
     CHECK_EQ(w[88], 0);
     CHECK(!(w[83] & (1u << 10)));  // no 48-bit
+    CHECK(w[82] & (1u << 5));      // write cache supported...
+    CHECK(w[85] & (1u << 5));      // ...and enabled
+    CHECK(w[83] & (1u << 12));     // FLUSH CACHE supported...
+    CHECK(w[86] & (1u << 12));     // ...and enabled
 }
 
 TEST(test_identify_checksum) {

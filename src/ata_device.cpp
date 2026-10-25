@@ -4,6 +4,11 @@
 
 namespace ata {
 
+// The handover from one sector to the next runs between two of the host's
+// reads (the last data word and ALTSTATUS), so it is one straight run of code
+// in consumeDataWords, not a chain of calls each saving registers.
+#define HANDOVER CORE1_RAM __attribute__((always_inline)) inline
+
 CORE1_RAM Reg regFor(bool command_block, bool control_block, unsigned address) {
     if (command_block && !control_block) return static_cast<Reg>(address & 7);
     if (control_block && !command_block && address == 6) return Reg::AltStatusDevCtrl;
@@ -35,6 +40,7 @@ CORE1_RAM void Device::resetToSignature() {
     reading_ = false;
     writing_ = false;
     receiving_ = false;
+    flushing_ = false;
     fetch_pending_ = false;
     ++fetch_id_;
 }
@@ -128,10 +134,14 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         reading_ = false;
         writing_ = false;
         receiving_ = false;
+        flushing_ = false;
         fetch_pending_ = false;
         ++fetch_id_;
-        // A hardware reset (not a soft one) restores the power-on CHS translation.
+        // A hardware reset (not a soft one) restores the power-on CHS
+        // translation and write cache setting.
         setGeometry(defaultGeometry(info_.total_sectors));
+        write_cache_ = true;
+        setWriteCacheEnabled(identify_, true);
         standby_ = false;
     } else if (in_reset_) {
         in_reset_ = false;
@@ -182,7 +192,10 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
             initializeDeviceParameters();
             break;
         case CMD_FLUSH_CACHE:
-            completeNoData();  // no write cache: nothing to flush
+            // The drive keeps nothing back itself, but its storage may (SdFat's
+            // cache, the card's own buffer), so core 0 flushes it under BSY.
+            flushing_ = true;
+            requestFetch();
             break;
         case CMD_STANDBY_IMMEDIATE:
         case CMD_STANDBY:
@@ -266,13 +279,21 @@ CORE1_RAM void Device::seek() {
 }
 
 CORE1_RAM void Device::setFeatures() {
+    last_.lba = features_;  // for the trace: which subcommand, and its argument
+    last_.count = sector_count_;
     if (features_ == SF_SET_TRANSFER_MODE &&
         (sector_count_ == XFER_PIO_DEFAULT || sector_count_ == XFER_PIO_FLOW_0)) {
         completeNoData();  // the only mode there is
         return;
     }
+    if (features_ == SF_ENABLE_WRITE_CACHE || features_ == SF_DISABLE_WRITE_CACHE) {
+        write_cache_ = features_ == SF_ENABLE_WRITE_CACHE;
+        setWriteCacheEnabled(identify_, write_cache_);
+        completeNoData();
+        return;
+    }
     // Faster PIO modes and every DMA mode are not advertised; nor is turning
-    // IORDY off (01h), write caching, look-ahead or the power-on defaults.
+    // IORDY off (01h), look-ahead or the power-on defaults.
     fail(ER_ABRT);
 }
 
@@ -348,7 +369,7 @@ CORE1_RAM void Device::finishDataOut() {
     requestFetch();  // BSY while core 0 stores the sector
 }
 
-CORE1_RAM void Device::requestFetch(bool busy) {
+HANDOVER void Device::requestFetch(bool busy) {
     if (busy) status_ = ST_BSY | ST_DRDY | ST_DSC;
     fetch_pending_ = true;
     ++fetch_id_;
@@ -358,11 +379,11 @@ CORE1_RAM void Device::requestFetch(bool busy) {
     fetch_buf_ = writing_ ? 0 : (data_ == sectors_[0] ? 1 : 0);
 }
 
-CORE1_RAM void Device::readAhead() {
-    if (reading_ && read_left_ > 0) requestFetch(false);  // no BSY: the host carries on reading
+HANDOVER void Device::readAhead() {
+    if (read_ahead_ && reading_ && read_left_ > 0) requestFetch(false);  // no BSY: the host carries on reading
 }
 
-CORE1_RAM void Device::deliverSector(bool ok) {
+HANDOVER void Device::deliverSector(bool ok) {
     if (!ok) {
         setTaskFileLba(fetch_lba_);
         reading_ = false;
@@ -375,13 +396,21 @@ CORE1_RAM void Device::deliverSector(bool ok) {
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
-    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_};
+    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_, flushing_ || (writing_ && !write_cache_)};
     return true;
 }
 
 CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
     if (!fetch_pending_ || id != fetch_id_) return;  // stale: a reset came first
     fetch_pending_ = false;
+    if (flushing_) {
+        flushing_ = false;
+        if (ok)
+            completeNoData();
+        else
+            fail(ER_ABRT);
+        return;
+    }
     if (writing_) {
         if (!ok) {
             setTaskFileLba(write_lba_);
@@ -440,7 +469,7 @@ CORE1_RAM void Device::complete() {
     ++commands_completed_;
 }
 
-CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
+HANDOVER void Device::startDataIn(const uint16_t* words, uint16_t count) {
     data_ = words;
     data_count_ = count;
     data_index_ = 0;
@@ -448,7 +477,7 @@ CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
     irq_pending_ = true;  // PIO data-in: interrupt when each block is ready
 }
 
-CORE1_RAM void Device::finishDataIn() {
+HANDOVER void Device::finishDataIn() {
     data_ = nullptr;
     data_count_ = data_index_ = 0;
     if (reading_ && (ahead_ok_ || ahead_failed_)) {  // the next sector is in: on at once
@@ -459,6 +488,10 @@ CORE1_RAM void Device::finishDataIn() {
     }
     if (reading_ && fetch_pending_) {
         status_ = ST_BSY | ST_DRDY | ST_DSC;  // the read-ahead isn't in yet: wait for it
+        return;
+    }
+    if (reading_ && read_left_ > 0) {
+        requestFetch();  // read-ahead off: the next sector, under BSY
         return;
     }
     reading_ = false;

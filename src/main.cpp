@@ -92,6 +92,7 @@ CORE1_RAM void loop1() {
 static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
+static SharedFlag g_read_ahead{true};  // console `A` (debug)
 
 // For the activity LED (core 0's updateLed): core 1 counts commands as they
 // start and says whether one is running.
@@ -166,6 +167,7 @@ CORE1_RAM void loop1() {
                 recordCommandStart(command_start_us, start_info);
                 start_unrecorded = false;
             }
+            dev.setReadAhead(g_read_ahead.load());
             dev.runQueuedCommand();
             ide_bus::updateIntrq(dev.intrq());
             if (dev.commandsStarted() != started) {
@@ -262,7 +264,10 @@ static void updateLed() {
     gpio_put(cfg::PIN_BOARD_LED, int32_t(off_ms - now) > 0);
 }
 
+static uint32_t g_disk_ms = 0;  // how long choosing the disk took at boot (console `s`)
+
 static void chooseDisk() {
+    uint32_t start = millis();
     if (ImageFile* file = sd_card::openImage(Serial)) {
         static ImageDisk image(*file);
         if (image.sectors() > 0) {
@@ -270,6 +275,7 @@ static void chooseDisk() {
             g_disk_name = "image";
         }
     }
+    g_disk_ms = millis() - start;
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);
 }
 
@@ -293,7 +299,10 @@ static void noteActivity(const TraceEvent& e) {
 static void serveFetches() {
     ata::Fetch fetch;
     while (g_mailbox.takeRequest(fetch)) {
-        bool ok = fetch.store ? g_disk->write(fetch.lba, fetch.buffer) : g_disk->read(fetch.lba, fetch.buffer);
+        bool ok = fetch.store ? g_disk->write(fetch.lba, fetch.buffer)
+                  : fetch.flush ? true  // FLUSH CACHE: nothing to move
+                                : g_disk->read(fetch.lba, fetch.buffer);
+        if (ok && fetch.flush) ok = g_disk->flush();
         while (!g_mailbox.postResult(FetchResult{fetch.id, ok})) {}
     }
 }
@@ -348,7 +357,8 @@ static void printStats() {
                   (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
-    Serial.printf(" disk=%s sectors=%lu", g_disk_name, (unsigned long)g_disk->sectors());
+    Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
+                  (unsigned long)g_disk_ms);
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
@@ -452,6 +462,12 @@ static void handleConsole() {
                 bus_observer::resetCounts();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
+            case 'A': {  // debug: read-ahead on or off, to compare
+                bool on = !g_read_ahead.load();
+                g_read_ahead.store(on);
+                Serial.printf("READAHEAD %s\n", on ? "on" : "off");
+                break;
+            }
             case 'F': {  // debug: the fast lane on or off, to compare
                 bool on = !g_fast_lane.load();
                 g_fast_lane.store(on);

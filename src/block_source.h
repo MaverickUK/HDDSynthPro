@@ -22,6 +22,9 @@ public:
         (void)words;
         return false;
     }
+    // Makes everything written so far permanent (FLUSH CACHE). Returns false
+    // if it couldn't. Nothing to do for a source without a cache.
+    virtual bool flush() { return true; }
 };
 
 // Slice 3: content computed from the LBA (gen_disk.h). No storage needed.
@@ -94,6 +97,7 @@ public:
     virtual uint64_t size() const = 0;
     virtual bool readAt(uint64_t offset, void* data, size_t bytes) = 0;
     virtual bool writeAt(uint64_t offset, const void* data, size_t bytes) = 0;
+    virtual bool sync() { return true; }  // written data onto the medium
 };
 
 // Slice 5: the disk is an image file, sector n at byte n * 512. The file's
@@ -114,6 +118,8 @@ public:
         if (lba >= sectors()) return false;
         return file_.writeAt(uint64_t(lba) * gen_disk::SECTOR_BYTES, words, gen_disk::SECTOR_BYTES);
     }
+
+    bool flush() override { return file_.sync(); }
 
 private:
     ImageFile& file_;

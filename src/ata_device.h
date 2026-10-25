@@ -84,7 +84,7 @@ constexpr uint8_t CMD_IDLE_IMMEDIATE = 0xE1;
 constexpr uint8_t CMD_STANDBY = 0xE2;
 constexpr uint8_t CMD_IDLE = 0xE3;
 constexpr uint8_t CMD_CHECK_POWER_MODE = 0xE5;
-constexpr uint8_t CMD_FLUSH_CACHE = 0xE7;
+constexpr uint8_t CMD_FLUSH_CACHE = 0xE7;  // BSY while core 0 flushes the storage
 constexpr uint8_t CMD_IDENTIFY_DEVICE = 0xEC;
 constexpr uint8_t CMD_SET_FEATURES = 0xEF;
 // The ATA-1 era opcodes for the power commands (94h-98h), still sent by some hosts.
@@ -97,6 +97,8 @@ constexpr uint8_t CMD_CHECK_POWER_MODE_OLD = 0x98;
 // SET FEATURES subcommand (Features register) and transfer mode values
 // (Sector Count register) that this device accepts.
 constexpr uint8_t SF_SET_TRANSFER_MODE = 0x03;
+constexpr uint8_t SF_ENABLE_WRITE_CACHE = 0x02;
+constexpr uint8_t SF_DISABLE_WRITE_CACHE = 0x82;
 constexpr uint8_t XFER_PIO_DEFAULT = 0x00;  // PIO default mode
 constexpr uint8_t XFER_PIO_FLOW_0 = 0x08;   // PIO flow-control mode 0 (with IORDY)
 
@@ -115,13 +117,15 @@ struct Fetch {
     uint32_t lba;
     uint16_t* buffer;  // SECTOR_WORDS words, in bus order (low byte first on disk)
     bool store;        // true: write `buffer` to `lba`; false: fill it from `lba`
+    bool flush;        // true: then make everything stored so far permanent. Alone: FLUSH
+                       // CACHE; with store: a write with the write cache off
 };
 
 // What the trace reports about a command.
 struct CommandInfo {
     uint8_t command;
-    uint32_t lba;    // decoded start address (LBA, or CHS converted)
-    uint16_t count;  // sectors (0 in the register means 256)
+    uint32_t lba;    // decoded start address (LBA, or CHS converted); SET FEATURES: the subcommand
+    uint16_t count;  // sectors (0 in the register means 256); SET FEATURES: its Sector Count
 };
 
 class Device {
@@ -168,6 +172,11 @@ public:
     void queueCommand(uint8_t command);
     bool commandQueued() const { return command_queued_; }
     void runQueuedCommand();
+
+    // Read-ahead on (the default) or off, from the next read on. Off, each
+    // sector after the first is fetched under BSY once the host has read the
+    // previous one, as before read-ahead (console `A`, for comparisons).
+    void setReadAhead(bool on) { read_ahead_ = on; }
 
     // RESET# asserted (true) or released (false).
     void hardReset(bool asserted);
@@ -278,6 +287,9 @@ private:
     // previous sector, waiting to be handed over: it worked, or it failed.
     bool ahead_ok_ = false;
     bool ahead_failed_ = false;
+    bool flushing_ = false;  // FLUSH CACHE: its fetch is a flush
+    bool write_cache_ = true;
+    bool read_ahead_ = true;  // SET FEATURES 02h/82h; off: each sector synced as it's stored
 
     bool irq_pending_ = false;
     bool command_queued_ = false;  // see queueCommand()

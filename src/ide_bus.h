@@ -27,11 +27,11 @@ bool serviceOnce(ata::Device& dev, uint32_t& sample);
 // the caller handles the reset. Call only when dev.dataInRemaining() is true.
 // It records nothing for the raw trace and ignores setDataReadDelay(), so the
 // caller skips it for those. While it waits between words it does one small
-// job per pass: post the device's read-ahead to core 0 (once; `posted_fetch`
-// is the last id posted), or hand core 0's results to the device. So a
-// read-ahead is under way while the host reads, it's in when the block ends,
-// and the next sector's DRQ comes at once; and a read never waits behind
-// more than one job.
+// job per pass: post the device's read-ahead to core 0 (once, after the first
+// data word; `posted_fetch` is the last id posted), or hand core 0's results
+// to the device. So a read-ahead is under way while the host reads, it's in
+// when the block ends, and the next sector's DRQ comes at once; and a read
+// never waits behind more than one job, nor a status read behind any.
 bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
 
 // True while setDataReadDelay() is on.
