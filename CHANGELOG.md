@@ -2,6 +2,15 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.7.3] - 2026-10-25
+
+### Added
+- **A bus observer** (`bus_observer.pio`, `bus_observer.*`, `sector_check.*`): a third PIO program samples DD0-15 and the register bits just before every DIOR# rise, DMA copies the samples to a ring in RAM, and core 0 checks each data sector against the generated disk. `s` shows `bus_sectors`, `bus_bad`, `bus_skipped` and `bus_gaps`; a wrong sector prints a `BUSERR` line (LBA, first wrong word, bits lost and gained). It tells whether a mismatch the host sees was already wrong on the cable.
+- The soak labels each mismatch "wrong on the cable" (with the `BUSERR` line) or "right on the cable", and logs the observer's counts.
+
+### On the rig
+- 3 minutes of soak traffic: 207,564 sectors checked, none wrong, no samples missed. The worst read rose from about 955 ns to 1,000 ns, probably the observer's DMA on the bus.
+
 ## [0.7.2] - 2026-10-25
 
 Diagnostics for the rare read mismatch the overnight soak found: one sector in 8 hours (17 GB), always the first sector of the second command when a long read is split at 128 sectors, with bits that should be 1 read as 0.

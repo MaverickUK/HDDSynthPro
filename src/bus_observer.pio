@@ -1,0 +1,29 @@
+; Drive build: records what the host takes off the bus on every read, as a
+; check on the bus program and the wiring. Only reads pins, so it can run
+; alongside ide_bus and never drives anything.
+;
+; Pin mapping (see bus_observer.cpp):
+;   IN_BASE      = GPIO4 (DD0), as in bus_sample.h
+;   wait gpio 26 = DIOR#, and JMP_PIN = GPIO26 too
+;
+; While DIOR# is low it keeps sampling, so the last sample is the bus within
+; 3 cycles (20 ns) of DIOR# rising, when the host latches the data. Each read
+; gives one word, which DMA copies to a ring in RAM:
+;   bits 20-0   the sample's bits 20-0: DD0-15, DA2-0, CS0#, CS1#
+;   bits 31-21  a sequence number, counting down, so missed words show
+
+.pio_version 1
+.program bus_observer
+.wrap_target
+top:
+    wait 0 gpio 26          ; DIOR# falls: the host starts a read
+sample:
+    mov osr, pins           ; sample, and again while DIOR# is low
+    jmp pin done            ; DIOR# has risen: the last sample is the one
+    jmp sample
+done:
+    in osr, 21              ; DD0-15, DA2-0, CS0#, CS1#
+    in y, 11                ; the sequence number on top
+    push noblock            ; DMA keeps the FIFO empty
+    jmp y-- top
+.wrap

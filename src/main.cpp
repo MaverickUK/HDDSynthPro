@@ -32,6 +32,7 @@
 #include "activity.h"
 #include "ata_device.h"
 #include "block_source.h"
+#include "bus_observer.h"
 #include "fetch_mailbox.h"
 #include "ide_bus.h"
 #include "iordy_timer.h"
@@ -105,7 +106,8 @@ void setup1() {
     // sees no drive for that moment (well under a second with an SD card).
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
     ide_bus::begin();
-    iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so the two never race to claim a PIO
+    iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
+    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed));
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
     // delay its PIO accesses while the host waits on a read.
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
@@ -326,6 +328,9 @@ static void printStats() {
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
                   iordy_timer::earlyRegister());
+    Serial.printf(" bus_sectors=%lu bus_bad=%lu bus_skipped=%lu bus_gaps=%lu",
+                  (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
+                  (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
     Serial.printf(" disk=%s sectors=%lu", g_disk_name, (unsigned long)g_disk->sectors());
@@ -427,7 +432,10 @@ static void handleConsole() {
                 break;
             case 's': printStats(); break;
 #if FIRMWARE_SLICE != 0
-            case 'r': iordy_timer::reset(); break;
+            case 'r':
+                iordy_timer::reset();
+                bus_observer::resetCounts();
+                break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 't': {
                 bool on = !g_trace_bus.load();
@@ -465,6 +473,7 @@ void loop() {
 #if FIRMWARE_SLICE != 0
     serveFetches();
     iordy_timer::poll();
+    bus_observer::poll(Serial, g_disk == &g_overlay);  // only the generated disk can be checked
     updateLed();
 
     // Re-evaluate the activity state once a millisecond, before anything

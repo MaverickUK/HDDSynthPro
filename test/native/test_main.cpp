@@ -315,6 +315,7 @@ TEST(test_gen_disk_sectors_differ) {
 void runAtaDeviceTests();
 void runShortTestTests();
 void runActivityTests();
+void runSectorCheckTests();
 
 int main() {
     RUN(test_pin_layout);
@@ -339,6 +340,7 @@ int main() {
     runAtaDeviceTests();
     runShortTestTests();
     runActivityTests();
+    runSectorCheckTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

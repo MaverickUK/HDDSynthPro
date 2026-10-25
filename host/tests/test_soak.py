@@ -115,7 +115,20 @@ def check_drive(drive, start_mark: int) -> str:
     wakes = sum(1 for c in t.commands if c.command in WAKE_COMMANDS)
     return (f"commands {len(t.commands)}, standbys {standbys}, wakes {wakes}, "
             f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']}), "
-            f"early {fields.get('iordy_early', '?')} ({fields.get('iordy_early_reg', '-')})")
+            f"early {fields.get('iordy_early', '?')} ({fields.get('iordy_early_reg', '-')}); "
+            f"bus observer: {fields.get('bus_sectors', '?')} sectors checked, {fields.get('bus_bad', '?')} bad, "
+            f"{fields.get('bus_gaps', '?')} gaps")
+
+
+def on_the_bus(drive, start_mark: int, lba: int) -> str:
+    """What the drive's bus observer saw of sector `lba`: whether the data
+    was already wrong on the cable."""
+    time.sleep(0.5)  # core 0 checks the observer's samples within a few ms
+    hits = [l for l in drive.lines_since(start_mark) if l.startswith("BUSERR") and f" lba={lba} " in l]
+    if hits:
+        return f"wrong on the cable: {hits[-1]}"
+    gaps = dict(re.findall(r"(\w+)=(\S+)", drive.command("s", "STATS"))).get("bus_gaps", "?")
+    return f"right on the cable, as far as the observer saw (no BUSERR; bus_gaps={gaps})"
 
 
 def pause(disk, fd: int):
@@ -180,7 +193,8 @@ def test_soak(raw_disk_rw, drive, run_dir):
                 if bad is not None:
                     i = (bad[0] - lba) * SECTOR
                     errors.append(f"read {reads} (LBA {lba} x {count}): "
-                                  f"{describe(data[i:i + SECTOR], bad[0], fd)}")
+                                  f"{describe(data[i:i + SECTOR], bad[0], fd)}; "
+                                  f"{on_the_bus(drive, start_mark, bad[0])}")
                     note(f"MISMATCH {errors[-1]}")
                     assert len(errors) < max_errors, f"{len(errors)} mismatches; last: {errors[-1]}"
                 reads += 1

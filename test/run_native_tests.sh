@@ -10,6 +10,7 @@ SANITIZE="${SANITIZE:-address,undefined}"
 "$CXX" -std=c++17 -O2 -g -Wall -Wextra -pthread -fsanitize="$SANITIZE" \
     -Isrc test/native/test_main.cpp test/native/test_ata_device.cpp test/native/test_short_test.cpp \
     test/native/test_activity.cpp src/activity.cpp \
+    test/native/test_sector_check.cpp src/sector_check.cpp \
     src/trace_format.cpp src/identify.cpp src/ata_device.cpp src/short_test.cpp \
     -o .pio/native-tests/run_tests
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/classify_trace.cpp src/activity.cpp \

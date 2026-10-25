@@ -27,7 +27,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   `main.cpp` holds both. Rig tests skip unless the board runs the build they need, and `scripts/rig.sh` takes `PIO_ENV`.
   - The variant defines `PIN_LED` as a macro, so don't reuse Arduino pin-macro names for constants.
 - **PIO programs:** the platform assembles each `src/*.pio` into a `.pio.h` next to it (git-ignored) before every build. Include them as `"name.pio.h"`.
-- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test` and `activity` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
+- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test`, `activity` and `sector_check` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
 - **CI:** `.github/workflows/build.yml` builds the firmware and runs the C++ tests and `pytest -m sim` on every push. A `vX.Y.Z` tag that matches `FIRMWARE_VERSION` publishes a release with the UF2.
 - **Python tests:** in `host/` (pytest). One marker per slice; `sim` needs no hardware.
   - Plain `pytest` runs only the `sim` tests.
@@ -84,9 +84,10 @@ The Python parser is `host/hddproto/trace.py`; change both together.
 Console:
 - `h`: help, and the READY line with version and build;
 - `p`: pin levels (wiring check);
-- `s`: stats; on the drive build also `iordy_slow`/`iordy_max_ns`/`iordy_max_reg`/`iordy_max_at_us` (reads IORDY held over 400 ns, and the longest: how long, which register, when; measured by `iordy_timer.pio`) and `bus_contested`/`bus_stalls` (fast peripheral bus contention);
+- `s`: stats; on the drive build also `iordy_slow`/`iordy_max_ns`/`iordy_max_reg`/`iordy_max_at_us` (reads IORDY held over 400 ns, and the longest: how long, which register, when; measured by `iordy_timer.pio`) `iordy_early` (reads that started before IORDY was low; should be 0), `bus_sectors`/`bus_bad`/`bus_gaps` (the bus observer's check of data sectors on the cable, against the generated disk; a bad one prints `BUSERR`) and `bus_contested`/`bus_stalls` (fast peripheral bus contention);
 - `r`: reset the read timings (they also restart when the host releases RESET#);
 - `t`: raw bus trace on or off;
+- `D` then a digit: debug, answer data reads that many × 250 ns late (`-m timing`; `D0` is off);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it (drive build; only reads);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
@@ -107,8 +108,8 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
   - `ata_device`: IDENTIFY, READ and WRITE SECTORS, DIAGNOSTIC, and the housekeeping commands bridges send during setup (SET FEATURES transfer mode, INITIALIZE DEVICE PARAMETERS, READ VERIFY, SEEK, RECALIBRATE, power commands, FLUSH CACHE). Everything else gets ABRT;
   - the disk, served through the mailbox: the SD image, or the generated disk with its RAM overlay.
 - **Next, to make PIO solid** (DMA, faster modes, clocks and throughput wait until then):
-  1. An overnight soak (slice 6's exit test), with `HDDPRO_SOAK_MINUTES=480` and `HDDPRO_SOAK_MAX_ERRORS` above 1 so a mismatch is diagnosed. It needs the generated disk: rename `HDDSYNTH.IMG` or take the card out. The 1-hour soak saw one unexplained transient mismatch in an earlier run.
-  2. Make the soak's idle pauses close the raw device, so the adapter actually sends STANDBY and the wake path is exercised.
+  1. The rare read mismatch: one sector per 8-9 h of soak (17 GB), twice the first sector of the second command when the adapter splits a long read at 128 sectors, bits 1 read as 0, a re-read right. Ruled out: strobe recovery racing IORDY's re-arm (`iordy_early` 0), an IORDY timeout in the adapter (clean up to 3.2 µs, `-m timing`). Next: an overnight soak with the bus observer, stopping at the first mismatch (`HDDPRO_SOAK_MINUTES=600 HDDPRO_SOAK_IDLE_EVERY_S=99999`, generated disk), to tell wrong on the cable from spoiled in the adapter. Bus-timing changes (faster PIO modes, DMA) wait for the answer.
+  2. Standby and wake work (the overnight soak saw 6 of each); each of the first wakes raised the worst read by about 50 ns, to 1,086 ns.
   3. SD follow-ups: boot with no card, a card removed or failing mid-use, FLUSH CACHE syncing the image file.
   4. Add the adapter's probe sequence as a virtual-host test, and rework the slice 0 test around it.
   5. Later: throughput (SPI clock, read-ahead), DMA, PIO modes 3–4, SDIO, then slice 6's pass-through tests from a Pi 5.
