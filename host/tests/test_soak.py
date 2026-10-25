@@ -16,6 +16,9 @@ Writes use the same window as slice 4, so the overlay's 512 sectors are
 never filled; the window gets its generated content back at the end.
 
 Length: HDDPRO_SOAK_MINUTES (default 60). The exit criterion is overnight.
+HDDPRO_SOAK_TOLERATE_RESETS=1 rides out host-side resets (macOS resetting the
+adapter, as a USB glitch did once): logged, the read timings restarted after
+the re-detection, the disk reopened, the write window re-checked. At most 3.
 A mismatch is diagnosed in the log (whose data came back, shifted or not,
 whether a re-read is right). HDDPRO_SOAK_MAX_ERRORS (default 1) lets a
 diagnostic run carry on and collect several.
@@ -57,6 +60,10 @@ CHECK_EVERY_S = 300     # the drive's view
 # 10 minutes on the rig, so a pause has to be longer than that.
 IDLE_EVERY_S = float(os.environ.get("HDDPRO_SOAK_IDLE_EVERY_S", 3600))
 IDLE_PAUSE_S = float(os.environ.get("HDDPRO_SOAK_IDLE_PAUSE_S", 660))
+TOLERATE_RESETS = os.environ.get("HDDPRO_SOAK_TOLERATE_RESETS") == "1"
+MAX_RESETS = 3
+DETECT_SETTLE_S = 10     # after a host reset, let the adapter detect the drive again
+DISK_BACK_S = 180        # and wait this long for the disk to reappear
 STANDBY_COMMANDS = (0xE0, 0xE2, 0x94, 0x96)  # STANDBY (IMMEDIATE), both opcodes
 WAKE_COMMANDS = (0xE1, 0x95)                 # IDLE IMMEDIATE
 
@@ -131,6 +138,22 @@ def on_the_bus(drive, start_mark: int, lba: int) -> str:
     return f"right on the cable, as far as the observer saw (no BUSERR; bus_gaps={gaps})"
 
 
+def reopen(disk, fd: int):
+    """After the disk went away and came back: the raw device opened again on
+    the same descriptor, so everything holding `fd` carries on."""
+    deadline = time.monotonic() + DISK_BACK_S
+    while True:
+        try:
+            reopened = MacHost(print).open_raw(disk, write=True)
+            break
+        except OSError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(5)
+    os.dup2(reopened, fd)
+    os.close(reopened)
+
+
 def pause(disk, fd: int):
     """An idle pause, long enough for the drive to be put in standby, with
     the raw device closed so nothing on the Mac holds it. Meanwhile `fd`
@@ -169,6 +192,52 @@ def test_soak(raw_disk_rw, drive, run_dir):
     reads = writes = sectors_moved = 0
     max_errors = int(os.environ.get("HDDPRO_SOAK_MAX_ERRORS", "1"))
     errors: list[str] = []
+    resets = 0
+
+    def recover(reason: str):
+        """A host-side reset (HDDPRO_SOAK_TOLERATE_RESETS=1): log it, wait for
+        the re-detection, restart the read timings, re-check the window."""
+        nonlocal resets, start_mark, shadow
+        resets += 1
+        note(f"HOST RESET {resets}: {reason}; waiting for the re-detection")
+        assert resets <= MAX_RESETS, f"more than {MAX_RESETS} host resets"
+        time.sleep(DETECT_SETTLE_S)
+        reopen(disk, fd)
+        drive.send("r")  # detection's reads (near 1.2 us) don't count
+        start_mark = drive.mark()
+        window = read(fd, WINDOW_START, WINDOW)
+        bad = first_diff(window, bytes(shadow), WINDOW_START)
+        if bad:
+            note(f"the write window differs after the reset: {bad} (a write cut short?); taken as it is")
+            shadow = bytearray(window)
+        note("resumed")
+
+    def soak_step() -> tuple[int, int, int]:
+        """One random read, or one write read straight back: (reads, writes, sectors moved)."""
+        if rng.random() < 0.65:  # a read anywhere outside the window
+            count = rng.randint(1, 256)
+            lba = rng.randrange(0, TOTAL - count + 1)
+            if lba < WINDOW_START + WINDOW and lba + count > WINDOW_START:
+                return 0, 0, 0
+            data = read(fd, lba, count)
+            bad = gen_disk.first_mismatch(data, lba)
+            if bad is not None:
+                i = (bad[0] - lba) * SECTOR
+                errors.append(f"read {reads} (LBA {lba} x {count}): "
+                              f"{describe(data[i:i + SECTOR], bad[0], fd)}; "
+                              f"{on_the_bus(drive, start_mark, bad[0])}")
+                note(f"MISMATCH {errors[-1]}")
+                assert len(errors) < max_errors, f"{len(errors)} mismatches; last: {errors[-1]}"
+            return 1, 0, count
+        count = rng.randint(1, 32)  # a write into the window, read straight back
+        offset = rng.randrange(0, WINDOW - count + 1)
+        data = rng.randbytes(count * SECTOR)
+        write(fd, WINDOW_START + offset, data)
+        shadow[offset * SECTOR:(offset + count) * SECTOR] = data
+        bad = first_diff(read(fd, WINDOW_START + offset, count), data, WINDOW_START + offset)
+        assert bad is None, f"write {writes} (LBA {WINDOW_START + offset} x {count}): {bad}"
+        return 0, 1, 2 * count
+
     try:
         while time.monotonic() < end:
             now = time.monotonic()
@@ -176,6 +245,13 @@ def test_soak(raw_disk_rw, drive, run_dir):
                 pause(disk, fd)
                 now = time.monotonic()
                 next_idle = now + IDLE_EVERY_S
+            if now >= next_check and TOLERATE_RESETS:
+                t = trace.parse(drive.lines_since(start_mark))
+                if t.resets:
+                    first = t.resets[0][0]
+                    failed = [str(c) for c in t.commands if c.status is not None and not c.ok and c.t_us < first]
+                    assert not failed, f"failed commands before the reset: {failed[:5]}"
+                    recover(f"{len(t.resets)} RESET# changes at the drive")
             if now >= next_check:
                 summary = check_drive(drive, start_mark)
                 elapsed = (now - started) / 60
@@ -183,32 +259,16 @@ def test_soak(raw_disk_rw, drive, run_dir):
                      f"{sectors_moved * SECTOR / 1e6:.0f} MB, {len(errors)} mismatches; {summary}")
                 next_check = now + CHECK_EVERY_S
 
-            if rng.random() < 0.65:  # a read anywhere outside the window
-                count = rng.randint(1, 256)
-                lba = rng.randrange(0, TOTAL - count + 1)
-                if lba < WINDOW_START + WINDOW and lba + count > WINDOW_START:
-                    continue
-                data = read(fd, lba, count)
-                bad = gen_disk.first_mismatch(data, lba)
-                if bad is not None:
-                    i = (bad[0] - lba) * SECTOR
-                    errors.append(f"read {reads} (LBA {lba} x {count}): "
-                                  f"{describe(data[i:i + SECTOR], bad[0], fd)}; "
-                                  f"{on_the_bus(drive, start_mark, bad[0])}")
-                    note(f"MISMATCH {errors[-1]}")
-                    assert len(errors) < max_errors, f"{len(errors)} mismatches; last: {errors[-1]}"
-                reads += 1
-                sectors_moved += count
-            else:  # a write into the window, read straight back
-                count = rng.randint(1, 32)
-                offset = rng.randrange(0, WINDOW - count + 1)
-                data = rng.randbytes(count * SECTOR)
-                write(fd, WINDOW_START + offset, data)
-                shadow[offset * SECTOR:(offset + count) * SECTOR] = data
-                bad = first_diff(read(fd, WINDOW_START + offset, count), data, WINDOW_START + offset)
-                assert bad is None, f"write {writes} (LBA {WINDOW_START + offset} x {count}): {bad}"
-                writes += 1
-                sectors_moved += 2 * count
+            try:
+                moved = soak_step()
+            except OSError as e:  # the disk went away: a host reset, if tolerated
+                if not TOLERATE_RESETS:
+                    raise
+                recover(f"I/O error: {e}")
+                continue
+            reads += moved[0]
+            writes += moved[1]
+            sectors_moved += moved[2]
 
         bad = first_diff(read(fd, WINDOW_START, WINDOW), bytes(shadow), WINDOW_START)
         assert bad is None, f"window doesn't match what was written: {bad}"
