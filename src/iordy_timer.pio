@@ -14,13 +14,18 @@
 ;   bits 31-16  0xFFFF minus the further 2-cycle iterations IORDY stayed low
 ;   bits 15-0   pin sample bits 31-16, taken as DIOR# fell: DA2-0 in bits
 ;               2-0, CS0# in bit 3, CS1# in bit 4 (which register was read)
+;
+; A read that starts while IORDY is still high is reported at once, untimed:
+; ide_bus pulls IORDY low before every strobe, so the host might not wait for
+; the data. Its sample has the IORDY bit (bit 8 of the report) set.
 
 .pio_version 1
 .program iordy_timer
     pull block              ; the threshold, once
 .wrap_target
     wait 0 gpio 26          ; DIOR# falls: the host starts a read
-    mov isr, pins           ; which register (kept for a report)
+    mov isr, pins           ; which register, and IORDY (kept for a report)
+    jmp pin early           ; IORDY still high as the read starts
     mov y, osr
 fast:
     jmp pin done            ; IORDY high: the host has its data
@@ -35,3 +40,7 @@ report:
 done:
     wait 1 gpio 26          ; DIOR# rises
 .wrap
+early:
+    in null, 16             ; the register bits, with IORDY's set
+    push noblock
+    jmp done

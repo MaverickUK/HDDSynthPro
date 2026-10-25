@@ -25,6 +25,10 @@ uint32_t slowReads();
 uint32_t maxNs();
 const char* maxRegister();
 uint32_t maxAtUs();
+// Reads that started while IORDY was still high, so the host may not have
+// waited for the data, and the register the last one read. Should stay 0.
+uint32_t earlyReads();
+const char* earlyRegister();
 uint32_t contestedAccesses();  // fast peripheral bus, since the last reset
 uint32_t stallCycles();
 void reset();

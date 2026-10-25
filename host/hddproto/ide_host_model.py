@@ -29,6 +29,11 @@ class Mode0:
     tA: float = 35     # IORDY setup: the host samples IORDY this long after the strobe falls
     iordy_max: float = 1250  # longest the device may hold IORDY low (tB)
     host_iordy_delay: float = 10  # host's own delay from IORDY high to strobe rising
+    # Strobe recovery (t2i) between accesses with CS held. Mode 0 only sets
+    # the cycle time t0, so once IORDY has stretched a strobe past it, a host
+    # may strobe again this soon after the last one rose. 0: the host waits
+    # t9 + t1 as before any access.
+    t2i: float = 0
 
 
 @dataclass
@@ -206,6 +211,12 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             i += 1
             state = "gap"
             t_next = max(t, int(cur.fall_ns * 1000) + T["t0"] - T["t1"])
+            if cur.access.hold_cs and T["t2i"] and i < len(accesses):
+                # CS and DA stay valid, so no t1: only recovery and cycle time
+                cur = Result(accesses[i])
+                state = "setup"
+                t_next = max(t, int(results[-1].rise_ns * 1000) + T["t2i"],
+                             int(results[-1].fall_ns * 1000) + T["t0"])
 
         if host_dd is not None and t >= host_dd_until:
             host_dd = None

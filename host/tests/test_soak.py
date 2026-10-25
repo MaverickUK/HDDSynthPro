@@ -114,7 +114,8 @@ def check_drive(drive, start_mark: int) -> str:
     standbys = sum(1 for c in t.commands if c.command in STANDBY_COMMANDS)
     wakes = sum(1 for c in t.commands if c.command in WAKE_COMMANDS)
     return (f"commands {len(t.commands)}, standbys {standbys}, wakes {wakes}, "
-            f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']})")
+            f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']}), "
+            f"early {fields.get('iordy_early', '?')} ({fields.get('iordy_early_reg', '-')})")
 
 
 def pause(disk, fd: int):

@@ -2,6 +2,18 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.7.2] - 2026-10-25
+
+Diagnostics for the rare read mismatch the overnight soak found: one sector in 8 hours (17 GB), always the first sector of the second command when a long read is split at 128 sectors, with bits that should be 1 read as 0.
+
+### Added
+- **The IORDY timer counts reads that start while IORDY is still high** (`iordy_early`, `iordy_early_reg` in `s`), when the host might not wait for the data. On the rig: none in 15 minutes of soak traffic, so the adapter's strobe recovery isn't racing the bus program's re-arm.
+- **Console `D` and a digit** (debug): core 1 answers every data read that many × 250 ns later. `-m timing` steps it from 0 to 2,250 ns and checks the reads. On the rig the adapter waited for reads held up to 3.2 µs with no errors, so it doesn't give up on IORDY near our worst read (about 1 µs).
+- The host model's strobe recovery (`Mode0.t2i`) for back-to-back accesses with CS held.
+
+### Changed
+- The soak waits 11 minutes once an hour, longer than macOS's disk sleep, so the drive goes into standby and the next access wakes it; it logs standbys, wakes and early reads. Overnight: 6 standbys and wakes, all clean.
+
 ## [0.7.1] - 2026-10-24
 
 ### Added

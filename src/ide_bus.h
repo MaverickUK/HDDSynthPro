@@ -30,4 +30,8 @@ void restart();
 // released (the host pulls it down).
 void updateIntrq(bool asserted);
 
+// Debug (console `D`): answer every data register read at least `ns` later,
+// to find how long the host really waits on IORDY. 0 turns it off.
+void setDataReadDelay(uint32_t ns);
+
 }  // namespace ide_bus

@@ -20,13 +20,16 @@ static uint32_t s_slow = 0;
 static uint32_t s_max_iterations = 0;
 static const char* s_max_register = "-";
 static uint32_t s_max_at_us = 0;
+static uint32_t s_early = 0;
+static const char* s_early_register = "-";
 // Core 1 starts the program while core 0 may already be polling.
 static std::atomic<bool> s_started{false};
 static std::atomic<bool> s_reset_requested{false};
 
-// One loop iteration is 2 PIO cycles; the wait and the two movs before it add 3.
+// One loop iteration is 2 PIO cycles; the wait and the three instructions
+// before the loop add 4.
 static uint32_t iterationsToNs(uint32_t iterations) {
-    return uint32_t((2ull * iterations + 3) * 1000000000ull / clock_get_hz(clk_sys));
+    return uint32_t((2ull * iterations + 4) * 1000000000ull / clock_get_hz(clk_sys));
 }
 
 void begin(uint32_t threshold_ns) {
@@ -57,11 +60,16 @@ void poll() {
     if (!s_started.load(std::memory_order_acquire)) return;
     while (!pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
         uint32_t report = pio_sm_get(s_pio, s_sm);
+        uint32_t sample = report << 16;  // back to the sample layout
+        if (bus::high(sample, cfg::PIN_IORDY)) {  // started before IORDY was low
+            ++s_early;
+            s_early_register = bus::registerName(bus::block(sample), bus::address(sample), false);
+            continue;
+        }
         uint32_t iterations = s_threshold_iterations + (0xFFFFu - (report >> 16));
         ++s_slow;
         if (iterations > s_max_iterations) {
             s_max_iterations = iterations;
-            uint32_t sample = report << 16;  // back to the sample layout
             s_max_register = bus::registerName(bus::block(sample), bus::address(sample), false);
             s_max_at_us = time_us_32();
         }
@@ -73,6 +81,8 @@ uint32_t slowReads() { return s_slow; }
 uint32_t maxNs() { return s_max_iterations ? iterationsToNs(s_max_iterations) : 0; }
 const char* maxRegister() { return s_max_register; }
 uint32_t maxAtUs() { return s_max_at_us; }
+uint32_t earlyReads() { return s_early; }
+const char* earlyRegister() { return s_early_register; }
 uint32_t contestedAccesses() { return busctrl_hw->counter[0].value; }
 uint32_t stallCycles() { return busctrl_hw->counter[1].value; }
 
@@ -83,6 +93,8 @@ void reset() {
     s_max_iterations = 0;
     s_max_register = "-";
     s_max_at_us = 0;
+    s_early = 0;
+    s_early_register = "-";
     busctrl_hw->counter[0].value = 0;  // any write clears a counter
     busctrl_hw->counter[1].value = 0;
 }

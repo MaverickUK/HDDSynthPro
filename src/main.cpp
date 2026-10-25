@@ -324,6 +324,8 @@ static void printStats() {
     Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu iordy_max_reg=%s iordy_max_at_us=%lu",
                   (unsigned long)iordy_timer::slowReads(), (unsigned long)iordy_timer::maxNs(),
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
+    Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
+                  iordy_timer::earlyRegister());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
     Serial.printf(" disk=%s sectors=%lu", g_disk_name, (unsigned long)g_disk->sectors());
@@ -384,6 +386,18 @@ static void handleConsole() {
     while (Serial.available()) {
         int c = Serial.read();
         if (c != 'x' && c != 'Y' && c != '\r' && c != '\n') g_short_test_armed_ms = 0;
+#if FIRMWARE_SLICE != 0
+        static bool delay_digit_next = false;  // `D` then a digit
+        if (delay_digit_next) {
+            delay_digit_next = false;
+            if (c >= '0' && c <= '9') {
+                uint32_t ns = uint32_t(c - '0') * 250;
+                ide_bus::setDataReadDelay(ns);
+                Serial.printf("DELAY %lu\n", (unsigned long)ns);
+                continue;
+            }
+        }
+#endif
         switch (c) {
             case 'h':
                 printReady();
@@ -414,6 +428,7 @@ static void handleConsole() {
             case 's': printStats(); break;
 #if FIRMWARE_SLICE != 0
             case 'r': iordy_timer::reset(); break;
+            case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 't': {
                 bool on = !g_trace_bus.load();
                 g_trace_bus.store(on);

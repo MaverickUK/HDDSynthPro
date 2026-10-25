@@ -1,6 +1,7 @@
 """Runs the real src/iordy_timer.pio in the simulator: a read that IORDY holds
 longer than the threshold is reported with its length and its register; a
-quick one is not. No hardware needed."""
+quick one is not; one that starts while IORDY is still high is reported as
+early. No hardware needed."""
 from __future__ import annotations
 
 import pytest
@@ -27,14 +28,15 @@ def program(assemble):
     return assemble("iordy_timer")
 
 
-def read_held(start_ns: float, hold_ns: float):
+def read_held(start_ns: float, hold_ns: float, iordy_low_from_ns: float = -100):
     """One read: DIOR# falls at start_ns; IORDY (held low from before the
-    strobe, as ide_bus does from chip select) rises hold_ns later; DIOR#
-    rises 150 ns after that."""
+    strobe, as ide_bus does from chip select, unless `iordy_low_from_ns` says
+    when after the strobe it falls) rises hold_ns later; DIOR# rises 150 ns
+    after that."""
     def wave(t_ps: int) -> int:
         t = t_ps / NS
         pins = DIOR | IORDY | CS1 | (STATUS_ADDR << 16)
-        if start_ns - 100 <= t < start_ns + hold_ns:
+        if start_ns + iordy_low_from_ns <= t < start_ns + hold_ns:
             pins &= ~IORDY
         if start_ns <= t < start_ns + hold_ns + 150:
             pins &= ~DIOR
@@ -45,7 +47,7 @@ def read_held(start_ns: float, hold_ns: float):
 def held_ns(word: int) -> float:
     """What iordy_timer.cpp makes of a report (its iterationsToNs)."""
     iterations = THRESHOLD_ITERATIONS + (0xFFFF - (word >> 16))
-    return (2 * iterations + 3) * CYCLE_PS / NS
+    return (2 * iterations + 4) * CYCLE_PS / NS
 
 
 def register_bits(word: int) -> int:
@@ -83,3 +85,22 @@ def test_each_slow_read_reported_once(program):
         return read_held(200, 900)(t_ps) if t < 1500 else read_held(2000, 600)(t_ps)
     words = pio_sim.run(make_sim(program), wave, 4000 * NS)
     assert [round(held_ns(w), -2) for w in words] == [900, 600]
+
+
+def is_early(word: int) -> bool:
+    """iordy_timer.cpp's test: the IORDY bit of the sample, report bit 8."""
+    return bool(word & (1 << (IORDY_BIT - 16)))
+
+
+@pytest.mark.parametrize("hold_ns", [200, 1000])
+def test_timed_reads_are_not_early(program, hold_ns):
+    assert not any(is_early(w) for w in run_one(program, hold_ns))
+
+
+@pytest.mark.parametrize("low_after_ns", [10, 30])
+def test_read_starting_with_iordy_high_is_early(program, low_after_ns):
+    """IORDY falls only after the strobe: within tA the host may still wait,
+    but there's no margin. Reported once, untimed, with its register."""
+    words = pio_sim.run(make_sim(program), read_held(200, 600, iordy_low_from_ns=low_after_ns), 2000 * NS)
+    assert len(words) == 1 and is_early(words[0])
+    assert register_bits(words[0]) == STATUS_ADDR | 0x10

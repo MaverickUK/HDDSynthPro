@@ -1,5 +1,8 @@
 #include "ide_bus.h"
 
+#include <atomic>
+
+#include <hardware/clocks.h>
 #include <hardware/gpio.h>
 #include <hardware/pio.h>
 
@@ -23,6 +26,7 @@ static_assert(cfg::PIN_CS0_N == cfg::PIN_DA0 + 3 && cfg::PIN_CS1_N == cfg::PIN_D
               "DA2-0, CS0#, CS1# must be consecutive");
 static constexpr unsigned REG_INDEX_SHIFT = bus::bitOf(cfg::PIN_DA0);
 static ata::Reg s_reg_for[32];
+static std::atomic<uint32_t> s_data_delay_cycles{0};  // setDataReadDelay
 
 static unsigned regIndex(uint32_t sample) { return (sample >> REG_INDEX_SHIFT) & 31u; }
 
@@ -85,6 +89,8 @@ CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
     } else {
         // Every read must be answered, or the PIO holds IORDY low forever.
         // The host waits until it is, so answer first and catch up after.
+        uint32_t delay = s_data_delay_cycles.load(std::memory_order_relaxed);
+        if (delay && reg == ata::Reg::Data) busy_wait_at_least_cycles(delay);
         pio_sm_put(s_pio, s_sm, dev.peek(reg));
         dev.consumeRead(reg);
     }
@@ -99,6 +105,11 @@ void restart() {
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);  // release DD and IORDY
     pio_sm_exec(s_pio, s_sm, pio_encode_jmp(s_offset));
     pio_sm_set_enabled(s_pio, s_sm, true);
+}
+
+void setDataReadDelay(uint32_t ns) {
+    s_data_delay_cycles.store(uint32_t(uint64_t(ns) * clock_get_hz(clk_sys) / 1000000000ull),
+                              std::memory_order_relaxed);
 }
 
 CORE1_RAM void updateIntrq(bool asserted) { gpio_set_dir(cfg::PIN_INTRQ, asserted); }
