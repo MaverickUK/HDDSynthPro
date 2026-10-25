@@ -2,6 +2,11 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.8.3] - 2026-10-25
+
+### Changed
+- **The SD card's SPI clock is 25 MHz** (`cfg::SD_SPI_MHZ`, from 12). Image-disk reads go from 0.59 to 0.84 MB/s; three full reads of the image gave identical hashes.
+
 ## [0.8.2] - 2026-10-25
 
 ### Fixed

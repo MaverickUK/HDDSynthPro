@@ -21,6 +21,8 @@ MB/s here means 10^6 bytes per second.
 | 2026-10-25 | 0.7.3 | Baseline | PIO 0, 150 MHz | generated | 0.87 MB/s | 69 IOPS (14.4 ms) | 10.7 ms + 501 µs/sector | 1.56 MB/s | 1000 ns |
 | 2026-10-25 | 0.8.1 | Core 1 fast lane for data reads | PIO 0, 150 MHz | generated | 1.05 MB/s | 73 IOPS (13.7 ms) | 10.8 ms + 398 µs/sector | 1.56 MB/s | 1146 ns |
 | 2026-10-25 | 0.8.2 | Access handling inlined again | PIO 0, 150 MHz | generated | 1.05 MB/s | 73 IOPS (13.7 ms) | 10.8 ms + 400 µs/sector | 1.56 MB/s | 1040 ns |
+| 2026-10-25 | 0.8.2 | (the same firmware) | PIO 0, 150 MHz, SD at 12 MHz | SD image | 0.59 MB/s | 61 IOPS (16.3 ms) | 10.4 ms + 780 µs/sector | (not run) | 1173 ns |
+| 2026-10-25 | 0.8.3 | SD card's SPI clock 12 → 25 MHz | PIO 0, 150 MHz, SD at 25 MHz | SD image | 0.84 MB/s | 69 IOPS (14.5 ms) | 10.7 ms + 519 µs/sector | (not run) | 1186 ns |
 
 ## Where the time goes (0.7.3 baseline)
 
@@ -59,6 +61,13 @@ A probe build offered up to 16 sectors per DRQ block in IDENTIFY (word 47) and a
 A sector takes about 400 µs: about 330 µs for the 256 words (1.29 µs each) and about 70 µs of the adapter's pause before the next one. Only about 3% of words are now held past 400 ns, so most of each word's 1.29 µs is the adapter's own PIO mode 0 cycle, not us. On this rig the remaining levers are:
 - faster PIO modes, which the adapter would use if IDENTIFY offered them (it sets the mode with SET FEATURES at detection). That changes the bus timing, so it waits for the bus observer's answer on the rare mismatch;
 - the SD card path, for the image disk: core 0's fetches from the card are slower than from the generated disk.
+
+### 0.8.3: the SD card at 25 MHz
+
+On the image disk each sector took 780 µs, 380 more than on the generated disk: moving 512 bytes over SPI at 12 MHz takes 341 µs, plus the card's command overhead, and core 0 only starts a fetch once the host has read the previous sector. At 25 MHz a sector takes 519 µs and sequential reads are 0.84 MB/s (from 0.59).
+- Checked by reading the whole 64 MB image three times at 25 MHz with identical SHA-256s; at 12 MHz two reads also matched. (macOS writes to the volume when it mounts and unmounts it, so hashes are only compared with the volume unmounted, between remounts.)
+- Not 37.5 MHz, the next step SPI0 can divide 150 MHz into: it would save only ~55 µs a sector on hand-wired leads, and reading ahead can hide the card's time completely.
+- The worst read on the image is 1,173-1,186 ns, against about 1,040 on the generated disk: SD traffic on core 0 costs core 1 about 140 ns at a bad moment. To look into before reading ahead keeps the card busier.
 
 ## Ceilings on this adapter
 

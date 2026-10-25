@@ -34,6 +34,10 @@ constexpr unsigned PIN_SD_CLK = 34;   // SPI0 SCK
 constexpr unsigned PIN_SD_CMD = 35;   // SPI0 TX (card DI)
 constexpr unsigned PIN_SD_DAT0 = 36;  // SPI0 RX (card DO); DAT1-3 on 37-39
 constexpr unsigned PIN_SD_DAT3 = 39;  // SPI chip select
+// The SPI clock for the card, MHz. SPI0 divides the 150 MHz peripheral clock
+// by an even number, so this rounds down: 25 is exact, 50 gives 37.5. The
+// leads are hand-wired; each step up was checked by hashing the whole image.
+constexpr uint32_t SD_SPI_MHZ = 25;
 
 // Trace ring between core 1 (producer) and core 0 (consumer):
 // 8192 events x 12 bytes = 96 KB.

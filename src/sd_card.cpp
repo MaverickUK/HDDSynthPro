@@ -44,8 +44,7 @@ static bool spiPins(Print& out) {
 static bool mount(Print& out) {
     if (s_sd.fatType()) return true;
     if (!spiPins(out)) return false;
-    // 12 MHz: well within what hand-wired leads carry.
-    SdSpiConfig config(cfg::PIN_SD_DAT3, DEDICATED_SPI, SD_SCK_MHZ(12), &SPI);
+    SdSpiConfig config(cfg::PIN_SD_DAT3, DEDICATED_SPI, SD_SCK_MHZ(cfg::SD_SPI_MHZ), &SPI);
     if (!s_sd.begin(config)) {
         out.printf("SD error: no card, or no FAT volume on it (code %u, data %u)\n",
                    unsigned(s_sd.sdErrorCode()), unsigned(s_sd.sdErrorData()));
