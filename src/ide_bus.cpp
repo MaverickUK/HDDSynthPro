@@ -30,6 +30,12 @@ static std::atomic<uint32_t> s_data_delay_cycles{0};  // setDataReadDelay
 
 static unsigned regIndex(uint32_t sample) { return (sample >> REG_INDEX_SHIFT) & 31u; }
 
+// A read of the data register, as the PIO samples it: DIOR# low, DIOW# high,
+// CS0# low, CS1# high, DA2-0 = 0.
+static constexpr uint32_t ACCESS_BITS = (31u << REG_INDEX_SHIFT) | bus::maskOf(cfg::PIN_DIOR_N) |
+                                        bus::maskOf(cfg::PIN_DIOW_N);
+static constexpr uint32_t DATA_READ = bus::maskOf(cfg::PIN_CS1_N) | bus::maskOf(cfg::PIN_DIOW_N);
+
 void begin() {
     for (unsigned i = 0; i < 32; ++i) {
         uint32_t sample = i << REG_INDEX_SHIFT;
@@ -76,9 +82,7 @@ void begin() {
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
-CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
-    if (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) return false;
-    sample = pio_sm_get(s_pio, s_sm);
+CORE1_RAM static void serve(ata::Device& dev, uint32_t sample) {
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (bus::op(sample) == bus::Op::Write) {
         // A command only sets BSY here; core 1 runs it next (Device::queueCommand).
@@ -95,8 +99,44 @@ CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
         dev.consumeRead(reg);
     }
     updateIntrq(dev.intrq());
+}
+
+CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
+    if (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) return false;
+    sample = pio_sm_get(s_pio, s_sm);
+    serve(dev, sample);
     return true;
 }
+
+CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low) {
+    const uint16_t* next;
+    uint16_t left;
+    if (!dev.dataInRemaining(next, left)) return true;
+    uint16_t served = 0;
+    bool reset_changed = false;
+    while (served < left) {
+        while (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
+            if (gpio_get(cfg::PIN_RESET_N) == reset_low) {  // high when it was low, or low when high
+                reset_changed = true;
+                break;
+            }
+        }
+        if (reset_changed) break;
+        uint32_t sample = pio_sm_get(s_pio, s_sm);
+        if ((sample & ACCESS_BITS) != DATA_READ) {
+            dev.consumeDataWords(served);  // catch the device up first
+            serve(dev, sample);
+            return true;
+        }
+        pio_sm_put(s_pio, s_sm, next[served]);  // answer first, as serve() does
+        ++served;
+    }
+    dev.consumeDataWords(served);  // the block may be done: BSY for the next fetch
+    updateIntrq(dev.intrq());
+    return !reset_changed;
+}
+
+CORE1_RAM bool dataReadDelayed() { return s_data_delay_cycles.load(std::memory_order_relaxed) != 0; }
 
 void restart() {
     pio_sm_set_enabled(s_pio, s_sm, false);

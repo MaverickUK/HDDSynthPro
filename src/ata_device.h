@@ -144,6 +144,19 @@ public:
     uint16_t peek(Reg reg) const;
     void consumeRead(Reg reg);
 
+    // Core 1's fast lane for a data-in block: the words the host has still to
+    // read (`next`, `left`), if a block is being read from device 0. Answering
+    // the next n DATA reads from them and then calling consumeDataWords(n) is
+    // the same as n read(Reg::Data) calls. Any other access in between must
+    // come after consumeDataWords().
+    bool dataInRemaining(const uint16_t*& next, uint16_t& left) const {
+        if (device1Selected() || !(status_ & ST_DRQ) || !data_) return false;
+        next = data_ + data_index_;
+        left = uint16_t(data_count_ - data_index_);
+        return true;
+    }
+    void consumeDataWords(uint16_t n);
+
     // Host writes a register (only the low byte matters except for DATA).
     void write(Reg reg, uint16_t value);
 

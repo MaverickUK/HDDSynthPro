@@ -49,6 +49,12 @@ CORE1_RAM void Device::consumeRead(Reg reg) {
     }
 }
 
+CORE1_RAM void Device::consumeDataWords(uint16_t n) {
+    if (n == 0 || device1Selected() || !(status_ & ST_DRQ) || !data_) return;
+    data_index_ = uint16_t(data_index_ + n);
+    if (data_index_ >= data_count_) finishDataIn();
+}
+
 CORE1_RAM void Device::write(Reg reg, uint16_t value) {
     uint8_t v = uint8_t(value);
     if (reg == Reg::AltStatusDevCtrl) {

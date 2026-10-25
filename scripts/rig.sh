@@ -30,6 +30,10 @@ tail -1 .pio/native-tests.log
 
 if [[ -z "${NO_FLASH:-}" ]]; then
     echo "== Build and flash"
+    "$PIO" run -e "${PIO_ENV:-bb48}"
+    if [[ "${PIO_ENV:-bb48}" == bb48_drive ]]; then
+        python3 scripts/check_core1_ram.py  # nothing core 1 calls may be in flash
+    fi
     "$PIO" run -e "${PIO_ENV:-bb48}" -t upload
 fi
 

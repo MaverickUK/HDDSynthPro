@@ -16,7 +16,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 - **IORDY is open drain:** only pull it low or release it, never drive it high. The host pulls it up to 5 V.
 - **Slice 0 never drives a pin:** the bus pins stay under SIO control, so the PIO program cannot drive them even if it is wrong. Driving starts in slice 1, and only on DD (during reads), IORDY and INTRQ.
 - **Timing:** IORDY must go low within 35 ns (tA) of a strobe. Trigger on the chip-selects, which are valid 70 ns earlier (see the plan).
-- **Core split:** core 1 runs the bus loop and never touches USB, SD or anything slow. Everything it runs per access is marked `CORE1_RAM`, because code in flash can stall it for tens of µs. Slow work happens while STATUS shows BSY, never behind IORDY.
+- **Core split:** core 1 runs the bus loop and never touches USB, SD or anything slow. Everything it runs per access is marked `CORE1_RAM`, because code in flash can stall it for tens of µs; `scripts/check_core1_ram.py` (run by `rig.sh` and CI) fails if `loop1` can reach flash. Share flags with core 1 as `SharedFlag`, not `std::atomic<bool>`, whose members GCC may call out of line from flash. Slow work happens while STATUS shows BSY, never behind IORDY.
 
 ## Toolchain
 
@@ -88,6 +88,7 @@ Console:
 - `r`: reset the read timings (they also restart when the host releases RESET#);
 - `t`: raw bus trace on or off;
 - `D` then a digit: debug, answer data reads that many × 250 ns late (`-m timing`; `D0` is off);
+- `F`: debug, core 1's fast lane for data reads off or on (to compare);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it (drive build; only reads);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;

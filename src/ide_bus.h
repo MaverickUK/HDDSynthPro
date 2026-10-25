@@ -19,6 +19,18 @@ void begin();
 // Returns true if there was one; `sample` gets the pin sample for the trace.
 bool serviceOnce(ata::Device& dev, uint32_t& sample);
 
+// The fast lane for a data-in block (the 256 words of a sector or IDENTIFY):
+// answers data reads straight from the device's buffer until the block is
+// read, an access that isn't a data read comes (served as serviceOnce would),
+// or RESET# leaves the level `reset_low`. Returns false in that last case, so
+// the caller handles the reset. Call only when dev.dataInRemaining() is true.
+// It records nothing for the raw trace and ignores setDataReadDelay(), so the
+// caller skips it for those.
+bool serveDataIn(ata::Device& dev, bool reset_low);
+
+// True while setDataReadDelay() is on.
+bool dataReadDelayed();
+
 // Starts the PIO program again with empty FIFOs and DD and IORDY released.
 // Call when the host releases RESET#. While the host is unplugged or powering
 // up its strobes float low, and the PIO can push a write-path sample with

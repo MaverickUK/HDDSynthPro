@@ -28,6 +28,8 @@ jobs:
 
       # Builds first: it installs pioasm, which the PIO simulator tests use.
       - run: pio run -e bb48 -e bb48_drive
+      - name: Core 1 runs only from RAM
+        run: python3 scripts/check_core1_ram.py
       - name: C++ unit tests
         run: test/run_native_tests.sh
       - name: Simulator and parser tests

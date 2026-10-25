@@ -90,12 +90,13 @@ CORE1_RAM void loop1() {
 #else
 
 static FetchMailbox g_mailbox;
-static std::atomic<bool> g_trace_bus{false};  // console `t`
+static SharedFlag g_trace_bus{false};  // console `t`
+static SharedFlag g_fast_lane{true};   // console `F` (debug)
 
 // For the activity LED (core 0's updateLed): core 1 counts commands as they
 // start and says whether one is running.
 static std::atomic<uint32_t> g_command_starts{0};
-static std::atomic<bool> g_command_active{false};
+static SharedFlag g_command_active{false};
 
 // The disk's size, set by core 0 once it has chosen the disk (setup()).
 // Core 1 starts first, so it waits for it: IDENTIFY reports the real size.
@@ -138,9 +139,17 @@ CORE1_RAM void loop1() {
     for (;;) {
         uint32_t sample;
         if (ide_bus::serviceOnce(dev, sample)) {
-            if (g_trace_bus.load(std::memory_order_relaxed)) record(TraceKind::Bus, sample);
+            if (g_trace_bus.load()) record(TraceKind::Bus, sample);
             continue;
         }
+        // Mid-block, the fast lane answers data reads with nothing else in
+        // between. Not while the raw trace or the debug delay is on.
+        const uint16_t* next;
+        uint16_t left;
+        if (dev.dataInRemaining(next, left) && g_fast_lane.load() &&
+            !g_trace_bus.load() && !ide_bus::dataReadDelayed() &&
+            ide_bus::serveDataIn(dev, reset_low))
+            continue;
         if (dev.commandQueued()) {  // a Command write: the first job, ahead of the rest
             // The host polls status about 1 us after writing a command, so run
             // it and get back to the bus; its CMD line waits for step 0.
@@ -156,7 +165,7 @@ CORE1_RAM void loop1() {
                 start_info = dev.lastCommand();
                 start_unrecorded = true;
                 g_command_starts.fetch_add(1, std::memory_order_relaxed);
-                g_command_active.store(true, std::memory_order_relaxed);
+                g_command_active.store(true);
             }
             continue;
         }
@@ -172,7 +181,7 @@ CORE1_RAM void loop1() {
                     start_unrecorded = false;
                 } else if (dev.commandsCompleted() != completed) {
                     completed = dev.commandsCompleted();
-                    if (completed == started) g_command_active.store(false, std::memory_order_relaxed);
+                    if (completed == started) g_command_active.store(false);
                     uint32_t t = time_us_32();
                     record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(),
                                            t - command_start_us));
@@ -240,7 +249,7 @@ static void updateLed() {
     static uint32_t off_ms = 0;
     uint32_t starts = g_command_starts.load(std::memory_order_relaxed);
     uint32_t now = millis();
-    if (starts != seen || g_command_active.load(std::memory_order_relaxed)) {
+    if (starts != seen || g_command_active.load()) {
         seen = starts;
         off_ms = now + cfg::LED_MIN_MS;
     }
@@ -437,6 +446,12 @@ static void handleConsole() {
                 bus_observer::resetCounts();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
+            case 'F': {  // debug: the fast lane on or off, to compare
+                bool on = !g_fast_lane.load();
+                g_fast_lane.store(on);
+                Serial.printf("FASTLANE %s\n", on ? "on" : "off");
+                break;
+            }
             case 't': {
                 bool on = !g_trace_bus.load();
                 g_trace_bus.store(on);

@@ -2,6 +2,22 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.8.1] - 2026-10-25
+
+The start of the speed work, logged in `docs/speed-log.md`: sequential reads from 0.87 to 1.05 MB/s.
+
+### Added
+- **Core 1's fast lane for data reads** (`ide_bus::serveDataIn`, `Device::dataInRemaining`/`consumeDataWords`): while the host reads a DRQ block, core 1 answers each data register read straight from the buffer. Anything else leaves the lane and is served as before. Off while the raw trace or the debug delay is on; console `F` switches it for comparisons.
+- **`scripts/check_core1_ram.py`**: fails if anything core 1 calls from `loop1` (other than start-up and reset one-offs) is in flash. `scripts/rig.sh` runs it before flashing the drive build, and so does CI.
+- `test -m speed`: the benchmark behind the speed log.
+
+### Fixed
+- 0.8.0 (not released) held reads up to 2.6 µs: GCC called an out-of-line `std::atomic<bool>::load`, which lives in flash. Core 1's shared flags are now `SharedFlag`, whose load and store are always inlined.
+
+### On the rig
+- Sequential reads 1.05 MB/s (from 0.87), 398 µs per sector (from 501); writes unchanged at 1.56 MB/s. Worst read 1,146 ns (from 1,000), the same with the lane off.
+- 10-minute soak: no mismatches; the bus observer checked 762,610 sectors.
+
 ## [0.7.3] - 2026-10-25
 
 ### Added

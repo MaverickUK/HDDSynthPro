@@ -432,6 +432,61 @@ TEST(test_read_multiple_sectors_interrupt_each) {
     CHECK(!d.intrq());  // no interrupt after the last block of a read
 }
 
+TEST(test_fast_lane_matches_data_reads) {
+    // Core 1's fast lane: take the block's remaining words, answer reads from
+    // them, then consume. Here split by an ALTSTATUS read mid-sector, which
+    // must see DRQ and leave the interrupt pending.
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d};
+    h.setLba(2000, 2);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    std::vector<uint16_t> got;
+    for (int s = 0; s < 2; ++s) {
+        Fetch f;
+        CHECK(d.pendingFetch(f));
+        d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+        h.status();
+        const uint16_t* next;
+        uint16_t left;
+        CHECK(d.dataInRemaining(next, left));
+        CHECK_EQ(left, 256);
+        for (int i = 0; i < 100; ++i) got.push_back(next[i]);
+        d.consumeDataWords(100);
+        CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC | ST_DRQ);
+        CHECK(d.dataInRemaining(next, left));
+        CHECK_EQ(left, 156);
+        for (int i = 0; i < 156; ++i) got.push_back(next[i]);
+        d.consumeDataWords(156);
+        CHECK(!d.dataInRemaining(next, left));  // block done: BSY for the next fetch, or complete
+    }
+    CHECK(sameAsDisk(got, 2000, 2));
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+}
+
+TEST(test_fast_lane_only_for_a_data_in_block) {
+    Device d(INFO);
+    const uint16_t* next;
+    uint16_t left;
+    CHECK(!d.dataInRemaining(next, left));  // idle
+    VirtualHost h{d};
+    h.setLba(10, 1);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(!d.dataInRemaining(next, left));  // BSY: fetching
+    Fetch f;
+    CHECK(d.pendingFetch(f));
+    GeneratedDisk disk;
+    d.fetchDone(f.id, disk.read(f.lba, f.buffer));
+    CHECK(d.dataInRemaining(next, left));
+    d.write(Reg::Device, DEV_DEV);  // device 1 selected: its DATA reads return 0
+    CHECK(!d.dataInRemaining(next, left));
+    d.consumeDataWords(5);  // ignored, as consumeRead would be
+    d.write(Reg::Device, 0);
+    CHECK(d.dataInRemaining(next, left));
+    CHECK_EQ(left, 256);
+}
+
 TEST(test_read_count_zero_means_256) {
     Device d(INFO);
     GeneratedDisk disk;
@@ -1129,6 +1184,8 @@ void runAtaDeviceTests() {
     RUN(test_read_one_sector);
     RUN(test_read_busy_until_fetched);
     RUN(test_read_multiple_sectors_interrupt_each);
+    RUN(test_fast_lane_matches_data_reads);
+    RUN(test_fast_lane_only_for_a_data_in_block);
     RUN(test_read_count_zero_means_256);
     RUN(test_read_last_sector_and_past_the_end);
     RUN(test_read_chs);

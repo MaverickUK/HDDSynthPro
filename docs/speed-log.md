@@ -19,6 +19,7 @@ MB/s here means 10^6 bytes per second.
 | Date | Firmware | Change | Transfer mode | Disk | Seq read | Random 4 KB read | Read command | Seq write | Worst read |
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-10-25 | 0.7.3 | Baseline | PIO 0, 150 MHz | generated | 0.87 MB/s | 69 IOPS (14.4 ms) | 10.7 ms + 501 µs/sector | 1.56 MB/s | 1000 ns |
+| 2026-10-25 | 0.8.1 | Core 1 fast lane for data reads | PIO 0, 150 MHz | generated | 1.05 MB/s | 73 IOPS (13.7 ms) | 10.8 ms + 398 µs/sector | 1.56 MB/s | 1146 ns |
 
 ## Where the time goes (0.7.3 baseline)
 
@@ -33,6 +34,16 @@ A 64 KB read takes 74.9 ms in the drive:
 - **The adapter's 10 ms.** After a READ command the bus is silent for 10.3 ms, then the adapter reads status and the data. INTRQ is already asserted after a few tens of µs, and the adapter ignores it. Writes don't have this wait, which is why they're faster. A host that waits on INTRQ or polls status, as a retro PC does, won't have it either. It might change if IDENTIFY offers READ MULTIPLE or faster PIO modes.
 - **The data words.** PIO mode 0 allows a word every 600 ns; ours take 1.59 µs, because IORDY holds the host while core 1 answers. 68% of data words were held longer than 400 ns, the longest 973 ns.
 - **Between sectors.** The adapter reads ALTSTATUS once and finds the next sector ready, so fetching sectors further ahead wouldn't help on this rig.
+
+## Changes
+
+### 0.8.1: core 1's fast lane for data reads
+
+While the host reads a DRQ block, core 1 spins on the bus program's FIFO and answers each data register read straight from the sector buffer, checking it with one mask-and-compare instead of the general register handling. Anything else (a status poll mid-block, a write, RESET#) leaves the lane and is served as before.
+- Data words held longer than 400 ns: from 68% to about 3%. Each sector takes 398 µs instead of 501, and sequential reads are 21% faster.
+- Writes are unchanged: the lane is for reads only.
+- The worst read rose from 1,000 to 1,146 ns, still inside ATA's 1,250. It's the same with the lane switched off (console `F`), so it isn't the lane: it's an ALTSTATUS poll between commands meeting one of core 1's bookkeeping steps.
+- On the way, 0.8.0 lost about 1 µs a read to an out-of-line `std::atomic<bool>::load` that GCC placed in flash. `scripts/check_core1_ram.py` now fails the build if core 1 can reach any function in flash.
 
 ## Ceilings on this adapter
 
