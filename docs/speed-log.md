@@ -1,0 +1,46 @@
+# Speed log
+
+How fast the emulated drive is, measured the same way after each change, so each step's gain shows. Newest entries go at the bottom of each table.
+
+## How it's measured
+
+`PIO_ENV=bb48_drive NO_FLASH=1 scripts/rig.sh -m speed` ([test_speed.py](../host/tests/test_speed.py)), on the Mac through the NS1081 USB-IDE adapter, with the raw bus trace off. The test:
+- reads 32 MB sequentially in 64 KB requests (the adapter's largest command, 128 sectors);
+- makes 500 random 4 KB reads;
+- writes 16 MB in 64 KB requests into the RAM overlay window (generated disk only);
+- times read commands of 1 to 128 sectors from the drive's own CMD/DONE lines, and fits them to "fixed cost per command + cost per sector".
+
+It saves its table as `speed.txt` in the run's folder under `host/runs/`.
+
+## Results
+
+MB/s here means 10^6 bytes per second.
+
+| Date | Firmware | Change | Transfer mode | Disk | Seq read | Random 4 KB read | Read command | Seq write | Worst read |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-25 | 0.7.3 | Baseline | PIO 0, 150 MHz | generated | 0.87 MB/s | 69 IOPS (14.4 ms) | 10.7 ms + 501 µs/sector | 1.56 MB/s | 1000 ns |
+
+## Where the time goes (0.7.3 baseline)
+
+A 64 KB read takes 74.9 ms in the drive:
+
+| Part | Time | Whose |
+|---|---|---|
+| The adapter's wait after each READ command | 10.7 ms | The adapter |
+| 128 sectors × 256 data words × 1.59 µs | ~52 ms | Ours: mostly core 1's answer to each word |
+| 128 gaps between sectors, ~70 µs each | ~9 ms | The adapter |
+
+- **The adapter's 10 ms.** After a READ command the bus is silent for 10.3 ms, then the adapter reads status and the data. INTRQ is already asserted after a few tens of µs, and the adapter ignores it. Writes don't have this wait, which is why they're faster. A host that waits on INTRQ or polls status, as a retro PC does, won't have it either. It might change if IDENTIFY offers READ MULTIPLE or faster PIO modes.
+- **The data words.** PIO mode 0 allows a word every 600 ns; ours take 1.59 µs, because IORDY holds the host while core 1 answers. 68% of data words were held longer than 400 ns, the longest 973 ns.
+- **Between sectors.** The adapter reads ALTSTATUS once and finds the next sector ready, so fetching sectors further ahead wouldn't help on this rig.
+
+## Ceilings on this adapter
+
+A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:
+
+| Transfer mode | Cycle time | Per sector on the bus | 64 KB read | Ceiling |
+|---|---|---|---|---|
+| PIO 0 (today: 1.59 µs a word) | 600 ns | 154 µs | 39 ms | 1.7 MB/s |
+| PIO 4 | 120 ns | 31 µs | 23 ms | 2.8 MB/s |
+
+The adapter's own waits cap it well before the bus does. DMA modes may behave differently: the adapter is known to use DMA with drives that offer it.
