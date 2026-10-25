@@ -16,6 +16,20 @@ Three things, all of which the drive already knows:
 
 The synth plays its access sound while busy, as today, and chooses the sample by class: `sequential.wav` while sequential, `access.wav` otherwise.
 
+## HDD Synth side
+
+Built in HDDSynth_Native **v0.18.0**. On the synth's SD card, in `settings.json`:
+
+```json
+"EXPERIMENTAL_HDDSYNTHPRO_SUPPORT": true,
+"SEQUENTIAL_LED_COLOUR": "#FF1800"
+```
+
+- `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` (default `false`) turns on the receiver on J6 and `sequential.wav`; it switches the synth's OLED off, since they share J6.
+- `SEQUENTIAL_LED_COLOUR` is optional (default orange, `#FF1800`): the activity LED's colour during sequential transfers.
+- `sequential.wav` is optional per pack; a pack without it plays `access.wav` for sequential transfers too.
+- The synth's serial `s` stats show the link (`up`/`lost`, the last class, valid and rejected sentence counts), and it logs `[link] up` and `[link] lost`.
+
 ## Wiring
 
 Ground and one data wire. **Never connect the two boards' 3.3 V pins:** each is powered on its own.
