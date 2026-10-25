@@ -82,7 +82,9 @@ void begin() {
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
-CORE1_RAM static void serve(ata::Device& dev, uint32_t sample) {
+// Inlined into both callers: a call here costs every access its register
+// saves and restores, about 100 ns (0.8.1's worst read).
+__attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32_t sample) {
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (bus::op(sample) == bus::Op::Write) {
         // A command only sets BSY here; core 1 runs it next (Device::queueCommand).

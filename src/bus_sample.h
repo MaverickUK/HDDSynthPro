@@ -2,6 +2,12 @@
 // Bit n of a sample is GPIO (PIN_DD0 + n). Pure C++.
 #pragma once
 
+// Core 1 decodes every access with these. Without always_inline GCC may call
+// an out-of-line copy, which lives in flash (scripts/check_core1_ram.py).
+#ifndef ALWAYS_INLINE
+#define ALWAYS_INLINE __attribute__((always_inline))
+#endif
+
 #include <cstdint>
 
 #include "config.h"
@@ -17,15 +23,15 @@ constexpr uint32_t ACCESS_MASK = 0xFFFFu | (7u << bitOf(cfg::PIN_DA0)) | maskOf(
                                  maskOf(cfg::PIN_CS1_N) | maskOf(cfg::PIN_DIOR_N) |
                                  maskOf(cfg::PIN_DIOW_N);
 
-inline uint16_t data(uint32_t s) { return static_cast<uint16_t>(s & 0xFFFFu); }
-inline unsigned address(uint32_t s) { return (s >> bitOf(cfg::PIN_DA0)) & 7u; }
+ALWAYS_INLINE inline uint16_t data(uint32_t s) { return static_cast<uint16_t>(s & 0xFFFFu); }
+ALWAYS_INLINE inline unsigned address(uint32_t s) { return (s >> bitOf(cfg::PIN_DA0)) & 7u; }
 // Active-low lines: true means asserted (pin low).
-inline bool asserted(uint32_t s, unsigned pin) { return (s & maskOf(pin)) == 0; }
-inline bool high(uint32_t s, unsigned pin) { return (s & maskOf(pin)) != 0; }
+ALWAYS_INLINE inline bool asserted(uint32_t s, unsigned pin) { return (s & maskOf(pin)) == 0; }
+ALWAYS_INLINE inline bool high(uint32_t s, unsigned pin) { return (s & maskOf(pin)) != 0; }
 
 enum class Op { None, Read, Write, Both };
 
-inline Op op(uint32_t s) {
+ALWAYS_INLINE inline Op op(uint32_t s) {
     bool rd = asserted(s, cfg::PIN_DIOR_N);
     bool wr = asserted(s, cfg::PIN_DIOW_N);
     if (rd && wr) return Op::Both;  // never valid: the host must not do this
@@ -37,7 +43,7 @@ inline Op op(uint32_t s) {
 // Which register block the chip selects pick.
 enum class Block { None, Command, Control, Both };
 
-inline Block block(uint32_t s) {
+ALWAYS_INLINE inline Block block(uint32_t s) {
     bool cs0 = asserted(s, cfg::PIN_CS0_N);
     bool cs1 = asserted(s, cfg::PIN_CS1_N);
     if (cs0 && cs1) return Block::Both;  // invalid in PIO transfers

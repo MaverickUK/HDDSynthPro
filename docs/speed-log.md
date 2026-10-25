@@ -20,6 +20,7 @@ MB/s here means 10^6 bytes per second.
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-10-25 | 0.7.3 | Baseline | PIO 0, 150 MHz | generated | 0.87 MB/s | 69 IOPS (14.4 ms) | 10.7 ms + 501 µs/sector | 1.56 MB/s | 1000 ns |
 | 2026-10-25 | 0.8.1 | Core 1 fast lane for data reads | PIO 0, 150 MHz | generated | 1.05 MB/s | 73 IOPS (13.7 ms) | 10.8 ms + 398 µs/sector | 1.56 MB/s | 1146 ns |
+| 2026-10-25 | 0.8.2 | Access handling inlined again | PIO 0, 150 MHz | generated | 1.05 MB/s | 73 IOPS (13.7 ms) | 10.8 ms + 400 µs/sector | 1.56 MB/s | 1040 ns |
 
 ## Where the time goes (0.7.3 baseline)
 
@@ -44,6 +45,10 @@ While the host reads a DRQ block, core 1 spins on the bus program's FIFO and ans
 - Writes are unchanged: the lane is for reads only.
 - The worst read rose from 1,000 to 1,146 ns, still inside ATA's 1,250. It's the same with the lane switched off (console `F`), so it isn't the lane: it's an ALTSTATUS poll between commands meeting one of core 1's bookkeeping steps.
 - On the way, 0.8.0 lost about 1 µs a read to an out-of-line `std::atomic<bool>::load` that GCC placed in flash. `scripts/check_core1_ram.py` now fails the build if core 1 can reach any function in flash.
+
+### 0.8.2: the worst read back near 1 µs
+
+Splitting the general access handling out of `serviceOnce` for the fast lane had cost every access a function call: about 100 ns of register saves and restores. Forcing it inline again brought the worst read from 1,146 to a steady 1,026-1,053 ns over six trials, lane on or off, about 200 ns inside ATA's 1,250. Throughput is unchanged. Inlining it made GCC call the small decode helpers out of line, from flash, which `check_core1_ram.py` caught; those are always inlined now too.
 
 ## Ceilings on this adapter
 

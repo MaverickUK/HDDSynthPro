@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.8.2] - 2026-10-25
+
+### Fixed
+- **The worst read is back near 1 µs** (1,026-1,053 ns, from 1,146 in 0.8.1). Core 1's general access handling is inlined into `serviceOnce` and the fast lane again, instead of costing every access a call. The bus decode helpers (`bus_sample.h`) and `Device::peek` are always inlined, since GCC otherwise calls copies in flash, as `check_core1_ram.py` showed.
+
+### On the rig
+- 5-minute soak: no mismatches; the bus observer checked 381,436 sectors.
+
 ## [0.8.1] - 2026-10-25
 
 The start of the speed work, logged in `docs/speed-log.md`: sequential reads from 0.87 to 1.05 MB/s.

@@ -284,7 +284,7 @@ private:
 // Inline: on core 1 it sits between a read arriving and its answer.
 // ATA: with device 1 selected and absent, device 0 returns 00h for Status and
 // Alternate Status, so the host sees "no device".
-inline uint16_t Device::peek(Reg reg) const {
+__attribute__((always_inline)) inline uint16_t Device::peek(Reg reg) const {
     switch (reg) {
         case Reg::Data:
             if (device1Selected() || !(status_ & ST_DRQ) || !data_) return 0;
