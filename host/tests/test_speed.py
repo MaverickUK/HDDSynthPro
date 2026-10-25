@@ -72,6 +72,7 @@ def test_speed(raw_disk, drive, run_dir):
     disk = f.get("disk", "?")
     sectors = int(f.get("sectors", gen_disk.DEFAULT_SECTORS))
     lines = [f"firmware {drive.command('h', 'READY').split()[2]}, disk {disk}"]
+    drive.send("r")  # read timings from here: traffic only, not the detection after a replug
 
     # Sequential reads
     mark = drive.mark()
