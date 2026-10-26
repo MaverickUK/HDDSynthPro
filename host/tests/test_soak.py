@@ -35,7 +35,7 @@ import pytest
 
 from conftest import require_build, require_generated_disk
 from hddproto import gen_disk, trace
-from hddproto.host_macos import MacHost
+from hddproto.host import make_host, pread, pwrite
 
 pytestmark = pytest.mark.slice6
 
@@ -57,7 +57,10 @@ WINDOW = 256
 IORDY_MAX_NS = 1250
 CHECK_EVERY_S = 300     # the drive's view
 # Idle pauses, for standby and wake. macOS's disk sleep (pmset disksleep) is
-# 10 minutes on the rig, so a pause has to be longer than that.
+# 10 minutes on the rig, so a pause has to be longer than that. Windows'
+# "Turn off hard disk after" defaults to 20 minutes, and whether it reaches a
+# USB disk at all is untested: lower it (powercfg /change disk-timeout-ac 10)
+# or raise HDDPRO_SOAK_IDLE_PAUSE_S. The soak counts standbys, not requires them.
 IDLE_EVERY_S = float(os.environ.get("HDDPRO_SOAK_IDLE_EVERY_S", 3600))
 IDLE_PAUSE_S = float(os.environ.get("HDDPRO_SOAK_IDLE_PAUSE_S", 660))
 TOLERATE_RESETS = os.environ.get("HDDPRO_SOAK_TOLERATE_RESETS") == "1"
@@ -69,13 +72,13 @@ WAKE_COMMANDS = (0xE1, 0x95)                 # IDLE IMMEDIATE
 
 
 def read(fd: int, lba: int, count: int) -> bytes:
-    data = os.pread(fd, count * SECTOR, lba * SECTOR)
+    data = pread(fd, count * SECTOR, lba * SECTOR)
     assert len(data) == count * SECTOR, f"short read at LBA {lba}: {len(data)} bytes"
     return data
 
 
 def write(fd: int, lba: int, data: bytes):
-    assert os.pwrite(fd, data, lba * SECTOR) == len(data), f"short write at LBA {lba}"
+    assert pwrite(fd, data, lba * SECTOR) == len(data), f"short write at LBA {lba}"
 
 
 def first_diff(got: bytes, want: bytes, lba: int) -> str | None:
@@ -100,7 +103,7 @@ def describe(got: bytes, lba: int, fd: int) -> str:
         whose = "the right sector, one word early"
     else:
         whose = f"unrecognised, starts {got[:16].hex()}"
-    again = os.pread(fd, SECTOR, lba * SECTOR) == want
+    again = pread(fd, SECTOR, lba * SECTOR) == want
     return (f"LBA {lba}: {len(diffs)} bytes differ (first at {diffs[0]}), holds {whose}; "
             f"re-read {'right' if again else 'still wrong'}")
 
@@ -144,7 +147,7 @@ def reopen(disk, fd: int):
     deadline = time.monotonic() + DISK_BACK_S
     while True:
         try:
-            reopened = MacHost(print).open_raw(disk, write=True)
+            reopened = make_host(print).open_raw(disk, write=True)
             break
         except OSError:
             if time.monotonic() > deadline:
@@ -163,7 +166,7 @@ def pause(disk, fd: int):
     os.dup2(placeholder, fd)  # closes the raw device
     os.close(placeholder)
     time.sleep(IDLE_PAUSE_S)
-    reopened = MacHost(print).open_raw(disk, write=True)
+    reopened = make_host(print).open_raw(disk, write=True)
     os.dup2(reopened, fd)
     os.close(reopened)
 
@@ -173,7 +176,7 @@ def test_soak(raw_disk_rw, drive, run_dir):
     minutes = float(os.environ.get("HDDPRO_SOAK_MINUTES", "60"))
     seed = int(os.environ.get("HDDPRO_SEED", time.time_ns() % 2**32))
     rng = random.Random(seed)
-    log = open(run_dir / "soak.log", "w")
+    log = open(run_dir / "soak.log", "w", encoding="utf-8")
 
     def note(line: str):
         stamped = f"{time.strftime('%H:%M:%S')} {line}"

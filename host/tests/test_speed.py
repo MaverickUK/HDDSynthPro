@@ -21,7 +21,7 @@ import pytest
 
 from conftest import require_build
 from hddproto import gen_disk, trace
-from hddproto.host_macos import MacHost
+from hddproto.host import make_host, pread, pwrite
 
 pytestmark = pytest.mark.speed
 
@@ -79,7 +79,7 @@ def test_speed(raw_disk, drive, run_dir):
     start = time.monotonic()
     offset = 0
     while offset < SEQ_READ_BYTES:
-        assert len(os.pread(fd, REQUEST, offset)) == REQUEST
+        assert len(pread(fd, REQUEST, offset)) == REQUEST
         offset += REQUEST
     seconds = time.monotonic() - start
     reads = commands_since(drive, mark, "READ_SECTORS")
@@ -91,7 +91,7 @@ def test_speed(raw_disk, drive, run_dir):
     start = time.monotonic()
     for _ in range(RANDOM_READS):
         lba = rng.randrange(0, sectors - 8) & ~7
-        assert len(os.pread(fd, 4096, lba * SECTOR)) == 4096
+        assert len(pread(fd, 4096, lba * SECTOR)) == 4096
     seconds = time.monotonic() - start
     lines.append(f"random 4 KB read  {RANDOM_READS / seconds:6.1f} IOPS   ({seconds / RANDOM_READS * 1000:.1f} ms each)")
 
@@ -100,7 +100,7 @@ def test_speed(raw_disk, drive, run_dir):
     for count in FIT_SIZES:
         for _ in range(FIT_REPEATS):
             lba = rng.randrange(0, sectors - count)
-            os.pread(fd, count * SECTOR, lba * SECTOR)
+            pread(fd, count * SECTOR, lba * SECTOR)
     points = [(c.count, c.duration_us / 1000) for c in commands_since(drive, mark, "READ_SECTORS")]
     fixed, per_sector = fit(points)
     lines.append(f"read command      {fixed:6.2f} ms fixed + {per_sector * 1000:.0f} us per sector "
@@ -109,7 +109,7 @@ def test_speed(raw_disk, drive, run_dir):
     # Sequential writes: on the generated disk (its RAM overlay) or the scratch
     # image HDDBENCH.IMG, never on HDDSYNTH.IMG
     if disk in ("generated", "bench"):
-        wfd = MacHost(print).open_raw(raw_disk[0], write=True)
+        wfd = make_host(print).open_raw(raw_disk[0], write=True)
         try:
             mark = drive.mark()
             data = rng.randbytes(REQUEST)
@@ -118,7 +118,7 @@ def test_speed(raw_disk, drive, run_dir):
             while written < SEQ_WRITE_BYTES:
                 half = (written // REQUEST) % 2  # the window's two 64 KB halves in turn
                 base = WINDOW_START + half * (REQUEST // SECTOR)
-                assert os.pwrite(wfd, data, base * SECTOR) == REQUEST
+                assert pwrite(wfd, data, base * SECTOR) == REQUEST
                 written += REQUEST
             seconds = time.monotonic() - start
             writes = commands_since(drive, mark, "WRITE_SECTORS")
@@ -126,7 +126,7 @@ def test_speed(raw_disk, drive, run_dir):
             lines.append(f"sequential write  {SEQ_WRITE_BYTES / MB / seconds:6.2f} MB/s   "
                          f"({len(writes)} commands of {writes[0].count} sectors, {per_cmd:.1f} ms each in the drive)")
         finally:
-            os.pwrite(wfd, gen_disk.sectors(WINDOW_START, WINDOW), WINDOW_START * SECTOR)
+            pwrite(wfd, gen_disk.sectors(WINDOW_START, WINDOW), WINDOW_START * SECTOR)
             os.close(wfd)
     else:
         lines.append("sequential write  (skipped: not on HDDSYNTH.IMG; use the bench image)")

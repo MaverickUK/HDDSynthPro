@@ -35,9 +35,10 @@ def find_pioasm() -> str | None:
     """pioasm from the PlatformIO packages, or $PIOASM, or PATH."""
     if os.environ.get("PIOASM"):
         return os.environ["PIOASM"]
-    candidate = Path.home() / ".platformio/packages/tool-pioasm-rp2040-earlephilhower/pioasm"
-    if candidate.exists():
-        return str(candidate)
+    for exe in ("pioasm", "pioasm.exe"):
+        candidate = Path.home() / ".platformio/packages/tool-pioasm-rp2040-earlephilhower" / exe
+        if candidate.exists():
+            return str(candidate)
     return shutil.which("pioasm")
 
 

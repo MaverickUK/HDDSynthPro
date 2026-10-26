@@ -23,6 +23,7 @@ import pytest
 
 from conftest import require_build, require_generated_disk
 from hddproto import gen_disk, trace
+from hddproto.host import pread
 
 pytestmark = pytest.mark.slice3
 
@@ -43,7 +44,7 @@ CHUNK_SECTORS = 256  # one READ SECTORS command's worth
 
 
 def read(fd: int, lba: int, count: int) -> bytes:
-    data = os.pread(fd, count * SECTOR, lba * SECTOR)
+    data = pread(fd, count * SECTOR, lba * SECTOR)
     assert len(data) == count * SECTOR, f"short read at LBA {lba}: {len(data)} bytes"
     return data
 
@@ -89,4 +90,4 @@ def test_first_and_last_sectors(raw_disk):
     _, fd = raw_disk
     for lba in (0, 1, TOTAL - 2, TOTAL - 1):
         assert read(fd, lba, 1) == gen_disk.sector(lba)
-    assert os.pread(fd, SECTOR, TOTAL * SECTOR) == b""  # macOS stops at the end
+    assert pread(fd, SECTOR, TOTAL * SECTOR) == b""  # macOS stops at the end

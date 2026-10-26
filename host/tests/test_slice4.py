@@ -19,6 +19,7 @@ import pytest
 
 from conftest import require_build, require_generated_disk
 from hddproto import gen_disk, trace
+from hddproto.host import pread, pwrite
 
 pytestmark = pytest.mark.slice4
 
@@ -46,13 +47,13 @@ def restore_window(raw_disk_rw):
 
 
 def read(fd: int, lba: int, count: int) -> bytes:
-    data = os.pread(fd, count * SECTOR, lba * SECTOR)
+    data = pread(fd, count * SECTOR, lba * SECTOR)
     assert len(data) == count * SECTOR, f"short read at LBA {lba}: {len(data)} bytes"
     return data
 
 
 def write(fd: int, lba: int, data: bytes):
-    assert os.pwrite(fd, data, lba * SECTOR) == len(data), f"short write at LBA {lba}"
+    assert pwrite(fd, data, lba * SECTOR) == len(data), f"short write at LBA {lba}"
 
 
 def first_diff(got: bytes, want: bytes, lba: int) -> str | None:

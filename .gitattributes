@@ -1,0 +1,3 @@
+# Shell scripts and what they source keep LF, or bash on Windows chokes on the CRs.
+*.sh text eol=lf
+host/rig.env.example text eol=lf

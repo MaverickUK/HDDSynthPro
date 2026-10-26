@@ -22,6 +22,7 @@ import pytest
 
 from conftest import require_build
 from hddproto import gen_disk, trace
+from hddproto.host import pread
 
 pytestmark = pytest.mark.activity
 
@@ -40,7 +41,7 @@ def mark(drive) -> int:
 
 
 def read(fd, lba, sectors):
-    data = os.pread(fd, sectors * SECTOR, lba * SECTOR)
+    data = pread(fd, sectors * SECTOR, lba * SECTOR)
     assert len(data) == sectors * SECTOR
 
 

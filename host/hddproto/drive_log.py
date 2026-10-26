@@ -10,16 +10,21 @@ import serial
 from serial.tools import list_ports
 
 USB_PRODUCT = "HDDSynthPro"  # platformio.ini usb_product
+BOARD_VIDS = (0x15BA, 0x2E8A)  # Olimex (the BB48 board definition), Raspberry Pi
 
 
 def find_port() -> str | None:
-    """$HDDPRO_PORT, else the first port whose USB product is HDDSynthPro."""
+    """$HDDPRO_PORT, else the first port whose USB product is HDDSynthPro.
+    pyserial doesn't read the product on Windows; there, the only port with
+    the board's vendor ID will do."""
     if os.environ.get("HDDPRO_PORT"):
         return os.environ["HDDPRO_PORT"]
-    for p in list_ports.comports():
+    ports = list_ports.comports()
+    for p in ports:
         if p.product == USB_PRODUCT:
             return p.device
-    return None
+    picos = [p for p in ports if p.vid in BOARD_VIDS and p.product is None]
+    return picos[0].device if len(picos) == 1 else None
 
 
 class DriveLog:

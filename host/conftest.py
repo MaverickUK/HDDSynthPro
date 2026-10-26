@@ -1,7 +1,7 @@
 """Shared fixtures for the rig tests.
 
   drive    the drive's serial log (opened once per session, waits for READY)
-  rig      the host side: replug the adapter, system log (macOS for now)
+  rig      the host side: replug the adapter, system log (macOS or Windows)
   run_dir  a timestamped folder under host/runs/ for this test's evidence;
            on failure the drive log, system log and disk list land there too
 """
@@ -16,7 +16,7 @@ import pytest
 
 from hddproto import pio_sim
 from hddproto.drive_log import DriveLog
-from hddproto.host_macos import MacHost
+from hddproto.host import make_host
 from hddproto.paths import REPO, RUNS
 
 
@@ -86,10 +86,10 @@ def require_generated_disk(drive):
 
 @pytest.fixture(scope="module")
 def raw_disk(drive):
-    """The drive's raw device (/dev/rdiskN) opened read-only: (Disk, fd).
-    macOS does not cache it, so every byte read came from the drive."""
+    """The drive's raw device (/dev/rdiskN, \\\\.\\PhysicalDriveN) opened
+    read-only: (Disk, fd). It isn't cached, so every byte read came from the drive."""
     from hddproto import gen_disk
-    rig = MacHost(lambda m: print(f"\n>>> {m}"))
+    rig = make_host(lambda m: print(f"\n>>> {m}"))
     disk = rig.find_disk(gen_disk.DEFAULT_SECTORS * gen_disk.SECTOR_BYTES)
     fd = rig.open_raw(disk)
     yield disk, fd
@@ -102,7 +102,7 @@ def raw_disk_rw(drive):
     Never on an SD image: the tests that write would corrupt it."""
     from hddproto import gen_disk
     require_generated_disk(drive)
-    rig = MacHost(lambda m: print(f"\n>>> {m}"))
+    rig = make_host(lambda m: print(f"\n>>> {m}"))
     disk = rig.find_disk(gen_disk.DEFAULT_SECTORS * gen_disk.SECTOR_BYTES)
     fd = rig.open_raw(disk, write=True)
     yield disk, fd
@@ -123,7 +123,7 @@ def ask(request):
 
 @pytest.fixture
 def rig(ask):
-    return MacHost(ask)
+    return make_host(ask)
 
 
 @pytest.fixture
@@ -139,9 +139,9 @@ def run_dir(request, session_stamp):
     if report is not None and report.failed:
         if drive_mark is not None:
             lines = request.getfixturevalue("drive").lines_since(drive_mark)
-            (path / "drive.log").write_text("\n".join(lines) + "\n")
-        host = MacHost(lambda _m: None)
+            (path / "drive.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        host = make_host(lambda _m: None)
         minutes = int((time.monotonic() - started) // 60) + 1
-        (path / "system.log").write_text(host.system_log(f"{minutes}m"))
-        (path / "disks.txt").write_text(host.disks())
-        (path / "failure.txt").write_text(report.longreprtext)
+        (path / "system.log").write_text(host.system_log(f"{minutes}m"), encoding="utf-8")
+        (path / "disks.txt").write_text(host.disks(), encoding="utf-8")
+        (path / "failure.txt").write_text(report.longreprtext, encoding="utf-8")

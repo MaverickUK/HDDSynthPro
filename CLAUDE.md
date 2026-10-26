@@ -20,7 +20,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 
 ## Toolchain
 
-- **Build:** `pio run` (PlatformIO lives in `~/.platformio-venv/bin/pio` on the dev Mac). The board is `olimex_pico2bb48`. There are two builds, selected by `FIRMWARE_SLICE`:
+- **Build:** `pio run` (PlatformIO lives in `~/.platformio-venv/bin/pio` on the dev Mac, `~/.platformio/penv/Scripts/pio.exe` on Windows; `rig.sh` looks in both). The board is `olimex_pico2bb48`. There are two builds, selected by `FIRMWARE_SLICE`:
   - `bb48` (0): listen only;
   - `bb48_drive` (3): the drive, slices 1–5.
 
@@ -48,7 +48,9 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - After a read error (UNC) in the middle of a transfer it goes silent for about 60 s, until macOS times out and resets it; it then re-detects the drive, and macOS drops the disk if reads still fail. Seen when the SD card was pulled during reads (2026-10-25): the drive failed the first read in 346 ms and later ones in 67 µs, and stayed responsive. A card put back isn't re-mounted until the BB48 restarts.
   - It uses DMA with drives that support it. Its 44-pin header shares the bus with the 40-pin one, so the listen build on the 40-pin header can record a real drive on the 44-pin.
   - `host/rig.env` (git-ignored, from `rig.env.example`) holds the replug settings, and `scripts/rig.sh` loads it.
-- **Host OS:** the dev machine is macOS. There's no `O_DIRECT` (use `/dev/rdiskN`), no `dmesg` (use `log show`), and no ATA pass-through. OS-specific code stays in `host/hddproto/host_macos.py`; slice 6 adds a Linux host for pass-through.
+- **Host OS:** the rig runs from macOS or Windows. `host/hddproto/host.py` holds what's common (replug, `find_disk`, `pread`/`pwrite`, which Windows lacks) and `make_host()` picks `host_macos.py` or `host_windows.py`; OS-specific code stays in those two. Tests use `make_host` and `hddproto.host.pread`/`pwrite`, never `os.pread`. Slice 6 adds a Linux host for pass-through.
+  - macOS: there's no `O_DIRECT` (use `/dev/rdiskN`), no `dmesg` (use `log show`), and no ATA pass-through.
+  - Windows: `\\.\PhysicalDriveN` (uncached), found with `Get-Disk`; it needs an administrator terminal. Run `scripts/rig.sh` from Git Bash. pyserial doesn't report the USB product there, so `find_port` falls back to the only port with the board's vendor ID (Olimex 15BA, or Raspberry Pi 2E8A), or `HDDPRO_PORT=COMn`. uhubctl hardly works, so replugs are by hand. The native C++ tests need WSL (no ASan/TSan); `rig.sh` skips them without a `c++`. Windows' disk sleep defaults to 20 minutes, so the soak's 11-minute pauses may see no standby.
 
 ## Drive data path
 

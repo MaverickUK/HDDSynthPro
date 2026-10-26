@@ -33,7 +33,8 @@ ONE_OFFS = (
 
 
 def tool(name: str) -> str:
-    found = glob.glob(os.path.expanduser(f"~/.platformio/packages/toolchain-rp2040-earlephilhower/bin/*-{name}"))
+    bin_dir = os.path.expanduser("~/.platformio/packages/toolchain-rp2040-earlephilhower/bin")
+    found = glob.glob(f"{bin_dir}/*-{name}") + glob.glob(f"{bin_dir}/*-{name}.exe")  # .exe: Windows
     if not found:
         sys.exit(f"check_core1_ram: no {name} in the PlatformIO toolchain")
     return found[0]

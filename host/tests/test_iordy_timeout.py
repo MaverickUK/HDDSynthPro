@@ -16,6 +16,7 @@ import pytest
 
 from conftest import require_build, require_generated_disk
 from hddproto import gen_disk
+from hddproto.host import pread
 
 pytestmark = pytest.mark.timing
 
@@ -61,7 +62,7 @@ def test_iordy_timeout(raw_disk, drive, run_dir):
                 count = rng.randint(1, 256)
                 lba = rng.randrange(0, gen_disk.DEFAULT_SECTORS - count + 1)
                 try:
-                    data = os.pread(fd, count * SECTOR, lba * SECTOR)
+                    data = pread(fd, count * SECTOR, lba * SECTOR)
                 except OSError as e:
                     rows.append((delay_ns, "-", f"I/O error: {e}", "", ""))
                     break
