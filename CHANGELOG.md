@@ -2,6 +2,20 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.8.23] - 2026-10-26
+
+What holds status reads past 1.25 us with write-behind on: measured, not yet fixed.
+
+### Added
+- **`SLOWREAD t register ns`** for every read IORDY held past ATA's 1,250 ns (`cfg::IORDY_LIMIT_NS`), from the IORDY timer. The time is when core 0 collected the report, up to a sector's store after the read. The Python parser keeps them (`Trace.slow_reads`).
+- `s` shows `write_behind=`.
+
+### On the rig (Windows, generated disk, 3-minute soaks)
+- Write-behind on: 32 and 39 slow reads in two runs, all ALTSTATUS, all during writes, median 1,253 ns, worst 1,280. Write-behind off: none in 13.5 hours.
+- A pass probe (core 1 timing each pass of its loop by what it did, with its SysTick) showed bookkeeping passes of 400-730 ns even idle, and passes over 1 us for finishing a written sector, posting its store and taking the result. But its own bookkeeping pushed slow reads to 2,000-16,000 per run, so it was removed rather than kept as a tool that misleads.
+- Finishing the written sector later instead of at its last word made it worse: as core 1's next job, 931 slow reads (ALTSTATUS); after the host's ALTSTATUS read, 18,820, and after its STATUS read, 18,431 (now STATUS). The work after a block (finish the sector, post the store, take the result) only fits before both status reads if it starts at once. Not kept.
+- Next: make core 1's loop passes cheaper.
+
 ## [0.8.22] - 2026-10-25
 
 A scratch image for benchmarks, and write-behind (built, measured, off by default). 0.8.16 to 0.8.21 were rig builds, not released.

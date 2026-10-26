@@ -25,6 +25,9 @@ static const char* s_early_register = "-";
 // Core 1 starts the program while core 0 may already be polling.
 static std::atomic<bool> s_started{false};
 static std::atomic<bool> s_reset_requested{false};
+// Reads past the limit, waiting for takeOverLimit(); core 0 only.
+static OverLimit s_over[8];
+static unsigned s_over_head = 0, s_over_count = 0;
 
 // One loop iteration is 2 PIO cycles; the wait and the three instructions
 // before the loop add 4.
@@ -67,11 +70,20 @@ void poll() {
             continue;
         }
         uint32_t iterations = s_threshold_iterations + (0xFFFFu - (report >> 16));
+        const char* reg = bus::registerName(bus::block(sample), bus::address(sample), false);
         ++s_slow;
         if (iterations > s_max_iterations) {
             s_max_iterations = iterations;
-            s_max_register = bus::registerName(bus::block(sample), bus::address(sample), false);
+            s_max_register = reg;
             s_max_at_us = time_us_32();
+        }
+        uint32_t ns = iterationsToNs(iterations);
+        if (ns > cfg::IORDY_LIMIT_NS) {
+            s_over[(s_over_head + s_over_count) % 8] = OverLimit{ns, reg, time_us_32()};
+            if (s_over_count < 8)
+                ++s_over_count;
+            else
+                s_over_head = (s_over_head + 1) % 8;  // full: drop the oldest
         }
     }
     if (s_reset_requested.exchange(false, std::memory_order_relaxed)) reset();
@@ -83,6 +95,14 @@ const char* maxRegister() { return s_max_register; }
 uint32_t maxAtUs() { return s_max_at_us; }
 uint32_t earlyReads() { return s_early; }
 const char* earlyRegister() { return s_early_register; }
+bool takeOverLimit(OverLimit& read) {
+    if (s_over_count == 0) return false;
+    read = s_over[s_over_head];
+    s_over_head = (s_over_head + 1) % 8;
+    --s_over_count;
+    return true;
+}
+
 uint32_t contestedAccesses() { return busctrl_hw->counter[0].value; }
 uint32_t stallCycles() { return busctrl_hw->counter[1].value; }
 

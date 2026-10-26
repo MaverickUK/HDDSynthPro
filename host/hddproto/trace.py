@@ -71,6 +71,8 @@ class Trace:
     commands: list[Command] = field(default_factory=list)
     activity: list[Activity] = field(default_factory=list)
     marks: list[int] = field(default_factory=list)  # MARK timestamps, us
+    # Reads IORDY held past ATA's limit, as (t_us, register, ns).
+    slow_reads: list[tuple[int, str, int]] = field(default_factory=list)
     other: list[str] = field(default_factory=list)  # anything else the drive printed
 
     @property
@@ -113,6 +115,9 @@ def parse(lines: list[str]) -> Trace:
                 continue
             if kind == "MARK" and len(parts) == 2:
                 t.marks.append(int(parts[1]))
+                continue
+            if kind == "SLOWREAD" and len(parts) == 4:
+                t.slow_reads.append((int(parts[1]), parts[2], int(parts[3])))
                 continue
             if kind == "CMD" and len(parts) == 6:
                 t.commands.append(Command(int(parts[1]), int(parts[2], 16), parts[3],

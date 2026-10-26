@@ -353,6 +353,25 @@ static bool printLine(const char* line, size_t n) {
     return true;
 }
 
+#if FIRMWARE_SLICE != 0
+// A SLOWREAD line for each read IORDY held past ATA's limit. The time is when
+// core 0 collected the report: up to a sector's store (about 0.5 ms on the
+// SD card) after the read.
+static void printSlowReads() {
+    static iordy_timer::OverLimit pending;
+    static bool has_pending = false;
+    for (;;) {
+        if (!has_pending && !iordy_timer::takeOverLimit(pending)) return;
+        has_pending = true;
+        char line[48];
+        int n = std::snprintf(line, sizeof line, "SLOWREAD %lu %s %lu\n", (unsigned long)pending.at_us,
+                              pending.reg, (unsigned long)pending.ns);
+        if (n <= 0 || !printLine(line, size_t(n) < sizeof line ? size_t(n) : sizeof line - 1)) return;
+        has_pending = false;
+    }
+}
+#endif
+
 static void printReady() {
     Serial.printf("READY HDDSynthPro %s slice%d\n", FIRMWARE_VERSION, FIRMWARE_SLICE);
 }
@@ -390,6 +409,7 @@ static void printStats() {
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
+    Serial.printf(" write_behind=%d", (int)g_write_behind.load());
 #endif
     Serial.print("\n");
 }
@@ -465,7 +485,8 @@ static void handleConsole() {
 #else
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
                                "m mark, S SD card check, I create SD image, K create bench image, "
-                               "J serve the bench image or back (restarts), x short test (cable unplugged), "
+                               "J serve the bench image or back (restarts), W write-behind, "
+                               "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
                 break;
@@ -555,6 +576,7 @@ void loop() {
 #if FIRMWARE_SLICE != 0
     serveFetches();
     iordy_timer::poll();
+    printSlowReads();
     bus_observer::poll(Serial, g_disk == &g_overlay);  // only the generated disk can be checked
     updateLed();
 

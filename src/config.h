@@ -67,5 +67,7 @@ constexpr size_t RAM_DISK_SECTORS = 512;
 // The IORDY timer (iordy_timer.pio) counts and times reads that IORDY holds
 // longer than this. ATA's limit is 1250 ns (tB).
 constexpr uint32_t IORDY_REPORT_NS = 400;
+// Reads held past ATA's limit also print a SLOWREAD line each.
+constexpr uint32_t IORDY_LIMIT_NS = 1250;
 
 }  // namespace cfg

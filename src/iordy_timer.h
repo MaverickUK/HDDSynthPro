@@ -29,6 +29,15 @@ uint32_t maxAtUs();
 // waited for the data, and the register the last one read. Should stay 0.
 uint32_t earlyReads();
 const char* earlyRegister();
+// The reads held past ATA's limit (cfg::IORDY_LIMIT_NS), one at a time, for
+// a SLOWREAD line each: how long, which register, and when core 0 collected
+// the report. The last few are kept; older ones are dropped if nobody takes them.
+struct OverLimit {
+    uint32_t ns;
+    const char* reg;
+    uint32_t at_us;
+};
+bool takeOverLimit(OverLimit& read);
 uint32_t contestedAccesses();  // fast peripheral bus, since the last reset
 uint32_t stallCycles();
 void reset();

@@ -76,3 +76,9 @@ def test_activity_lines_and_time_in_states():
     assert spent == {"IDLE": 1000 + 1000, "SEQ": 3000, "RAND": 4000}
     # A window starting mid-state takes the state in force at its start.
     assert trace.time_in_states(t.activity, 6000, 8000) == {"IDLE": 0, "SEQ": 0, "RAND": 2000}
+
+
+def test_parse_slow_reads():
+    t = trace.parse(["SLOWREAD 5400 STATUS 1620", "SLOWREAD 6000 ALTSTATUS"])
+    assert t.slow_reads == [(5400, "STATUS", 1620)]
+    assert t.other == ["SLOWREAD 6000 ALTSTATUS"]  # malformed: kept, not guessed
