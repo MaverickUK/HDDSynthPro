@@ -57,10 +57,9 @@ WINDOW = 256
 IORDY_MAX_NS = 1250
 CHECK_EVERY_S = 300     # the drive's view
 # Idle pauses, for standby and wake. macOS's disk sleep (pmset disksleep) is
-# 10 minutes on the rig, so a pause has to be longer than that. Windows'
-# "Turn off hard disk after" defaults to 20 minutes, and whether it reaches a
-# USB disk at all is untested: lower it (powercfg /change disk-timeout-ac 10)
-# or raise HDDPRO_SOAK_IDLE_PAUSE_S. The soak counts standbys, not requires them.
+# 10 minutes on the rig, so a pause has to be longer than that. Windows never
+# sent this USB disk STANDBY, even with its disk timeout at 1 minute, so from
+# Windows the pauses only idle. The soak counts standbys, not requires them.
 IDLE_EVERY_S = float(os.environ.get("HDDPRO_SOAK_IDLE_EVERY_S", 3600))
 IDLE_PAUSE_S = float(os.environ.get("HDDPRO_SOAK_IDLE_PAUSE_S", 660))
 TOLERATE_RESETS = os.environ.get("HDDPRO_SOAK_TOLERATE_RESETS") == "1"
