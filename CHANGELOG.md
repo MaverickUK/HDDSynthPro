@@ -2,6 +2,19 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.8.24] - 2026-10-26
+
+Write-behind's slow status reads traced to core 0, and fixed there.
+
+### Fixed
+- **Core 0 could spend hundreds of microseconds draining the IORDY timer's reports** (one for every read held over 400 ns). `iordy_timer::poll()` drained until the FIFO was empty, and since 0.8.23 converted every report to nanoseconds (a 64-bit division) to find the ones past 1,250 ns. When reports came every few microseconds it fell behind and stayed there. Read-aheads were picked up late, so the host found BSY at block ends and backed off (reads 0.87 instead of 1.27 MB/s), and the polling of the PIO's FIFO held up core 1's own PIO accesses. Each report is now compared with a limit worked out once at start-up, only reads past it are converted, and one call takes at most 8 reports. If reports come faster than that, the PIO drops the extra ones (it never waits), so `iordy_slow` can undercount. Core 1's code is unchanged.
+
+### On the rig (Windows, generated disk)
+- Write-behind on, 3-minute soaks: 0 slow reads (0.8.23: 32 and 39, worst 1,280 ns).
+- Write-behind on, 30-minute soak: 1,609 MB, 55,660 commands, no mismatches, no resets, 0 slow reads; worst read 1,160 ns (STATUS); 2.76 million sectors checked on the cable, none bad.
+- Reads 1.27 MB/s, as 0.8.23 (4 MB sequential, 64 KB requests).
+- Found on the way, and not kept: inlining `Device::intrq()` or adding an inline data-word write changed only where core 1's code sat in RAM, yet held about 40% of data reads past 400 ns (3% before). That flood of reports is what exposed the core 0 problem. Caching the PIO FIFO pointers made the fast lane faster than ever, and with it the host reset the drive twice in 6 minutes (a command never completed); not understood yet.
+
 ## [0.8.23] - 2026-10-26
 
 What holds status reads past 1.25 us with write-behind on: measured, not yet fixed.

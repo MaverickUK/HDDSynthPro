@@ -16,6 +16,7 @@ namespace iordy_timer {
 static PIO s_pio;
 static uint s_sm;
 static uint32_t s_threshold_iterations;
+static uint32_t s_limit_iterations;  // cfg::IORDY_LIMIT_NS in loop iterations, for SLOWREAD
 static uint32_t s_slow = 0;
 static uint32_t s_max_iterations = 0;
 static const char* s_max_register = "-";
@@ -50,6 +51,9 @@ void begin(uint32_t threshold_ns) {
 
     uint64_t cycles = uint64_t(threshold_ns) * clock_get_hz(clk_sys) / 1000000000ull;
     s_threshold_iterations = uint32_t(cycles / 2);
+    // The inverse of iterationsToNs(), worked out once: poll() compares each
+    // report against it, and converts only the reads past the limit.
+    s_limit_iterations = uint32_t((uint64_t(cfg::IORDY_LIMIT_NS) * clock_get_hz(clk_sys) / 1000000000ull - 4) / 2);
     pio_sm_put(s_pio, s_sm, s_threshold_iterations);
     pio_sm_set_enabled(s_pio, s_sm, true);
 
@@ -61,7 +65,13 @@ void begin(uint32_t threshold_ns) {
 
 void poll() {
     if (!s_started.load(std::memory_order_acquire)) return;
-    while (!pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
+    // A bounded batch: reports can come every few microseconds (a read held
+    // past the threshold each), and core 0 must get back to the fetches.
+    // Draining until empty, with each report converted to ns, kept it here
+    // for hundreds of us, so read-aheads were late and reads slowed by a
+    // third (0.8.24). If reports come faster than that, the PIO drops the
+    // extra ones (push noblock): `iordy_slow` undercounts, the bus never waits.
+    for (int i = 0; i < 8 && !pio_sm_is_rx_fifo_empty(s_pio, s_sm); ++i) {
         uint32_t report = pio_sm_get(s_pio, s_sm);
         uint32_t sample = report << 16;  // back to the sample layout
         if (bus::high(sample, cfg::PIN_IORDY)) {  // started before IORDY was low
@@ -77,9 +87,8 @@ void poll() {
             s_max_register = reg;
             s_max_at_us = time_us_32();
         }
-        uint32_t ns = iterationsToNs(iterations);
-        if (ns > cfg::IORDY_LIMIT_NS) {
-            s_over[(s_over_head + s_over_count) % 8] = OverLimit{ns, reg, time_us_32()};
+        if (iterations > s_limit_iterations) {
+            s_over[(s_over_head + s_over_count) % 8] = OverLimit{iterationsToNs(iterations), reg, time_us_32()};
             if (s_over_count < 8)
                 ++s_over_count;
             else
