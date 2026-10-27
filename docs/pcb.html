@@ -1,0 +1,718 @@
+<title>HDDSynthPro PCB</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a schematic-capture sheet in the style of wiring.html and
+   wiring-sd.html. Block diagram first, then one net table per block, each
+   row ticked off once it is drawn in KiCad, then the PGA2350 pad list and
+   the BOM. Colours = signal groups, as in the other wiring sheets. */
+:root {
+  --bg: #f4f6f3;
+  --panel: #ffffff;
+  --fg: #1c2125;
+  --muted: #5d6870;
+  --line: #d3d9d4;
+  --accent: #0e6a87;
+  --warn-bg: #fff4e5;
+  --warn-fg: #7a3d00;
+  --c-pwr: #c0262d;
+  --c-3v3: #d9480f;
+  --c-gnd: #3c444a;
+  --c-usb: #2f9e44;
+  --c-ctl: #a87700;
+  --c-link: #7b3aec;
+  --c-led: #e8590c;
+  --c-sd: #c2410c;
+  --c-bus: #2457d6;
+  --c-strobe: #0b7285;
+  --c-rsv: #868e96;
+  --c-nc: #a3acb2;
+  --font-display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121518; --panel: #1a1e22; --fg: #e3e7ea; --muted: #94a0a8; --line: #2c3338;
+    --accent: #5cc3e0; --warn-bg: #33240f; --warn-fg: #ffcf94;
+    --c-pwr: #ff6b70; --c-3v3: #ff922b; --c-gnd: #aab3ba; --c-usb: #69db7c; --c-ctl: #e7b94c;
+    --c-link: #b598ff; --c-led: #ffa94d; --c-sd: #ff8a4f; --c-bus: #79a6ff; --c-strobe: #3bc9db;
+    --c-rsv: #adb5bd; --c-nc: #5b656c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121518; --panel: #1a1e22; --fg: #e3e7ea; --muted: #94a0a8; --line: #2c3338;
+  --accent: #5cc3e0; --warn-bg: #33240f; --warn-fg: #ffcf94;
+  --c-pwr: #ff6b70; --c-3v3: #ff922b; --c-gnd: #aab3ba; --c-usb: #69db7c; --c-ctl: #e7b94c;
+  --c-link: #b598ff; --c-led: #ffa94d; --c-sd: #ff8a4f; --c-bus: #79a6ff; --c-strobe: #3bc9db;
+  --c-rsv: #adb5bd; --c-nc: #5b656c;
+  color-scheme: dark;
+}
+
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
+.wrap {
+  max-width: 1120px; margin: 0 auto;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 36px;
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: 2.1rem; font-weight: 700; letter-spacing: 0.01em; }
+h2 { font-size: 1.35rem; font-weight: 600; }
+h3 { font-size: 1.08rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+p { margin: 0; max-width: 72ch; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+header { display: grid; gap: 10px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+a { color: var(--accent); }
+
+.warnings { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.warn { background: var(--warn-bg); color: var(--warn-fg); border-radius: 6px; padding: 12px 14px; display: grid; gap: 4px; min-width: 0; }
+.warn strong { font-family: var(--font-display); font-size: 1.02rem; font-weight: 600; }
+.warn p { font-size: 0.92rem; }
+
+section { display: grid; gap: 14px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.85rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 18px; height: 4px; border-radius: 2px; background: var(--c); display: inline-block; }
+button { font: inherit; font-size: 0.85rem; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 5px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible, a:focus-visible, .blk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.drawing { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; padding: 8px; }
+#block { display: block; width: 100%; min-width: 860px; height: auto; color: var(--fg); }
+figure { margin: 0; display: grid; gap: 10px; min-width: 0; }
+figcaption { font-size: 0.88rem; color: var(--muted); max-width: 90ch; }
+
+/* Diagram */
+.g-pwr { --c: var(--c-pwr); } .g-3v3 { --c: var(--c-3v3); } .g-gnd { --c: var(--c-gnd); }
+.g-usb { --c: var(--c-usb); } .g-ctl { --c: var(--c-ctl); } .g-link { --c: var(--c-link); }
+.g-led { --c: var(--c-led); } .g-sd { --c: var(--c-sd); } .g-bus { --c: var(--c-bus); }
+.g-strobe { --c: var(--c-strobe); } .g-rsv { --c: var(--c-rsv); } .g-nc { --c: var(--c-nc); }
+.blk rect.body { fill: var(--bg); stroke: var(--muted); stroke-width: 1.3; }
+.blk.mcu rect.body { fill: color-mix(in srgb, var(--accent) 7%, var(--bg)); stroke: var(--accent); stroke-width: 1.8; }
+.blk { cursor: pointer; }
+.blk:hover rect.body { stroke: var(--accent); stroke-width: 2; }
+.ref { fill: var(--muted); font: 600 10.5px var(--font-mono); letter-spacing: 0.06em; }
+.name { fill: currentColor; font: 600 14px var(--font-display); letter-spacing: 0.02em; }
+.sub { fill: var(--muted); font: 400 10.5px var(--font-body); }
+.pl { fill: var(--c); font: 600 10.5px var(--font-mono); }
+.pl.r { text-anchor: end; }
+.pad { fill: var(--muted); font: 400 9.5px var(--font-mono); }
+.pad.r { text-anchor: end; }
+.w { fill: none; stroke: var(--c); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.w.bus { stroke-width: 5; opacity: 0.85; }
+.w.dash { stroke-dasharray: 5 4; }
+.dot { fill: var(--c); }
+.part rect { fill: var(--panel); stroke: var(--c); stroke-width: 1.5; }
+.part text { fill: var(--c); font: 600 9.5px var(--font-mono); text-anchor: middle; }
+.diode { fill: var(--c); }
+.wl { fill: var(--c); font: 600 10px var(--font-mono); }
+.wl.mid { text-anchor: middle; }
+.cnt { fill: var(--c); font: 600 10px var(--font-mono); text-anchor: middle; }
+
+/* Tables */
+.progress { font-family: var(--font-mono); font-size: 0.9rem; }
+.progress b { color: var(--accent); }
+.blocks { display: grid; gap: 28px; }
+.blockhead { display: grid; gap: 6px; }
+.tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tbody tr:last-child td { border-bottom: 0; }
+th { font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); background: var(--panel); white-space: nowrap; }
+td.mono { font-family: var(--font-mono); font-size: 0.84rem; }
+td.note { font-size: 0.88rem; color: var(--muted); min-width: 200px; }
+.sig { font-family: var(--font-mono); font-weight: 600; font-size: 0.86rem; color: var(--c); white-space: nowrap; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--c); margin-right: 8px; vertical-align: -1px; }
+td input { accent-color: var(--accent); width: 17px; height: 17px; cursor: pointer; margin: 0; }
+tbody tr.done td:not(:first-child) { color: var(--muted); }
+tbody tr.done .sig { text-decoration: line-through; text-decoration-color: var(--muted); }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 3px; background: color-mix(in srgb, var(--c-rsv) 18%, transparent); color: var(--muted); vertical-align: 1px; }
+.tag.new { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+.cols > div { display: grid; gap: 10px; align-content: start; min-width: 0; }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
+.padgrid { display: grid; grid-template-columns: repeat(10, minmax(64px, 1fr)); gap: 3px; min-width: 700px; padding: 10px; }
+.padcell { border: 1px solid var(--line); border-radius: 4px; padding: 4px 5px; min-height: 46px; display: grid; align-content: start; gap: 1px; background: color-mix(in srgb, var(--c, var(--c-nc)) 10%, var(--panel)); }
+.padcell.empty { background: transparent; border-style: dashed; opacity: 0.4; }
+.padcell b { font: 600 10px var(--font-mono); color: var(--muted); }
+.padcell span { font: 600 10.5px var(--font-mono); color: var(--c, var(--fg)); overflow-wrap: anywhere; }
+.padcell small { font: 400 9.5px var(--font-body); color: var(--muted); line-height: 1.2; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">HDDSynthPro · PCB reference for the KiCad schematic · firmware pin map 0.8.22</div>
+    <h1>HDDSynthPro PCB</h1>
+    <p>Every connection on the board: a PGA2350 (RP2350B) acting as an IDE drive behind two 5&nbsp;V-tolerant bus switches, with USB-C and a 5&nbsp;V header for power, the activity link to the HDD Synth, a microSD socket and the activity LED. The GPIO numbers are the ones in <code>src/config.h</code>, so the drive firmware runs unchanged, apart from the new pins marked <span class="tag new">NEW</span>.</p>
+  </header>
+
+  <div class="warnings">
+    <div class="warn"><strong>Never join the IDE side's 5 V to this board</strong><p>The adapter's Molex power stays off the PCB. The two boards share ground through the IDE connector only.</p></div>
+    <div class="warn"><strong>The bus switches start open</strong><p><code>BUS_EN#</code> is pulled high, so the IDE bus is disconnected until firmware drives GP41 low. Close JP1 to run today's firmware, which doesn't know about GP41.</p></div>
+    <div class="warn"><strong>IORDY is still open drain</strong><p>It passes through the switch like any other line. Firmware only pulls it low or releases it; the host pulls it up to 5&nbsp;V and the switch caps what the RP2350 sees at about 3.3&nbsp;V.</p></div>
+    <div class="warn"><strong>Check before ordering</strong><p>The PGA2350's ground pads (A1, A10, B2, B9, J1, J10) are inferred from its schematic's six GND pins. Confirm them, and the SN74CB3T3245's pin numbers, against the datasheets.</p></div>
+  </div>
+
+  <section id="diagram">
+    <div class="toolbar">
+      <h2>Block diagram</h2>
+      <div class="legend">
+        <span class="g-pwr"><i></i>5 V</span>
+        <span class="g-3v3"><i></i>3.3 V</span>
+        <span class="g-usb"><i></i>USB</span>
+        <span class="g-ctl"><i></i>Boot, reset, SWD</span>
+        <span class="g-link"><i></i>Link UART</span>
+        <span class="g-sd"><i></i>microSD</span>
+        <span class="g-bus"><i></i>IDE data, address, selects</span>
+        <span class="g-strobe"><i></i>IDE control</span>
+        <span class="g-rsv"><i></i>Reserved</span>
+      </div>
+    </div>
+    <figure>
+      <div class="drawing">
+        <svg id="block" viewBox="0 0 1100 660" role="img" aria-labelledby="blockTitle">
+          <title id="blockTitle">Block diagram: power, USB, buttons, link and LED on the left of the PGA2350; bus switches, IDE header and microSD on the right.</title>
+
+          <!-- ===== Left column ===== -->
+          <g class="blk" data-go="b-power" tabindex="0">
+            <rect class="body" x="20" y="24" width="150" height="112" rx="6"/>
+            <text class="ref" x="32" y="42">J1</text>
+            <text class="name" x="32" y="60">USB-C</text>
+            <text class="sub" x="32" y="74">power + flashing</text>
+            <text class="pl g-pwr" x="32" y="94">VBUS</text>
+            <text class="pl g-usb" x="32" y="108">D+ D−</text>
+            <text class="pl g-gnd" x="32" y="122">CC1 CC2</text>
+          </g>
+          <g class="blk" data-go="b-power" tabindex="0">
+            <rect class="body" x="20" y="164" width="150" height="66" rx="6"/>
+            <text class="ref" x="32" y="182">J2</text>
+            <text class="name" x="32" y="200">5 V in</text>
+            <text class="sub" x="32" y="216">2-pin, keyed</text>
+          </g>
+          <g class="blk" data-go="b-ctl" tabindex="0">
+            <rect class="body" x="20" y="262" width="150" height="80" rx="6"/>
+            <text class="ref" x="32" y="280">SW1 · SW2</text>
+            <text class="name" x="32" y="298">BOOTSEL · RESET</text>
+            <text class="sub" x="32" y="314">to GND when pressed</text>
+          </g>
+          <g class="blk" data-go="b-ctl" tabindex="0">
+            <rect class="body" x="20" y="362" width="150" height="58" rx="6"/>
+            <text class="ref" x="32" y="380">J6 (optional)</text>
+            <text class="name" x="32" y="398">SWD debug</text>
+            <text class="sub" x="32" y="412">1×3 0.1″ header</text>
+          </g>
+          <g class="blk" data-go="b-link" tabindex="0">
+            <rect class="body" x="20" y="440" width="150" height="96" rx="6"/>
+            <text class="ref" x="32" y="458">J3</text>
+            <text class="name" x="32" y="476">Activity link</text>
+            <text class="sub" x="32" y="490">same order as synth's J6</text>
+            <text class="pl g-nc" x="32" y="508">1 NC   2 GND</text>
+            <text class="pl g-link" x="32" y="524">3 TX   4 RX</text>
+          </g>
+          <g class="blk" data-go="b-led" tabindex="0">
+            <rect class="body" x="20" y="560" width="150" height="70" rx="6"/>
+            <text class="ref" x="32" y="578">D3 · R5</text>
+            <text class="name" x="32" y="596">Activity LED</text>
+            <text class="sub" x="32" y="612">to GND</text>
+          </g>
+
+          <!-- Power path: diodes OR into VB -->
+          <g class="g-pwr">
+            <path class="w" d="M170 94 H236"/>
+            <polygon class="diode" points="236,86 236,102 252,94"/><line class="w" x1="253" y1="85" x2="253" y2="103"/>
+            <text class="wl mid" x="244" y="80">D1</text>
+            <path class="w" d="M253 94 H330"/>
+            <path class="w" d="M170 197 H206"/>
+            <g class="part"><rect x="206" y="189" width="34" height="16" rx="3"/><text x="223" y="200">F1</text></g>
+            <path class="w" d="M240 197 H262"/>
+            <polygon class="diode" points="262,189 262,205 278,197"/><line class="w" x1="279" y1="188" x2="279" y2="206"/>
+            <text class="wl mid" x="270" y="183">D2</text>
+            <path class="w" d="M279 197 H330 V94"/>
+            <circle class="dot" cx="330" cy="94" r="3.5"/>
+            <path class="w" d="M330 94 V64 H400"/>
+            <text class="wl" x="290" y="58">VB</text>
+            <g class="part"><rect x="338" y="120" width="32" height="16" rx="3"/><text x="354" y="131">C1</text></g>
+            <path class="w" d="M330 128 H338"/>
+          </g>
+          <g class="g-usb">
+            <path class="w" d="M170 108 H200 V118 H400"/>
+            <path class="w" d="M200 112 V132 H400"/>
+            <text class="wl" x="294" y="114">USB_DP</text>
+            <text class="wl" x="294" y="146">USB_DM</text>
+          </g>
+          <g class="g-gnd">
+            <path class="w dash" d="M170 122 H186"/>
+            <g class="part"><rect x="186" y="140" width="40" height="16" rx="3"/><text x="206" y="151">R1 R2</text></g>
+            <path class="w dash" d="M186 122 V148"/>
+            <text class="wl" x="188" y="172">5.1k → GND</text>
+          </g>
+          <g class="g-ctl">
+            <path class="w" d="M170 290 H400"/>
+            <path class="w" d="M170 314 H400"/>
+            <text class="wl" x="230" y="284">BOOTSEL</text>
+            <text class="wl" x="230" y="308">RUN</text>
+            <path class="w" d="M170 384 H400"/>
+            <path class="w" d="M170 404 H400"/>
+            <text class="wl" x="230" y="378">SWCLK</text>
+            <text class="wl" x="230" y="398">SWDIO</text>
+          </g>
+          <g class="g-link">
+            <path class="w" d="M170 518 H250"/>
+            <g class="part"><rect x="250" y="510" width="34" height="16" rx="3"/><text x="267" y="521">R3</text></g>
+            <path class="w" d="M284 518 H320 V470 H400"/>
+            <path class="w" d="M170 530 H300"/>
+            <g class="part"><rect x="300" y="522" width="34" height="16" rx="3"/><text x="317" y="533">R4</text></g>
+            <path class="w" d="M334 530 H350 V494 H400"/>
+            <text class="wl" x="216" y="506">1k</text>
+            <text class="wl" x="340" y="464">LINK_TX</text>
+            <text class="wl" x="356" y="488">LINK_RX</text>
+          </g>
+          <g class="g-led">
+            <path class="w" d="M170 596 H250"/>
+            <g class="part"><rect x="250" y="588" width="40" height="16" rx="3"/><text x="270" y="599">470Ω</text></g>
+            <path class="w" d="M290 596 H400"/>
+            <text class="wl" x="330" y="590">LED</text>
+          </g>
+
+          <!-- ===== PGA2350 ===== -->
+          <g class="blk mcu" data-go="pads" tabindex="0">
+            <rect class="body" x="400" y="24" width="220" height="612" rx="8"/>
+            <text class="ref" x="510" y="300" text-anchor="middle">U1</text>
+            <text class="name" x="510" y="320" text-anchor="middle">PGA2350</text>
+            <text class="sub" x="510" y="336" text-anchor="middle">RP2350B · 16 MB flash · 8 MB PSRAM</text>
+            <text class="sub" x="510" y="350" text-anchor="middle">on-board 3.3 V LDO, 27 Ω on USB</text>
+            <!-- left pins -->
+            <text class="pl g-pwr" x="410" y="68">VBUS</text><text class="pad" x="450" y="68">A3</text>
+            <text class="pl g-usb" x="410" y="122">USB_DP</text><text class="pad" x="462" y="122">A6</text>
+            <text class="pl g-usb" x="410" y="136">USB_DM</text><text class="pad" x="462" y="136">A7</text>
+            <text class="pl g-ctl" x="410" y="294">BOOTSEL</text><text class="pad" x="468" y="294">A8</text>
+            <text class="pl g-ctl" x="410" y="318">RUN</text><text class="pad" x="440" y="318">A5</text>
+            <text class="pl g-ctl" x="410" y="388">SWCLK</text><text class="pad" x="456" y="388">B6</text>
+            <text class="pl g-ctl" x="410" y="408">SWDIO</text><text class="pad" x="456" y="408">B7</text>
+            <text class="pl g-link" x="410" y="474">GP0</text><text class="pad" x="440" y="474">B3</text>
+            <text class="pl g-link" x="410" y="498">GP1</text><text class="pad" x="440" y="498">A2</text>
+            <text class="pl g-led" x="410" y="600">GP25</text><text class="pad" x="448" y="600">I6</text>
+            <!-- right pins -->
+            <text class="pl r g-bus" x="610" y="70">GP4–19 DD0–15</text>
+            <text class="pl r g-strobe" x="610" y="98">GP30 RESET#</text>
+            <text class="pl r g-bus" x="610" y="272">GP20–24 DA, CS#</text>
+            <text class="pl r g-strobe" x="610" y="290">GP26 DIOR#</text>
+            <text class="pl r g-strobe" x="610" y="308">GP27 DIOW#</text>
+            <text class="pl r g-strobe" x="610" y="326">GP28–29 IORDY, INTRQ</text>
+            <text class="pl r g-rsv" x="610" y="344">GP31 · GP3 DMA</text>
+            <text class="pl r g-ctl" x="610" y="182">GP41 BUS_EN#</text>
+            <text class="pl r g-3v3" x="610" y="420">3V3 out B4</text>
+            <text class="pl r g-sd" x="610" y="510">GP34–39 SD</text>
+            <text class="pl r g-sd" x="610" y="560">GP40 CD</text>
+            <text class="pl r g-gnd" x="610" y="624">GND ×6</text>
+          </g>
+
+          <!-- ===== Right side: bus switches ===== -->
+          <g class="g-bus">
+            <path class="w bus" d="M620 66 H690"/>
+            <path class="w" d="M620 94 H690"/>
+            <text class="cnt" x="655" y="58">16</text>
+            <path class="w bus" d="M620 268 H690"/>
+            <text class="cnt" x="655" y="262">5</text>
+          </g>
+          <g class="g-strobe">
+            <path class="w" d="M620 286 H636"/>
+            <g class="part"><rect x="636" y="279" width="34" height="14" rx="3"/><text x="653" y="289">R14</text></g>
+            <path class="w" d="M670 286 H690"/>
+            <path class="w" d="M620 304 H636"/>
+            <g class="part"><rect x="636" y="297" width="34" height="14" rx="3"/><text x="653" y="307">R15</text></g>
+            <path class="w" d="M670 304 H690"/>
+            <path class="w bus" d="M620 322 H690"/>
+            <text class="cnt" x="655" y="336" dy="0">2</text>
+          </g>
+          <g class="g-rsv"><path class="w dash" d="M620 344 H690"/></g>
+          <g class="g-ctl">
+            <path class="w" d="M620 178 H660 V250"/>
+            <path class="w" d="M660 160 V178"/>
+            <path class="w" d="M660 178 V200"/>
+            <text class="wl" x="626" y="196">OE#</text>
+          </g>
+
+          <g class="blk" data-go="b-switch" tabindex="0">
+            <rect class="body" x="690" y="30" width="130" height="130" rx="6"/>
+            <text class="ref" x="702" y="48">U2 · U3</text>
+            <text class="name" x="702" y="66">SN74CB3T3245 ×2</text>
+            <text class="sub" x="702" y="82">8-bit bus switches</text>
+            <text class="sub" x="702" y="128">RESET#, DD0–14,</text>
+            <text class="sub" x="702" y="142">in header pin order</text>
+          </g>
+          <g class="blk" data-go="b-switch" tabindex="0">
+            <rect class="body" x="690" y="250" width="130" height="112" rx="6"/>
+            <text class="ref" x="702" y="268">U5 · U6</text>
+            <text class="name" x="702" y="286">SN74CB3T3245 ×2</text>
+            <text class="sub" x="702" y="302">DD15, DA, CS#, strobes,</text>
+            <text class="sub" x="702" y="316">IORDY, INTRQ, DMA</text>
+            <text class="sub" x="702" y="346">VCC 3V3 · 100 nF each</text>
+          </g>
+
+          <g class="g-bus">
+            <path class="w bus" d="M820 66 H880"/>
+            <path class="w" d="M820 94 H880"/>
+            <path class="w bus" d="M820 268 H880"/>
+          </g>
+          <g class="g-strobe">
+            <path class="w" d="M820 286 H880"/>
+            <path class="w" d="M820 304 H880"/>
+            <path class="w bus" d="M820 322 H880"/>
+          </g>
+          <g class="g-rsv"><path class="w dash" d="M820 344 H880"/></g>
+
+          <g class="blk" data-go="b-ide" tabindex="0">
+            <rect class="body" x="880" y="30" width="200" height="340" rx="6"/>
+            <text class="ref" x="892" y="48">J5</text>
+            <text class="name" x="892" y="66">IDE 40-pin</text>
+            <text class="sub" x="892" y="82">2×20 shrouded, keyed</text>
+            <text class="pl g-bus" x="892" y="104">DD0–15</text>
+            <text class="pl g-strobe" x="892" y="98">RESET#</text>
+            <text class="pl g-bus" x="892" y="272">DA0–2 · CS0# · CS1#</text>
+            <text class="pl g-strobe" x="892" y="290">DIOR# · DIOW#</text>
+            <text class="pl g-strobe" x="892" y="326">IORDY · INTRQ</text>
+            <text class="pl g-rsv" x="892" y="348">DMARQ · DMACK#</text>
+            <text class="pl g-gnd" x="892" y="190">GND ×7</text>
+            <text class="sub" x="892" y="206">2 19 22 24 26 30 40</text>
+          </g>
+
+          <!-- 3V3 rail -->
+          <g class="g-3v3">
+            <path class="w" d="M620 416 H850"/>
+            <path class="w" d="M755 416 V362"/>
+            <path class="w" d="M660 416 V200"/>
+            <circle class="dot" cx="660" cy="416" r="3.5"/>
+            <circle class="dot" cx="755" cy="416" r="3.5"/>
+            <g class="part"><rect x="644" y="214" width="32" height="16" rx="3"/><text x="660" y="225">R13</text></g>
+            <path class="w" d="M850 416 V470 H880"/>
+            <text class="wl" x="770" y="410">3V3</text>
+          </g>
+
+          <!-- SD -->
+          <g class="g-sd">
+            <path class="w bus" d="M620 506 H880"/>
+            <text class="cnt" x="700" y="498">6</text>
+            <path class="w" d="M620 556 H880"/>
+            <g class="part"><rect x="740" y="520" width="80" height="16" rx="3"/><text x="780" y="531">R7–R12 10k</text></g>
+            <path class="w dash" d="M780 506 V520"/>
+            <path class="w dash" d="M780 536 V556"/>
+          </g>
+          <g class="blk" data-go="b-sd" tabindex="0">
+            <rect class="body" x="880" y="440" width="200" height="140" rx="6"/>
+            <text class="ref" x="892" y="458">J4</text>
+            <text class="name" x="892" y="476">microSD socket</text>
+            <text class="sub" x="892" y="492">push-push, card detect</text>
+            <text class="pl g-3v3" x="892" y="474" dy="0" visibility="hidden">.</text>
+            <text class="pl g-sd" x="892" y="510">CLK CMD DAT0–3</text>
+            <text class="pl g-sd" x="892" y="560">CD switch</text>
+            <text class="sub" x="892" y="574">C2 10 µF + C3 100 nF at VDD</text>
+          </g>
+
+          <!-- JP1 -->
+          <g class="g-ctl">
+            <g class="part"><rect x="644" y="138" width="32" height="16" rx="3"/><text x="660" y="149">JP1</text></g>
+            <text class="wl" x="582" y="152" visibility="hidden">.</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>Click a block to jump to its connections. Thick lines are bundles (the number is how many wires). R13 pulls <code>BUS_EN#</code> up to 3V3, and solder jumper JP1 ties it to GND for firmware that doesn't drive GP41. R1–R2 are the USB-C CC resistors; R14–R15 are 33&nbsp;Ω on the strobes.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="toolbar">
+      <h2>Connections</h2>
+      <div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap">
+        <span class="progress" id="progress"></span>
+        <button type="button" id="reset">Clear ticks</button>
+      </div>
+    </div>
+    <p class="note" style="color:var(--muted)">Tick each net once it's in the KiCad schematic. Ticks are kept in this browser only.</p>
+    <div class="blocks" id="blocks"></div>
+  </section>
+
+  <section id="pads">
+    <h2>PGA2350 pads</h2>
+    <p>Pad names from Pimoroni's schematic (U$1), as seen from the top. Use them to build the KiCad symbol, or to check Pimoroni's footprint against this board's nets. Blank pads aren't used; grey ones are pins left unconnected on purpose.</p>
+    <div class="tablewrap"><div class="padgrid" id="padgrid"></div></div>
+  </section>
+
+  <section id="bom">
+    <h2>Bill of materials</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Ref</th><th>Part</th><th>Example</th><th>Notes</th></tr></thead>
+        <tbody id="bomrows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Notes for layout</h2>
+    <div class="cols">
+      <div>
+        <h3>IDE bus</h3>
+        <ul>
+          <li>Keep U1 → U2, U3, U5, U6 → J5 short, and the bus on one layer over a solid ground plane.</li>
+          <li>Fit R14 and R15 (33&nbsp;Ω, DIOR#/DIOW#) between U1 and U3, close to U1.</li>
+          <li>Join every IDE ground pin to the plane. Leave the key (pin 20) out of the header.</li>
+          <li>No pull-ups or pull-downs on the bus: the host provides them, and the RP2350's internal pull-downs stay off (erratum E9).</li>
+          <li>The channels follow the header's pin order, so the IDE side runs straight. Spare channels (U6 A1–A4/B1–B4) stay unconnected.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Power</h3>
+        <ul>
+          <li>D1 and D2 diode-OR USB and the 5&nbsp;V header into VB, and block reverse polarity. VB sits about 0.35&nbsp;V below the input, inside the module's 3.0–5.5&nbsp;V.</li>
+          <li>The module's LDO supplies everything on 3V3. Pimoroni rates it at 300&nbsp;mA, so keep other loads off it.</li>
+          <li>Put a 100&nbsp;nF next to each switch's VCC pin (C4, C5, C7, C8), and C2/C3 at the SD socket.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Firmware changes this board brings</h3>
+        <ul>
+          <li>GP41 <code>BUS_EN#</code>: drive low once the bus program is set up (or close JP1).</li>
+          <li>GP40: SD card detect, for re-mounting a card put back while running.</li>
+          <li>GP31 and GP3: DMARQ and DMACK#, routed now so DMA needs no new board.</li>
+          <li>The pin rules in CLAUDE.md, <code>config.h</code> and the wiring docs would gain a line for each.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  // [group, net, from, through, to, note]
+  const BLOCKS = [
+    { id: "b-power", title: "Power", g: "pwr", intro: "USB-C and the 5 V header are diode-ORed into the module's VB pin. The module makes 3V3 for everything else.", rows: [
+      ["pwr", "VBUS_USB", "J1 A4, B4, A9, B9 (VBUS)", "", "D1 anode", "SS14 or similar Schottky, 1 A"],
+      ["pwr", "5V_EXT", "J2 pin 1 (+5 V)", "F1 polyfuse, 500 mA hold", "D2 anode", "Polarity: print + next to pin 1"],
+      ["pwr", "VB", "D1 cathode, D2 cathode", "C1 10 µF to GND", "U1 A3 (VBUS)", "The module's only power input"],
+      ["3v3", "3V3", "U1 B4 (3V3 out)", "", "U2, U3, U5, U6 VCC, J4 VDD, R7–R13", "Output of the module's LDO; ~300 mA budget"],
+      ["gnd", "GND", "U1 A1, A10, B2, B9, J1, J10", "", "J1 GND + shell, J2 pin 2, J3 pin 2, J5 GND pins, J6 pin 2, all caps, the switches' GND", "Ground pads inferred: confirm on Pimoroni's footprint"],
+      ["nc", "3V3_EN", "U1 A4", "", "not connected", "Pulled up to VBUS on the module (100k)"],
+      ["nc", "ADC_VREF", "U1 B5", "", "not connected", "ADC unused"],
+    ]},
+    { id: "b-usb", title: "USB-C", g: "usb", intro: "USB 2.0 only. The module already has the 27 Ω series resistors on D+ and D−.", rows: [
+      ["usb", "USB_DP", "J1 A6 + B6 (D+)", "", "U1 A6 (USB_DP)", "Join both D+ contacts; route as a 90 Ω pair"],
+      ["usb", "USB_DM", "J1 A7 + B7 (D−)", "", "U1 A7 (USB_DM)", "Join both D− contacts"],
+      ["gnd", "CC1", "J1 A5", "R1 5.1 kΩ", "GND", "Needed for power from C-to-C cables and chargers"],
+      ["gnd", "CC2", "J1 B5", "R2 5.1 kΩ", "GND", ""],
+      ["nc", "SBU1/SBU2", "J1 A8, B8", "", "not connected", ""],
+      ["usb", "ESD (optional)", "USB_DP, USB_DM, VBUS_USB", "U4 USBLC6-2SC6", "GND", "Place close to J1"],
+    ]},
+    { id: "b-ctl", title: "Buttons and debug", g: "ctl", intro: "The module has no buttons. BOOTSEL is the way back from firmware that won't boot.", rows: [
+      ["ctl", "BOOTSEL", "U1 A8", "SW1", "GND", "Hold while pressing RESET to get the UF2 drive"],
+      ["ctl", "RUN", "U1 A5", "SW2", "GND", "Reset; RUN has an internal pull-up"],
+      ["ctl", "SWCLK", "U1 B6", "", "J6 pin 1", "Optional: 0.1-inch header in the Raspberry Pi debug connector's order; the Debug Probe's JST-to-header cable fits"],
+      ["gnd", "GND", "J6 pin 2", "", "GND", ""],
+      ["ctl", "SWDIO", "U1 B7", "", "J6 pin 3", ""],
+    ]},
+    { id: "b-link", title: "Activity link (J3)", g: "link", intro: "Pins in the same order as the HDD Synth's J6, so a straight 4-way cable works. 3.3 V logic, 115200 baud (docs/activity-link.md).", rows: [
+      ["nc", "—", "J3 pin 1", "", "not connected", "The synth's 3.3 V: the boards' 3.3 V rails are never joined"],
+      ["gnd", "GND", "J3 pin 2", "", "GND", ""],
+      ["link", "LINK_TX", "U1 B3 (GP0, UART0 TX)", "R3 1 kΩ", "J3 pin 3", "To the synth's GP25 (UART1 RX)"],
+      ["link", "LINK_RX", "U1 A2 (GP1, UART0 RX)", "R4 1 kΩ", "J3 pin 4", "From the synth's GP24; reserved, unused by firmware"],
+    ]},
+    { id: "b-led", title: "LEDs", g: "led", intro: "GP25 is the drive's activity light (core 0's updateLed()).", rows: [
+      ["led", "LED", "U1 I6 (GP25)", "R5 470 Ω", "D3 anode → cathode to GND", "Lit while a command runs, at least 25 ms"],
+      ["3v3", "PWR LED (optional)", "3V3", "R6 1 kΩ", "D4 anode → cathode to GND", ""],
+    ]},
+    { id: "b-sd", title: "microSD (J4)", g: "sd", intro: "The same GPIOs as the breakout today: SPI now, 4-bit SDIO later (DAT0–3 consecutive). Pin numbers are the microSD card's.", rows: [
+      ["sd", "SD_CLK", "U1 H10 (GP34, SPI0 SCK)", "", "J4 pin 5 (CLK)", "No pull-up"],
+      ["sd", "SD_CMD", "U1 G9 (GP35, SPI0 TX)", "R7 10 kΩ to 3V3", "J4 pin 3 (CMD)", "Card DI in SPI mode"],
+      ["sd", "SD_DAT0", "U1 G10 (GP36, SPI0 RX)", "R8 10 kΩ to 3V3", "J4 pin 7 (DAT0)", "Card DO in SPI mode"],
+      ["sd", "SD_DAT1", "U1 F9 (GP37)", "R9 10 kΩ to 3V3", "J4 pin 8 (DAT1)", "SDIO only"],
+      ["sd", "SD_DAT2", "U1 F10 (GP38)", "R10 10 kΩ to 3V3", "J4 pin 1 (DAT2)", "SDIO only"],
+      ["sd", "SD_DAT3", "U1 E9 (GP39)", "R11 10 kΩ to 3V3", "J4 pin 2 (DAT3/CD)", "SPI chip select"],
+      ["3v3", "3V3", "J4 pin 4 (VDD)", "C2 10 µF + C3 100 nF to GND", "3V3", "Caps right at the socket"],
+      ["gnd", "GND", "J4 pin 6 (VSS) + shell", "", "GND", ""],
+      ["sd", "SD_CD", "U1 E10 (GP40)", "R12 10 kΩ to 3V3", "J4 card-detect switch → GND", "NEW. Check the socket's datasheet for which way the switch closes"],
+    ]},
+    { id: "b-switch", title: "Bus switches (U2, U3, U5, U6)", g: "bus", intro: "SN74CB3T3245 (TSSOP-20): eight channels and one OE# each (low = connected). Each takes eight consecutive IDE header signals in pin order, B8 nearest pin 1. The A side goes to the PGA2350, the B side to the IDE header. Pinout: 1 NC, 2-9 A1-A8, 10 GND, 11-18 B8-B1, 19 OE#, 20 VCC.", rows: [
+      ["ctl", "BUS_EN#", "U1 D9 (GP41)", "R13 10 kΩ to 3V3; JP1 to GND", "OE# (pin 19) of U2, U3, U5 and U6", "NEW. High (open) until firmware drives it low. R13 beats the pad's default pull-down at reset"],
+      ["3v3", "3V3", "VCC (pin 20) of U2, U3, U5, U6", "C4, C5, C7, C8 100 nF to GND", "3V3", ""],
+      ["gnd", "GND", "U2 GND pins, U3 GND pins", "", "GND", ""],
+    ]},
+    { id: "b-ide", title: "IDE header (J5)", g: "bus", intro: "Each line runs GPIO → switch A pin, switch B pin → IDE pin. Directions are the drive's.", ide: true, rows: [] },
+  ];
+
+  // [IDE pin, signal, GPIO, pad, switch channel, series R, dir, group, note]
+  const IDE = [
+    [17, "DD0", 4, "C1", "U3 A1/B1", "", "in/out", "bus"],
+    [15, "DD1", 5, "D2", "U3 A3/B3", "", "in/out", "bus"],
+    [13, "DD2", 6, "D1", "U3 A5/B5", "", "in/out", "bus"],
+    [11, "DD3", 7, "E2", "U3 A7/B7", "", "in/out", "bus"],
+    [9,  "DD4", 8, "E1", "U2 A1/B1", "", "in/out", "bus"],
+    [7,  "DD5", 9, "F2", "U2 A3/B3", "", "in/out", "bus"],
+    [5,  "DD6", 10, "F1", "U2 A5/B5", "", "in/out", "bus"],
+    [3,  "DD7", 11, "G2", "U2 A7/B7", "", "in/out", "bus", "Host pulls down ~10k"],
+    [4,  "DD8", 12, "G1", "U2 A6/B6", "", "in/out", "bus"],
+    [6,  "DD9", 13, "H2", "U2 A4/B4", "", "in/out", "bus"],
+    [8,  "DD10", 14, "H1", "U2 A2/B2", "", "in/out", "bus"],
+    [10, "DD11", 15, "I2", "U3 A8/B8", "", "in/out", "bus"],
+    [12, "DD12", 16, "I1", "U3 A6/B6", "", "in/out", "bus"],
+    [14, "DD13", 17, "J2", "U3 A4/B4", "", "in/out", "bus"],
+    [16, "DD14", 18, "J3", "U3 A2/B2", "", "in/out", "bus"],
+    [18, "DD15", 19, "I3", "U5 A8/B8", "", "in/out", "bus"],
+    [35, "DA0", 20, "J4", "U6 A8/B8", "", "in", "bus"],
+    [33, "DA1", 21, "I4", "U5 A1/B1", "", "in", "bus"],
+    [36, "DA2", 22, "J5", "U6 A7/B7", "", "in", "bus"],
+    [37, "CS0#", 23, "I5", "U6 A6/B6", "", "in", "bus", "ATA CS1FX-"],
+    [38, "CS1#", 24, "J6", "U6 A5/B5", "", "in", "bus", "ATA CS3FX-"],
+    [25, "DIOR#", 26, "J7", "U5 A5/B5", "R14 33 Ω", "in", "strobe", "R14 between U1 and U5"],
+    [23, "DIOW#", 27, "I7", "U5 A6/B6", "R15 33 Ω", "in", "strobe", "R15 between U1 and U5"],
+    [27, "IORDY", 28, "J8", "U5 A4/B4", "", "out, open drain", "strobe", "Host pulls up to 5 V via ~1k"],
+    [31, "INTRQ", 29, "I8", "U5 A2/B2", "", "out", "strobe", "Host pulls down ~10k"],
+    [1,  "RESET#", 30, "J9", "U2 A8/B8", "", "in", "strobe"],
+    [21, "DMARQ", 31, "I9", "U5 A7/B7", "", "out", "rsv", "RESERVED for DMA; firmware leaves it an input"],
+    [29, "DMACK#", 3, "C2", "U5 A3/B3", "", "in", "rsv", "RESERVED for DMA"],
+  ];
+  const IDE_OTHER = [
+    ["2, 19, 22, 24, 26, 30, 40", "GND", "gnd", "All to the ground plane"],
+    ["20", "Key", "nc", "No pin; use a keyed shroud"],
+    ["28", "CSEL", "nc", "Not connected (as today)"],
+    ["32", "IOCS16#", "nc", "Not connected"],
+    ["34", "PDIAG#", "nc", "Not connected"],
+    ["39", "DASP#", "nc", "Not connected"],
+  ];
+
+  const BOM = [
+    ["U1", "PGA2350 module", "Pimoroni PIM722", "Solder in, or 2.54 mm socket strips to swap it"],
+    ["U2, U3, U5, U6", "8-bit FET bus switch, 5 V tolerant, Ioff", "TI SN74CB3T3245PWR (TSSOP-20), JLCPCB C15298", "Isolates the bus when unpowered; caps inputs at ~3.3 V"],
+    ["U4", "USB ESD protection (optional)", "ST USBLC6-2SC6", ""],
+    ["J1", "USB-C receptacle, USB 2.0", "GCT USB4105-GF-A, HRO TYPE-C-31-M-12", ""],
+    ["J2", "2-pin keyed header, 5 V in", "JST XH B2B-XH-A, or a 2-way screw terminal", ""],
+    ["J3", "4-pin header, activity link", "2.54 mm female, or JST PH/XH to stop reversal", "Pin order matches the synth's J6"],
+    ["J4", "microSD socket with card detect", "Hirose DM3AT-SF-PEJM5, Molex 104031-0811", "Push-push"],
+    ["J5", "IDE 2×20 shrouded box header", "2.54 mm, keyed", "Pin 20 removed"],
+    ["J6", "SWD, 3-pin (optional)", "1×3 2.54 mm pin header, JLCPCB C2937625", "Raspberry Pi debug connector order"],
+    ["JP1", "Solder jumper, BUS_EN# to GND", "", "Close to run firmware that doesn't drive GP41"],
+    ["SW1, SW2", "Tactile switch", "Any 6 mm or 3×4 mm SMD", "BOOTSEL, RESET"],
+    ["D1, D2", "Schottky diode, 1 A", "SS14 (SMA), PMEG3020", "Power OR"],
+    ["D3", "LED, activity", "0805, any colour", ""],
+    ["D4", "LED, power (optional)", "0805", ""],
+    ["F1", "Polyfuse, 500 mA hold", "1206 PTC", "On the 5 V header"],
+    ["R1, R2", "5.1 kΩ", "0603", "USB-C CC"],
+    ["R3, R4", "1 kΩ", "0603", "Link TX/RX series"],
+    ["R5", "470 Ω", "0603", "Activity LED"],
+    ["R6", "1 kΩ (optional)", "0603", "Power LED"],
+    ["R7–R12", "10 kΩ", "0603", "SD pull-ups and card detect"],
+    ["R13", "10 kΩ", "0603", "BUS_EN# pull-up"],
+    ["R14, R15", "33 Ω", "0603", "DIOR#, DIOW# damping"],
+    ["C1, C2", "10 µF", "0805, 10 V", "VB, SD VDD"],
+    ["C3, C4, C5, C7, C8", "100 nF", "0603", "SD VDD, switch VCC"],
+  ];
+
+  // PGA2350 pads (from Pimoroni's schematic): pad -> [label, group, note]
+  const PADS = {
+    A1: ["GND", "gnd"], A2: ["GP1", "link", "LINK_RX"], A3: ["VBUS", "pwr", "VB"], A4: ["3V3_EN", "nc"],
+    A5: ["RUN", "ctl", "SW2"], A6: ["USB_DP", "usb"], A7: ["USB_DM", "usb"], A8: ["BOOTSEL", "ctl", "SW1"],
+    A9: ["GP46", "nc"], A10: ["GND", "gnd"],
+    B1: ["GP2", "nc"], B2: ["GND", "gnd"], B3: ["GP0", "link", "LINK_TX"], B4: ["3V3", "3v3", "out"],
+    B5: ["ADC_VREF", "nc"], B6: ["SWCLK", "ctl"], B7: ["SWDIO", "ctl"], B8: ["GP47", "nc", "PSRAM CS"],
+    B9: ["GND", "gnd"], B10: ["GP45", "nc"],
+    C1: ["GP4", "bus", "DD0"], C2: ["GP3", "rsv", "DMACK#"], C9: ["GP43", "nc"], C10: ["GP44", "nc"],
+    D1: ["GP6", "bus", "DD2"], D2: ["GP5", "bus", "DD1"], D9: ["GP41", "ctl", "BUS_EN#"], D10: ["GP42", "nc"],
+    E1: ["GP8", "bus", "DD4"], E2: ["GP7", "bus", "DD3"], E9: ["GP39", "sd", "DAT3"], E10: ["GP40", "sd", "CD"],
+    F1: ["GP10", "bus", "DD6"], F2: ["GP9", "bus", "DD5"], F9: ["GP37", "sd", "DAT1"], F10: ["GP38", "sd", "DAT2"],
+    G1: ["GP12", "bus", "DD8"], G2: ["GP11", "bus", "DD7"], G9: ["GP35", "sd", "CMD"], G10: ["GP36", "sd", "DAT0"],
+    H1: ["GP14", "bus", "DD10"], H2: ["GP13", "bus", "DD9"], H9: ["GP33", "nc"], H10: ["GP34", "sd", "CLK"],
+    I1: ["GP16", "bus", "DD12"], I2: ["GP15", "bus", "DD11"], I3: ["GP19", "bus", "DD15"], I4: ["GP21", "bus", "DA1"],
+    I5: ["GP23", "bus", "CS0#"], I6: ["GP25", "led", "LED"], I7: ["GP27", "strobe", "DIOW#"], I8: ["GP29", "strobe", "INTRQ"],
+    I9: ["GP31", "rsv", "DMARQ"], I10: ["GP32", "nc"],
+    J1: ["GND", "gnd"], J2: ["GP17", "bus", "DD13"], J3: ["GP18", "bus", "DD14"], J4: ["GP20", "bus", "DA0"],
+    J5: ["GP22", "bus", "DA2"], J6: ["GP24", "bus", "CS1#"], J7: ["GP26", "strobe", "DIOR#"], J8: ["GP28", "strobe", "IORDY"],
+    J9: ["GP30", "strobe", "RESET#"], J10: ["GND", "gnd"],
+  };
+
+  const STORE = "hddsynthpro-pcb-drawn";
+  let done = {};
+  try { done = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) { done = {}; }
+  const save = () => { try { localStorage.setItem(STORE, JSON.stringify(done)); } catch (e) {} };
+
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const tagged = s => esc(s).replace(/^NEW\. ?/, '<span class="tag new">NEW</span> ').replace(/^RESERVED/, '<span class="tag">RESERVED</span>');
+  const check = key => `<td><input type="checkbox" id="ck-${esc(key)}" data-key="${esc(key)}" aria-label="Drawn" ${done[key] ? "checked" : ""}></td>`;
+
+  const host = document.getElementById("blocks");
+  let html = "";
+  for (const b of BLOCKS) {
+    html += `<div class="blockhead" id="${b.id}"><h3 class="g-${b.g}"><span class="swatch"></span>${esc(b.title)}</h3><p class="note">${esc(b.intro)}</p></div>`;
+    if (b.ide) {
+      html += `<div class="tablewrap"><table><thead><tr><th>Drawn</th><th>IDE pin</th><th>Signal</th><th>Dir</th><th>GPIO</th><th>Pad</th><th>Switch A/B</th><th>Series R</th><th>Notes</th></tr></thead><tbody>`;
+      for (const [pin, sig, gp, pad, ch, r, dir, g, note] of IDE) {
+        const key = "ide-" + sig;
+        html += `<tr class="g-${g}${done[key] ? " done" : ""}">${check(key)}<td class="mono">${pin}</td><td><span class="sig">${esc(sig)}</span></td><td class="mono">${esc(dir)}</td><td class="mono">GP${gp}</td><td class="mono">${pad}</td><td class="mono">${esc(ch)}</td><td class="mono">${esc(r)}</td><td class="note">${tagged(note || "")}</td></tr>`;
+      }
+      for (const [pins, sig, g, note] of IDE_OTHER) {
+        const key = "ide-" + sig;
+        html += `<tr class="g-${g}${done[key] ? " done" : ""}">${check(key)}<td class="mono">${esc(pins)}</td><td><span class="sig">${esc(sig)}</span></td><td></td><td></td><td></td><td></td><td></td><td class="note">${esc(note)}</td></tr>`;
+      }
+      html += `</tbody></table></div>`;
+    } else {
+      html += `<div class="tablewrap"><table><thead><tr><th>Drawn</th><th>Net</th><th>From</th><th>Through</th><th>To</th><th>Notes</th></tr></thead><tbody>`;
+      b.rows.forEach(([g, net, from, via, to, note], i) => {
+        const key = b.id + "-" + i;
+        html += `<tr class="g-${g}${done[key] ? " done" : ""}">${check(key)}<td><span class="sig">${esc(net)}</span></td><td class="mono">${esc(from)}</td><td class="mono">${esc(via)}</td><td class="mono">${esc(to)}</td><td class="note">${tagged(note)}</td></tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+  }
+  host.innerHTML = html;
+
+  const progress = document.getElementById("progress");
+  const boxes = () => [...host.querySelectorAll("input[type=checkbox]")];
+  const update = () => {
+    const all = boxes();
+    const n = all.filter(b => b.checked).length;
+    progress.innerHTML = `<b>${n}</b> of ${all.length} nets drawn`;
+  };
+  host.addEventListener("change", e => {
+    const box = e.target.closest("input[data-key]");
+    if (!box) return;
+    if (box.checked) done[box.dataset.key] = 1; else delete done[box.dataset.key];
+    box.closest("tr").classList.toggle("done", box.checked);
+    save(); update();
+  });
+  document.getElementById("reset").addEventListener("click", () => {
+    done = {}; save();
+    boxes().forEach(b => { b.checked = false; b.closest("tr").classList.remove("done"); });
+    update();
+  });
+  update();
+
+  // Pad grid: rows A-J, columns 1-10; only the two outer rings exist.
+  const grid = document.getElementById("padgrid");
+  let cells = "";
+  for (const row of "ABCDEFGHIJ") {
+    for (let col = 1; col <= 10; col++) {
+      const id = row + col;
+      const p = PADS[id];
+      if (!p) { cells += `<div class="padcell empty" aria-hidden="true"></div>`; continue; }
+      const [label, g, note] = p;
+      cells += `<div class="padcell g-${g}"><b>${id}</b><span>${esc(label)}</span>${note ? `<small>${esc(note)}</small>` : ""}</div>`;
+    }
+  }
+  grid.innerHTML = cells;
+
+  document.getElementById("bomrows").innerHTML = BOM.map(([ref, part, ex, note]) =>
+    `<tr><td class="mono">${esc(ref)}</td><td>${esc(part)}</td><td class="mono">${esc(ex)}</td><td class="note">${esc(note)}</td></tr>`).join("");
+
+  // Diagram blocks jump to their table.
+  const go = el => { const t = document.getElementById(el.dataset.go); if (t) t.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" }); };
+  document.querySelectorAll(".blk[data-go]").forEach(el => {
+    el.addEventListener("click", () => go(el));
+    el.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(el); } });
+  });
+})();
+</script>

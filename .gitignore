@@ -9,3 +9,11 @@ host/rig.env
 
 # Personal Claude Code settings
 .claude/settings.local.json
+
+# KiCad local state
+hardware/*-backups/
+hardware/*.kicad_prl
+hardware/fp-info-cache
+hardware/_autosave-*
+hardware/~*.lck
+hardware/fab/
