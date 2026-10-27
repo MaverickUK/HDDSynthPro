@@ -40,6 +40,39 @@ constexpr size_t SENTENCE_MAX = 24;
 // length without the NUL, or 0 if `size` is too small.
 size_t formatSentence(const Fields& f, char* buf, size_t size);
 
+// The longest line a receiver accepts, without its line ending.
+constexpr size_t LINE_MAX = 80;
+
+// Validates one received line, without its line ending, as a receiver must
+// (docs/activity-link.md; the reference is host/hddproto/activity_link.py):
+// it starts with $HDA, its checksum matches (either case of hex), it has a
+// version number, and busy, class and op are valid; fields after op are
+// ignored, for later versions. Writes the fields to `out` if so.
+bool parseLine(const char* line, size_t len, Fields& out);
+
+// Assembles bytes into lines and validates each with parseLine(), counting
+// the valid and the rejected ones. Lines end with \n, with or without \r;
+// empty lines are skipped, and a line over LINE_MAX is rejected whole. The
+// console's loopback test (`U`) uses it, and the HDD Synth's receiver can
+// be a copy.
+class Receiver {
+public:
+    // Feeds one byte. Returns true when it completes a valid sentence, whose
+    // fields are written to `out`.
+    bool feed(char c, Fields& out);
+    // Forgets any partial line and zeroes the counts.
+    void reset() { *this = Receiver(); }
+    uint32_t valid() const { return valid_; }
+    uint32_t rejected() const { return rejected_; }
+
+private:
+    char line_[LINE_MAX + 1];  // room for a trailing \r
+    size_t len_ = 0;
+    bool overlong_ = false;
+    uint32_t valid_ = 0;
+    uint32_t rejected_ = 0;
+};
+
 // Decides when to send: on any change of the fields, or once `heartbeat_ms`
 // has passed since the last sentence that went out.
 class Sender {

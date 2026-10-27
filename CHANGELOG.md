@@ -2,6 +2,21 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.10.1] - 2026-10-27
+
+The activity link's loopback test.
+
+### Added
+- **Console `U`**: with a jumper from GPIO 0 (TX) to GPIO 1 (RX), reads back what the link sends for 1 s and prints `LOOPBACK pass|fail|no-data sent= valid= rejected= errors= bytes= last=`. It passes when every sentence sent arrived valid, with no UART errors. GPIO 1 is the UART's input, with a pull-up, only while the test runs, and goes back as it was afterwards. It runs on core 0 without waiting, and resets the UART between sentences as it starts, so what the UART read before (breaks from the unconnected input, and the overrun mark that follows) doesn't count.
+- `activity_link::parseLine` and `Receiver`, a byte-at-a-time receiver with the reference parser's rules (`host/hddproto/activity_link.py`), host-tested with the cases the synth's brief lists. The HDD Synth's receiver can be a copy.
+- `host/tests/test_link_loopback.py` (`-m link`): `U` idle and during reads.
+
+### Changed
+- The synth's brief no longer says to reject versions other than 1: a later version only adds fields at the end, so a receiver accepts it and ignores those fields, as both reference parsers do.
+
+### On the rig (Windows, no jumper)
+- `U` reports `no-data` (5 sent, nothing read, no errors) and the link carries on. With the UART's internal loopback (a throwaway build that set its LBE bit), `U` passed three times in a row, idle and during mixed reads from the SD image (5-6 sentences, all valid). Before the reset at the start, the second run failed on one overrun error.
+
 ## [0.10.0] - 2026-10-27
 
 Settings on the SD card.

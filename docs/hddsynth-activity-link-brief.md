@@ -41,7 +41,7 @@ $HDA,1,<busy>,<class>,<op>*<checksum>\r\n
 The sender sends a sentence on every change and every 200 ms as a heartbeat.
 
 Receiver rules:
-- Ignore lines that don't start with `$HDA`, fail the checksum, are longer than 80 bytes, or have a version other than `1`. Ignore any fields after `<op>`: later versions add them at the end.
+- Ignore lines that don't start with `$HDA`, fail the checksum, or are longer than 80 bytes. Accept any version number: a later version keeps these fields and adds any new ones at the end, so ignore fields after `<op>`. Accept lower-case hex in the checksum.
 - The link is **present** from the first valid sentence and **lost** 1 s after the last. While lost, use the optocoupler input as today. Log each change through `Console` (`[link] up` / `[link] lost`).
 
 Known answers for tests:
@@ -58,7 +58,7 @@ $HDA,1,0,R,R*4C      not busy this instant, recent mix still random
 
 1. **Setting `ACTIVITY_LINK`** (bool, default `false`) in `settings.cpp`, and in the README's settings table. If both `ACTIVITY_LINK` and `OLED_ENABLED` are true, the link wins: don't start the OLED, and log why.
 2. **`src/link_parser.h/.cpp`, pure C++ (no Arduino headers), host-tested:**
-   - feed it bytes one at a time; it assembles lines (dropping anything over 80 bytes) and validates them;
+   - feed it bytes one at a time; it assembles lines (dropping anything over 80 bytes) and validates them. HDDSynthPro's `activity_link::parseLine` and `Receiver` (`src/activity_link.*`, with its tests in `test/native/test_activity_link.cpp`) do exactly this and are pure C++: copy them;
    - it yields `LinkState { bool busy; Class cls; Op op; }` for each valid sentence;
    - `LinkWatch`, a pure helper: given "valid sentence at t" and "now", is the link present (1 s timeout)?
 3. **Receiving, on core 0:** start `Serial2` in `setup()` when the setting is on, with `setFIFOSize(512)` or so, so a slow loop pass (an SD refill) can't overflow the 32-byte hardware FIFO. In the main loop, read whatever is available without blocking, feed the parser, keep the latest state. Core 1 never touches the UART.
@@ -79,7 +79,7 @@ $HDA,1,0,R,R*4C      not busy this instant, recent mix still random
 
 - Host tests for the parser:
   - the known answers above;
-  - a bad checksum, a missing `*`, lower-case hex if you choose to accept it (decide and test either way), a wrong version, unknown sentence names;
+  - a bad checksum, a missing `*`, lower-case hex (accepted), a version that isn't a number, unknown sentence names;
   - lines split across feeds, two sentences in one feed, a line over 80 bytes followed by a good one, `\n` without `\r`;
   - extra trailing fields accepted.
 - Host tests for `LinkWatch` (present, still present at 999 ms, lost at 1000 ms, back again) and for the sample choice (class × pack has `sequential.wav` × busy → which voice is at the access level).

@@ -443,6 +443,113 @@ static void serviceLink() {
     g_link.sent(f, now);
 }
 
+// The loopback test (console `U`): with a jumper from GPIO 0 (TX) to GPIO 1
+// (RX), read back what the link sends for a second and check it. GPIO 1 is
+// a UART input only while the test runs, with a pull-up so that without the
+// jumper it reads idle instead of noise; afterwards it goes back as it was.
+// Polled on every loop pass, so core 0 never waits on it and the 32-byte RX
+// FIFO (2.8 ms at 115200 baud) can't overflow.
+constexpr uint32_t LOOPBACK_MS = 1000;  // five heartbeats
+static struct {
+    enum class Phase : uint8_t { Off, Starting, Listening, Finishing } phase = Phase::Off;
+    uint32_t until_ms = 0;
+    uint32_t sent_before = 0;
+    uint32_t bytes = 0;
+    uint32_t errors = 0;  // framing, parity, break or overrun
+    activity_link::Receiver receiver;
+    activity_link::Fields last;
+    // GPIO 1 as it was before the test.
+    gpio_function_t function = GPIO_FUNC_NULL;
+    bool pulled_up = false;
+    bool pulled_down = false;
+} g_loopback;
+
+static void startLoopback() {
+    if (g_loopback.phase != decltype(g_loopback)::Phase::Off) return;
+    if (!g_link_on) {
+        Serial.println("# loopback: the link is off (L turns it on)");
+        return;
+    }
+    g_loopback.function = gpio_get_function(cfg::PIN_LINK_RX);
+    g_loopback.pulled_up = gpio_is_pulled_up(cfg::PIN_LINK_RX);
+    g_loopback.pulled_down = gpio_is_pulled_down(cfg::PIN_LINK_RX);
+    gpio_set_pulls(cfg::PIN_LINK_RX, true, false);
+    gpio_set_function(cfg::PIN_LINK_RX, GPIO_FUNC_UART);
+    g_loopback.phase = decltype(g_loopback)::Phase::Starting;
+    Serial.printf("# loopback: reading GPIO %u for %lu ms (needs a jumper from GPIO %u)\n",
+                  unsigned(cfg::PIN_LINK_RX), (unsigned long)LOOPBACK_MS, unsigned(cfg::PIN_LINK_TX));
+}
+
+// Reads what has arrived, without waiting.
+static void drainLoopback() {
+    uart_hw_t* hw = uart_get_hw(uart0);
+    while (!(hw->fr & UART_UARTFR_RXFE_BITS)) {
+        uint32_t dr = hw->dr;
+        ++g_loopback.bytes;
+        if (dr & (UART_UARTDR_FE_BITS | UART_UARTDR_PE_BITS | UART_UARTDR_BE_BITS | UART_UARTDR_OE_BITS)) {
+            ++g_loopback.errors;
+            continue;
+        }
+        activity_link::Fields f;
+        if (g_loopback.receiver.feed(char(dr & 0xFF), f)) g_loopback.last = f;
+    }
+}
+
+static void serviceLoopback() {
+    using Phase = decltype(g_loopback)::Phase;
+    uart_hw_t* hw = uart_get_hw(uart0);
+    bool sending = hw->fr & UART_UARTFR_BUSY_BITS;  // a sentence still on the wire
+    uint32_t now = millis();
+    switch (g_loopback.phase) {
+        case Phase::Off: return;
+        case Phase::Starting:
+            // Between sentences, so listening starts at the beginning of one.
+            // Resetting the UART then (nothing is being sent) clears what it
+            // received before GPIO 1 was its input: breaks from an unconnected
+            // input fill the FIFO, and the overrun that follows marks the next
+            // character even after the FIFO is drained and the errors cleared.
+            if (sending) return;
+            uart_init(uart0, cfg::LINK_BAUD);
+            g_loopback.receiver.reset();
+            g_loopback.bytes = g_loopback.errors = 0;
+            g_loopback.sent_before = g_link.count();
+            g_loopback.until_ms = now + LOOPBACK_MS;
+            g_loopback.phase = Phase::Listening;
+            return;
+        case Phase::Listening:
+            drainLoopback();
+            if (int32_t(now - g_loopback.until_ms) >= 0) g_loopback.phase = Phase::Finishing;
+            return;
+        case Phase::Finishing:
+            if (sending) return;  // let the last sentence finish arriving
+            drainLoopback();
+            break;
+    }
+
+    uint32_t sent = g_link.count() - g_loopback.sent_before;
+    uint32_t valid = g_loopback.receiver.valid();
+    uint32_t rejected = g_loopback.receiver.rejected();
+    bool last_matches = valid && g_loopback.last == g_link.last();
+    const char* result = g_loopback.bytes == 0                                         ? "no-data"
+                         : (valid == sent && !rejected && !g_loopback.errors && last_matches) ? "pass"
+                                                                                       : "fail";
+    char last[activity_link::SENTENCE_MAX] = "-";
+    if (valid) {
+        size_t n = activity_link::formatSentence(g_loopback.last, last, sizeof last);
+        if (n >= 2) last[n - 2] = '\0';  // without the \r\n
+    }
+    Serial.printf("LOOPBACK %s sent=%lu valid=%lu rejected=%lu errors=%lu bytes=%lu last=%s\n", result,
+                  (unsigned long)sent, (unsigned long)valid, (unsigned long)rejected,
+                  (unsigned long)g_loopback.errors, (unsigned long)g_loopback.bytes, last);
+    if (g_loopback.bytes == 0)
+        Serial.printf("# loopback: nothing arrived; is GPIO %u jumpered to GPIO %u?\n", unsigned(cfg::PIN_LINK_TX),
+                      unsigned(cfg::PIN_LINK_RX));
+
+    gpio_set_function(cfg::PIN_LINK_RX, g_loopback.function);
+    gpio_set_pulls(cfg::PIN_LINK_RX, g_loopback.pulled_up, g_loopback.pulled_down);
+    g_loopback.phase = Phase::Off;
+}
+
 static void noteActivity(const TraceEvent& e) {
     uint8_t command = uint8_t(e.extra);
     if (!activity::isMediaCommand(command)) return;
@@ -638,7 +745,7 @@ static void handleConsole() {
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
                                "m mark, S SD card and settings, C create HDDSYNTH.INI, E set a setting, ! restart, "
                                "I create SD image, K create bench image, "
-                               "J serve the bench image or back (restarts), L activity link, W write-behind, "
+                               "J serve the bench image or back (restarts), L activity link, U link loopback test, W write-behind, "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -665,6 +772,7 @@ static void handleConsole() {
                 bus_observer::resetCounts();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
+            case 'U': startLoopback(); break;  // the link's loopback test
             case 'L':  // the activity link on or off
                 g_link_on = !g_link_on;
                 Serial.printf("LINK %s\n", g_link_on ? "on" : "off");
@@ -758,6 +866,7 @@ void loop() {
     printSlowReads();
     bus_observer::poll(Serial, g_disk == &g_overlay);  // only the generated disk can be checked
     updateLed();
+    serviceLoopback();
 
     // Re-evaluate the activity state once a millisecond, before anything
     // below can return early on a busy serial link.
