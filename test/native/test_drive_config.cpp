@@ -124,7 +124,21 @@ TEST(test_config_set_key_refuses) {
     CHECK_EQ(drive_config::setKey("", 0, "image", "A_LONG_NAME.IMG", out, sizeof out), size_t(0));  // no room
 }
 
+TEST(test_config_image_none) {
+    // `image = none`: the built-in disk, in any case, with no warning.
+    for (const char* line : {"image = none", "image = NONE", "Image = None"}) {
+        Config c = parsed(line);
+        CHECK(!drive_config::servesImage(c));
+        CHECK_EQ(c.warning_count, size_t(0));
+    }
+    CHECK(drive_config::servesImage(parsed("")));                     // the default image
+    CHECK(drive_config::servesImage(parsed("image = NONE.IMG")));     // a file that starts with "none"
+    CHECK(drive_config::servesImage(parsed("image = non")));
+    CHECK_STR(edited("image = HDDSYNTH.IMG\r\n", "image", "none"), "image = none\r\n");  // what console E writes
+}
+
 void runDriveConfigTests() {
+    RUN(test_config_image_none);
     RUN(test_config_defaults);
     RUN(test_config_default_file_is_the_defaults);
     RUN(test_config_reads_both_keys);

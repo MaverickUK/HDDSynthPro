@@ -408,6 +408,8 @@ static void chooseDisk() {
         // no card: the generated disk, without waiting for the card again
     } else if (benchRequested()) {
         if (useImage(sd_card::BENCH_IMAGE_NAME, why)) g_disk_name = "bench";
+    } else if (!drive_config::servesImage(g_config)) {
+        // image = none: the generated disk, with the card left alone
     } else if (useImage(g_config.image, why)) {
         g_disk_name = "image";
     } else {

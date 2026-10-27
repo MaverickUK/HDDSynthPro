@@ -17,12 +17,12 @@ mode = auto
 
 | Key | Values | Default |
 |---|---|---|
-| `image` | The disk image to serve: a file in the card's root folder, e.g. `GAMES.IMG` (quotes optional) | `HDDSYNTH.IMG` |
+| `image` | The disk image to serve: a file in the card's root folder, e.g. `GAMES.IMG` (quotes optional), or `none` for the built-in 64 MB test disk (its writes are lost when the drive restarts; the soak test uses it, since only its data can be checked on the cable) | `HDDSYNTH.IMG` |
 | `mode` | The transfer mode to offer the host: `auto` (the fastest both sides support), or one of `pio0`–`pio4`, `mdma0`–`mdma2`, `udma0`–`udma6` to allow at most that one | `auto` |
 
 **Which disk the drive serves**, in order:
 1. `HDDBENCH.IMG`, if console `J` asked for it (a scratch disk for tests; a power cycle undoes it).
-2. The `image` from the settings.
+2. The `image` from the settings, or with `image = none` the built-in test disk.
 3. If that isn't on the card, or is empty: `HDDSYNTH.IMG`.
 4. If there's no card, or neither image can be used: the built-in 64 MB test disk, whose writes stay in RAM until the drive restarts.
 

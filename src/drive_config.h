@@ -3,7 +3,7 @@
 // per line, `#` starts a comment; any editor will do (Notepad's CRLF line
 // endings and UTF-8 byte-order mark are fine).
 //
-//   image = HDDSYNTH.IMG   # the disk image, in the card's root folder
+//   image = HDDSYNTH.IMG   # the disk image, in the card's root folder; none: the built-in disk
 //   mode = auto            # auto, or a transfer mode such as pio0
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
@@ -20,6 +20,9 @@ namespace drive_config {
 
 constexpr const char* FILE_NAME = "HDDSYNTH.INI";
 constexpr const char* DEFAULT_IMAGE = "HDDSYNTH.IMG";
+// `image = none`: no image, the built-in 64 MB test disk (writes kept in RAM
+// until a restart), whose data the bus observer can check on the cable.
+constexpr const char* NO_IMAGE = "none";
 constexpr size_t MAX_FILE = 4096;      // longer files are read this far, with a warning
 constexpr size_t MAX_NAME = 64;        // an image name, without the NUL
 constexpr size_t MAX_WARNINGS = 4;
@@ -52,6 +55,9 @@ void parse(const char* text, size_t len, Config& out);
 
 // The defaults, as parse("") gives them.
 void defaults(Config& out);
+
+// False for `image = none` (any case): serve the built-in disk, not an image.
+bool servesImage(const Config& c);
 
 // `text` with `key` set to `value`, into `out` (NUL-terminated): the line
 // setting it is replaced in place, keeping its comment, or a new line is

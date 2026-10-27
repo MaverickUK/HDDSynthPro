@@ -1,5 +1,6 @@
 #include "drive_config.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -212,12 +213,21 @@ size_t setKey(const char* text, size_t len, const char* key, const char* value, 
     return (n > 0 && size_t(n) < size) ? size_t(n) : 0;
 }
 
+bool servesImage(const Config& c) {
+    const char* a = c.image;
+    const char* b = NO_IMAGE;
+    for (; *a && *b; ++a, ++b)
+        if (std::tolower(static_cast<unsigned char>(*a)) != *b) return true;
+    return *a || *b;  // a different length: some other name
+}
+
 const char* defaultFile() {
     return "# HDDSynthPro settings. Changes take effect when the drive restarts.\r\n"
            "# One setting per line, as key = value; # starts a comment.\r\n"
            "\r\n"
            "# The disk image to serve: a file in the card's root folder. If it\r\n"
            "# isn't there, the drive uses HDDSYNTH.IMG, or else its built-in test disk.\r\n"
+           "# none: the built-in test disk (64 MB; writes are lost when it restarts).\r\n"
            "image = HDDSYNTH.IMG\r\n"
            "\r\n"
            "# The transfer mode to offer the host: auto (the fastest both sides\r\n"

@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.12.0] - 2026-10-27
+
+Serve the built-in test disk with the card in.
+
+### Added
+- **`image = none`** in `HDDSYNTH.INI` (any case): serve the built-in 64 MB test disk instead of an image, leaving the card alone. The soak test needs it (only that disk's data can be checked on the cable by the bus observer), and until now it was served only with no card in. Set it with console `E image = none` and `!`; `E image = HDDSYNTH.IMG` and `!` put the image back. `J` still comes first. The file `C` creates mentions it.
+
 ## [0.11.1] - 2026-10-27
 
 The STATUS read after IDENTIFY, within ATA's limit (nearly always).
