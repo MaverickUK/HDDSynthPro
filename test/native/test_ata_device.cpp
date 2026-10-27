@@ -779,6 +779,61 @@ TEST(test_read_and_write_through_an_image) {
     CHECK(std::all_of(got.begin(), got.end(), [](uint16_t w) { return w == 0; }));
 }
 
+// The NS1081's detection, as the drive's trace shows it every time (Windows,
+// 26-27 Oct 2026): two RESET# pulses, IDENTIFY twice, SET FEATURES for PIO
+// flow-control mode 4 (refused), then mode 0, then the host's media commands
+// carry on. It waits for INTRQ after each command and reads Status, which
+// acknowledges it. The detection is the most fragile moment with the
+// adapter and needs a physical replug to see on the rig; this keeps it in CI.
+TEST(test_ns1081_detection) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<8> disk(base);
+    VirtualHost h{d, &disk};
+    for (int pulse = 0; pulse < 2; ++pulse) {
+        d.hardReset(true);
+        CHECK(h.altStatus() & ST_BSY);
+        d.hardReset(false);
+    }
+    CHECK(h.waitNotBusy());
+    CHECK(h.ataSignature());
+
+    h.select(0);
+    for (int i = 0; i < 2; ++i) {
+        d.write(Reg::StatusCommand, CMD_IDENTIFY_DEVICE);
+        CHECK(d.intrq());                     // data ready: the adapter's cue
+        CHECK_EQ(h.status(), ST_DRDY | ST_DSC | ST_DRQ);
+        CHECK(!d.intrq());                    // reading Status acknowledged it
+        uint16_t id[256];
+        for (auto& w : id) w = d.read(Reg::Data);
+        CHECK_EQ(uint32_t(id[60]) | (uint32_t(id[61]) << 16), 131072u);
+        CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    }
+
+    // PIO flow-control mode 4 (0Ch): IDENTIFY offers mode 0 only, so ABRT,
+    // with an interrupt, as the trace shows ("DONE ef 51 04").
+    d.write(Reg::ErrorFeatures, SF_SET_TRANSFER_MODE);
+    d.write(Reg::SectorCount, 0x0C);
+    d.write(Reg::StatusCommand, CMD_SET_FEATURES);
+    CHECK(d.intrq());
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC | ST_ERR);
+    CHECK_EQ(d.read(Reg::ErrorFeatures), ER_ABRT);
+    // Then flow-control mode 0 (08h): accepted ("DONE ef 50 00").
+    d.write(Reg::SectorCount, XFER_PIO_FLOW_0);
+    d.write(Reg::StatusCommand, CMD_SET_FEATURES);  // Features still 03h
+    CHECK(d.intrq());
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC);
+    CHECK_EQ(d.read(Reg::ErrorFeatures), 0);
+
+    // The host's media commands carry on: a write, read back.
+    std::vector<uint16_t> words = pattern(2, 31), got;
+    CHECK(h.writeSectors(100000, 2, words));
+    CHECK(h.readSectors(100000, 2, got));
+    CHECK(got == words);
+    CHECK(h.readSectors(0, 1, got));
+    CHECK(sameAsDisk(got, 0, 1));
+}
+
 TEST(test_write_one_sector) {
     Device d(INFO);
     GeneratedDisk base;
@@ -1487,6 +1542,7 @@ void runAtaDeviceTests() {
     RUN(test_intrq_masked_by_nien_and_device1);
     RUN(test_intrq_cleared_by_new_command);
     RUN(test_virtual_host_probe);
+    RUN(test_ns1081_detection);
     RUN(test_generated_disk_words);
     RUN(test_read_one_sector);
     RUN(test_read_busy_until_fetched);
