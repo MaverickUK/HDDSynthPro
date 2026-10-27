@@ -336,6 +336,9 @@ class Sheet:
     # --- high level
     def part(self, lib_id, ref, value, x, y, nets, footprint="", fields=(), in_bom=True):
         """Place a symbol and give every pin a net (None = not connected)."""
+        if ref in LCSC:
+            fields = list(fields) + [("LCSC", LCSC[ref])]
+        fields = list(fields) + FT_FIELDS.get(footprint.split(":")[-1], [])
         sym = self._symbol(lib_id, ref, value, x, y, footprint=footprint, in_bom=in_bom, fields=fields)
         done = {}
         for num, px, py, angle, kind in symbol_pins(sym):
@@ -380,30 +383,79 @@ class Sheet:
                            [S("uuid"), uid(self.file, "text", text[:40])]])
 
 
+# Corrections for the KiCad Fabrication Toolkit's JLCPCB placement file, by footprint, so its
+# output matches JLCPCB's own footprints (fitted 2026-10-27; tools/jlcpcb.py's JLC_FIX holds the
+# same differences). The toolkit centres each part on its pads and adds its own rotation table;
+# these fields cover where that table, or the pad centre, is wrong for JLCPCB's part.
+FT_FIELDS = {
+    "QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias": [("FT Rotation Offset", "-90")],
+    "SOT-23-6": [("FT Rotation Offset", "90")],
+    "JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical": [("FT Rotation Offset", "180")],
+    "PinSocket_1x04_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
+    "PinHeader_1x03_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
+    "IDC-Header_2x20_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
+    "SOT-223-3_TabPin2": [("FT Position Offset", "-0.18,0")],
+    "USB_C_Receptacle_HRO_TYPE-C-31-M-12": [("FT Position Offset", "0,0.111")],
+    "microSD_TF-PUSH": [("FT Position Offset", "0,0.15")],
+    "L_Abracon_AOTA-B201610S3R3": [("FT Rotation Offset", "180")],  # JLCPCB marks the dot at the other end
+}
+
 # ---------------------------------------------------------------- the design
+
+# JLCPCB/LCSC part numbers, written into each part's "LCSC" field so KiCad's BOM export and
+# the Fabrication Toolkit carry them. Checked in stock at JLCPCB on 2026-10-27.
+def _refs(prefix, *nums):
+    return [f"{prefix}{n}" for n in nums]
+
+
+LCSC = {
+    **{r: "C15850" for r in _refs("C", 1, 2, 6, 29)},              # 10uF 0805
+    **{r: "C14663" for r in _refs("C", 3, 4, 5, 7, 8)},            # 100nF 0603
+    **{r: "C23733" for r in _refs("C", 9, 10, 11)},                # 4.7uF 0402
+    **{r: "C1525" for r in _refs("C", *range(12, 27))},            # 100nF 0402
+    **{r: "C1548" for r in _refs("C", 27, 28)},                    # 15pF 0402
+    "D1": "C2480", "D2": "C2480", "D3": "C2297", "D4": "C84256",
+    "F1": "C19193043",
+    "J1": "C165948", "J2": "C158012", "J3": "C2718488", "J4": "C393941", "J5": "C19193815", "J6": "C2937625",
+    "L1": "C42411119",
+    "R1": "C23186", "R2": "C23186",                                # 5.1k 0603
+    **{r: "C21190" for r in _refs("R", 3, 4, 6, 20)},              # 1k 0603
+    "R5": "C23179",                                                # 470R 0603
+    **{r: "C25804" for r in _refs("R", 7, 8, 9, 10, 11, 12, 13)},  # 10k 0603
+    "R18": "C25744", "R19": "C11702",                              # 10k, 1k 0402 (by the flash)
+    "R14": "C23140", "R15": "C23140",                              # 33R 0603
+    "R16": "C25105", "R17": "C11702",                              # 33R, 1k 0402
+    "R21": "C25100", "R22": "C25100",                              # 27R 0402 (no basic 27R in 0402)
+    "SW1": "C318884", "SW2": "C318884",
+    "U1": "C42415655", **{r: "C15298" for r in _refs("U", 2, 3, 5, 6)}, "U4": "C2687116", "U7": "C97521",
+    "U8": "C6186", "Y1": "C20625731",
+}
+
+
 
 R0603 = "Resistor_SMD:R_0603_1608Metric"
 C0603 = "Capacitor_SMD:C_0603_1608Metric"
 C0805 = "Capacitor_SMD:C_0805_2012Metric"
+C0402 = "Capacitor_SMD:C_0402_1005Metric"
+R0402 = "Resistor_SMD:R_0402_1005Metric"
 
 
 def power_sheet(sh):
-    sh.note("USB-C (power and flashing) and the 5 V header, diode-ORed into the PGA2350's VBUS (VB).\n"
+    sh.note("USB-C (power and flashing) and the 5 V header, diode-ORed into VB; an AMS1117 makes 3V3 from it.\n"
             "Never connect the IDE adapter's 5 V (Molex) to this board: the boards share ground only.", 20, 20, 1.6)
     usb = {"A1": "GND", "A12": "GND", "B1": "GND", "B12": "GND", "SH": "GND",
            "A4": "VBUS_USB", "A9": "VBUS_USB", "B4": "VBUS_USB", "B9": "VBUS_USB",
            "A5": "CC1", "B5": "CC2", "A6": "USB_DP", "B6": "USB_DP", "A7": "USB_DM", "B7": "USB_DM",
            "A8": None, "B8": None}
     sh.part("Connector:USB_C_Receptacle_USB2.0_16P", "J1", "USB-C", 50.8, 81.28, usb,
-            "Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal",
-            fields=[("MPN", "GCT USB4105-GF-A-120")])
+            "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12", fields=[("MPN", "HRO TYPE-C-31-M-12")])
     sh.r("R1", "5.1k", 101.6, 76.2, "CC1", "GND")
     sh.r("R2", "5.1k", 116.84, 76.2, "CC2", "GND")
     sh.note("CC pull-downs: without them a\nC-to-C cable gives no power.", 96.52, 91.44)
     sh.part("Power_Protection:USBLC6-2SC6", "U4", "USBLC6-2SC6", 160.02, 78.74,
             {"1": "USB_DP", "6": "USB_DP", "3": "USB_DM", "4": "USB_DM", "2": "GND", "5": "VBUS_USB"},
             "Package_TO_SOT_SMD:SOT-23-6")
-    sh.note("ESD protection, close to J1. The module\nhas the 27 R series resistors on D+/D-.", 144.78, 93.98)
+    sh.note("ESD protection, close to J1. The 27 R series\nresistors sit by the RP2350 (RP2350 sheet).", 144.78, 93.98)
 
     sh.part("Device:D_Schottky", "D1", "SS14", 213.36, 60.96, {"2": "VBUS_USB", "1": "VB"}, "Diode_SMD:D_SMA")
     sh.part("Connector_Generic:Conn_01x02", "J2", "5V in", 50.8, 137.16, {"1": "5V_EXT_IN", "2": "GND"},
@@ -416,11 +468,16 @@ def power_sheet(sh):
     sh.flag("VB", 271.78, 63.5)
     sh.flag("GND", 287.02, 63.5)
 
+    sh.part("Regulator_Linear:AMS1117-3.3", "U8", "AMS1117-3.3", 254.0, 137.16, {"3": "VB", "2": "+3V3", "1": "GND"},
+            "Package_TO_SOT_SMD:SOT-223-3_TabPin2")
+    sh.c("C29", "10uF", 287.02, 137.16, "+3V3", "GND", C0805)
+    sh.note("3V3 for everything: ~1 V dropout, so 3.3 V holds down to\nabout 4.4 V on VB. The board draws well under 300 mA.", 228.6, 152.4)
+
     sh.part("Switch:SW_Push", "SW1", "BOOTSEL", 63.5, 200.66, {"1": "BOOTSEL", "2": "GND"},
-            "Button_Switch_SMD:SW_SPST_B3U-1000P")
-    sh.part("Switch:SW_Push", "SW2", "RESET", 63.5, 223.52, {"1": "RUN", "2": "GND"},
-            "Button_Switch_SMD:SW_SPST_B3U-1000P")
-    sh.note("Hold BOOTSEL and press RESET for the UF2 drive.", 45.72, 238.76)
+            "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A")
+    sh.part("Switch:SW_Push", "SW2", "RESET", 63.5, 223.52, {"1": "RUN_BTN", "2": "GND"},
+            "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A")
+    sh.note("Hold BOOTSEL and press RESET for the UF2 drive.\nBoth go through 1k on the RP2350 sheet.", 45.72, 238.76)
     sh.part("Connector_Generic:Conn_01x03", "J6", "SWD", 147.32, 210.82,
             {"1": "SWCLK", "2": "GND", "3": "SWDIO"},
             "Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical")
@@ -429,11 +486,15 @@ def power_sheet(sh):
 
 
 def mcu_sheet(sh):
-    sh.note("PGA2350 (RP2350B). GPIO numbers as in src/config.h; GP3, GP31, GP40 and GP41 are new on this board.\n"
-            "Pad names (A1-J10) from Pimoroni's schematic. GND pads inferred: confirm against Pimoroni's footprint.",
-            20, 20, 1.6)
-    nets = {"VBUS": "VB", "3V3": "+3V3", "3V3_EN": None, "RUN": "RUN", "BOOTSEL": "BOOTSEL", "ADC_VREF": None,
-            "USB_DP": "USB_DP", "USB_DM": "USB_DM", "SWCLK": "SWCLK", "SWDIO": "SWDIO", "GND": "GND"}
+    sh.note("RP2350B with Raspberry Pi's minimal-design support circuit (\"Hardware design with RP2350\"):\n"
+            "core regulator, 12 MHz crystal, 16 MB QSPI flash, USB. GPIO numbers as in src/config.h;\n"
+            "GP3, GP31, GP40 and GP41 are new on this board.", 20, 20, 1.6)
+    power = {"IOVDD": "+3V3", "ADC_AVDD": "+3V3", "USB_OTP_VDD": "+3V3", "QSPI_IOVDD": "+3V3", "VREG_VIN": "+3V3",
+             "DVDD": "+1V1", "VREG_FB": "+1V1", "VREG_AVDD": "VREG_AVDD", "VREG_LX": "VREG_LX",
+             "VREG_PGND": "GND", "GND": "GND", "XIN": "XIN", "XOUT": "XOUT", "RUN": "RUN",
+             "SWCLK": "SWCLK", "SWDIO": "SWDIO", "USB_DP": "USB_DP_MCU", "USB_DM": "USB_DM_MCU",
+             "~{QSPI_SS}": "QSPI_SS", "QSPI_SCLK": "QSPI_SCLK", "QSPI_SD0": "QSPI_SD0", "QSPI_SD1": "QSPI_SD1",
+             "QSPI_SD2": "QSPI_SD2", "QSPI_SD3": "QSPI_SD3"}
     gp = {g: None for g in range(48)}
     gp.update({0: "LINK_TX", 1: "LINK_RX", 3: "DMACK_N", 25: "LED", 26: "DIOR_N", 27: "DIOW_N", 28: "IORDY",
                29: "INTRQ", 30: "RESET_N", 31: "DMARQ", 34: "SD_CLK", 35: "SD_CMD", 36: "SD_DAT0", 37: "SD_DAT1",
@@ -441,15 +502,57 @@ def mcu_sheet(sh):
     gp.update({4 + i: f"DD{i}" for i in range(16)})
     gp.update({20 + i: f"DA{i}" for i in range(3)})
     pins = {}
-    sym = pga2350_symbol()
+    sym = symbol_def("MCU_RaspberryPi:RP2350B")
     for unit in find(sym, "symbol"):
         for p in find(unit, "pin"):
             name, num = first(p, "name")[1], first(p, "number")[1]
-            pins[num] = gp[int(name[2:])] if name.startswith("GP") else nets[name]
-    sh.part("HDDSynthPro:PGA2350", "U1", "PGA2350", 190.5, 152.4, pins, "HDDSynthPro:PGA2350",
-            fields=[("MPN", "Pimoroni PIM722")])
-    sh.c("C6", "10uF", 106.68, 63.5, "+3V3", "GND", C0805)
-    sh.note("Bulk on 3V3 (the module has 2.2 uF).", 99.06, 76.2)
+            pins[num] = gp[int(name[4:].split("/")[0])] if name.startswith("GPIO") else power[name]
+    sh.part("MCU_RaspberryPi:RP2350B", "U1", "RP2350B", 205.74, 152.4, pins,
+            "Package_DFN_QFN:QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias")
+
+    # Core regulator, as in Raspberry Pi's layout: the polarity-marked inductor (pad 1 to 1.1 V),
+    # 4.7 uF on VREG_VIN and on the 1.1 V output, and an RC filter (33 R, 4.7 uF) on VREG_AVDD.
+    sh.note("Core regulator: Raspberry Pi require this inductor (polarity dot), and their layout.", 30.48, 45.72)
+    sh.part("Device:L", "L1", "3.3uH", 40.64, 66.04, {"1": "+1V1", "2": "VREG_LX"},
+            "HDDSynthPro:L_Abracon_AOTA-B201610S3R3", fields=[("MPN", "Abracon AOTA-B201610S3R3-101-T")])
+    sh.c("C9", "4.7uF", 55.88, 66.04, "+3V3", "GND", "HDDSynthPro:C_0402_1005Metric_RPi_Wide")
+    sh.c("C10", "4.7uF", 71.12, 66.04, "+1V1", "GND", "HDDSynthPro:C_0402_1005Metric_RPi_Wide")
+    sh.r("R16", "33", 86.36, 66.04, "+3V3", "VREG_AVDD", R0402)
+    sh.c("C11", "4.7uF", 101.6, 66.04, "VREG_AVDD", "GND", C0402)
+    sh.flag("+1V1", 116.84, 58.42)
+    sh.flag("VREG_AVDD", 129.54, 58.42)
+
+    # A 100 nF on every supply pin: IOVDD x8, DVDD x3, ADC_AVDD, USB_OTP_VDD, QSPI_IOVDD.
+    sh.note("100 nF on every supply pin, each by its pin.", 30.48, 236.22)
+    for i in range(14):
+        sh.c(f"C{12 + i}", "100nF", 40.64 + 12.7 * i, 254.0, "+1V1" if i in (8, 9, 10) else "+3V3", "GND", C0402)
+
+    # Crystal, exactly as Raspberry Pi specify: ABM8-272-T3, 15 pF each side, 1k from XOUT.
+    sh.note("12 MHz crystal: Raspberry Pi's part and values (ABM8-272-T3, 15 pF, 1k).", 30.48, 172.72)
+    sh.part("Device:Crystal_GND24", "Y1", "12MHz", 63.5, 196.85, {"1": "XIN", "3": "XTAL_OUT", "2": "GND", "4": "GND"},
+            "Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm", fields=[("MPN", "Abracon ABM8-272-T3")])
+    sh.c("C27", "15pF", 40.64, 203.2, "XIN", "GND", C0402)
+    sh.c("C28", "15pF", 86.36, 203.2, "XTAL_OUT", "GND", C0402)
+    sh.r("R17", "1k", 101.6, 190.5, "XOUT", "XTAL_OUT", R0402)
+
+    # QSPI flash, BOOTSEL and RUN.
+    sh.part("Memory_Flash:W25Q128JVS", "U7", "W25Q128JVSIQ", 76.2, 127.0,
+            {"1": "QSPI_SS", "2": "QSPI_SD1", "3": "QSPI_SD2", "4": "GND", "5": "QSPI_SD0", "6": "QSPI_SCLK",
+             "7": "QSPI_SD3", "8": "+3V3"}, "Package_SO:SOIC-8_5.3x5.3mm_P1.27mm")
+    sh.c("C26", "100nF", 101.6, 116.84, "+3V3", "GND", C0402)
+    sh.r("R18", "10k", 116.84, 116.84, "+3V3", "QSPI_SS", R0402)
+    sh.r("R19", "1k", 132.08, 116.84, "QSPI_SS", "BOOTSEL", R0402)
+    sh.r("R20", "1k", 132.08, 142.24, "RUN", "RUN_BTN")
+    sh.note("Flash CS pulled up (10k). BOOTSEL pulls QSPI_SS low through 1k;\n"
+            "RESET pulls RUN low through 1k (RUN has its own pull-up).", 99.06, 157.48)
+
+    # USB: 27 R series resistors by the RP2350.
+    sh.r("R21", "27", 297.18, 203.2, "USB_DP", "USB_DP_MCU", R0402)
+    sh.r("R22", "27", 312.42, 203.2, "USB_DM", "USB_DM_MCU", R0402)
+    sh.note("USB: 27 R series, next to the RP2350.", 287.02, 218.44)
+
+    sh.c("C6", "10uF", 330.2, 203.2, "+3V3", "GND", C0805)
+    sh.note("Bulk on 3V3.", 322.58, 218.44)
 
     sh.note("Activity link to the HDD Synth (docs/activity-link.md): UART0, 115200 8N1, 3.3 V logic.\n"
             "Pin order matches the synth's J6. Pin 1 (the synth's 3.3 V) stays unconnected.", 279.4, 63.5)
@@ -476,7 +579,7 @@ IDE_NC = [20, 28, 32, 34, 39]
 
 
 def ide_sheet(sh):
-    sh.note("IDE bus through four SN74CB3T3245 FET bus switches: A side to the PGA2350, B side to the IDE header.\n"
+    sh.note("IDE bus through four SN74CB3T3245 FET bus switches: A side to the RP2350, B side to the IDE header.\n"
             "OE# low = connected. They cap what the RP2350 sees at about 3.3 V and isolate it when unpowered (Ioff).\n"
             "No pull-ups or pull-downs on the bus: the host provides them. IORDY stays open drain.", 20, 20, 1.6)
     # Each switch takes eight consecutive IDE header signals, in the header's pin order from
@@ -503,7 +606,7 @@ def ide_sheet(sh):
 
     sh.r("R14", "33", 66.04, 182.88, "DIOR_N", "DIOR_N_SW")
     sh.r("R15", "33", 81.28, 182.88, "DIOW_N", "DIOW_N_SW")
-    sh.note("33 R damping on the strobes,\nclose to the PGA2350.", 58.42, 205.74)
+    sh.note("33 R damping on the strobes,\nclose to the RP2350.", 58.42, 205.74)
 
     sh.r("R13", "10k", 66.04, 99.06, "+3V3", "BUS_EN_N")
     sh.part("Jumper:SolderJumper_2_Open", "JP1", "BUS_EN", 71.12, 124.46, {"1": "BUS_EN_N", "2": "GND"},
@@ -528,11 +631,12 @@ def ide_sheet(sh):
 def sd_sheet(sh):
     sh.note("microSD: SPI now, 4-bit SDIO later. CLK, CMD and DAT0 on SPI0's SCK, TX and RX; DAT3 is the SPI\n"
             "chip select; DAT0-3 on consecutive GPIOs (36-39), as PIO SDIO needs.", 20, 20, 1.6)
-    sh.part("Connector:Micro_SD_Card_Det_Hirose_DM3AT", "J4", "microSD", 228.6, 111.76,
+    sh.part("Connector:Micro_SD_Card_Det1", "J4", "microSD", 228.6, 111.76,
             {"1": "SD_DAT2", "2": "SD_DAT3", "3": "SD_CMD", "4": "+3V3", "5": "SD_CLK", "6": "GND",
-             "7": "SD_DAT0", "8": "SD_DAT1", "10": "SD_CD", "9": "GND", "SH": "GND"},
-            "Connector_Card:microSD_HC_Hirose_DM3AT-SF-PEJM5")
-    sh.note("Card detect (GP40): check the socket's datasheet for\nwhich way the switch closes.", 205.74, 132.08)
+             "7": "SD_DAT0", "8": "SD_DAT1", "9": "SD_CD", "SH": "GND"},
+            "HDDSynthPro:microSD_TF-PUSH", fields=[("MPN", "TF PUSH (generic push-push)")])
+    sh.note("Card detect (GP40): pin 9, pulled up by R12. On these sockets it usually\n"
+            "meets the grounded shell when a card is in (reads low): check on the first board.", 205.74, 132.08)
     for i, (ref, net) in enumerate([("R7", "SD_CMD"), ("R8", "SD_DAT0"), ("R9", "SD_DAT1"),
                                     ("R10", "SD_DAT2"), ("R11", "SD_DAT3"), ("R12", "SD_CD")]):
         sh.r(ref, "10k", 63.5 + 17.78 * i, 99.06, "+3V3", net)
@@ -600,8 +704,8 @@ def root_sheet(project):
                       [S("instances"), [S("project"), PROJECT,
                                         [S("path"), f"/{project.root_uuid}", [S("page"), str(sh.page)]]]]])
         x += w + 30.48
-    note = ("HDDSynthPro: a PGA2350 (RP2350B) that acts as an IDE hard disk.\n"
-            "Pages: power and USB; the PGA2350 with the activity link and LEDs; the IDE bus switches and header; the microSD socket.\n"
+    note = ("HDDSynthPro: an RP2350B that acts as an IDE hard disk.\n"
+            "Pages: power and USB; the RP2350 with the activity link and LEDs; the IDE bus switches and header; the microSD socket.\n"
             "Nets cross pages through global labels. The GPIO map must agree with src/config.h and docs/wiring.md:\n"
             "run hardware/tools/check_netlist.py after editing.")
     items.append([S("text"), note, [S("exclude_from_sim"), S("no")], at(30.48, 30.48),
@@ -678,7 +782,7 @@ def write_project(project):
 
 def main():
     project = Project()
-    builders = [("Power and USB", "power.kicad_sch", power_sheet), ("PGA2350", "mcu.kicad_sch", mcu_sheet),
+    builders = [("Power and USB", "power.kicad_sch", power_sheet), ("RP2350", "mcu.kicad_sch", mcu_sheet),
                 ("IDE bus", "ide.kicad_sch", ide_sheet), ("microSD", "sd.kicad_sch", sd_sheet)]
     for page, (name, file, build) in enumerate(builders, start=2):
         build(project.sheet(name, file, page))

@@ -1,0 +1,129 @@
+(footprint "L_Abracon_AOTA-B201610S3R3"
+	(version 20241229)
+	(generator "hddsynthpro_gen")
+	(generator_version "1.0")
+	(layer "F.Cu")
+	(descr "Abracon AOTA-B201610S3R3-101-T, 3.3 uH, 2016, polarity marked. From Raspberry Pi's RP2350 minimal design (MIT licence). Pad 1 to the 1.1 V side.")
+	(tags "inductor RP2350 polarity")
+	(property "Reference" "REF**"
+		(at 0 -1.55 0)
+		(layer "F.SilkS")
+		(uuid "7cafa30e-d21c-52b3-91e4-33d8d9329245")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.12)
+			)
+		)
+	)
+	(property "Value" "L_Abracon_AOTA-B201610S3R3"
+		(at 0 1.6 0)
+		(layer "F.Fab")
+		(uuid "8d5b6987-01f5-5dca-b6b8-c0da3fb0e91d")
+		(effects
+			(font
+				(size 0.6 0.6)
+				(thickness 0.09)
+			)
+		)
+	)
+	(units
+		(unit
+			(name "A")
+			(pins "1" "2")
+		)
+	)
+	(attr smd)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_circle
+		(center -1.4 0.7)
+		(end -1.25 0.7)
+		(stroke
+			(width 0.01)
+			(type solid)
+		)
+		(fill yes)
+		(layer "F.SilkS")
+		(uuid "8944275e-0473-5938-830e-95f1b87b4fed")
+	)
+	(fp_rect
+		(start -1.1 0.9)
+		(end 1.1 -0.9)
+		(stroke
+			(width 0.01)
+			(type default)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "95845fac-14e6-56b0-ab41-18c9cdd139ea")
+	)
+	(fp_rect
+		(start -1 0.8)
+		(end 1 -0.8)
+		(stroke
+			(width 0.01)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "05fdf7d3-35fb-53de-a09a-910f5c3d353b")
+	)
+	(fp_rect
+		(start -0.4 0.8)
+		(end 0.4 -0.8)
+		(stroke
+			(width 0.01)
+			(type default)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "61edbfe8-dfc0-541f-8b5b-15ce05a8c226")
+	)
+	(fp_circle
+		(center -0.7 0.55)
+		(end -0.6 0.55)
+		(stroke
+			(width 0.01)
+			(type solid)
+		)
+		(fill yes)
+		(layer "F.Fab")
+		(uuid "9f60a607-be11-56bd-9bc9-2ba47123d0bb")
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "2786093e-1dec-56f4-af2d-3c4567a50d7e")
+		(effects
+			(font
+				(size 0.8 0.5)
+				(thickness 0.01)
+			)
+		)
+	)
+	(pad "1" smd rect
+		(at -0.7 0)
+		(size 0.7 1.7)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "4d9feb52-bb1e-503b-b4b8-938776a40c2a")
+	)
+	(pad "2" smd rect
+		(at 0.7 0)
+		(size 0.7 1.7)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(uuid "c74e6378-0d1a-5c4d-99f2-226a183d25a5")
+	)
+	(embedded_fonts no)
+	(model "kicad-embed://abracon_aota-b201610s3r3-101-t.step"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

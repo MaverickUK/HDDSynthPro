@@ -1,0 +1,8 @@
+(version 1)
+
+# Raspberry Pi's RP2350 regulator layout (copied in tools/layout_pcb.py) keeps 0.125-0.127 mm
+# between some of its copper (its pads carry a 0.125 mm clearance); allow that inside
+# its area only. Everywhere else the default net class keeps 0.15 mm.
+(rule "RP2350 core regulator spacing"
+	(condition "A.intersectsArea('RP2350 core') || B.intersectsArea('RP2350 core')")
+	(constraint clearance (min 0.125)))

@@ -2371,7 +2371,7 @@
 			(embedded_fonts no)
 		)
 	)
-	(text "IDE bus through four SN74CB3T3245 FET bus switches: A side to the PGA2350, B side to the IDE header.\nOE# low = connected. They cap what the RP2350 sees at about 3.3 V and isolate it when unpowered (Ioff).\nNo pull-ups or pull-downs on the bus: the host provides them. IORDY stays open drain."
+	(text "IDE bus through four SN74CB3T3245 FET bus switches: A side to the RP2350, B side to the IDE header.\nOE# low = connected. They cap what the RP2350 sees at about 3.3 V and isolate it when unpowered (Ioff).\nNo pull-ups or pull-downs on the bus: the host provides them. IORDY stays open drain."
 		(exclude_from_sim no)
 		(at 20 20 0)
 		(effects
@@ -2428,6 +2428,15 @@
 			)
 		)
 		(property "Description" "8-bit FET bus switch, 2.5/3.3 V, 5 V-tolerant level shifter, Ioff, OE# active low"
+			(at 120.65 88.9 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C15298"
 			(at 120.65 88.9 0)
 			(effects
 				(font
@@ -2711,8 +2720,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "6991ee47-0440-5800-835d-b30d0c0c2398")
-		(property "Reference" "#PWR025"
+		(uuid "098006de-9b96-5d5f-b514-917e470bceb5")
+		(property "Reference" "#PWR067"
 			(at 120.65 74.93 0)
 			(effects
 				(font
@@ -2757,12 +2766,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "735227f0-fd67-5744-88eb-cb0f44015143")
+			(uuid "39c6be3e-09b4-5d66-b5e9-f17fcf6c588e")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR025")
+					(reference "#PWR067")
 					(unit 1)
 				)
 			)
@@ -2787,8 +2796,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "23259a97-2058-561d-89d8-30aa137645dd")
-		(property "Reference" "#PWR026"
+		(uuid "2180048a-55c1-5c70-92f5-1d7ca0173e8a")
+		(property "Reference" "#PWR068"
 			(at 120.65 115.57 0)
 			(effects
 				(font
@@ -2833,12 +2842,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "371926e4-d70b-5541-83a3-d78aad1d6204")
+			(uuid "890111a1-7685-5759-bb69-a7f04b4bcfea")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR026")
+					(reference "#PWR068")
 					(unit 1)
 				)
 			)
@@ -2890,6 +2899,15 @@
 			)
 		)
 		(property "Description" "8-bit FET bus switch, 2.5/3.3 V, 5 V-tolerant level shifter, Ioff, OE# active low"
+			(at 120.65 157.48 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C15298"
 			(at 120.65 157.48 0)
 			(effects
 				(font
@@ -3173,8 +3191,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "ab53c759-0d13-55d5-bfd2-346c7212ba8a")
-		(property "Reference" "#PWR027"
+		(uuid "b74cbc96-0301-5e99-98e4-6671801ad45a")
+		(property "Reference" "#PWR069"
 			(at 120.65 143.51 0)
 			(effects
 				(font
@@ -3219,12 +3237,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "1eec2f4b-e8ea-5dc9-8feb-04ce7af0878a")
+			(uuid "fa0c3de8-87be-51e6-9b39-85097cee6542")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR027")
+					(reference "#PWR069")
 					(unit 1)
 				)
 			)
@@ -3249,8 +3267,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "307a5308-e7fb-584e-a308-968487e906d8")
-		(property "Reference" "#PWR028"
+		(uuid "4f573fa1-09af-52d1-8d73-45d5edc5ded6")
+		(property "Reference" "#PWR070"
 			(at 120.65 184.15 0)
 			(effects
 				(font
@@ -3295,12 +3313,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "12a34f73-d26f-5684-8a8e-20ee83295024")
+			(uuid "23cad936-a768-5b83-a059-68f71597de67")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR028")
+					(reference "#PWR070")
 					(unit 1)
 				)
 			)
@@ -3352,6 +3370,15 @@
 			)
 		)
 		(property "Description" "8-bit FET bus switch, 2.5/3.3 V, 5 V-tolerant level shifter, Ioff, OE# active low"
+			(at 205.74 88.9 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C15298"
 			(at 205.74 88.9 0)
 			(effects
 				(font
@@ -3635,8 +3662,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "ba5ef231-e74b-5e75-8c26-089cb1687ded")
-		(property "Reference" "#PWR029"
+		(uuid "40daf64d-2c45-54b2-ab97-87916f26b284")
+		(property "Reference" "#PWR071"
 			(at 205.74 74.93 0)
 			(effects
 				(font
@@ -3681,12 +3708,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "63082782-c2e4-5fa0-9800-3e2a3249ba06")
+			(uuid "264a7366-4c73-5cc9-a826-abc055679acf")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR029")
+					(reference "#PWR071")
 					(unit 1)
 				)
 			)
@@ -3711,8 +3738,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "2c3f1111-deb3-55c1-9deb-e658671310c1")
-		(property "Reference" "#PWR030"
+		(uuid "d4f0b2e2-0ce3-54e4-a08c-47dd7348b4ce")
+		(property "Reference" "#PWR072"
 			(at 205.74 115.57 0)
 			(effects
 				(font
@@ -3757,12 +3784,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "98b71783-31eb-5034-b76a-6db0494b075c")
+			(uuid "99fe107a-c423-5c8a-afbb-adf611277e90")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR030")
+					(reference "#PWR072")
 					(unit 1)
 				)
 			)
@@ -3814,6 +3841,15 @@
 			)
 		)
 		(property "Description" "8-bit FET bus switch, 2.5/3.3 V, 5 V-tolerant level shifter, Ioff, OE# active low"
+			(at 205.74 157.48 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C15298"
 			(at 205.74 157.48 0)
 			(effects
 				(font
@@ -4041,8 +4077,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "4f79c378-61dd-585a-a258-0da6f1e002ae")
-		(property "Reference" "#PWR031"
+		(uuid "aa69032f-4235-5766-9a5d-ee066fac540c")
+		(property "Reference" "#PWR073"
 			(at 205.74 143.51 0)
 			(effects
 				(font
@@ -4087,12 +4123,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "b4efee4c-36dc-54f1-8943-30d825215580")
+			(uuid "d38b1523-af18-5d2f-ae54-59d98464bfbc")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR031")
+					(reference "#PWR073")
 					(unit 1)
 				)
 			)
@@ -4117,8 +4153,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "51ea0cb8-6df8-539b-92a4-428b3b624655")
-		(property "Reference" "#PWR032"
+		(uuid "d8cc5bae-84cc-57b1-b771-17b6817eb93b")
+		(property "Reference" "#PWR074"
 			(at 205.74 184.15 0)
 			(effects
 				(font
@@ -4163,12 +4199,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "b03896ba-99a3-57f6-a0d8-1494fd0a20d7")
+			(uuid "f45b6eac-3036-5b72-8d12-34b6872e7ed6")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR032")
+					(reference "#PWR074")
 					(unit 1)
 				)
 			)
@@ -4229,6 +4265,15 @@
 			)
 		)
 		(property "Description" "Resistor"
+			(at 66.04 182.88 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C23140"
 			(at 66.04 182.88 0)
 			(effects
 				(font
@@ -4326,6 +4371,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C23140"
+			(at 81.28 182.88 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "502bc217-7bd8-55a6-807d-c1769030f407")
 		)
@@ -4363,7 +4417,7 @@
 		)
 		(uuid "109782d7-bcfa-5e8f-b412-ffe3a75778ad")
 	)
-	(text "33 R damping on the strobes,\nclose to the PGA2350."
+	(text "33 R damping on the strobes,\nclose to the RP2350."
 		(exclude_from_sim no)
 		(at 58.42 205.74 0)
 		(effects
@@ -4426,6 +4480,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C25804"
+			(at 66.04 99.06 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "2928c2fa-cd37-5ae4-a433-c7bc335b6f26")
 		)
@@ -4460,8 +4523,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "fe640859-274d-5bf2-8a1f-71a1657228f7")
-		(property "Reference" "#PWR033"
+		(uuid "14fb82db-13a1-5a9f-a8c1-bf200aaa901e")
+		(property "Reference" "#PWR075"
 			(at 66.04 96.52 0)
 			(effects
 				(font
@@ -4506,12 +4569,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "dc59a99d-2a4f-5a4f-9910-143ee1037195")
+			(uuid "d1d871e7-9668-5aae-bbe5-0194f28a8e60")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR033")
+					(reference "#PWR075")
 					(unit 1)
 				)
 			)
@@ -4625,8 +4688,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "a46d8217-da6f-5738-a703-93553c8c38d6")
-		(property "Reference" "#PWR034"
+		(uuid "0c359e0a-5fb5-53eb-89c7-e794ba7ebe3f")
+		(property "Reference" "#PWR076"
 			(at 85.09 124.46 0)
 			(effects
 				(font
@@ -4671,12 +4734,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "c5fd0006-1453-5e07-aeba-937865d74c3c")
+			(uuid "afc3cdf9-c21b-55e3-b93e-c004f491a16a")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR034")
+					(reference "#PWR076")
 					(unit 1)
 				)
 			)
@@ -4747,6 +4810,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C14663"
+			(at 50.8 68.58 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "d2e93d7f-f841-576b-9765-bce22401d242")
 		)
@@ -4781,8 +4853,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "cf6cd798-1edc-5e3e-82fb-61ba5fb73e13")
-		(property "Reference" "#PWR035"
+		(uuid "4f31f7d5-f99c-548f-b706-9b7a71665cca")
+		(property "Reference" "#PWR077"
 			(at 50.8 66.04 0)
 			(effects
 				(font
@@ -4827,12 +4899,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "fc36e19a-75f3-56e7-8701-416034f5ea3c")
+			(uuid "7c89bf6b-68a0-5eb8-b1b0-6e697608da38")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR035")
+					(reference "#PWR077")
 					(unit 1)
 				)
 			)
@@ -4857,8 +4929,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "f078fe48-0d4c-5117-8eee-fcd271482388")
-		(property "Reference" "#PWR036"
+		(uuid "570a55db-23be-5847-ae2d-ac079d1170de")
+		(property "Reference" "#PWR078"
 			(at 50.8 81.28 0)
 			(effects
 				(font
@@ -4903,12 +4975,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "684623c8-1098-5a9b-9cec-734365e387a0")
+			(uuid "1b620614-16de-5d9a-ad0c-892e0cba5a04")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR036")
+					(reference "#PWR078")
 					(unit 1)
 				)
 			)
@@ -4968,6 +5040,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C14663"
+			(at 66.04 68.58 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "a8f10b41-d1d8-54ae-976e-fd72cf3c4ecc")
 		)
@@ -5002,8 +5083,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "ca86e026-f72c-5db6-8929-3b019b39317c")
-		(property "Reference" "#PWR037"
+		(uuid "3ab13d76-9d24-5c79-880b-49156c0937f7")
+		(property "Reference" "#PWR079"
 			(at 66.04 66.04 0)
 			(effects
 				(font
@@ -5048,12 +5129,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "8213e02d-9d88-5b54-8556-df5e85fbfb09")
+			(uuid "39c4ea6a-ea57-5968-b465-6536642c41eb")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR037")
+					(reference "#PWR079")
 					(unit 1)
 				)
 			)
@@ -5078,8 +5159,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "599c063a-d2c0-5103-9122-1423c3e0226f")
-		(property "Reference" "#PWR038"
+		(uuid "60639c71-d27d-5ac5-a373-7d03759f8d75")
+		(property "Reference" "#PWR080"
 			(at 66.04 81.28 0)
 			(effects
 				(font
@@ -5124,12 +5205,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "2bc585fe-01f8-50f2-8c8c-cf9b185e38e7")
+			(uuid "6f1d6766-2645-553d-ab32-99d46b1d0d76")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR038")
+					(reference "#PWR080")
 					(unit 1)
 				)
 			)
@@ -5189,6 +5270,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C14663"
+			(at 81.28 68.58 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "6e81e685-5667-5fee-a7ca-65cfc4008a6e")
 		)
@@ -5223,8 +5313,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "922899e8-a149-5320-992c-c809ac3f3afd")
-		(property "Reference" "#PWR039"
+		(uuid "17286e06-9feb-5b22-896d-7295d0acb8c4")
+		(property "Reference" "#PWR081"
 			(at 81.28 66.04 0)
 			(effects
 				(font
@@ -5269,12 +5359,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "1f1ae186-4f47-5ec2-b0ac-21348c96a214")
+			(uuid "a436a36f-82de-5ee8-9b8b-9830388d66ff")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR039")
+					(reference "#PWR081")
 					(unit 1)
 				)
 			)
@@ -5299,8 +5389,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "004c70e1-d01f-5281-b6ea-c9c2a2a15f51")
-		(property "Reference" "#PWR040"
+		(uuid "6ec805be-7607-568b-b206-7cd4c7772d9a")
+		(property "Reference" "#PWR082"
 			(at 81.28 81.28 0)
 			(effects
 				(font
@@ -5345,12 +5435,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "61ba4b48-274a-5a1e-b798-6724b72abdd5")
+			(uuid "7a65a133-4dea-5697-a011-1410a1cb25cb")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR040")
+					(reference "#PWR082")
 					(unit 1)
 				)
 			)
@@ -5410,6 +5500,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C14663"
+			(at 96.52 68.58 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "4f8ceeb5-56bc-5dd1-8eaa-cfced8e4a037")
 		)
@@ -5444,8 +5543,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "121fd3a8-10e4-5c79-b179-2981d413a6a4")
-		(property "Reference" "#PWR041"
+		(uuid "52d47e9a-21d9-54bd-ae25-0c0cc983a0c8")
+		(property "Reference" "#PWR083"
 			(at 96.52 66.04 0)
 			(effects
 				(font
@@ -5490,12 +5589,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "84203c16-51ca-5090-be92-329e46cfefee")
+			(uuid "c2cb6864-35a9-5972-9383-9983e065b2c6")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR041")
+					(reference "#PWR083")
 					(unit 1)
 				)
 			)
@@ -5520,8 +5619,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "35bcff1a-5239-5a0e-befe-749d6dcbc9f5")
-		(property "Reference" "#PWR042"
+		(uuid "e9363090-b2ed-56a1-b077-b9b9cba9994c")
+		(property "Reference" "#PWR084"
 			(at 96.52 81.28 0)
 			(effects
 				(font
@@ -5566,12 +5665,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "1dea1327-d2e0-59a6-b76c-d73d39120dca")
+			(uuid "e912c52d-d79a-57d3-a55b-9349109a30af")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR042")
+					(reference "#PWR084")
 					(unit 1)
 				)
 			)
@@ -5632,6 +5731,24 @@
 			)
 		)
 		(property "Description" "Generic connector, double row, 02x20, odd/even pin numbering scheme (row 1 odd numbers, row 2 even numbers), script generated (kicad-library-utils/schlib/autogen/connector/)"
+			(at 289.56 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C19193815"
+			(at 289.56 152.4 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "FT Rotation Offset" "-90"
 			(at 289.56 152.4 0)
 			(effects
 				(font
@@ -5799,8 +5916,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "0de67300-d742-5401-8669-feef8a4a4bef")
-		(property "Reference" "#PWR043"
+		(uuid "0cb299ad-64cd-5014-98e5-a65f67571ab0")
+		(property "Reference" "#PWR085"
 			(at 306.07 129.54 0)
 			(effects
 				(font
@@ -5845,12 +5962,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "87236d06-8422-55ab-9bdb-7a39651399c1")
+			(uuid "1688d941-c141-5a60-a385-15db5924f5e4")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR043")
+					(reference "#PWR085")
 					(unit 1)
 				)
 			)
@@ -6051,8 +6168,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "8f737157-4318-55c6-b055-7d2a3e28d9da")
-		(property "Reference" "#PWR044"
+		(uuid "1eafabd7-6242-5947-a708-855fc5750c91")
+		(property "Reference" "#PWR086"
 			(at 275.59 152.4 0)
 			(effects
 				(font
@@ -6097,12 +6214,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "670ec639-6263-54d0-a5f7-14e4d67026f3")
+			(uuid "36686253-8820-5fdc-b612-0036e757fb40")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR044")
+					(reference "#PWR086")
 					(unit 1)
 				)
 			)
@@ -6142,8 +6259,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "e7159b0c-a27d-5837-b3e8-4a1c0efab691")
-		(property "Reference" "#PWR045"
+		(uuid "cec0f1dd-ac23-584d-81f0-279a6da637e0")
+		(property "Reference" "#PWR087"
 			(at 306.07 154.94 0)
 			(effects
 				(font
@@ -6188,12 +6305,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "38aea4a3-ea13-5208-9aa9-fe03bd2b893f")
+			(uuid "350d7f3b-178b-5afc-8556-25c1b375bd35")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR045")
+					(reference "#PWR087")
 					(unit 1)
 				)
 			)
@@ -6229,8 +6346,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "37be369d-dbd3-5942-9e99-42c5e6d7ed53")
-		(property "Reference" "#PWR046"
+		(uuid "22ce6a7a-9d3e-55a5-8b78-d7ae3e89c9a8")
+		(property "Reference" "#PWR088"
 			(at 306.07 157.48 0)
 			(effects
 				(font
@@ -6275,12 +6392,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "37a89e24-054e-503a-9ea5-42cec96b81ce")
+			(uuid "73c59a9b-7a57-5f17-ac77-70d2cdf3cea4")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR046")
+					(reference "#PWR088")
 					(unit 1)
 				)
 			)
@@ -6316,8 +6433,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "57cf2627-c809-581b-a950-b65c7ec67384")
-		(property "Reference" "#PWR047"
+		(uuid "2a3f165c-ade8-57e1-a369-d4cb5fa2b982")
+		(property "Reference" "#PWR089"
 			(at 306.07 160.02 0)
 			(effects
 				(font
@@ -6362,12 +6479,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "4d122b72-36da-5798-b6ba-f5d0ab574b74")
+			(uuid "a8c1fdc4-ca71-596a-b677-63b0a45f2b60")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR047")
+					(reference "#PWR089")
 					(unit 1)
 				)
 			)
@@ -6418,8 +6535,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "ef6e12d2-5329-5472-8d25-d445670006af")
-		(property "Reference" "#PWR048"
+		(uuid "eba51952-dd30-5d8f-91fc-6fa10c53a7cf")
+		(property "Reference" "#PWR090"
 			(at 306.07 165.1 0)
 			(effects
 				(font
@@ -6464,12 +6581,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "0e1fc14e-b59b-5585-9260-2660ae111216")
+			(uuid "254d2400-0f0c-5c7b-8985-a3108f8d8ae1")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR048")
+					(reference "#PWR090")
 					(unit 1)
 				)
 			)
@@ -6572,8 +6689,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "698e6d07-7209-5db7-ad02-a5177e4e66d2")
-		(property "Reference" "#PWR049"
+		(uuid "276c3526-6ef7-5d5c-9e07-34d8b35b2e40")
+		(property "Reference" "#PWR091"
 			(at 306.07 177.8 0)
 			(effects
 				(font
@@ -6618,12 +6735,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "19dce05b-a3a2-56c5-85d2-78021a1aa252")
+			(uuid "e050a9ef-dd18-53bb-94fb-a1b0298ccd15")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR049")
+					(reference "#PWR091")
 					(unit 1)
 				)
 			)

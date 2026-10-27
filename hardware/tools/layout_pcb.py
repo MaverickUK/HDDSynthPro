@@ -3,8 +3,10 @@
 Run with KiCad's own Python, which has the pcbnew module:
   /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \
       hardware/tools/layout_pcb.py [output.kicad_pcb]
-  or, on a board that's already routed, redo only the logo and labels:
+  or, on a board that's already routed, redo only the logo and labels, or copy the
+  schematic's fields (LCSC numbers, Fabrication Toolkit offsets) onto it:
       hardware/tools/layout_pcb.py --silkscreen hardware/hddsynthpro.kicad_pcb
+      hardware/tools/layout_pcb.py --fields hardware/hddsynthpro.kicad_pcb
   then fill the planes:  kicad-cli pcb drc --refill-zones --save-board hardware/hddsynthpro.kicad_pcb
 
 It reads the netlist from the schematic (via kicad-cli), so every footprint is
@@ -55,20 +57,35 @@ PLACE = {
     "JP1": (117.6, 160.5, 90),     # BUS_EN# to GND
     "R14": (132.0, 153.0, 0),      # DIOR# 33R
     "R15": (132.0, 156.0, 0),      # DIOW# 33R
-    # Module
-    "U1": (143.0, 133.0, 0),
-    "C6": (137.5, 116.8, 0),       # 3V3 bulk, near pad B4
+    # RP2350B, its data side (pins 1-20) facing the switches. Its regulator cluster is placed
+    # by core_copper(), relative to the VREG_LX pin, as in Raspberry Pi's layout.
+    "U1": (140.0, 132.0, 0),
+    "R20": (154.0, 147.6, 0),      # RUN to RESET button
+    "Y1": (140.0, 143.5, 0),       # crystal below XIN/XOUT
+    "R17": (141.6, 139.6, 90),     # XOUT 1k
+    "C27": (136.6, 144.35, 0),     # XIN 15 pF
+    "C28": (143.4, 142.65, 0),     # crystal output 15 pF
+    # 100 nF on the supply pins: corners and the gaps between signal groups
+    "C24": (123.2, 125.0, 90), "C25": (124.8, 125.0, 90), "C19": (126.4, 125.0, 90), "C20": (128.0, 125.0, 90),
+    "C12": (129.6, 125.0, 90),    # left of the QSPI fan-out
+    "C13": (133.6, 138.4, 0), "C14": (133.6, 139.6, 0), "C15": (137.4, 141.2, 0),
+    "C16": (146.4, 138.4, 0), "C21": (146.4, 139.6, 0),
+    "C17": (146.8, 130.0, 90), "C22": (148.0, 130.0, 90),
+    "C18": (146.6, 126.4, 90), "C23": (147.8, 126.4, 90),
+    "C6": (159.0, 121.0, 0),       # 3V3 bulk
+    "U8": (172.0, 124.0, 0),       # AMS1117 3.3 V regulator
+    "C29": (165.0, 122.0, 0),      # its output capacitor
     # Top edge: link, buttons, SWD, USB-C, power
     "J3": (116.0, 104.0, 90),      # link socket, pins along the edge, pin 1 on the left
     "R3": (117.27, 108.8, 90),
     "R4": (119.81, 108.8, 90),
     "J6": (127.46, 104.0, 90),     # SWD, 1x3 0.1" header, pins along the edge
-    "SW1": (128.0, 111.5, 0),      # BOOTSEL
-    "SW2": (134.0, 111.5, 0),      # RESET
-    "J1": (147.0, 103.1, 180),     # USB-C, mouth on the top edge
-    "U4": (147.0, 111.0, 0),
-    "R1": (141.2, 110.5, 90),
-    "R2": (152.8, 110.5, 90),
+    "SW1": (150.0, 152.0, 0),      # BOOTSEL, bottom right, clear of the flash
+    "SW2": (158.5, 152.0, 0),      # RESET
+    "J1": (147.0, 103.64, 180),    # USB-C, mouth on the top edge (3.64 mm in, as on the HDD Synth Mk5)
+    "U4": (147.0, 112.6, 90),      # ESD, turned so D+ and D- run straight through it to J1
+    "R1": (150.4, 110.2, 0),       # CC1 pull-down, beside the CC1 pin
+    "R2": (143.4, 110.2, 180),     # CC2 pull-down, beside the CC2 pin
     "D1": (158.5, 104.0, 0),
     "C1": (160.0, 110.5, 0),
     "J2": (166.0, 103.6, 0),       # 5 V in
@@ -80,7 +97,7 @@ PLACE = {
     "R6": (172.0, 117.0, 0),
     "D4": (176.0, 117.0, 0),
     # microSD on the right edge, card in from the right
-    "J4": (X0 + W - 8.93, 140.0, 90),
+    "J4": (X0 + W - 9.69, 140.0, 90),  # TF PUSH: its front edge on the board edge
     "R7": (161.0, 126.5, 0),
     "R8": (161.0, 128.7, 0),
     "R9": (161.0, 130.9, 0),
@@ -93,22 +110,133 @@ PLACE = {
 # Reference designators moved off pads and neighbours: ref -> (x, y), or None to hide.
 REF_TEXT = {
     **{r: (158.0, PLACE[r][1]) for r in ("R7", "R8", "R9", "R10", "R11", "R12", "C3", "C2")},
-    "R3": (117.27, 111.6), "R4": (119.81, 111.6), "U4": (147.0, 113.6), "J6": (135.6, 103.4), "J1": (153.6, 101.6),
+    "R3": (117.27, 111.6), "R4": (119.81, 111.6), "U4": (150.9, 113.4), "J6": (135.6, 103.4), "J1": (153.6, 101.6),
     "J2": (172.6, 103.6), "F1": (167.5, 112.6), "R13": (114.3, 163.8), "JP1": (118.3, 163.8),
     **{u: (PLACE[u][0], PLACE[u][1]) for u in ("U2", "U3", "U5", "U6")},  # on the chip body
     **{c: (114.9, PLACE[c][1]) for c in ("C4", "C5", "C7", "C8")},
-    "H1": None, "H2": None, "H3": None, "H4": None,
+    "H1": None, "H2": None, "H3": None, "H4": None, "SW1": None, "SW2": None, "R20": None,
+    "R18": None, "R19": None, "R1": (150.4, 111.9), "R2": (143.4, 111.9),
+    # The small parts round the RP2350 have no room for labels; they're on the fab layer.
+    **{r: None for r in ["L1", "R16", "R17", "R21", "R22"] + [f"C{n}" for n in range(9, 29) if n not in (12,)]},
+    "C12": None,
 }
+# Raspberry Pi's core-regulator cluster (RP2350 minimal design), relative to the VREG_LX pad:
+# ref -> (dx, dy, rotation). Same pin order and pitch on the RP2350B as on their RP2350A.
+CORE = {
+    "C9": (0.0, -1.16, 0),     # VREG_VIN 4.7 uF
+    "C10": (0.0, -2.1, 0),     # 1.1 V output 4.7 uF
+    "L1": (0.0, -3.75, 0),     # inductor, pad 1 (1.1 V) on the left: Raspberry Pi's polarity
+    "C11": (2.2, -1.6, 270),   # VREG_AVDD 4.7 uF
+    "R16": (2.2, -3.45, 270),  # VREG_AVDD 33R
+    "R21": (-3.1, -3.95, 270), # USB D+ 27R
+    "R22": (-2.1, -3.95, 270), # USB D- 27R
+    # Raspberry Pi's flash corner: the same QSPI pins sit at the same place relative to LX.
+    "U7": (-8.95, -9.27, 0),   # W25Q128JV
+    "R18": (-9.0, -14.35, 270),  # CS pull-up, 10k
+    "R19": (-13.1, -15.25, 0),   # QSPI_SS to BOOTSEL, 1k
+    "C26": (-5.81, -13.72, 180),  # flash 100 nF
+}
+# Their small copper fills on F.Cu, relative to the VREG_LX pad: net -> (priority, outline).
+CORE_ZONES = [
+    ("+3V3", 7, [(-0.5, 0.75), (-0.5, -0.6), (-0.75, -0.85), (-0.75, -1.4), (-0.3, -1.4), (-0.3, 0.75)]),
+    ("GND", 4, [(0.3, 0.3), (0.3, -1.4), (0.45, -1.4), (0.45, -1.85), (0.3, -1.85), (0.3, -2.35), (1.1, -2.35),
+                (1.4, -2.05), (1.4, -1.3), (0.5, -0.4), (0.5, 0.3)]),
+    ("VREG_LX", 5, [(-0.1, 0.3), (-0.1, -0.5), (-0.15, -0.55), (-0.15, -2.7), (0.35, -3.2), (0.35, -4.6), (1.05, -4.6),
+                    (1.05, -2.9), (0.75, -2.6), (0.3, -2.6), (0.15, -2.45), (0.15, -0.55), (0.1, -0.5), (0.1, 0.3)]),
+    ("+1V1", 6, [(-0.35, -1.85), (-0.35, -4.6), (-1.05, -4.6), (-1.05, -2.75), (-0.75, -2.45), (-0.75, -2.3),
+                 (-0.95, -2.3), (-1.3, -2.65), (-1.5, -2.65), (-1.8, -2.35), (-1.8, -1.75), (-1.5, -1.45), (-1.0, -1.45),
+                 (-1.0, -1.65), (-0.45, -1.65), (-0.45, -1.85)]),
+]
+# Their tracks, relative to the VREG_LX pad: net -> (width, points).
+CORE_TRACKS = [
+    ("VREG_AVDD", 0.15, [(0.8, 0.0), (0.8, -0.15), (1.64, -0.99), (1.64, -1.52), (2.2, -2.08), (2.2, -2.97)]),
+    ("+1V1", 0.15, [(-0.8, 0.0), (-0.825, -0.025), (-0.825, -0.675), (-1.075, -0.925), (-1.075, -1.675)]),
+    ("USB_DP_MCU", 0.15, [(-1.6, 0.0), (-1.6, -0.55), (-3.1, -2.05), (-3.1, -3.47)]),
+    ("USB_DM_MCU", 0.15, [(-1.2, 0.0), (-1.225, -0.025), (-1.225, -0.651), (-2.1, -1.526), (-2.1, -3.47)]),
+]
+CORE_TRACKS += [
+    # Raspberry Pi's QSPI fan-out. Their FLASH_SS and QSPI_SS are one net here (no 0R between them).
+    # Their QSPI_SS route from the chip would clip the RP2350B's pin 76, which the RP2350A
+    # doesn't have, so only its flash end is kept and the router takes it from the chip.
+    ("QSPI_SS", 0.15, [(-13.61, -13.85), (-13.61, -15.25)]),
+    ("QSPI_SS", 0.15, [(-12.55, -11.18), (-12.59, -11.22), (-12.59, -13.85), (-10.71, -13.85), (-10.7, -13.84),
+                       (-9.0, -13.84)]),
+    ("QSPI_SS", 0.15, [(-13.61, -13.85), (-12.59, -13.85)]),
+    ("QSPI_SD1", 0.15, [(-4.4, 0.0), (-4.4, -0.41), (-5.94, -1.95), (-9.15, -1.95), (-14.0, -6.8), (-14.0, -8.95),
+                        (-13.04, -9.91), (-12.55, -9.91)]),
+    ("QSPI_SD2", 0.15, [(-4.0, 0.0), (-4.0, -0.45), (-10.4, -6.85), (-10.4, -7.95), (-11.09, -8.64), (-12.55, -8.64)]),
+    ("QSPI_SD0", 0.15, [(-3.6, 0.0), (-3.6, -0.55), (-6.0, -2.95), (-6.0, -6.72), (-5.35, -7.37)]),
+    ("QSPI_SCLK", 0.15, [(-3.2, 0.0), (-3.2, -0.65), (-5.6, -3.05), (-5.6, -5.35), (-4.2, -6.75), (-4.2, -8.05),
+                         (-4.79, -8.64), (-5.35, -8.64)]),
+    ("QSPI_SD3", 0.15, [(-2.8, 0.0), (-2.8, -0.75), (-5.2, -3.15), (-5.2, -5.05), (-3.8, -6.45), (-3.8, -8.95),
+                        (-4.76, -9.91), (-5.35, -9.91)]),
+    # VREG_AVDD capacitor's ground out to a via on its right; the 33R's 3V3 end up to a via
+    ("GND", 0.2, [(2.2, -1.12), (2.85, -1.12)]),
+    ("+3V3", 0.2, [(2.2, -3.93), (2.2, -4.7)]),
+    # the flash's GND pin, boxed in by the QSPI fan-out, to its own via
+    ("GND", 0.25, [(-12.55, -7.37), (-11.7, -6.45)]),
+]
+CORE_VIAS = [("+1V1", -1.5, -2.35), ("+1V1", -1.5, -1.75), ("GND", 1.1, -1.45), ("GND", 1.1, -2.05),
+             ("GND", 2.85, -1.12), ("+3V3", 2.2, -4.7), ("GND", -11.7, -6.45)]
+# The RP2350B's supply pins (pad centres, relative to the chip's centre) and the via under the
+# chip each joins: (net, pads, via). Neighbouring pins on the same net share a via.
+SUPPLY_VIAS = [
+    ("+3V3", [(-4.95, -2.2)], (-3.7, -2.2)),               # IOVDD 5
+    ("+1V1", [(-4.95, -0.2)], (-3.7, -0.2)),               # DVDD 10
+    ("+3V3", [(-4.95, 1.8)], (-3.7, 1.8)),                 # IOVDD 15
+    ("+3V3", [(-2.6, 4.95)], (-2.6, 3.7)),                 # IOVDD 24
+    ("+3V3", [(-0.6, 4.95)], (-0.6, 3.7)),                 # IOVDD 29
+    ("+1V1", [(0.6, 4.95)], (0.6, 3.7)),                   # DVDD 32
+    ("+3V3", [(4.95, 3.8)], (3.7, 3.6)),                   # IOVDD 41
+    ("+3V3", [(4.95, 0.2)], (3.7, 0.7)),                   # IOVDD 50
+    ("+1V1", [(4.95, -0.2)], (3.7, -0.7)),                 # DVDD 51
+    ("+3V3", [(4.95, -3.4), (4.95, -3.8)], (3.7, -3.6)),   # ADC_AVDD 59, IOVDD 60
+    ("+3V3", [(2.6, -4.95)], (2.6, -3.7)),                 # VREG_VIN 64
+    ("+3V3", [(1.0, -4.95), (0.6, -4.95)], (0.8, -3.7)),   # USB_OTP_VDD 68, QSPI_IOVDD 69
+    ("+3V3", [(-2.2, -4.95)], (-2.2, -3.7)),               # IOVDD 76
+]
+# 1V1 on B.Cu under the RP2350B (chip-relative): from Raspberry Pi's two 1V1 vias (LX-relative
+# (-1.5, -2.35) and (-1.5, -1.75)) between the 3V3 vias to the DVDD 51, 10 and 32 vias.
+CORE_1V1_BOTTOM = [
+    [(1.5, -7.3), (1.5, -6.7), (1.7, -6.5), (1.7, -3.0), (3.7, -1.0), (3.7, -0.7)],   # to DVDD 51
+    [(1.7, -3.0), (-2.0, -3.0), (-3.0, -2.0), (-3.0, -0.2), (-3.7, -0.2)],            # to DVDD 10
+    [(-3.0, -0.2), (-3.0, 2.6), (-0.2, 2.6), (0.6, 3.4), (0.6, 3.7)],                 # to DVDD 32
+]
+# USB, board coordinates: from R21/R22 (pad 1) straight through U4 (pins 1-6 D+, 3-4 D-) to the
+# connector's outer D+/D- pads (B6, B7), and the inner pads (A6, A7), which sit swapped between
+# them, by a stub and via each and a hop across on the bottom layer. (net, layer, points)
+USB_TRACKS = [
+    ("USB_DP", "F.Cu", [(139.9, 122.625), (139.9, 121.9), (144.0, 117.8), (146.05, 115.75), (146.05, 109.0),
+                        (146.25, 108.8), (146.25, 107.685)]),
+    ("USB_DM", "F.Cu", [(140.9, 122.625), (140.9, 121.9), (145.0, 117.8), (147.95, 114.85), (147.95, 109.0),
+                        (147.75, 108.8), (147.75, 107.685)]),
+    ("USB_DM", "F.Cu", [(146.75, 107.685), (146.75, 109.15)]),   # A7
+    ("USB_DP", "F.Cu", [(147.25, 107.685), (147.25, 110.0)]),    # A6
+    ("USB_DM", "B.Cu", [(146.75, 109.15), (147.95, 109.6)]),
+    ("USB_DP", "B.Cu", [(147.25, 110.0), (146.05, 110.3)]),
+    # VBUS: the right-hand pads (A4/B9) under R1 to D1's anode; the left-hand pads (A9/B4) over on
+    # the bottom layer, above the D+/D- hops; U4's VBUS pin down a via and round underneath.
+    # (the connector's pads reach down to y 108.41, so the run below them is at 108.95)
+    ("VBUS_USB", "F.Cu", [(149.45, 107.685), (149.45, 108.95), (160.5, 108.95), (160.5, 104.0)]),
+    ("VBUS_USB", "F.Cu", [(144.55, 107.685), (144.55, 108.95)]),
+    ("VBUS_USB", "B.Cu", [(144.55, 108.95), (145.0, 108.5), (149.0, 108.5), (149.45, 108.95)]),
+    ("VBUS_USB", "F.Cu", [(147.0, 111.46), (147.0, 110.6)]),
+    ("VBUS_USB", "B.Cu", [(147.0, 110.6), (148.6, 112.2), (152.6, 112.2), (152.6, 108.95)]),
+    ("GND", "F.Cu", [(147.0, 113.74), (147.0, 114.75)]),   # U4's GND, boxed in by D+ and D-
+]
+USB_VIAS = [("USB_DM", 146.75, 109.15), ("USB_DM", 147.95, 109.6), ("USB_DP", 147.25, 110.0), ("USB_DP", 146.05, 110.3),
+            ("VBUS_USB", 144.55, 108.95), ("VBUS_USB", 149.45, 108.95), ("VBUS_USB", 147.0, 110.6),
+            ("VBUS_USB", 152.6, 108.95), ("GND", 147.0, 114.75)]
 HOLES = [(104.0, 104.0), (181.0, 104.0), (104.0, 172.0), (181.0, 172.0)]
 LOGO = (129.0, 166.8)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
 SILK = [  # text, x, y, size
-    ("PGA2350 IDE drive  rev 0.1", 158.0, 164.0, 1.0),
+    ("RP2350B IDE drive  rev 0.2", 158.0, 164.0, 1.0),
     ("IDE 40-pin", 113.0, 170.5, 1.0),
     ("NC", 116.0, 101.3, 0.8), ("GND", 118.54, 101.3, 0.8), ("TX", 121.08, 101.3, 0.8), ("RX", 123.62, 101.3, 0.8),
     ("+5V GND", 167.25, 108.5, 0.8),
     ("CLK", 127.46, 101.3, 0.8), ("GND", 130.0, 101.3, 0.8), ("DIO", 132.54, 101.3, 0.8),
-    ("BOOT", 128.0, 114.3, 0.8),
-    ("RST", 134.0, 114.3, 0.8),
+    ("BOOT", 150.0, 156.0, 0.8),
+    ("RST", 158.5, 156.0, 0.8),
     ("JP1: close for firmware without BUS_EN#", 158.0, 167.5, 0.8),
 ]
 # Net-name patterns for the Power class (local nets carry their sheet path).
@@ -199,11 +327,142 @@ def design_rules(project_file):
         "netclass_patterns": [{"netclass": "Power", "pattern": p} for p in POWER_PATTERNS],
     }
     rules = pro.setdefault("board", {}).setdefault("design_settings", {}).setdefault("rules", {})
-    rules.update({"min_clearance": 0.15, "min_track_width": 0.1, "min_via_diameter": 0.5,
-                  "min_via_annular_width": 0.1, "min_through_hole_diameter": 0.3, "min_hole_to_hole": 0.25,
+    rules.update({"min_clearance": 0.12, "min_track_width": 0.1, "min_via_diameter": 0.5,
+                  "min_via_annular_width": 0.1, "min_through_hole_diameter": 0.2, "min_hole_to_hole": 0.25,
                   "min_copper_edge_clearance": 0.3,
                   "min_resolved_spokes": 1})  # THT GND pins also join the inner plane
     project_file.write_text(json.dumps(pro, indent=2) + "\n")
+
+
+def lx_pad():
+    """Where the RP2350B's VREG_LX pin (63) lands: (3.0, -4.95) from the QFN-80's centre, unrotated."""
+    x, y, rot = PLACE["U1"]
+    if rot != 0:
+        raise ValueError("core_copper() assumes the RP2350B unrotated")
+    return x + 3.0, y - 4.95
+
+
+def core_copper(board):
+    """Raspberry Pi's regulator copper, and a 3V3 ring under the RP2350B joining its supply pins.
+
+    The ring is Raspberry Pi's approach too: between the pad ring and the exposed pad, so every
+    3V3 pin (and the VREG_VIN fill) joins it on the top layer; four vias take it to the 3V3 plane.
+    """
+    def net(name):
+        for n, item in board.GetNetsByName().items():
+            if str(n) == name or str(n).endswith("/" + name):
+                return item
+        raise KeyError(name)
+
+    lx, ly = lx_pad()
+
+    def zone(netname, prio, pts, layer=pcbnew.F_Cu):
+        z = pcbnew.ZONE(board)
+        z.SetLayer(layer)
+        z.SetNet(net(netname))
+        z.SetAssignedPriority(prio)
+        z.SetLocalClearance(mm(0.15))
+        z.SetMinThickness(mm(0.12))
+        z.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
+        z.SetLocked(True)
+        ol = z.Outline()
+        ol.NewOutline()
+        for x, y in pts:
+            ol.Append(mm(x), mm(y))
+        board.Add(z)
+
+    def via(netname, x, y):
+        v = pcbnew.PCB_VIA(board)
+        v.SetPosition(pcbnew.VECTOR2I_MM(x, y))
+        v.SetWidth(mm(0.5))
+        v.SetDrill(mm(0.3))
+        v.SetNet(net(netname))
+        v.SetLocked(True)
+        board.Add(v)
+
+    # Raspberry Pi's cluster is laid out to 0.125 mm in places; hardware/hddsynthpro.kicad_dru
+    # allows that inside this area only.
+    area = pcbnew.ZONE(board)
+    area.SetIsRuleArea(True)
+    area.SetLayer(pcbnew.F_Cu)
+    for flag in ("Tracks", "Vias", "Pads", "Footprints", "ZoneFills"):
+        getattr(area, f"SetDoNotAllow{flag}")(False)
+    area.SetZoneName("RP2350 core")
+    ol = area.Outline()
+    ol.NewOutline()
+    for dx, dy in [(-3.8, -4.8), (2.8, -4.8), (2.8, 0.5), (-3.8, 0.5)]:
+        ol.Append(mm(lx + dx), mm(ly + dy))
+    board.Add(area)
+
+    for netname, prio, pts in CORE_ZONES:
+        zone(netname, prio, [(lx + dx, ly + dy) for dx, dy in pts])
+    for netname, width, pts in CORE_TRACKS:
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            tr = pcbnew.PCB_TRACK(board)
+            tr.SetStart(pcbnew.VECTOR2I_MM(lx + x0, ly + y0))
+            tr.SetEnd(pcbnew.VECTOR2I_MM(lx + x1, ly + y1))
+            tr.SetWidth(mm(width))
+            tr.SetLayer(pcbnew.F_Cu)
+            tr.SetNet(net(netname))
+            tr.SetLocked(True)
+            board.Add(tr)
+    for netname, dx, dy in CORE_VIAS:
+        via(netname, lx + dx, ly + dy)
+
+    # Each supply pin: a short stub inward, under the chip, to its own via (3V3 drops to the
+    # 3V3 plane; 1V1 to the bottom layer, where the router joins the DVDD pins to the regulator,
+    # as Raspberry Pi do). The outward lanes stay free for signals.
+    cx, cy, _ = PLACE["U1"]
+
+    def track(netname, pts, width=0.2):
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            tr = pcbnew.PCB_TRACK(board)
+            tr.SetStart(pcbnew.VECTOR2I_MM(cx + x0, cy + y0))
+            tr.SetEnd(pcbnew.VECTOR2I_MM(cx + x1, cy + y1))
+            tr.SetWidth(mm(width))
+            tr.SetLayer(pcbnew.F_Cu)
+            tr.SetNet(net(netname))
+            tr.SetLocked(True)
+            board.Add(tr)
+
+    # 1V1 on the bottom layer, under the chip: Raspberry Pi's 1V1 vias to the three DVDD vias.
+    for pts in CORE_1V1_BOTTOM:
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            tr = pcbnew.PCB_TRACK(board)
+            tr.SetStart(pcbnew.VECTOR2I_MM(cx + x0, cy + y0))
+            tr.SetEnd(pcbnew.VECTOR2I_MM(cx + x1, cy + y1))
+            tr.SetWidth(mm(0.4))
+            tr.SetLayer(pcbnew.B_Cu)
+            tr.SetNet(net("+1V1"))
+            tr.SetLocked(True)
+            board.Add(tr)
+    # USB D+/D- from the 27R resistors to U4's inputs (board coordinates), laid before the
+    # router so nothing else takes the space.
+    for netname, layer, pts in USB_TRACKS:
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            tr = pcbnew.PCB_TRACK(board)
+            tr.SetStart(pcbnew.VECTOR2I_MM(x0, y0))
+            tr.SetEnd(pcbnew.VECTOR2I_MM(x1, y1))
+            tr.SetWidth(mm(0.5 if netname == "VBUS_USB" and (x0, y0) != (147.0, 111.46) else 0.2))
+            tr.SetLayer(pcbnew.F_Cu if layer == "F.Cu" else pcbnew.B_Cu)
+            tr.SetNet(net(netname))
+            tr.SetLocked(True)
+            board.Add(tr)
+    for netname, x, y in USB_VIAS:
+        via(netname, x, y)
+
+    for netname, pads, (vx, vy) in SUPPLY_VIAS:
+        for px, py in pads:
+            # straight in past the pad's inner end (4.55 from centre), then across to the via
+            k = 4.3 / 4.95
+            track(netname, [(px, py), (px * k if abs(px) > 4 else px, py * k if abs(py) > 4 else py), (vx, vy)])
+        v = pcbnew.PCB_VIA(board)
+        v.SetPosition(pcbnew.VECTOR2I_MM(cx + vx, cy + vy))
+        v.SetWidth(mm(0.5))
+        v.SetDrill(mm(0.3))
+        v.SetNet(net(netname))
+        v.SetLocked(True)
+        board.Add(v)
 
 
 def silkscreen(board, logo):
@@ -232,6 +491,20 @@ def silkscreen(board, logo):
 
 
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == "--fields":
+        # Copy the schematic's fields (LCSC, FT offsets, ...) onto an existing (routed) board.
+        comps, _ = netlist()
+        board = pcbnew.LoadBoard(sys.argv[2])
+        for ref, c in comps.items():
+            fp = board.FindFootprintByReference(ref)
+            if fp is None:
+                continue
+            for name, text in c["fields"].items():
+                fp.SetField(name, text)
+                fp.GetField(name).SetVisible(False)
+        board.Save(sys.argv[2])
+        print(f"fields updated on {sys.argv[2]}")
+        return
     if len(sys.argv) > 2 and sys.argv[1] == "--silkscreen":
         # Redo only the logo and labels on an existing (routed) board.
         logo = load_footprint("HDDSynthPro:LOGO_HDDSynthPro")
@@ -241,6 +514,8 @@ def main():
         print(f"silkscreen updated on {sys.argv[2]}")
         return
     comps, nets = netlist()
+    lx, ly = lx_pad()
+    PLACE.update({ref: (lx + dx, ly + dy, rot) for ref, (dx, dy, rot) in CORE.items()})
     missing = set(comps) - set(PLACE)
     if missing:
         raise KeyError(f"no position for {sorted(missing)}")
@@ -296,6 +571,7 @@ def main():
     silkscreen(board, load_footprint("HDDSynthPro:LOGO_HDDSynthPro"))
 
     # The zone filler crashes outside the GUI; fill the planes with kicad-cli (see the docstring).
+    core_copper(board)
     plane(board, net_items["GND"], pcbnew.In1_Cu, "GND plane")
     plane(board, net_items["+3V3"], pcbnew.In2_Cu, "3V3 plane")
 

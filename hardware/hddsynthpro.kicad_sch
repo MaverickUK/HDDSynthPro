@@ -70,7 +70,7 @@
 			(color 0 0 0 0)
 		)
 		(uuid "a7697fa6-7690-5cb6-93b1-03592d7bdfa7")
-		(property "Sheetname" "PGA2350"
+		(property "Sheetname" "RP2350"
 			(at 121.92 60.2484 0)
 			(effects
 				(font
@@ -180,7 +180,7 @@
 			)
 		)
 	)
-	(text "HDDSynthPro: a PGA2350 (RP2350B) that acts as an IDE hard disk.\nPages: power and USB; the PGA2350 with the activity link and LEDs; the IDE bus switches and header; the microSD socket.\nNets cross pages through global labels. The GPIO map must agree with src/config.h and docs/wiring.md:\nrun hardware/tools/check_netlist.py after editing."
+	(text "HDDSynthPro: an RP2350B that acts as an IDE hard disk.\nPages: power and USB; the RP2350 with the activity link and LEDs; the IDE bus switches and header; the microSD socket.\nNets cross pages through global labels. The GPIO map must agree with src/config.h and docs/wiring.md:\nrun hardware/tools/check_netlist.py after editing."
 		(exclude_from_sim no)
 		(at 30.48 30.48 0)
 		(effects

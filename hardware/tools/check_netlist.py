@@ -2,7 +2,7 @@
 """Checks the KiCad schematic against src/config.h and the ATA pinout.
 
 Exports the netlist with kicad-cli, then follows each IDE signal from its
-GPIO on the PGA2350, through any series resistor and the bus switch, to the
+GPIO on the RP2350, through any series resistor and the bus switch, to the
 IDE header, and checks it lands on the right pin. Also checks the microSD
 socket, the activity link, the LED, the bus-switch enable and the IDE grounds.
 Run it after editing the schematic: CLAUDE.md requires the pin map in
@@ -105,6 +105,64 @@ def ohms(v):
     return float(m.group(1)) * {"": 1, "k": 1e3, "K": 1e3, "m": 1e6, "M": 1e6}[m.group(2)]
 
 
+def check_rp2350_support(nl, u1):
+    """The RP2350's support circuit, against Raspberry Pi's minimal design."""
+    if not nl.lib[u1].startswith("MCU_RaspberryPi:RP2350"):
+        return []  # the PGA2350 module carries its own
+    errors = []
+    pins = {(r, p): fn for (r, p), fn in nl.pin_name.items() if r == u1}
+
+    def net(name):
+        return {nl.net_of[k] for k, fn in pins.items() if fn == name}
+
+    want = {**{n: "+3V3" for n in ("IOVDD", "ADC_AVDD", "USB_OTP_VDD", "QSPI_IOVDD", "VREG_VIN")},
+            **{n: "+1V1" for n in ("DVDD", "VREG_FB")}, "VREG_PGND": "GND", "GND": "GND"}
+    for name, rail in want.items():
+        got = {n.split("/")[-1] for n in net(name)}
+        if got != {rail}:
+            errors.append(f"RP2350 {name} is on {sorted(got)}, expected {rail}")
+
+    def parts_on(netname, lib_prefix):
+        return [(r, p) for r, p in nl.nodes.get(netname, []) if nl.lib[r].startswith(lib_prefix)]
+
+    def two_pin(ref):  # net names without their sheet path
+        return {p: (nl.net_of.get((ref, p)) or "").split("/")[-1] for p in ("1", "2")}
+
+    lx = next(iter(net("VREG_LX")), None)
+    inductors = parts_on(lx, "Device:L") if lx else []
+    if len(inductors) != 1 or two_pin(inductors[0][0]) != {"1": "+1V1", "2": lx.split("/")[-1]}:
+        errors.append("VREG_LX must go to pad 2 of the inductor, pad 1 to +1V1 (Raspberry Pi's polarity)")
+    avdd = next(iter(net("VREG_AVDD")), None)
+    rs = [r for r, _ in parts_on(avdd, "Device:R") if ohms(nl.value[r]) == 33 and "+3V3" in two_pin(r).values()]
+    cs = [r for r, _ in parts_on(avdd, "Device:C") if "GND" in two_pin(r).values()]
+    if not rs or not cs:
+        errors.append("VREG_AVDD needs its 33R from +3V3 and a capacitor to GND")
+    caps = {rail: [r for r, _ in parts_on(rail, "Device:C") if "GND" in two_pin(r).values()] for rail in ("+3V3", "+1V1")}
+    supply_pins = sum(1 for fn in pins.values() if want.get(fn) in ("+3V3", "+1V1"))
+    if len(caps["+3V3"]) + len(caps["+1V1"]) < supply_pins:
+        errors.append(f"{len(caps['+3V3']) + len(caps['+1V1'])} decoupling caps for {supply_pins} RP2350 supply pins")
+
+    xin, xout = next(iter(net("XIN")), None), next(iter(net("XOUT")), None)
+    xtal = [r for r, p in parts_on(xin, "Device:Crystal") if p == "1"] if xin else []
+    r_xout = [r for r, _ in parts_on(xout, "Device:R") if ohms(nl.value[r]) == 1000] if xout else []
+    if not xtal or not r_xout or (nl.net_of.get((xtal[0], "3")) or "").split("/")[-1] not in two_pin(r_xout[0]).values():
+        errors.append("crystal: XIN to its pin 1, XOUT through 1k to its pin 3")
+
+    flash = [r for r, lib in nl.lib.items() if lib.startswith("Memory_Flash:")]
+    qspi = {"~{QSPI_SS}": "1", "QSPI_SD1": "2", "QSPI_SD2": "3", "QSPI_SD0": "5", "QSPI_SCLK": "6", "QSPI_SD3": "7"}
+    for name, fpin in qspi.items():
+        if not flash or nl.net_of.get((flash[0], fpin)) not in net(name):
+            errors.append(f"RP2350 {name} doesn't reach the flash's pin {fpin}")
+
+    for name, conn in (("USB_DP", "A6"), ("USB_DM", "A7")):
+        mcu_net = next(iter(net(name)), None)
+        rs = [r for r, _ in parts_on(mcu_net, "Device:R") if ohms(nl.value[r]) == 27] if mcu_net else []
+        usb = [r for r, lib in nl.lib.items() if lib.startswith("Connector:USB_C")]
+        if not rs or not usb or (nl.net_of.get((usb[0], conn)) or "").split("/")[-1] not in two_pin(rs[0]).values():
+            errors.append(f"RP2350 {name} must reach USB-C {conn} through 27R")
+    return errors
+
+
 def main():
     sch = HW / "hddsynthpro.kicad_sch"
     with tempfile.TemporaryDirectory() as tmp:
@@ -115,9 +173,9 @@ def main():
 
     errors = []
     gp = config_gpios()
-    mcu = nl.refs("HDDSynthPro:PGA2350")
+    mcu = [r for r, lib in nl.lib.items() if lib.startswith("MCU_RaspberryPi:RP2350") or lib == "HDDSynthPro:PGA2350"]
     if len(mcu) != 1:
-        sys.exit(f"expected one PGA2350, found {mcu}")
+        sys.exit(f"expected one RP2350 (or PGA2350), found {mcu}")
     u1 = mcu[0]
     ide = [r for r in nl.refs("Connector_Generic:Conn_02x20_Odd_Even")]
     j_ide = ide[0] if len(ide) == 1 else None
@@ -125,7 +183,9 @@ def main():
         errors.append(f"expected one 40-pin IDE header, found {ide}")
 
     def gpio_net(name):
-        pad = nl.pin_named(u1, f"GP{gp[name]}")
+        n = gp[name]  # RP2350 pins are GPIO<n> or GPIO<n>/ADC<k>; the PGA2350 module's GP<n>
+        pad = next((p for (r, p), fn in nl.pin_name.items()
+                    if r == u1 and fn.split("/")[0] in (f"GPIO{n}", f"GP{n}")), None)
         return nl.net_of.get((u1, pad)) if pad else None
 
     def reach(name):
@@ -149,10 +209,11 @@ def main():
         if nl.net_of.get((j_ide, str(pin))) != "GND":
             errors.append(f"IDE pin {pin} is not on GND")
 
-    sd = nl.refs("Connector:Micro_SD_Card_Det_Hirose_DM3AT")
+    sd = sorted(r for r, lib in nl.lib.items() if lib.startswith("Connector:Micro_SD_Card"))
     for sig, card_pin in [("SD_CLK", "CLK"), ("SD_CMD", "CMD"), ("SD_DAT0", "DAT0"), ("SD_DAT1", "DAT1"),
-                          ("SD_DAT2", "DAT2"), ("SD_DAT3", "DAT3/CD"), ("SD_CD", "DET_A")]:
-        p = nl.pin_named(sd[0], card_pin) if sd else None
+                          ("SD_DAT2", "DAT2"), ("SD_DAT3", "DAT3/CD"), ("SD_CD", "DET")]:
+        names = (card_pin, "DET_A") if card_pin == "DET" else (card_pin,)
+        p = next((nl.pin_named(sd[0], n) for n in names if nl.pin_named(sd[0], n)), None) if sd else None
         if not p or nl.net_of.get((sd[0], p)) != gpio_net(sig):
             errors.append(f"{sig} (GP{gp[sig]}) is not on the microSD's {card_pin}")
 
@@ -182,6 +243,8 @@ def main():
     if not any(nl.lib[r] == "Device:R" and "+3V3" in (nl.net_of.get((r, "1")), nl.net_of.get((r, "2")))
                for r, _ in nl.nodes.get(en, [])):
         errors.append("BUS_EN# has no pull-up to +3V3")
+
+    errors += check_rp2350_support(nl, u1)
 
     if errors:
         print("\n".join("FAIL " + e for e in errors))

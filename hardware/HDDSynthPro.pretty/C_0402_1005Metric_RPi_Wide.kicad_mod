@@ -1,0 +1,109 @@
+(footprint "C_0402_1005Metric_RPi_Wide"
+	(version 20241229)
+	(generator "hddsynthpro_gen")
+	(generator_version "1.0")
+	(layer "F.Cu")
+	(descr "0402 capacitor with Raspberry Pi's wide pad layout (RP2350 minimal design, MIT licence).")
+	(tags "capacitor 0402 RP2350")
+	(property "Reference" "REF**"
+		(at 0 -1 0)
+		(layer "F.SilkS")
+		(uuid "9a851f08-f541-5c28-91bf-5a5afe041b33")
+		(effects
+			(font
+				(size 0.6 0.6)
+				(thickness 0.1)
+			)
+		)
+	)
+	(property "Value" "C_0402_1005Metric_RPi_Wide"
+		(at 0 1 0)
+		(layer "F.Fab")
+		(uuid "a7a29f06-4cea-5859-8d31-2fa661249c3f")
+		(effects
+			(font
+				(size 0.5 0.5)
+				(thickness 0.08)
+			)
+		)
+	)
+	(attr smd)
+	(units
+		(unit
+			(name "A")
+			(pins "1" "2")
+		)
+	)
+	(duplicate_pad_numbers_are_jumpers no)
+	(fp_rect
+		(start -0.5 -0.25)
+		(end 0.5 0.25)
+		(stroke
+			(width 0.01)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.CrtYd")
+		(uuid "5835c576-5d41-5e06-8fd3-a8146e816087")
+	)
+	(fp_rect
+		(start -0.5 -0.25)
+		(end 0.5 0.25)
+		(stroke
+			(width 0.01)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "5835c576-5d41-5e06-8fd3-a8146e816087")
+	)
+	(fp_rect
+		(start -0.25 -0.25)
+		(end 0.25 0.25)
+		(stroke
+			(width 0.01)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.Fab")
+		(uuid "0c1a3b22-2c46-5224-bab3-10e7200fbc55")
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "048a027b-81cd-52ae-bf57-b770d69fdc31")
+		(effects
+			(font
+				(size 0.8 0.5)
+				(thickness 0.01)
+			)
+		)
+	)
+	(pad "1" smd rect
+		(at -0.515 0)
+		(size 0.47 0.55)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(clearance 0.125)
+		(uuid "aaebd63d-f08c-5b15-a85c-4c8a4c506611")
+	)
+	(pad "2" smd rect
+		(at 0.515 0)
+		(size 0.47 0.55)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(clearance 0.125)
+		(uuid "c518ebb1-593c-56b6-91cf-29957cacef09")
+	)
+	(embedded_fonts no)
+	(model "kicad-embed://generic_capc1005x50.step"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

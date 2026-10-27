@@ -10,7 +10,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 
 - **Pins:** the pin map in `src/config.h`, `docs/wiring.md` and the tables in `docs/wiring.html` (IDE) and `docs/wiring-sd.html` (microSD), the interactive diagrams, must agree.
   - GPIO 0–3 stay off the bus: the BB48 pulls GPIO 2/3 up to 3.3 V (R17/R18).
-  - The PCB schematic (`hardware/`, the PGA2350 board in `docs/pcb.html`) keeps the same GPIOs; `hardware/tools/check_netlist.py` checks it against `src/config.h`.
+  - The PCB (`hardware/`, the RP2350B board in `docs/pcb.html`) keeps the same GPIOs; `hardware/tools/check_netlist.py` checks it against `src/config.h`.
   - GPIO 25 is the LED: the drive build's activity light (core 0's `updateLed()`, `cfg::LED_MIN_MS`).
   - DD/DA/CS# must stay on consecutive pins (one PIO read).
 - **Never use internal pull-downs** (RP2350 erratum E9). The host provides the bus pulls.

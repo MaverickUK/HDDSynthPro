@@ -41,10 +41,28 @@ def _rect(item):
     return (_mm(b.GetLeft()), _mm(b.GetTop()), _mm(b.GetRight()), _mm(b.GetBottom()))
 
 
-def _dist(x, y, r):
-    dx = max(r[0] - x, 0.0, x - r[2])
-    dy = max(r[1] - y, 0.0, y - r[3])
+def _dist(x, y, o):
+    """Distance from (x, y) to an obstacle: a rectangle (x0, y0, x1, y1), or a track
+    ("seg", x0, y0, x1, y1, half_width) measured to its centreline less its half-width."""
+    if o[0] == "seg":
+        _, x0, y0, x1, y1, hw = o
+        vx, vy = x1 - x0, y1 - y0
+        L = vx * vx + vy * vy
+        s = 0.0 if L == 0 else max(0.0, min(1.0, ((x - x0) * vx + (y - y0) * vy) / L))
+        return max(0.0, math.hypot(x - (x0 + s * vx), y - (y0 + s * vy)) - hw)
+    dx = max(o[0] - x, 0.0, x - o[2])
+    dy = max(o[1] - y, 0.0, y - o[3])
     return math.hypot(dx, dy)
+
+
+def _seg(t):
+    s, e = t.GetStart(), t.GetEnd()
+    return ("seg", _mm(s.x), _mm(s.y), _mm(e.x), _mm(e.y), _mm(t.GetWidth()) / 2)
+
+
+# Pads joined to their planes some other way: the RP2350B (its 3V3 ring and exposed pad) and
+# the regulator capacitors inside Raspberry Pi's copper fills.
+FANOUT_SKIP = {"U1", "C9", "C10"}
 
 
 def fanout(board):
@@ -58,15 +76,24 @@ def fanout(board):
     edge = board.GetBoardEdgesBoundingBox()
     ex0, ey0, ex1, ey1 = _mm(edge.GetLeft()), _mm(edge.GetTop()), _mm(edge.GetRight()), _mm(edge.GetBottom())
     obstacles = [(_rect(p), p.GetNetname()) for p in board.GetPads()]
+    obstacles += [(_seg(t) if t.GetClass() == "PCB_TRACK" else _rect(t), t.GetNetname())
+                  for t in board.GetTracks()]  # fixed copper already there
+    obstacles += [(_rect(z), z.GetNetname()) for z in board.Zones() if z.GetLayer() in (pcbnew.F_Cu, pcbnew.B_Cu)
+                  and z.GetBoundingBox().GetWidth() < pcbnew.FromMM(20)]
     vias = []  # holes keep apart whatever their net
     added = 0
     for fp in board.GetFootprints():
         cx, cy = _mm(fp.GetPosition().x), _mm(fp.GetPosition().y)
+        if fp.GetReference() in FANOUT_SKIP:
+            continue
         for pad in fp.Pads():
             net = pad.GetNetname()
             if net not in PLANE_NETS or pad.GetAttribute() != pcbnew.PAD_ATTRIB_SMD:
                 continue
             px, py = _mm(pad.GetPosition().x), _mm(pad.GetPosition().y)
+            if any(o[0] == "seg" and n == net and (math.hypot(o[1] - px, o[2] - py) < 0.05 or math.hypot(o[3] - px, o[4] - py) < 0.05)
+                   for o, n in obstacles):
+                continue  # a fixed track already takes this pad to its via
             r = _rect(pad)
             half = max(r[2] - r[0], r[3] - r[1]) / 2
             out = math.atan2(py - cy, px - cx) if (px, py) != (cx, cy) else 0.0
@@ -113,9 +140,24 @@ def fanout(board):
             board.Add(via)
             vias.append((vx, vy))
             obstacles.append(((vx - VIA_D / 2, vy - VIA_D / 2, vx + VIA_D / 2, vy + VIA_D / 2), net))
-            obstacles.append(((min(px, vx), min(py, vy), max(px, vx), max(py, vy)), net))
+            obstacles.append((("seg", px, py, vx, vy, STUB_W / 2), net))
             added += 1
     return added
+
+
+def remove_dangling_tracks(board):
+    """Unlocked track ends the router left going nowhere, removed until none are left."""
+    removed = 0
+    while True:
+        board.BuildConnectivity()
+        conn = board.GetConnectivity()
+        dangling = [t for t in board.GetTracks()
+                    if t.GetClass() == "PCB_TRACK" and not t.IsLocked() and conn.TestTrackEndpointDangling(t, False)]
+        if not dangling:
+            return removed
+        for t in dangling:
+            board.Remove(t)
+        removed += len(dangling)
 
 
 def remove_dangling_vias(board):
@@ -183,6 +225,10 @@ def main():
         subprocess.run(cmd + ["-de", str(dsn), "-do", str(ses), "-mp", PASSES], check=True)
         if not pcbnew.ImportSpecctraSES(board, str(ses)):
             sys.exit("SES import failed")
+    print(f"removed {remove_dangling_tracks(board)} dangling track pieces")
+    # KiCad 10's Python bindings break after removing items; save and reload before going on.
+    board.Save(str(pcb))
+    board = pcbnew.LoadBoard(str(pcb))
     print(f"removed {remove_dangling_vias(board)} dangling vias")
     outer_ground(board)
     board.Save(str(pcb))
