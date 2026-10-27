@@ -46,6 +46,12 @@ constexpr unsigned PIN_SD_DAT3 = 39;  // SPI chip select
 // leads are hand-wired; each step up was checked by hashing the whole image.
 constexpr uint32_t SD_SPI_MHZ = 25;
 
+// After a command starts, core 1 only serves the bus for this long before its
+// next bookkeeping step, so the host's first status poll (the adapter's comes
+// at once after IDENTIFY and SET FEATURES) never waits behind one. Without it
+// that poll was held 1.29-1.39 us (ATA allows 1.25).
+constexpr uint32_t COMMAND_QUIET_US = 4;
+
 // Trace ring between core 1 (producer) and core 0 (consumer):
 // 8192 events x 12 bytes = 96 KB.
 constexpr size_t TRACE_RING_EVENTS = 8192;

@@ -2,6 +2,17 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.11.1] - 2026-10-27
+
+The STATUS read after IDENTIFY, within ATA's limit (nearly always).
+
+### Fixed
+- **The adapter's first status poll after a command was held 1,346-1,386 ns** (ATA allows 1,250): it polls at once after IDENTIFY and SET FEATURES 03h/08h, while core 1 was still on the command's trace bookkeeping or its next bookkeeping step. Core 1 now answers any access already waiting before that bookkeeping, and for 4 µs after a command starts (`cfg::COMMAND_QUIET_US`) only serves the bus. Recording the CMD line or posting a READ's fetch 4 µs later costs nothing; the adapter waits about 10 ms after a READ.
+
+### On the rig (Windows, redetect cycles)
+- Measured in A-B-A order against v0.11.0 after a PC restart, which cleared the adapter's decline (below): v0.11.0 6/24 double detections, 2 lost or renamed disks, 50 slow reads; this fix 2/24, 0, 4 slow reads (1,253-1,320 ns, around IDENTIFY: 4 in 48); v0.11.0 again 3/12, 2, 26. Reads 1.23 MB/s, worst read during traffic 1,173 ns, as before.
+- Before the restart the same fix had looked far worse (11/12 double detections). The adapter was then declining in every build, the baseline included, after the PC had run for days with it plugged straight in: it was corrupting its own USB serial number and the disk's name. Restarting the PC cleared that, and 24 cycles on v0.11.0 afterwards didn't decline.
+
 ## [0.11.0] - 2026-10-27
 
 Re-detection without a replug, and two detection bugs it found.

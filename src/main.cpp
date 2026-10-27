@@ -192,6 +192,7 @@ CORE1_RAM void loop1() {
     uint32_t command_start_us = 0;
     ata::CommandInfo start_info{};  // the command whose CMD line is still to record
     bool start_unrecorded = false;
+    bool quiet = false;  // a command just started: bookkeeping waits (COMMAND_QUIET_US)
     uint32_t posted_fetch = 0;
     uint32_t wake_start_us = 0;  // 0: not timing a wake
     uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
@@ -227,6 +228,11 @@ CORE1_RAM void loop1() {
             dev.setWriteBehind(g_write_behind.load());
             dev.runQueuedCommand();
             ide_bus::updateIntrq(dev.intrq());
+            // The host may already be polling (the adapter reads STATUS at
+            // once after IDENTIFY): answer it before the bookkeeping below.
+            while (ide_bus::serviceOnce(dev, sample)) {
+                if (g_trace_bus.load()) record(TraceKind::Bus, sample);
+            }
             if (dev.commandsStarted() != started) {
                 started = dev.commandsStarted();
                 command_start_us = time_us_32();
@@ -234,8 +240,16 @@ CORE1_RAM void loop1() {
                 start_unrecorded = true;
                 g_command_starts.fetch_add(1, std::memory_order_relaxed);
                 g_command_active.store(true);
+                quiet = true;
             }
             continue;
+        }
+        // For a moment after a command starts, only the bus: the host's first
+        // status poll comes within a few microseconds and must find core 1
+        // free, not in the middle of a step (CMD line, fetch post).
+        if (quiet) {
+            if (time_us_32() - command_start_us < cfg::COMMAND_QUIET_US) continue;
+            quiet = false;
         }
 
         // Mid-sector the host streams 256 words and nothing else can happen
