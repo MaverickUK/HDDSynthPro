@@ -11,6 +11,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 - **Pins:** the pin map in `src/config.h`, `docs/wiring.md` and the tables in `docs/wiring.html` (IDE) and `docs/wiring-sd.html` (microSD), the interactive diagrams, must agree.
   - GPIO 0–3 stay off the bus: the BB48 pulls GPIO 2/3 up to 3.3 V (R17/R18).
   - GPIO 25 is the LED: the drive build's activity light (core 0's `updateLed()`, `cfg::LED_MIN_MS`).
+  - GPIO 0 is the activity link's UART0 TX (`cfg::PIN_LINK_TX`, docs/activity-link.md); GPIO 1 is reserved for its reply and stays untouched.
   - DD/DA/CS# must stay on consecutive pins (one PIO read).
 - **Never use internal pull-downs** (RP2350 erratum E9). The host provides the bus pulls.
 - **IORDY is open drain:** only pull it low or release it, never drive it high. The host pulls it up to 5 V.
@@ -27,7 +28,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   `main.cpp` holds both. Rig tests skip unless the board runs the build they need, and `scripts/rig.sh` takes `PIO_ENV`.
   - The variant defines `PIN_LED` as a macro, so don't reuse Arduino pin-macro names for constants.
 - **PIO programs:** the platform assembles each `src/*.pio` into a `.pio.h` next to it (git-ignored) before every build. Include them as `"name.pio.h"`.
-- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test`, `activity` and `sector_check` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
+- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test`, `activity`, `activity_link` and `sector_check` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
 - **CI:** `.github/workflows/build.yml` builds the firmware and runs the C++ tests and `pytest -m sim` on every push. A `vX.Y.Z` tag that matches `FIRMWARE_VERSION` publishes a release with the UF2.
 - **Python tests:** in `host/` (pytest). One marker per slice; `sim` needs no hardware.
   - Plain `pytest` runs only the `sim` tests.
@@ -98,6 +99,7 @@ Console:
 - `S`: start the microSD card and report it (drive build; only reads);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
 - `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`);
+- `L`: the activity link on or off (on by default; `s` shows `link`, `link_sent` and `link_last`);
 - `W`: debug, write-behind on or off (off by default: it holds some status reads past 1.25 µs during writes);
 - `x` then `Y`: the solder-bridge test, IDE cable unplugged (`short_test.*`; the board reboots afterwards);
 - `b`: reboot to the bootloader.
@@ -118,6 +120,6 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
 - **Next, to make PIO solid** (faster modes, DMA and clocks wait until then):
   1. The rare read mismatch: one sector per 8-9 h of soak on 0.7.1, twice the first sector of the second command when the adapter splits a long read at 128 sectors, bits 1 read as 0, a re-read right. Ruled out: strobe recovery racing IORDY's re-arm (`iordy_early` 0), an IORDY timeout in the adapter (clean up to 3.2 µs, `-m timing`). Not seen in 21.5 h on 0.8.22-0.8.24, whose core 1 code is the same (13.5 h, then 8 h with write-behind on; well under a 1% chance by luck at the old rate). If one appears in a later soak, the bus observer says whether it was wrong on the cable.
   2. Write-behind (built, off by default, console `W`): 1.51 MB/s to the card. Its slow status reads on the generated disk (32-39 per 3-minute soak, up to 1,280 ns) came from core 0 falling behind on the IORDY timer's reports, fixed in 0.8.24: none since (8 hours clean with `W` on, worst read 1,173 ns). On the SD card it still holds reads: about 2,000 ALTSTATUS reads past 1.25 µs per 16 MB written, worst 1.5-2.0 µs (0.8.24's CHANGELOG lists what's ruled out). The reasoning-and-counters approach has run out; next is GPIO markers from core 1 on a logic analyser, alongside DIOR#, IORDY and INTRQ. The NS1081 is sensitive to the order of DRQ, INTRQ and the store post: posting the store before raising INTRQ made it hang.
-  3. The activity link to the HDD Synth: `docs/activity-link.md` (this side) and `docs/hddsynth-activity-link-brief.md` (the synth's).
+  3. The activity link to the HDD Synth: this side built in 0.9.0 (`src/activity_link.*`, `host/hddproto/activity_link.py`), sending on the rig. Next: the loopback test (jumper GPIO 0 to GPIO 1), then the synth's side (`docs/hddsynth-activity-link-brief.md`).
   4. Smaller: re-mount a card put back while running; the slice 0 test reworked so it can pass without the bus going quiet (needs the listen build and a replug; the adapter's detection on the drive build is now `test_ns1081_detection`); why handling the mailbox mid-block broke detection (0.8.17).
   5. Later: PIO modes 3–4 (the adapter asks for mode 4), SD at 37.5 MHz (the card didn't start at it on the hand-wired leads: rewire first) then SDIO, DMA feeding the bus program, slice 6's pass-through tests from a Pi 5, retro hosts.

@@ -28,8 +28,10 @@
 #include "ide_listen.h"
 #else
 #include <hardware/structs/busctrl.h>
+#include <hardware/uart.h>
 
 #include "activity.h"
+#include "activity_link.h"
 #include "ata_device.h"
 #include "block_source.h"
 #include "bus_observer.h"
@@ -272,7 +274,10 @@ static BlockSource* g_disk = &g_overlay;
 static const char* g_disk_name = "generated";
 
 // The BB48's LED as the drive's activity light, like a hard disk's: lit while
-// a command runs, and for at least LED_MIN_MS after any command starts.
+// a command runs, and for at least LED_MIN_MS after any command starts. The
+// activity link sends the same busy flag.
+static bool g_busy = false;
+
 static void updateLed() {
     static uint32_t seen = 0;
     static uint32_t off_ms = 0;
@@ -282,7 +287,8 @@ static void updateLed() {
         seen = starts;
         off_ms = now + cfg::LED_MIN_MS;
     }
-    gpio_put(cfg::PIN_BOARD_LED, int32_t(off_ms - now) > 0);
+    g_busy = int32_t(off_ms - now) > 0;
+    gpio_put(cfg::PIN_BOARD_LED, g_busy);
 }
 
 static uint32_t g_disk_ms = 0;  // how long choosing the disk took at boot (console `s`)
@@ -313,10 +319,41 @@ static activity::Classifier g_activity;
 static uint32_t g_activity_checked_us = 0;
 static bool g_activity_unprinted = false;
 
+// The activity link to an HDD Synth (activity_link.h), on UART0, transmit
+// only. Core 0 must never wait on it, so a sentence (at most 20 bytes) is
+// written only when the 32-byte TX FIFO is empty; otherwise it stays due
+// and goes a millisecond later, with whatever is current then.
+static activity_link::Sender g_link(cfg::LINK_HEARTBEAT_MS);
+static activity_link::Op g_link_op = activity_link::Op::None;  // the last media command's
+static bool g_link_on = true;  // console `L`
+
+static void beginLink() {
+    uart_init(uart0, cfg::LINK_BAUD);  // 8N1
+    gpio_set_function(cfg::PIN_LINK_TX, GPIO_FUNC_UART);  // GPIO 1 (RX) stays untouched
+}
+
+static void serviceLink() {
+    if (!g_link_on) return;
+    activity_link::Fields f;
+    f.busy = g_busy;
+    f.state = g_activity.state();
+    f.op = g_link_op;
+    uint32_t now = millis();
+    if (!g_link.due(f, now)) return;
+    if (!(uart_get_hw(uart0)->fr & UART_UARTFR_TXFE_BITS)) return;  // not empty yet
+    char line[activity_link::SENTENCE_MAX];
+    size_t n = activity_link::formatSentence(f, line, sizeof line);
+    if (n == 0) return;
+    uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(line), n);  // fits: never waits
+    g_link.sent(f, now);
+}
+
 static void noteActivity(const TraceEvent& e) {
     uint8_t command = uint8_t(e.extra);
     if (!activity::isMediaCommand(command)) return;
     if (e.kind == TraceKind::CommandStart) {
+        activity_link::Op op = activity_link::opOf(command);
+        if (op != activity_link::Op::None) g_link_op = op;
         bool seek_only = (command >= 0x10 && command <= 0x1F) || (command >= 0x70 && command <= 0x7F);
         g_activity.onCommand(e.time_us, e.pins, seek_only ? 0 : (e.extra >> 8));
     } else if (e.kind == TraceKind::CommandEnd) {
@@ -410,6 +447,12 @@ static void printStats() {
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
     Serial.printf(" write_behind=%d", (int)g_write_behind.load());
+    char last[activity_link::SENTENCE_MAX] = "-";
+    if (g_link.count()) {
+        size_t n = activity_link::formatSentence(g_link.last(), last, sizeof last);
+        if (n >= 2) last[n - 2] = '\0';  // without the \r\n
+    }
+    Serial.printf(" link=%d link_sent=%lu link_last=%s", (int)g_link_on, (unsigned long)g_link.count(), last);
 #endif
     Serial.print("\n");
 }
@@ -485,7 +528,7 @@ static void handleConsole() {
 #else
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
                                "m mark, S SD card check, I create SD image, K create bench image, "
-                               "J serve the bench image or back (restarts), W write-behind, "
+                               "J serve the bench image or back (restarts), L activity link, W write-behind, "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -512,6 +555,10 @@ static void handleConsole() {
                 bus_observer::resetCounts();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
+            case 'L':  // the activity link on or off
+                g_link_on = !g_link_on;
+                Serial.printf("LINK %s\n", g_link_on ? "on" : "off");
+                break;
             case 'W': {  // debug: write-behind on or off, to compare
                 bool on = !g_write_behind.load();
                 g_write_behind.store(on);
@@ -567,6 +614,7 @@ void setup() {
 #if FIRMWARE_SLICE != 0
     gpio_init(cfg::PIN_BOARD_LED);
     gpio_set_dir(cfg::PIN_BOARD_LED, true);
+    beginLink();
     chooseDisk();
 #endif
     printReady();
@@ -586,6 +634,7 @@ void loop() {
     if (now_us - g_activity_checked_us >= 1000) {
         g_activity_checked_us = now_us;
         if (g_activity.update(now_us)) g_activity_unprinted = true;
+        serviceLink();
     }
     if (g_activity_unprinted) {
         char line[48];

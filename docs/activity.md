@@ -62,3 +62,7 @@ Record their traces, and replay them through `classify_trace` while listening to
   - short versus long seeks (the "average seek" in each `ACT` line);
   - reads versus writes;
   - spin-down after a long idle (the standby commands are already handled).
+
+## Sending it to an HDD Synth
+
+Since 0.9.0 the drive sends its activity (busy, the class above, and whether the last command read or wrote) to an HDD Synth over a one-way UART on GPIO 0, as `$HDA` sentences: on every change and every 200 ms. The protocol, wiring and status are in [activity-link.md](activity-link.md); console `s` shows `link_sent=` and the last sentence, and `L` turns it off and on.

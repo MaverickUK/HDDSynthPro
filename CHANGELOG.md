@@ -2,6 +2,23 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.9.0] - 2026-10-27
+
+The activity link to an HDD Synth, this side.
+
+### Added
+- **The activity link** (`src/activity_link.*`, docs/activity-link.md): the drive sends `$HDA,1,<busy>,<class>,<op>*<checksum>` sentences on UART0 TX (GPIO 0, 115200 8N1), on every change and every 200 ms, so an HDD Synth can play a different sound for sequential transfers than for random access. Busy is the LED's own flag; the class comes from the activity classifier; op is whether the last media command read or wrote.
+- Driven through the Pico SDK, transmit only: a sentence is written only when the 32-byte TX FIFO is empty, so core 0 never waits on it. GPIO 1 (UART0 RX) is reserved and untouched.
+- Console `L` turns it off and on; `s` shows `link=`, `link_sent=` and `link_last=` (the last sentence).
+- `host/hddproto/activity_link.py`, the receiver's reference parser (it ignores bad checksums, other sentences and lines over 80 bytes, and accepts extra fields), with `sim` tests; C++ tests for the format, the checksum (the spec's known answers, shared with the Python tests) and the send rules.
+- `test_ns1081_detection`: the adapter's detection sequence, from the drive's traces, as a host test.
+
+### On the rig (Windows, SD scratch image)
+- Sends: an idle heartbeat every 200 ms (`$HDA,1,0,I,-*28`), and 541 sentences over the speed and activity tests.
+- No cost to the bus: reads 1.26 MB/s, 76 IOPS, writes 0.92 MB/s, worst read 1,120 ns, no slow reads, as 0.8.24. Core 1's code is unchanged and sits where it did.
+- The activity test passes (each phase 95.5-99% in the right state).
+- Not yet received by anything: the loopback test needs a jumper from GPIO 0 to GPIO 1.
+
 ## [0.8.24] - 2026-10-26
 
 Write-behind's slow status reads traced to core 0, and fixed there.

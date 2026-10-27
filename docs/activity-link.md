@@ -2,7 +2,11 @@
 
 HDDSynthPro knows exactly what the emulated drive is doing; the HDD Synth only sees an activity LED. This link sends the drive's activity to an HDD Synth over a one-way UART, so the synth can play a different sound for sustained sequential transfers than for random access.
 
-Status: **planned**, not built. The HDD Synth side is briefed in [hddsynth-activity-link-brief.md](hddsynth-activity-link-brief.md).
+Status: **the HDDSynthPro side is built (0.9.0)** and sends on the rig; nothing has received it yet. Still to do: the loopback test (a jumper from GPIO 0 to GPIO 1), then the HDD Synth side, briefed in [hddsynth-activity-link-brief.md](hddsynth-activity-link-brief.md).
+
+As built, it differs from the plan below in two places:
+- **UART0 is driven through the Pico SDK, transmit only**, not Arduino's `Serial1`. `Serial1.availableForWrite()` only says whether one byte fits and `write()` waits when the FIFO is full, so it couldn't keep the rule that core 0 never waits; it also enables a receive interrupt, which a floating GPIO 1 could trigger. Now GPIO 1 isn't touched, and a sentence is written only when the 32-byte TX FIFO is empty, so it always fits.
+- **The last operation is tracked next to the link** (`activity_link::opOf()` on each media command), not in `activity::Classifier`, which stays as it was.
 
 ## What is sent
 

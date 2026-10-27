@@ -6,7 +6,7 @@ The pin map lives in [src/config.h](../src/config.h); this table must match it.
 
 ## Why these pins
 
-- **GPIO 0–3 are not used.** The BB48 pulls GPIO 2 and 3 up to 3.3 V through 2.2 kΩ (R17/R18, for the UEXT and Qwiic I2C connectors). GPIO 0/1 stay free for a debug UART.
+- **GPIO 0–3 are off the IDE bus.** The BB48 pulls GPIO 2 and 3 up to 3.3 V through 2.2 kΩ (R17/R18, for the UEXT and Qwiic I2C connectors). GPIO 0 (EXT1 pin 4) is UART0 TX for the activity link to an HDD Synth, and GPIO 1 (EXT1 pin 5) is reserved for its reply; wiring in [activity-link.md](activity-link.md).
 - **GPIO 25 is off the bus.** It drives the board's LED, which the drive build uses as its activity light.
 - **DD0–15, DA0–2, CS0#, CS1# are on 21 consecutive pins (GPIO 4–24)**, so one PIO read captures a whole register access.
 - **Everything is within GPIO 0–31**, the range one PIO block can reach.
