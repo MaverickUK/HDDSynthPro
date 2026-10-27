@@ -8,6 +8,7 @@
 
 #include "bus_observer.pio.h"
 #include "config.h"
+#include "identify.h"
 #include "sector_check.h"
 
 namespace bus_observer {
@@ -25,8 +26,11 @@ static uint32_t s_read = 0;  // next word for core 0
 static sector_check::Checker* s_checker = nullptr;
 static std::atomic<bool> s_started{false};
 
-void begin(uint32_t disk_sectors) {
+void begin(uint32_t disk_sectors, const IdentifyInfo& identity) {
     static sector_check::Checker checker(disk_sectors);
+    uint16_t identify[256];
+    buildIdentify(identity, identify);
+    checker.setIdentify(identify);
     s_checker = &checker;
 
     uint offset;
@@ -54,15 +58,30 @@ void begin(uint32_t disk_sectors) {
     s_started.store(true, std::memory_order_release);
 }
 
-void poll(Print& out, bool check) {
+void poll(Print& out, bool check, bool check_identify) {
     if (!s_started.load(std::memory_order_acquire)) return;
     uint32_t written = (dma_hw->ch[s_dma].write_addr - uint32_t(uintptr_t(s_ring))) / 4;
+    static bool checking = false;
+    if (!check && !check_identify) {
+        // Nothing to check: discard, which costs core 0 next to nothing.
+        s_read = written;
+        checking = false;
+        return;
+    }
+    if (!checking) s_checker->resync();  // words were discarded: not a gap
+    checking = true;
     // A bounded batch, so fetches are never kept waiting for long.
     for (unsigned n = 0; s_read != written && n < 512; ++n) {
         uint32_t word = s_ring[s_read];
         s_read = (s_read + 1) % RING_WORDS;
-        if (!check || !s_checker->observe(word)) continue;
+        if (!s_checker->observe(word, check)) continue;
         const sector_check::Mismatch& m = s_checker->mismatch();
+        if (m.lba == sector_check::IDENTIFY_LBA) {
+            out.printf("BUSERR %lu IDENTIFY word=%u seen=%04x want=%04x bad_words=%u bits_lost=%u bits_gained=%u\n",
+                       (unsigned long)time_us_32(), unsigned(m.first_word), unsigned(m.seen), unsigned(m.want),
+                       unsigned(m.bad_words), unsigned(m.bits_lost), unsigned(m.bits_gained));
+            continue;
+        }
         out.printf("BUSERR %lu lba=%lu word=%u seen=%04x want=%04x bad_words=%u bits_lost=%u bits_gained=%u\n",
                    (unsigned long)time_us_32(), (unsigned long)m.lba, unsigned(m.first_word),
                    unsigned(m.seen), unsigned(m.want), unsigned(m.bad_words), unsigned(m.bits_lost),
@@ -73,6 +92,8 @@ void poll(Print& out, bool check) {
 uint32_t sectorsChecked() { return s_checker ? s_checker->sectorsChecked() : 0; }
 uint32_t sectorsBad() { return s_checker ? s_checker->sectorsBad() : 0; }
 uint32_t sectorsSkipped() { return s_checker ? s_checker->sectorsSkipped() : 0; }
+uint32_t identifyChecked() { return s_checker ? s_checker->identifyChecked() : 0; }
+uint32_t identifyBad() { return s_checker ? s_checker->identifyBad() : 0; }
 uint32_t gaps() { return s_checker ? s_checker->gaps() : 0; }
 
 void resetCounts() {

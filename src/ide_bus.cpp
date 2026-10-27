@@ -180,6 +180,13 @@ void restart() {
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
+void stop() {
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    pio_sm_clear_fifos(s_pio, s_sm);
+    pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);  // release DD and IORDY
+    updateIntrq(false);
+}
+
 void setDataReadDelay(uint32_t ns) {
     s_data_delay_cycles.store(uint32_t(uint64_t(ns) * clock_get_hz(clk_sys) / 1000000000ull),
                               std::memory_order_relaxed);

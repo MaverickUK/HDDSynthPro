@@ -11,20 +11,28 @@
 
 #include <cstdint>
 
+#include "identify.h"
+
 namespace bus_observer {
 
 // Starts the program and its DMA channel. Call on core 1 next to
-// iordy_timer::begin, so the two never race to claim a PIO.
-void begin(uint32_t disk_sectors);
+// iordy_timer::begin, so the two never race to claim a PIO. `identity` is
+// the drive's, so IDENTIFY blocks on the bus can be checked too.
+void begin(uint32_t disk_sectors, const IdentifyInfo& identity);
 
-// Checks the samples so far; call often from core 0. With `check` false
-// (the disk isn't the generated one) they are only discarded. Prints a
-// BUSERR line for each sector that was wrong on the bus.
-void poll(Print& out, bool check);
+// Checks the samples so far; call often from core 0: data sectors with
+// `check` (the disk is the generated one), and IDENTIFY blocks with `check`
+// or `check_identify`. With neither the samples are discarded, which is
+// cheap; checking every word costs core 0 enough to slow reads (1.23 to
+// 1.16 MB/s), so on an image IDENTIFY is checked only around detection.
+// Prints a BUSERR line for each block that was wrong on the bus.
+void poll(Print& out, bool check, bool check_identify);
 
 uint32_t sectorsChecked();
 uint32_t sectorsBad();
 uint32_t sectorsSkipped();
+uint32_t identifyChecked();
+uint32_t identifyBad();
 uint32_t gaps();
 void resetCounts();
 

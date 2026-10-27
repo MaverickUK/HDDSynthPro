@@ -44,6 +44,10 @@ bool dataReadDelayed();
 // answer, and every later read would get the previous read's data.
 void restart();
 
+// Stops the PIO program and releases DD, IORDY and INTRQ: the drive is gone
+// from the bus, as if unplugged, until restart(). Console `V`.
+void stop();
+
 // Drives INTRQ to match the device: asserted = driven high, otherwise
 // released (the host pulls it down).
 void updateIntrq(bool asserted);

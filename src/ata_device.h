@@ -218,6 +218,9 @@ public:
     uint8_t status() const { return status_; }
     uint8_t error() const { return error_; }
     // Counters: a change means a command started / completed since last look.
+    // A command cut short (by RESET#, SRST or a new command) counts as
+    // completed, so the two are equal whenever no command is running: the
+    // activity LED and the HDD Synth link's busy flag rely on it.
     uint32_t commandsStarted() const { return commands_started_; }
     uint32_t commandsCompleted() const { return commands_completed_; }
     const CommandInfo& lastCommand() const { return last_; }
@@ -231,6 +234,7 @@ private:
     bool device1Selected() const { return (device_ & DEV_DEV) != 0; }
     bool acceptsCommand(uint8_t command) const;
     void resetToSignature();  // registers and status as after a reset
+    void abandonCommand() { commands_completed_ = commands_started_; }  // a command cut short ends
     void startCommand(uint8_t command);
     void startRead();
     void startWrite();

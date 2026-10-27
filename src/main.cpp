@@ -132,13 +132,19 @@ static SharedFlag g_command_active{false};
 // Core 1 starts first, so it waits for it: IDENTIFY reports the real size.
 static std::atomic<uint32_t> g_disk_sectors{0};
 
+// What IDENTIFY says: the device's, and the bus observer's to check it by.
+static IdentifyInfo driveIdentity() {
+    return IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
+                        g_disk_sectors.load(std::memory_order_acquire)};
+}
+
 void setup1() {
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
     ide_bus::begin();
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
-    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed));
+    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity());
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
     // delay its PIO accesses while the host waits on a read.
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
@@ -156,13 +162,31 @@ CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& 
     record(commandStartEvent(t_us, c.command, c.lba, c.count));
 }
 
+// Console `V`: the drive goes silent, as if unplugged, while core 0 holds
+// g_absent. The adapter's next command fails, it resets and probes, and the
+// drive is detected again once it's back: a replug without hands on the rig.
+// It comes back as from a power cycle, with the device reset. Runs once per
+// absence, never per access, so it can stay in flash (one of
+// check_core1_ram.py's one-offs).
+static SharedFlag g_absent{false};
+
+__attribute__((noinline)) static void stayAbsent(ata::Device& dev) {
+    dev.hardReset(true);
+    ide_bus::stop();
+    while (g_absent.load()) tight_loop_contents();
+    dev.hardReset(false);
+    ide_bus::restart();
+    iordy_timer::requestReset();
+    ide_bus::updateIntrq(dev.intrq());
+    g_command_active.store(false);
+}
+
 CORE1_RAM void loop1() {
     // Never returns. The bus comes first: every access waiting in the FIFO is
     // served back to back, and only when it is empty does core 1 do one small
     // bookkeeping step before looking again. So a read waits for one step at
     // most; iordy_timer.pio measures how long the host actually waits.
-    static ata::Device dev(IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
-                                        g_disk_sectors.load(std::memory_order_acquire)});
+    static ata::Device dev(driveIdentity());
     uint32_t started = dev.commandsStarted();
     uint32_t completed = dev.commandsCompleted();
     uint32_t command_start_us = 0;
@@ -265,7 +289,13 @@ CORE1_RAM void loop1() {
                     ide_bus::updateIntrq(dev.intrq());
                 }
                 break;
-            default: {  // RESET#
+            default: {  // RESET#, and console `V`
+                if (g_absent.load()) {
+                    stayAbsent(dev);
+                    reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
+                    if (reset_low) dev.hardReset(true);  // back in the middle of a reset
+                    break;
+                }
                 uint32_t pins = pinsAsSample();
                 bool low = !bus::high(pins, cfg::PIN_RESET_N);
                 if (low != reset_low) {
@@ -572,10 +602,67 @@ static void serviceLoopback() {
     g_loopback.phase = Phase::Off;
 }
 
+// Console `V`: the drive goes silent (core 1's stayAbsent) until the adapter,
+// having failed a command, asserts RESET# to look for a drive. Core 0 watches
+// RESET# itself (core 1 records nothing meanwhile) and brings the drive back
+// at that edge, so it's present before the reset ends, as a drive powering up
+// with the adapter would be. Coming back later, after the adapter had started
+// probing an empty bus, once left it with a garbled IDENTIFY. A second `V`, or
+// ABSENT_MAX_MS, also brings it back.
+constexpr uint32_t ABSENT_MAX_MS = 120000;
+static uint32_t g_absent_since_ms = 0;  // while g_absent
+static uint32_t g_absent_resets = 0;
+static bool g_absent_reset_low = false;
+
+static void setAbsent(bool on, const char* why) {
+    if (on == g_absent.load()) return;
+    if (on) {
+        g_absent_since_ms = millis();
+        g_absent_resets = 0;
+        g_absent_reset_low = !gpio_get(cfg::PIN_RESET_N);
+        g_absent.store(true);
+        Serial.println("ABSENT on");
+    } else {
+        g_absent.store(false);
+        Serial.printf("ABSENT off resets=%lu ms=%lu%s\n", (unsigned long)g_absent_resets,
+                      (unsigned long)(millis() - g_absent_since_ms), why);
+    }
+}
+
+static void serviceAbsence() {
+    if (!g_absent.load()) return;
+    bool low = !gpio_get(cfg::PIN_RESET_N);
+    if (low != g_absent_reset_low) {
+        g_absent_reset_low = low;
+        if (low) {
+            ++g_absent_resets;
+            setAbsent(false, " at RESET#");
+            return;
+        }
+    }
+    if (millis() - g_absent_since_ms >= ABSENT_MAX_MS) setAbsent(false, " timeout");
+}
+
+// The last media command seen, for the STUCK line (checkStuck).
+static struct {
+    uint8_t command = 0;
+    uint32_t lba = 0, count = 0;
+} g_last_command;
+
+// On an SD image the bus observer checks IDENTIFY only around detection,
+// which comes about 2.6 s after RESET# is released: for this long after each
+// release, and after boot (bus_observer::poll says why).
+constexpr uint32_t IDENTIFY_CHECK_MS = 10000;
+static uint32_t g_identify_check_until_ms = 30000;
+
 static void noteActivity(const TraceEvent& e) {
+    if (e.kind == TraceKind::ResetRelease) g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
     uint8_t command = uint8_t(e.extra);
     if (!activity::isMediaCommand(command)) return;
     if (e.kind == TraceKind::CommandStart) {
+        g_last_command.command = command;
+        g_last_command.lba = e.pins;
+        g_last_command.count = e.extra >> 8;
         activity_link::Op op = activity_link::opOf(command);
         if (op != activity_link::Op::None) g_link_op = op;
         bool seek_only = (command >= 0x10 && command <= 0x1F) || (command >= 0x70 && command <= 0x7F);
@@ -585,6 +672,12 @@ static void noteActivity(const TraceEvent& e) {
     }
 }
 
+// The last fetch served, for the STUCK line.
+static struct {
+    uint32_t count = 0, id = 0, lba = 0, at_ms = 0;
+    bool store = false, ok = false;
+} g_last_fetch;
+
 static void serveFetches() {
     ata::Fetch fetch;
     while (g_mailbox.takeRequest(fetch)) {
@@ -593,7 +686,40 @@ static void serveFetches() {
                                 : g_disk->read(fetch.lba, fetch.buffer);
         if (ok && fetch.flush) ok = g_disk->flush();
         while (!g_mailbox.postResult(FetchResult{fetch.id, ok})) {}
+        g_last_fetch.count++;
+        g_last_fetch.id = fetch.id;
+        g_last_fetch.lba = fetch.lba;
+        g_last_fetch.store = fetch.store;
+        g_last_fetch.ok = ok;
+        g_last_fetch.at_ms = millis();
     }
+}
+
+// A command still running after STUCK_MS: one STUCK line, saying whether core
+// 0 ever served its fetch and whether the result is still waiting for core 1.
+// From core 0's side only, so core 1 is untouched.
+constexpr uint32_t STUCK_MS = 3000;
+
+static void checkStuck() {
+    static uint32_t starts = 0;  // the command being timed, by g_command_starts
+    static uint32_t since_ms = 0;
+    static bool reported = false;
+    uint32_t now = millis();
+    uint32_t now_starts = g_command_starts.load(std::memory_order_relaxed);
+    if (!g_command_active.load() || now_starts != starts) {  // idle, or another command
+        starts = now_starts;
+        since_ms = now;
+        reported = false;
+        return;
+    }
+    if (reported || now - since_ms < STUCK_MS) return;
+    reported = true;
+    Serial.printf("STUCK cmd=%02x lba=%lu count=%lu busy_ms=%lu fetches=%lu last_fetch=%lu lba=%lu %s ok=%d "
+                  "ago_ms=%lu results_waiting=%u\n",
+                  g_last_command.command, (unsigned long)g_last_command.lba, (unsigned long)g_last_command.count,
+                  (unsigned long)(now - since_ms), (unsigned long)g_last_fetch.count, (unsigned long)g_last_fetch.id,
+                  (unsigned long)g_last_fetch.lba, g_last_fetch.store ? "store" : "read", (int)g_last_fetch.ok,
+                  (unsigned long)(now - g_last_fetch.at_ms), unsigned(g_mailbox.resultsWaiting()));
 }
 
 #endif
@@ -666,6 +792,8 @@ static void printStats() {
     Serial.printf(" bus_sectors=%lu bus_bad=%lu bus_skipped=%lu bus_gaps=%lu",
                   (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
                   (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps());
+    Serial.printf(" bus_identify=%lu bus_identify_bad=%lu", (unsigned long)bus_observer::identifyChecked(),
+                  (unsigned long)bus_observer::identifyBad());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
     Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
@@ -770,7 +898,7 @@ static void handleConsole() {
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
                                "m mark, S SD card and settings, C create HDDSYNTH.INI, E set a setting, ! restart, "
                                "I create SD image, K create bench image, "
-                               "J serve the bench image or back (restarts), L activity link, U link loopback test, W write-behind, "
+                               "J serve the bench image or back (restarts), L activity link, U link loopback test, V drive gone/back, W write-behind, "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -806,6 +934,7 @@ static void handleConsole() {
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 'U': startLoopback(); break;  // the link's loopback test
+            case 'V': setAbsent(!g_absent.load(), ""); break;  // the drive gone from the bus, or back
             case 'L':  // the activity link on or off
                 g_link_on = !g_link_on;
                 Serial.printf("LINK %s\n", g_link_on ? "on" : "off");
@@ -897,9 +1026,12 @@ void loop() {
     serveFetches();
     iordy_timer::poll();
     printSlowReads();
-    bus_observer::poll(Serial, g_disk == &g_overlay);  // only the generated disk can be checked
+    // Data sectors only on the generated disk; IDENTIFY there, and around detection.
+    bus_observer::poll(Serial, g_disk == &g_overlay, int32_t(g_identify_check_until_ms - millis()) > 0);
     updateLed();
     serviceLoopback();
+    serviceAbsence();
+    checkStuck();
 
     // Re-evaluate the activity state once a millisecond, before anything
     // below can return early on a busy serial link.

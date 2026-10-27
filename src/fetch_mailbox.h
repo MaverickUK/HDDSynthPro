@@ -27,6 +27,8 @@ public:
     // Core 0
     bool takeRequest(ata::Fetch& fetch) { return requests_.pop(fetch); }
     bool postResult(const FetchResult& result) { return results_.push(result); }
+    // Results core 1 hasn't taken yet (a snapshot, for diagnostics).
+    size_t resultsWaiting() const { return results_.size(); }
 
 private:
     SpscRing<ata::Fetch, 4> requests_;

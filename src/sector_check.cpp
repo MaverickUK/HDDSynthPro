@@ -15,7 +15,50 @@ static unsigned popcount16(uint16_t v) {
     return n;
 }
 
-bool Checker::observe(uint32_t word) {
+// IDENTIFY's words that never change after start-up: serial (10-19),
+// firmware and model (23-46), LBA28 capacity (60-61). The rest change with
+// SET FEATURES and INITIALIZE DEVICE PARAMETERS (and the checksum with them).
+static bool identifyWordIsStable(unsigned i) {
+    return (i >= 10 && i <= 19) || (i >= 23 && i <= 46) || i == 60 || i == 61;
+}
+
+void Checker::setIdentify(const uint16_t words[256]) {
+    for (unsigned i = 0; i < 256; ++i) identify_[i] = words[i];
+    have_identify_ = true;
+}
+
+bool Checker::checkIdentify(bool& is_identify) {
+    is_identify = false;
+    if (!have_identify_) return false;
+    Mismatch m{IDENTIFY_LBA, 0, 0, 0, 0, 0, 0};
+    unsigned matches = 0;
+    for (unsigned i = 0; i < 256; ++i) {
+        if (!identifyWordIsStable(i)) continue;
+        uint16_t want = identify_[i];
+        uint16_t seen = words_[i];
+        if (seen == want) {
+            if (want != 0) ++matches;  // zeros prove nothing
+            continue;
+        }
+        if (m.bad_words == 0) {
+            m.first_word = uint16_t(i);
+            m.seen = seen;
+            m.want = want;
+        }
+        ++m.bad_words;
+        m.bits_lost = uint16_t(m.bits_lost + popcount16(want & ~seen));
+        m.bits_gained = uint16_t(m.bits_gained + popcount16(seen & ~want));
+    }
+    if (matches < IDENTIFY_MIN_MATCHES) return false;
+    is_identify = true;
+    ++identify_checked_;
+    if (m.bad_words == 0) return false;
+    ++identify_bad_;
+    mismatch_ = m;
+    return true;
+}
+
+bool Checker::observe(uint32_t word, bool data) {
     uint32_t seq = (word >> SEQ_SHIFT) & SEQ_MASK;
     bool gap = have_seq_ && seq != ((last_seq_ - 1) & SEQ_MASK);
     have_seq_ = true;
@@ -32,10 +75,17 @@ bool Checker::observe(uint32_t word) {
     words_[count_++] = bus::data(sample);
     if (count_ < 256) return false;
     count_ = 0;
-    return finishSector();
+    return finishSector(data);
 }
 
-bool Checker::finishSector() {
+bool Checker::finishSector(bool data) {
+    bool is_identify;
+    bool bad = checkIdentify(is_identify);
+    if (is_identify) return bad;
+    if (!data) {
+        ++skipped_;
+        return false;
+    }
     // The LBA from words 0-1, or failing that from ~words 2-3.
     uint32_t candidates[2] = {
         uint32_t(words_[0]) | (uint32_t(words_[1]) << 16),

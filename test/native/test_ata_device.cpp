@@ -571,6 +571,72 @@ TEST(test_read_ahead_stale_after_reset) {
     CHECK(!d.pendingFetch(f));
 }
 
+TEST(test_command_abandons_unread_block) {
+    // The host gives up on a READ partway through a sector and writes the
+    // command again, with no reset (the JMicron did, 27 Oct 2026). The new
+    // command must start clean: a stale data pointer looked like a transfer
+    // under way (so loop1 never took the fetch result) and made the new
+    // sector look like a read-ahead, and the drive stayed BSY for good.
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    h.setLba(7, 4);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(h.waitNotBusy());
+    h.status();
+    for (int i = 0; i < 100; ++i) d.read(Reg::Data);  // part of sector 7
+    Fetch ahead;
+    CHECK(d.pendingFetch(ahead));  // the read-ahead of sector 8, under way on core 0
+    CHECK(d.transferring());
+
+    h.setLba(7, 4);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(!d.transferring());  // the old block is gone
+    d.fetchDone(ahead.id, disk.read(ahead.lba, ahead.buffer));  // late: ignored
+    std::vector<uint16_t> got;
+    for (int s = 0; s < 4; ++s) {
+        CHECK(h.waitNotBusy());
+        CHECK_EQ(h.status() & (ST_DRQ | ST_ERR), ST_DRQ);
+        for (int i = 0; i < 256; ++i) got.push_back(d.read(Reg::Data));
+    }
+    CHECK(h.waitNotBusy());
+    CHECK(sameAsDisk(got, 7, 4));
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC);
+}
+
+TEST(test_command_abandons_unread_identify) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    d.write(Reg::StatusCommand, CMD_IDENTIFY_DEVICE);
+    h.status();
+    for (int i = 0; i < 10; ++i) d.read(Reg::Data);
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(42, 2, got));
+    CHECK(sameAsDisk(got, 42, 2));
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());  // the IDENTIFY counts as ended: not busy
+}
+
+TEST(test_reset_ends_the_running_command) {
+    // The activity LED and the link's busy flag go off when the counts match.
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    h.setLba(100, 4);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(h.waitNotBusy());
+    CHECK(d.commandsCompleted() != d.commandsStarted());
+    d.hardReset(true);
+    d.hardReset(false);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+
+    h.setLba(100, 4);
+    d.write(Reg::StatusCommand, CMD_READ_SECTORS);
+    CHECK(h.waitNotBusy());
+    h.softReset();
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+}
+
 TEST(test_read_ahead_off) {
     // Off, the next sector is fetched under BSY after the host reads one.
     Device d(INFO);
@@ -1552,6 +1618,9 @@ void runAtaDeviceTests() {
     RUN(test_read_ahead_hides_the_fetch);
     RUN(test_read_ahead_failure_reported_at_its_sector);
     RUN(test_read_ahead_stale_after_reset);
+    RUN(test_command_abandons_unread_block);
+    RUN(test_command_abandons_unread_identify);
+    RUN(test_reset_ends_the_running_command);
     RUN(test_read_ahead_off);
     RUN(test_read_count_zero_means_256);
     RUN(test_read_last_sector_and_past_the_end);

@@ -2,6 +2,27 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.11.0] - 2026-10-27
+
+Re-detection without a replug, and two detection bugs it found.
+
+### Added
+- **Console `V`**: the drive leaves the bus (the bus program stopped, DD, IORDY and INTRQ released, the device reset) and comes back at the adapter's next RESET# assert, a second `V`, or after 120 s. With a read sent meanwhile, the adapter fails it, resets about 20 s later and probes; the drive is back before that reset ends, so it is detected again (IDENTIFY, SET FEATURES) and the read is retried. About 30 s, and the host keeps the disk. Coming back later, after the adapter had started probing an empty bus, once left it with a garbled IDENTIFY.
+- **`HDDPRO_REPLUG=redetect`**: `rig.replug()` does that cycle (`Host.redetect()`), so slices 1-2 run their 20 cycles with no hands on the rig. A re-detection, not a power-up probe: not for slice 0.
+- **IDENTIFY checked on the cable**: the bus observer compares IDENTIFY blocks with the drive's own on the words that never change (serial, firmware, model, capacity), and prints `BUSERR t IDENTIFY ...` for a bad one; `s` shows `bus_identify=` and `bus_identify_bad=`. On an SD image only for 10 s after each RESET# release (detection), since checking every word costs core 0 enough to slow reads from 1.23 to 1.16 MB/s.
+- **`STUCK`**: a command running over 3 s prints the last fetch core 0 served and whether its result is still waiting for core 1.
+
+### Fixed
+- **The drive stayed BSY for good when the host wrote a command over an unread block.** The JMicron sometimes gives up on a READ (or IDENTIFY) partway and writes the next command with no reset. `startCommand` kept the old data pointer, so the device looked mid-transfer: loop1 then never took the new fetch's result (`STUCK ... results_waiting=1`), and the new sector would have been taken for a read-ahead. Windows dropped the disk. A new command now abandons an unread block and any read-ahead; host tests reproduce both cases.
+- **Busy (the activity LED and the HDD Synth link's busy flag) stayed on after a command was cut short** by RESET#, SRST or a new command, since it never counted as completed. After a detection the link said busy until the next command ended. A cut-short command now counts as completed.
+
+### Found
+- The STATUS read straight after each IDENTIFY is held 1,266-1,293 ns (now 1,346-1,386 with the fix above in the command path): the adapter polls at once while core 1 is still running the command. Deferring the command's trace bookkeeping only moved the slow read to SET FEATURES, so that was reverted. Slice 1's IORDY check fails on it.
+- The JMicron read IDENTIFY with three words in four zero twice (once after a redetect that came back late, once after a reflash), and Windows named the disk "HD P". Not seen in 69 IDENTIFYs checked on the cable since.
+
+### On the rig (Windows, no hands)
+- 30 redetect cycles, each followed by 4 MB of reads from the SD image: all detected, 69 IDENTIFYs checked on the cable with none bad, 8 abandoned READs recovered (each a hang before the fix), the disk kept its name. Before the fix: hangs in about 1 cycle in 5. Reads 1.23 MB/s outside the IDENTIFY window.
+
 ## [0.10.2] - 2026-10-27
 
 The slice 0 test, reworked so it can pass while the adapter probes forever.

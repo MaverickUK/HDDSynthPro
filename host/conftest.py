@@ -122,8 +122,10 @@ def ask(request):
 
 
 @pytest.fixture
-def rig(ask):
-    return make_host(ask)
+def rig(ask, drive):
+    host = make_host(ask)
+    host.drive = drive  # for HDDPRO_REPLUG=redetect
+    return host
 
 
 @pytest.fixture

@@ -65,6 +65,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
         bool was_srst = (device_control_ & DC_SRST) != 0;
         device_control_ = v;
         if (v & DC_SRST) {
+            abandonCommand();
             in_reset_ = true;
             status_ = ST_BSY;
             irq_pending_ = false;
@@ -121,6 +122,7 @@ CORE1_RAM void Device::runQueuedCommand() {
 
 CORE1_RAM void Device::hardReset(bool asserted) {
     if (asserted) {
+        abandonCommand();
         in_reset_ = true;
         status_ = ST_BSY;
         irq_pending_ = false;
@@ -154,6 +156,23 @@ CORE1_RAM bool Device::intrq() const {
 // ---- Commands ---------------------------------------------------------------
 
 CORE1_RAM void Device::startCommand(uint8_t command) {
+    // A command written while a data-in block is unread (DRQ): the host gave
+    // up on it. ATA says it mustn't, but the JMicron does. Abandon it, or the
+    // stale block looks like a transfer under way (loop1 then never takes a
+    // fetch result) and the new command's first sector like a read-ahead,
+    // and the drive stays BSY for good. A write can't be left like this: it
+    // ends only when every sector is stored, and holds BSY until then.
+    abandonCommand();  // whatever was running ends here
+    if (data_ || reading_) {
+        data_ = nullptr;
+        data_count_ = data_index_ = 0;
+        reading_ = false;
+        ahead_ok_ = ahead_failed_ = false;
+        if (fetch_pending_) {  // a read-ahead under way: its result is stale now
+            fetch_pending_ = false;
+            if (++fetch_id_ == 0) ++fetch_id_;
+        }
+    }
     last_ = CommandInfo{command, 0, 0};
     ++commands_started_;
     irq_pending_ = false;  // writing Command clears a pending interrupt

@@ -7,6 +7,7 @@
 #include "check.h"
 #include "config.h"
 #include "gen_disk.h"
+#include "identify.h"
 #include "sector_check.h"
 
 using namespace sector_check;
@@ -143,7 +144,87 @@ TEST(test_sector_check_sequence_wraps) {
     CHECK_EQ(c.sectorsChecked(), 20u);
 }
 
+static std::vector<uint16_t> identifyWords() {
+    std::vector<uint16_t> w(256);
+    buildIdentify(IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", "0.11.0", gen_disk::DEFAULT_SECTORS}, w.data());
+    return w;
+}
+
+TEST(test_sector_check_identify_good) {
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    std::vector<uint16_t> id = identifyWords();
+    c.setIdentify(id.data());
+    CHECK_EQ(feed(c, o, id), 0);
+    CHECK_EQ(c.identifyChecked(), 1u);
+    CHECK_EQ(c.identifyBad(), 0u);
+    CHECK_EQ(c.sectorsSkipped(), 0u);
+
+    // Words that change after start-up (geometry, write cache, checksum) don't count.
+    std::vector<uint16_t> changed = id;
+    changed[54] ^= 0x10;
+    changed[85] ^= 0x20;
+    changed[255] ^= 0x1200;
+    CHECK_EQ(feed(c, o, changed), 0);
+    CHECK_EQ(c.identifyChecked(), 2u);
+}
+
+TEST(test_sector_check_identify_garbled) {
+    // As the NS1081/JMicron once read it: the model came out "HD P", three
+    // words in four read as zero.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    std::vector<uint16_t> id = identifyWords();
+    c.setIdentify(id.data());
+    std::vector<uint16_t> garbled = id;
+    for (unsigned i = 0; i < 256; ++i)
+        if (i % 4 != 3) garbled[i] = 0;
+    CHECK_EQ(feed(c, o, garbled), 1);
+    CHECK_EQ(c.identifyChecked(), 1u);
+    CHECK_EQ(c.identifyBad(), 1u);
+    const Mismatch& m = c.mismatch();
+    CHECK_EQ(m.lba, IDENTIFY_LBA);
+    CHECK_EQ(unsigned(m.first_word), 10u);  // the serial number's first word
+    CHECK_EQ(unsigned(m.seen), 0u);
+    CHECK(m.bad_words > 20);
+    CHECK_EQ(unsigned(m.bits_gained), 0u);
+}
+
+TEST(test_sector_check_identify_without_data_check) {
+    // On an SD image only IDENTIFY is checked; data sectors are skipped.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    std::vector<uint16_t> id = identifyWords();
+    c.setIdentify(id.data());
+    std::vector<uint16_t> bad = id;
+    bad[27] = 0;
+    int reports = 0;
+    for (uint32_t i = 0; i < 4; ++i) reports += feed(c, o, sectorWords(i));
+    reports += feed(c, o, bad);
+    for (uint32_t i = 0; i < 4; ++i) reports += feed(c, o, sectorWords(i));
+    CHECK_EQ(reports, 1);
+    CHECK_EQ(c.sectorsChecked(), 8u);
+    CHECK_EQ(c.identifyBad(), 1u);
+
+    Checker image(gen_disk::DEFAULT_SECTORS);
+    image.setIdentify(id.data());
+    int image_reports = 0;
+    auto feed_image = [&](const std::vector<uint16_t>& words) {
+        image_reports += image.observe(o.status(), false) ? 1 : 0;
+        for (uint16_t w : words) image_reports += image.observe(o.data(w), false) ? 1 : 0;
+    };
+    feed_image(sectorWords(5));
+    feed_image(bad);
+    CHECK_EQ(image_reports, 1);
+    CHECK_EQ(image.sectorsChecked(), 0u);
+    CHECK_EQ(image.sectorsSkipped(), 1u);
+    CHECK_EQ(image.identifyBad(), 1u);
+}
+
 void runSectorCheckTests() {
+    RUN(test_sector_check_identify_good);
+    RUN(test_sector_check_identify_garbled);
+    RUN(test_sector_check_identify_without_data_check);
     RUN(test_sector_check_good_sectors);
     RUN(test_sector_check_overnight_mismatch);
     RUN(test_sector_check_lba_from_inverted_words);

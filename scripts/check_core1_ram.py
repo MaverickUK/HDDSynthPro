@@ -27,6 +27,7 @@ ONE_OFFS = (
     "ata::Device::Device(",       # loop1's static device, constructed once
     "ide_bus::restart(",          # when the host releases RESET#
     "iordy_timer::requestReset(",  # likewise
+    "stayAbsent(",                # console `V`: the drive goes silent, once per absence
     "__cxa_guard_acquire",        # guards for function-local statics
     "__cxa_guard_release",
 )
