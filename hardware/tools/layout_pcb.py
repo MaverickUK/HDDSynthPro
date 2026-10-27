@@ -14,10 +14,11 @@ linked to its symbol and "Update PCB from Schematic" works afterwards. Like
 gen_schematic.py, this only bootstraps: once the board has been edited in
 KiCad, rerunning it overwrites the edits. Traces aren't routed here.
 
-Layout: the 40-pin IDE header on the left edge, vertical. The four bus switches
-sit beside it, their IDE side facing the header and their PGA2350 side facing
-the module. The PGA2350 is in the middle; USB-C, power and the link along the top
-edge; the microSD socket on the right edge with its pull-ups beside it.
+Layout: the HDD Synth Mk5's outline and holes. The 40-pin IDE header on the left,
+vertical, just inside the left-hand holes. The four bus switches sit beside it,
+their IDE side facing the header and their RP2350B side facing the chip. The
+RP2350B is in the middle; USB-C, power and the link along the top edge; the
+microSD socket on the right edge with its pull-ups beside it.
 Four layers: signals, GND plane, 3V3 plane, signals.
 """
 import json
@@ -36,86 +37,91 @@ HW = Path(__file__).resolve().parent.parent
 KICAD_SHARE = Path(os.environ.get("KICAD_SHARE", "/Applications/KiCad/KiCad.app/Contents/SharedSupport"))
 OUT = HW / "hddsynthpro.kicad_pcb"
 
-# Board outline, mm. KiCad's y axis points down.
-X0, Y0, W, H = 100.0, 100.0, 85.0, 76.0
+# Board outline, mm. KiCad's y axis points down. The HDD Synth Mk5's outline (100.33 x 69.88 mm,
+# 2.54 mm corner radius) and mounting holes, moved so its top left corner is at (X0, Y0), so the
+# two boards stack on standoffs.
+X0, Y0, W, H = 100.0, 100.0, 100.33, 69.88
+CORNER_R = 2.54
 
 # ref -> (x, y, rotation in degrees counterclockwise). Footprint origins: pin 1 for the
 # IDE header and the pin socket, the centre for everything else.
 PLACE = {
     # IDE side
-    "J5": (105.5, 114.0, 0),       # 2x20 header, pin 1 at the top, key facing the edge
+    "J5": (117.5, 114.0, 0),       # 2x20 header, pin 1 at the top, key facing the edge
     # Bus switches, B side (pins 11-18) facing the header, each beside the header pins it serves.
-    "U2": (118.0, 119.0, 180),     # header pins 1-9
-    "U3": (118.0, 129.5, 180),     # 10-17
-    "U5": (118.0, 141.5, 180),     # 18-33
-    "U6": (118.0, 151.5, 180),     # 35-38
-    "C4": (118.0, 124.2, 0),       # decoupling, below each switch
-    "C5": (118.0, 134.7, 0),
-    "C7": (118.0, 146.7, 0),
-    "C8": (118.0, 156.7, 0),
-    "R13": (115.0, 160.5, 90),     # BUS_EN# pull-up
-    "JP1": (117.6, 160.5, 90),     # BUS_EN# to GND
-    "R14": (132.0, 153.0, 0),      # DIOR# 33R
-    "R15": (132.0, 156.0, 0),      # DIOW# 33R
+    "U2": (130.0, 119.0, 180),     # header pins 1-9
+    "U3": (130.0, 129.5, 180),     # 10-17
+    "U5": (130.0, 141.5, 180),     # 18-33
+    "U6": (130.0, 151.5, 180),     # 35-38
+    "C4": (130.0, 124.2, 0),       # decoupling, below each switch
+    "C5": (130.0, 134.7, 0),
+    "C7": (130.0, 146.7, 0),
+    "C8": (130.0, 156.7, 0),
+    "R13": (127.0, 160.5, 90),     # BUS_EN# pull-up
+    "JP1": (129.6, 160.5, 90),     # BUS_EN# to GND
+    "R14": (142.0, 148.5, 0),      # DIOR# 33R
+    "R15": (142.0, 150.7, 0),      # DIOW# 33R
     # RP2350B, its data side (pins 1-20) facing the switches. Its regulator cluster is placed
     # by core_copper(), relative to the VREG_LX pin, as in Raspberry Pi's layout.
-    "U1": (140.0, 132.0, 0),
-    "R20": (154.0, 147.6, 0),      # RUN to RESET button
-    "Y1": (140.0, 143.5, 0),       # crystal below XIN/XOUT
-    "R17": (141.6, 139.6, 90),     # XOUT 1k
-    "C27": (136.6, 144.35, 0),     # XIN 15 pF
-    "C28": (143.4, 142.65, 0),     # crystal output 15 pF
+    "U1": (151.0, 132.0, 0),
+    "R20": (169.0, 147.6, 0),      # RUN to RESET button
+    "Y1": (151.0, 143.5, 0),       # crystal below XIN/XOUT
+    "R17": (152.6, 139.6, 90),     # XOUT 1k
+    "C27": (147.6, 144.35, 0),     # XIN 15 pF
+    "C28": (154.4, 142.65, 0),     # crystal output 15 pF
     # 100 nF on the supply pins: corners and the gaps between signal groups
-    "C24": (123.2, 125.0, 90), "C25": (124.8, 125.0, 90), "C19": (126.4, 125.0, 90), "C20": (128.0, 125.0, 90),
-    "C12": (129.6, 125.0, 90),    # left of the QSPI fan-out
-    "C13": (133.6, 138.4, 0), "C14": (133.6, 139.6, 0), "C15": (137.4, 141.2, 0),
-    "C16": (146.4, 138.4, 0), "C21": (146.4, 139.6, 0),
-    "C17": (146.8, 130.0, 90), "C22": (148.0, 130.0, 90),
-    "C18": (146.6, 126.4, 90), "C23": (147.8, 126.4, 90),
-    "C6": (159.0, 121.0, 0),       # 3V3 bulk
-    "U8": (172.0, 124.0, 0),       # AMS1117 3.3 V regulator
-    "C29": (165.0, 122.0, 0),      # its output capacitor
+    "C24": (134.2, 125.0, 90), "C25": (135.8, 125.0, 90), "C19": (137.4, 125.0, 90), "C20": (139.0, 125.0, 90),
+    "C12": (140.6, 125.0, 90),    # left of the QSPI fan-out
+    "C13": (144.6, 138.4, 0), "C14": (144.6, 139.6, 0), "C15": (148.4, 141.2, 0),
+    "C16": (157.4, 138.4, 0), "C21": (157.4, 139.6, 0),
+    "C17": (157.8, 130.0, 90), "C22": (159.0, 130.0, 90),
+    "C18": (157.6, 126.4, 90), "C23": (158.8, 126.4, 90),
+    "C6": (170.0, 121.0, 0),       # 3V3 bulk
+    "U8": (183.0, 124.0, 0),       # AMS1117 3.3 V regulator
+    "C29": (176.0, 122.0, 0),      # its output capacitor
     # Top edge: link, buttons, SWD, USB-C, power
-    "J3": (116.0, 104.0, 90),      # link socket, pins along the edge, pin 1 on the left
-    "R3": (117.27, 108.8, 90),
-    "R4": (119.81, 108.8, 90),
-    "J6": (127.46, 104.0, 90),     # SWD, 1x3 0.1" header, pins along the edge
-    "SW1": (150.0, 152.0, 0),      # BOOTSEL, bottom right, clear of the flash
-    "SW2": (158.5, 152.0, 0),      # RESET
-    "J1": (147.0, 103.64, 180),    # USB-C, mouth on the top edge (3.64 mm in, as on the HDD Synth Mk5)
-    "U4": (147.0, 112.6, 90),      # ESD, turned so D+ and D- run straight through it to J1
-    "R1": (150.4, 110.2, 0),       # CC1 pull-down, beside the CC1 pin
-    "R2": (143.4, 110.2, 180),     # CC2 pull-down, beside the CC2 pin
-    "D1": (158.5, 104.0, 0),
-    "C1": (160.0, 110.5, 0),
-    "J2": (166.0, 103.6, 0),       # 5 V in
-    "F1": (167.5, 110.5, 0),
-    "D2": (174.0, 110.5, 0),
+    "J3": (127.0, 104.0, 90),      # link socket, pins along the edge, pin 1 on the left
+    "R3": (128.27, 108.8, 90),
+    "R4": (130.81, 108.8, 90),
+    "D5": (136.0, 110.0, 180),     # link 5 V into VB, anode towards J3's pin 1
+    "J6": (138.46, 104.0, 90),     # SWD, 1x3 0.1" header, pins along the edge
+    "SW1": (165.0, 152.0, 0),      # BOOTSEL, bottom right, clear of the flash and the logo
+    "SW2": (173.5, 152.0, 0),      # RESET
+    "J1": (158.0, 103.64, 180),    # USB-C, mouth on the top edge (3.64 mm in, as on the HDD Synth Mk5)
+    "U4": (158.0, 112.6, 90),      # ESD, turned so D+ and D- run straight through it to J1
+    "R1": (161.4, 110.2, 0),       # CC1 pull-down, beside the CC1 pin
+    "R2": (154.4, 110.2, 180),     # CC2 pull-down, beside the CC2 pin
+    "D1": (169.5, 104.0, 0),
+    "C1": (171.0, 110.5, 0),
+    "J2": (177.0, 103.6, 0),       # 5 V in
+    "F1": (178.5, 110.5, 0),
+    "D2": (185.0, 110.5, 0),
     # LEDs, top right
-    "R5": (163.0, 117.0, 0),
-    "D3": (167.0, 117.0, 0),
-    "R6": (172.0, 117.0, 0),
-    "D4": (176.0, 117.0, 0),
+    "R5": (174.0, 117.0, 0),
+    "D3": (178.0, 117.0, 0),
+    "R6": (183.0, 117.0, 0),
+    "D4": (187.0, 117.0, 0),
     # microSD on the right edge, card in from the right
     "J4": (X0 + W - 9.69, 140.0, 90),  # TF PUSH: its front edge on the board edge
-    "R7": (161.0, 126.5, 0),
-    "R8": (161.0, 128.7, 0),
-    "R9": (161.0, 130.9, 0),
-    "R10": (161.0, 133.1, 0),
-    "R11": (161.0, 135.3, 0),
-    "R12": (161.0, 137.5, 0),
-    "C3": (161.0, 140.0, 0),
-    "C2": (161.0, 143.0, 0),
+    "R7": (172.0, 126.5, 0),
+    "R8": (172.0, 128.7, 0),
+    "R9": (172.0, 130.9, 0),
+    "R10": (172.0, 133.1, 0),
+    "R11": (172.0, 135.3, 0),
+    "R12": (172.0, 137.5, 0),
+    "C3": (172.0, 140.0, 0),
+    "C2": (172.0, 143.0, 0),
 }
 # Reference designators moved off pads and neighbours: ref -> (x, y), or None to hide.
 REF_TEXT = {
-    **{r: (158.0, PLACE[r][1]) for r in ("R7", "R8", "R9", "R10", "R11", "R12", "C3", "C2")},
-    "R3": (117.27, 111.6), "R4": (119.81, 111.6), "U4": (150.9, 113.4), "J6": (135.6, 103.4), "J1": (153.6, 101.6),
-    "J2": (172.6, 103.6), "F1": (167.5, 112.6), "R13": (114.3, 163.8), "JP1": (118.3, 163.8),
+    **{r: (169.0, PLACE[r][1]) for r in ("R7", "R8", "R9", "R10", "R11", "R12", "C3", "C2")},
+    "R3": (128.27, 111.6), "R4": (130.81, 111.6), "U4": (161.9, 113.4), "J6": (146.6, 103.4), "J1": (164.6, 101.6),
+    "R14": (138.6, 148.5), "R15": (138.6, 150.7),
+    "J2": (183.6, 103.6), "F1": (178.5, 112.6), "R13": (126.3, 163.8), "JP1": (130.3, 163.8),
     **{u: (PLACE[u][0], PLACE[u][1]) for u in ("U2", "U3", "U5", "U6")},  # on the chip body
-    **{c: (114.9, PLACE[c][1]) for c in ("C4", "C5", "C7", "C8")},
+    **{c: (126.9, PLACE[c][1]) for c in ("C4", "C5", "C7", "C8")},
     "H1": None, "H2": None, "H3": None, "H4": None, "SW1": None, "SW2": None, "R20": None,
-    "R18": None, "R19": None, "R1": (150.4, 111.9), "R2": (143.4, 111.9),
+    "R18": None, "R19": None, "R1": (161.4, 111.9), "R2": (154.4, 111.9),
     # The small parts round the RP2350 have no room for labels; they're on the fab layer.
     **{r: None for r in ["L1", "R16", "R17", "R21", "R22"] + [f"C{n}" for n in range(9, 29) if n not in (12,)]},
     "C12": None,
@@ -206,41 +212,43 @@ CORE_1V1_BOTTOM = [
 # connector's outer D+/D- pads (B6, B7), and the inner pads (A6, A7), which sit swapped between
 # them, by a stub and via each and a hop across on the bottom layer. (net, layer, points)
 USB_TRACKS = [
-    ("USB_DP", "F.Cu", [(139.9, 122.625), (139.9, 121.9), (144.0, 117.8), (146.05, 115.75), (146.05, 109.0),
-                        (146.25, 108.8), (146.25, 107.685)]),
-    ("USB_DM", "F.Cu", [(140.9, 122.625), (140.9, 121.9), (145.0, 117.8), (147.95, 114.85), (147.95, 109.0),
-                        (147.75, 108.8), (147.75, 107.685)]),
-    ("USB_DM", "F.Cu", [(146.75, 107.685), (146.75, 109.15)]),   # A7
-    ("USB_DP", "F.Cu", [(147.25, 107.685), (147.25, 110.0)]),    # A6
-    ("USB_DM", "B.Cu", [(146.75, 109.15), (147.95, 109.6)]),
-    ("USB_DP", "B.Cu", [(147.25, 110.0), (146.05, 110.3)]),
+    ("USB_DP", "F.Cu", [(150.9, 122.625), (150.9, 121.9), (155.0, 117.8), (157.05, 115.75), (157.05, 109.0),
+                        (157.25, 108.8), (157.25, 107.685)]),
+    ("USB_DM", "F.Cu", [(151.9, 122.625), (151.9, 121.9), (156.0, 117.8), (158.95, 114.85), (158.95, 109.0),
+                        (158.75, 108.8), (158.75, 107.685)]),
+    ("USB_DM", "F.Cu", [(157.75, 107.685), (157.75, 109.15)]),   # A7
+    ("USB_DP", "F.Cu", [(158.25, 107.685), (158.25, 110.0)]),    # A6
+    ("USB_DM", "B.Cu", [(157.75, 109.15), (158.95, 109.6)]),
+    ("USB_DP", "B.Cu", [(158.25, 110.0), (157.05, 110.3)]),
     # VBUS: the right-hand pads (A4/B9) under R1 to D1's anode; the left-hand pads (A9/B4) over on
     # the bottom layer, above the D+/D- hops; U4's VBUS pin down a via and round underneath.
     # (the connector's pads reach down to y 108.41, so the run below them is at 108.95)
-    ("VBUS_USB", "F.Cu", [(149.45, 107.685), (149.45, 108.95), (160.5, 108.95), (160.5, 104.0)]),
-    ("VBUS_USB", "F.Cu", [(144.55, 107.685), (144.55, 108.95)]),
-    ("VBUS_USB", "B.Cu", [(144.55, 108.95), (145.0, 108.5), (149.0, 108.5), (149.45, 108.95)]),
-    ("VBUS_USB", "F.Cu", [(147.0, 111.46), (147.0, 110.6)]),
-    ("VBUS_USB", "B.Cu", [(147.0, 110.6), (148.6, 112.2), (152.6, 112.2), (152.6, 108.95)]),
-    ("GND", "F.Cu", [(147.0, 113.74), (147.0, 114.75)]),   # U4's GND, boxed in by D+ and D-
+    ("VBUS_USB", "F.Cu", [(160.45, 107.685), (160.45, 108.95), (171.5, 108.95), (171.5, 104.0)]),
+    ("VBUS_USB", "F.Cu", [(155.55, 107.685), (155.55, 108.95)]),
+    ("VBUS_USB", "B.Cu", [(155.55, 108.95), (156.0, 108.5), (160.0, 108.5), (160.45, 108.95)]),
+    ("VBUS_USB", "F.Cu", [(158.0, 111.46), (158.0, 110.6)]),
+    ("VBUS_USB", "B.Cu", [(158.0, 110.6), (159.6, 112.2), (163.6, 112.2), (163.6, 108.95)]),
+    ("GND", "F.Cu", [(158.0, 113.74), (158.0, 114.75)]),   # U4's GND, boxed in by D+ and D-
 ]
-USB_VIAS = [("USB_DM", 146.75, 109.15), ("USB_DM", 147.95, 109.6), ("USB_DP", 147.25, 110.0), ("USB_DP", 146.05, 110.3),
-            ("VBUS_USB", 144.55, 108.95), ("VBUS_USB", 149.45, 108.95), ("VBUS_USB", 147.0, 110.6),
-            ("VBUS_USB", 152.6, 108.95), ("GND", 147.0, 114.75)]
-HOLES = [(104.0, 104.0), (181.0, 104.0), (104.0, 172.0), (181.0, 172.0)]
-LOGO = (129.0, 166.8)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
-SILK = [  # text, x, y, size
-    ("RP2350B IDE drive  rev 0.2", 158.0, 164.0, 1.0),
-    ("IDE 40-pin", 113.0, 170.5, 1.0),
-    ("NC", 116.0, 101.3, 0.8), ("GND", 118.54, 101.3, 0.8), ("TX", 121.08, 101.3, 0.8), ("RX", 123.62, 101.3, 0.8),
-    ("+5V GND", 167.25, 108.5, 0.8),
-    ("CLK", 127.46, 101.3, 0.8), ("GND", 130.0, 101.3, 0.8), ("DIO", 132.54, 101.3, 0.8),
-    ("BOOT", 150.0, 156.0, 0.8),
-    ("RST", 158.5, 156.0, 0.8),
-    ("JP1: close for firmware without BUS_EN#", 158.0, 167.5, 0.8),
+USB_VIAS = [("USB_DM", 157.75, 109.15), ("USB_DM", 158.95, 109.6), ("USB_DP", 158.25, 110.0), ("USB_DP", 157.05, 110.3),
+            ("VBUS_USB", 155.55, 108.95), ("VBUS_USB", 160.45, 108.95), ("VBUS_USB", 158.0, 110.6),
+            ("VBUS_USB", 163.6, 108.95), ("GND", 158.0, 114.75)]
+# The Mk5's M3 holes, relative to its top left corner: 9.76 mm in from the left, 13.97 from the right.
+HOLES = [(X0 + 9.76, Y0 + 4.09), (X0 + 86.36, Y0 + 4.09), (X0 + 9.76, Y0 + 65.81), (X0 + 86.36, Y0 + 65.81)]
+LOGO = (151.0, 161.2)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
+SILK = [  # text, x, y, size, rotation
+    ("RP2350B IDE drive  rev 0.3", 172.0, 160.0, 1.0, 0),
+    ("IDE 40-pin", 111.0, 135.0, 1.0, 90),
+    ("5V", 127.0, 101.3, 0.8, 0), ("GND", 129.54, 101.3, 0.8, 0), ("TX", 132.08, 101.3, 0.8, 0),
+    ("RX", 134.62, 101.3, 0.8, 0),
+    ("+5V GND", 178.25, 108.5, 0.8, 0),
+    ("CLK", 138.46, 101.3, 0.8, 0), ("GND", 141.0, 101.3, 0.8, 0), ("DIO", 143.54, 101.3, 0.8, 0),
+    ("BOOT", 165.0, 156.0, 0.8, 0),
+    ("RST", 173.5, 156.0, 0.8, 0),
+    ("JP1: close for firmware\nwithout BUS_EN#", 172.0, 164.5, 0.8, 0),
 ]
 # Net-name patterns for the Power class (local nets carry their sheet path).
-POWER_PATTERNS = ["VB", "*/VBUS_USB", "*/5V_EXT", "*/5V_EXT_IN"]  # GND and +3V3 are planes
+POWER_PATTERNS = ["VB", "5V_LINK", "*/VBUS_USB", "*/5V_EXT", "*/5V_EXT_IN"]  # GND and +3V3 are planes
 
 
 def mm(v):
@@ -281,13 +289,31 @@ def load_footprint(fpid):
 
 
 def outline(board):
-    rect = pcbnew.PCB_SHAPE(board)
-    rect.SetShape(pcbnew.SHAPE_T_RECT)
-    rect.SetStart(pcbnew.VECTOR2I(mm(X0), mm(Y0)))
-    rect.SetEnd(pcbnew.VECTOR2I(mm(X0 + W), mm(Y0 + H)))
-    rect.SetLayer(pcbnew.Edge_Cuts)
-    rect.SetWidth(mm(0.1))
-    board.Add(rect)
+    """A rectangle with rounded corners: four edges and four quarter-circle arcs."""
+    r, x1, y1 = CORNER_R, X0 + W, Y0 + H
+    k = r * (1 - 0.5 ** 0.5)  # from a corner to its arc's midpoint, along each axis
+
+    def shape(kind, *pts):
+        s = pcbnew.PCB_SHAPE(board)
+        s.SetShape(kind)
+        v = [pcbnew.VECTOR2I(mm(x), mm(y)) for x, y in pts]
+        if kind == pcbnew.SHAPE_T_ARC:
+            s.SetArcGeometry(*v)
+        else:
+            s.SetStart(v[0])
+            s.SetEnd(v[1])
+        s.SetLayer(pcbnew.Edge_Cuts)
+        s.SetWidth(mm(0.1))
+        board.Add(s)
+
+    shape(pcbnew.SHAPE_T_SEGMENT, (X0 + r, Y0), (x1 - r, Y0))
+    shape(pcbnew.SHAPE_T_SEGMENT, (x1, Y0 + r), (x1, y1 - r))
+    shape(pcbnew.SHAPE_T_SEGMENT, (x1 - r, y1), (X0 + r, y1))
+    shape(pcbnew.SHAPE_T_SEGMENT, (X0, y1 - r), (X0, Y0 + r))
+    shape(pcbnew.SHAPE_T_ARC, (x1 - r, Y0), (x1 - k, Y0 + k), (x1, Y0 + r))
+    shape(pcbnew.SHAPE_T_ARC, (x1, y1 - r), (x1 - k, y1 - k), (x1 - r, y1))
+    shape(pcbnew.SHAPE_T_ARC, (X0 + r, y1), (X0 + k, y1 - k), (X0, y1 - r))
+    shape(pcbnew.SHAPE_T_ARC, (X0, Y0 + r), (X0 + k, Y0 + k), (X0 + r, Y0))
 
 
 def plane(board, net, layer, name):
@@ -443,7 +469,7 @@ def core_copper(board):
             tr = pcbnew.PCB_TRACK(board)
             tr.SetStart(pcbnew.VECTOR2I_MM(x0, y0))
             tr.SetEnd(pcbnew.VECTOR2I_MM(x1, y1))
-            tr.SetWidth(mm(0.5 if netname == "VBUS_USB" and (x0, y0) != (147.0, 111.46) else 0.2))
+            tr.SetWidth(mm(0.5 if netname == "VBUS_USB" and (x0, y0) != (158.0, 111.46) else 0.2))
             tr.SetLayer(pcbnew.F_Cu if layer == "F.Cu" else pcbnew.B_Cu)
             tr.SetNet(net(netname))
             tr.SetLocked(True)
@@ -480,10 +506,11 @@ def silkscreen(board, logo):
     logo.SetReference("LOGO1")
     logo.SetPosition(pcbnew.VECTOR2I(mm(LOGO[0]), mm(LOGO[1])))
     board.Add(logo)
-    for text, x, y, size in SILK:
+    for text, x, y, size, rot in SILK:
         t = pcbnew.PCB_TEXT(board)
         t.SetText(text)
         t.SetPosition(pcbnew.VECTOR2I(mm(x), mm(y)))
+        t.SetTextAngleDegrees(rot)
         t.SetLayer(pcbnew.F_SilkS)
         t.SetTextSize(pcbnew.VECTOR2I(mm(size), mm(size)))
         t.SetTextThickness(mm(size * 0.15))

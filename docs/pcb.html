@@ -213,7 +213,7 @@ ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
             <text class="ref" x="32" y="458">J3</text>
             <text class="name" x="32" y="476">Activity link</text>
             <text class="sub" x="32" y="490">same order as synth's J6</text>
-            <text class="pl g-nc" x="32" y="508">1 NC   2 GND</text>
+            <text class="pl g-pwr" x="32" y="508">1 +5V  2 GND</text>
             <text class="pl g-link" x="32" y="524">3 TX   4 RX</text>
           </g>
           <g class="blk" data-go="b-led" tabindex="0">
@@ -253,6 +253,13 @@ ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
             <path class="w dash" d="M186 122 V148"/>
             <text class="wl" x="188" y="172">5.1k → GND</text>
           </g>
+          <g class="g-pwr">
+            <path class="w" d="M170 502 H200"/>
+            <polygon class="diode" points="200,494 200,510 216,502"/><line class="w" x1="217" y1="493" x2="217" y2="511"/>
+            <text class="wl mid" x="208" y="488">D5</text>
+            <path class="w" d="M217 502 H238"/>
+            <text class="wl" x="242" y="506">VB</text>
+          </g>
           <g class="g-ctl">
             <path class="w" d="M170 290 H400"/>
             <path class="w" d="M170 314 H400"/>
@@ -270,7 +277,7 @@ ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
             <path class="w" d="M170 530 H300"/>
             <g class="part"><rect x="300" y="522" width="34" height="16" rx="3"/><text x="317" y="533">R4</text></g>
             <path class="w" d="M334 530 H350 V494 H400"/>
-            <text class="wl" x="216" y="506">1k</text>
+            <text class="wl" x="262" y="550">1k</text>
             <text class="wl" x="340" y="464">LINK_TX</text>
             <text class="wl" x="356" y="488">LINK_RX</text>
           </g>
@@ -476,7 +483,7 @@ ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
       <div>
         <h3>Power</h3>
         <ul>
-          <li>D1 and D2 diode-OR USB and the 5&nbsp;V header into VB, and block reverse polarity. VB sits about 0.35&nbsp;V below the input; the AMS1117 holds 3.3&nbsp;V down to about 4.4&nbsp;V on VB.</li>
+          <li>D1, D2 and D5 diode-OR USB, the 5&nbsp;V header and the link socket's pin&nbsp;1 into VB, and block reverse polarity. Pin&nbsp;1 is for a future HDD Synth that powers both boards from one supply. VB sits about 0.35&nbsp;V below the input; the AMS1117 holds 3.3&nbsp;V down to about 4.4&nbsp;V on VB.</li>
           <li>The RP2350B's core regulator, crystal and flash copy Raspberry Pi's layout exactly, including its 0.125&nbsp;mm spacing inside that area (a design rule allows it there only).</li>
           <li>Put a 100&nbsp;nF next to each switch's VCC pin (C4, C5, C7, C8), and C2/C3 at the SD socket.</li>
         </ul>
@@ -498,10 +505,11 @@ ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
 (() => {
   // [group, net, from, through, to, note]
   const BLOCKS = [
-    { id: "b-power", title: "Power", g: "pwr", intro: "USB-C and the 5 V header are diode-ORed into VB; an AMS1117 makes 3V3 for everything.", rows: [
+    { id: "b-power", title: "Power", g: "pwr", intro: "USB-C, the 5 V header and the link socket's pin 1 are diode-ORed into VB; an AMS1117 makes 3V3 for everything.", rows: [
       ["pwr", "VBUS_USB", "J1 A4, B4, A9, B9 (VBUS)", "", "D1 anode, U4 pin 5", "SS14 Schottky, 1 A"],
       ["pwr", "5V_EXT", "J2 pin 1 (+5 V)", "F1 polyfuse, 500 mA hold", "D2 anode", "Polarity: print + next to pin 1"],
-      ["pwr", "VB", "D1 cathode, D2 cathode", "C1 10 µF to GND", "U8 pin 3 (VI)", "About 4.6 V"],
+      ["pwr", "5V_LINK", "J3 pin 1 (+5 V from the HDD Synth)", "", "D5 anode", "So the synth can power both boards. Not the Mk5's J6 pin 1, which is 3.3 V"],
+      ["pwr", "VB", "D1, D2 and D5 cathodes", "C1 10 µF to GND", "U8 pin 3 (VI)", "About 4.6 V"],
       ["3v3", "3V3", "U8 pin 2 and tab (VO)", "C29 10 µF, C6 10 µF to GND", "U1 IOVDD/ADC/USB/QSPI/VREG_VIN, U2, U3, U5, U6, U7, J4, pull-ups", "AMS1117-3.3, about 1 V dropout"],
       ["gnd", "GND", "U1 exposed pad (thermal vias), U8 pin 1", "", "J1 GND + shell, J2 pin 2, J3 pin 2, J5 GND pins, J6 pin 2, all caps", ""],
     ]},
@@ -531,7 +539,7 @@ ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
       ["3v3", "Decoupling", "Every IOVDD, DVDD, ADC_AVDD, USB_OTP_VDD, QSPI_IOVDD pin", "C12–C25 100 nF", "", "Each supply pin has its own via under the chip"],
     ]},
     { id: "b-link", title: "Activity link (J3)", g: "link", intro: "Pins in the same order as the HDD Synth's J6, so a straight 4-way cable works. 3.3 V logic, 115200 baud (docs/activity-link.md).", rows: [
-      ["nc", "—", "J3 pin 1", "", "not connected", "The synth's 3.3 V: the boards' 3.3 V rails are never joined"],
+      ["pwr", "5V_LINK", "J3 pin 1", "", "D5 anode, into VB", "5 V from the synth (Power). The Mk5's J6 pin 1 is 3.3 V: leave it unconnected until the synth supplies 5 V there"],
       ["gnd", "GND", "J3 pin 2", "", "GND", ""],
       ["link", "LINK_TX", "U1 pin 77 (GP0, UART0 TX)", "R3 1 kΩ", "J3 pin 3", "To the synth's GP25 (UART1 RX)"],
       ["link", "LINK_RX", "U1 pin 78 (GP1, UART0 RX)", "R4 1 kΩ", "J3 pin 4", "From the synth's GP24; reserved, unused by firmware"],
@@ -615,7 +623,7 @@ ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
     ["J6", "SWD, 3-pin (optional)", "1×3 2.54 mm pin header, C2937625", "Raspberry Pi debug connector order"],
     ["JP1", "Solder jumper, BUS_EN# to GND", "", "Close to run firmware that doesn't drive GP41"],
     ["SW1, SW2", "Tactile switch, 5.1 mm", "XKB TS-1187A-B-A-B, C318884", "BOOTSEL, RESET; as on the HDD Synth Mk5"],
-    ["D1, D2", "Schottky diode, 1 A", "SS14 (SMA), C2480", "Power OR"],
+    ["D1, D2, D5", "Schottky diode, 1 A", "SS14 (SMA), C2480", "Power OR"],
     ["D3, D4", "LEDs, activity (green) and power (red)", "0805, C2297 / C84256", ""],
     ["F1", "Polyfuse, 500 mA hold", "1206, C19193043", "On the 5 V header"],
     ["R1–R15, R20", "Resistors", "0603", "CC 5.1k, link 1k, LEDs, SD pull-ups 10k, BUS_EN# 10k, strobes 33R, RUN 1k"],

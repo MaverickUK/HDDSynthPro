@@ -41,6 +41,8 @@ Ground and one data wire. **Never connect the two boards' 3.3 V pins:** each is 
 | GPIO 1 (UART0 RX), EXT1 pin 5 | reserved, not connected | pin 4, GP24 (UART1 TX; the OLED's SDA) |
 | (not connected) | | pin 1, 3.3 V |
 
+- **Power over the link (HDDSynthPro PCB, rev 0.3 on):** the board's J3 pin 1 takes **5 V** through a Schottky diode into its supply, so a future HDD Synth can power both boards from one supply. The Mk5's J6 pin 1 carries 3.3 V, so with the Mk5 leave pin 1 unconnected (the BB48 has no such input at all).
+
 - The 1 kΩ resistor limits the current into the synth's pin if one board is powered and the other isn't (the HDD Synth runs on its supercap after a power cut, and an unpowered RP2350's pin would otherwise be fed through its protection diodes). It doesn't matter at 115200 baud.
 - J6 carries either the OLED or the link, not both: the same pins.
 - GPIO 0 and 1 are off the IDE bus and away from the BB48's pull-ups on GPIO 2/3 (see [wiring.md](wiring.md)).

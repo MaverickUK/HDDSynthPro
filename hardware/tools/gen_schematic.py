@@ -26,8 +26,8 @@ HW = HERE.parent
 KICAD_SHARE = Path(os.environ.get("KICAD_SHARE", "/Applications/KiCad/KiCad.app/Contents/SharedSupport"))
 PROJECT = "hddsynthpro"
 SCH_VERSION = 20250114  # KiCad 9 format; KiCad 10 opens it
-DATE = "2026-10-26"
-REV = "0.1"
+DATE = "2026-10-27"
+REV = "0.3"
 STUB = 2.54
 POWER_NETS = {"GND": "power:GND", "+3V3": "power:+3V3"}
 
@@ -414,7 +414,7 @@ LCSC = {
     **{r: "C23733" for r in _refs("C", 9, 10, 11)},                # 4.7uF 0402
     **{r: "C1525" for r in _refs("C", *range(12, 27))},            # 100nF 0402
     **{r: "C1548" for r in _refs("C", 27, 28)},                    # 15pF 0402
-    "D1": "C2480", "D2": "C2480", "D3": "C2297", "D4": "C84256",
+    "D1": "C2480", "D2": "C2480", "D5": "C2480", "D3": "C2297", "D4": "C84256",
     "F1": "C19193043",
     "J1": "C165948", "J2": "C158012", "J3": "C2718488", "J4": "C393941", "J5": "C19193815", "J6": "C2937625",
     "L1": "C42411119",
@@ -441,7 +441,8 @@ R0402 = "Resistor_SMD:R_0402_1005Metric"
 
 
 def power_sheet(sh):
-    sh.note("USB-C (power and flashing) and the 5 V header, diode-ORed into VB; an AMS1117 makes 3V3 from it.\n"
+    sh.note("USB-C (power and flashing), the 5 V header and 5 V from the HDD Synth on the link socket,\n"
+            "diode-ORed into VB; an AMS1117 makes 3V3 from it.\n"
             "Never connect the IDE adapter's 5 V (Molex) to this board: the boards share ground only.", 20, 20, 1.6)
     usb = {"A1": "GND", "A12": "GND", "B1": "GND", "B12": "GND", "SH": "GND",
            "A4": "VBUS_USB", "A9": "VBUS_USB", "B4": "VBUS_USB", "B9": "VBUS_USB",
@@ -463,7 +464,9 @@ def power_sheet(sh):
     sh.part("Device:Polyfuse", "F1", "500mA", 99.06, 137.16, {"1": "5V_EXT_IN", "2": "5V_EXT"},
             "Fuse:Fuse_1206_3216Metric")
     sh.part("Device:D_Schottky", "D2", "SS14", 213.36, 81.28, {"2": "5V_EXT", "1": "VB"}, "Diode_SMD:D_SMA")
-    sh.note("D1/D2: diode-OR of USB and the 5 V header;\nalso reverse-polarity protection. VB is about 4.6 V.", 200.66, 91.44)
+    sh.part("Device:D_Schottky", "D5", "SS14", 213.36, 101.6, {"2": "5V_LINK", "1": "VB"}, "Diode_SMD:D_SMA")
+    sh.note("D1/D2/D5: diode-OR of USB, the 5 V header and the link socket's\n"
+            "pin 1 (5 V from the HDD Synth); also reverse-polarity protection.\nVB is about 4.6 V.", 200.66, 111.76)
     sh.c("C1", "10uF", 254.0, 71.12, "VB", "GND", C0805)
     sh.flag("VB", 271.78, 63.5)
     sh.flag("GND", 287.02, 63.5)
@@ -555,11 +558,12 @@ def mcu_sheet(sh):
     sh.note("Bulk on 3V3.", 322.58, 218.44)
 
     sh.note("Activity link to the HDD Synth (docs/activity-link.md): UART0, 115200 8N1, 3.3 V logic.\n"
-            "Pin order matches the synth's J6. Pin 1 (the synth's 3.3 V) stays unconnected.", 279.4, 63.5)
+            "Pin order matches the synth's J6. Pin 1 takes 5 V from the synth, through D5 (Power and USB sheet),\n"
+            "so one supply runs both boards. The synth's J6 pin 1 must carry 5 V, not its 3.3 V.", 279.4, 63.5)
     sh.r("R3", "1k", 289.56, 88.9, "LINK_TX", "LINK_TX_EXT")
     sh.r("R4", "1k", 309.88, 88.9, "LINK_RX", "LINK_RX_EXT")
     sh.part("Connector_Generic:Conn_01x04", "J3", "Link", 373.38, 88.9,
-            {"1": None, "2": "GND", "3": "LINK_TX_EXT", "4": "LINK_RX_EXT"},
+            {"1": "5V_LINK", "2": "GND", "3": "LINK_TX_EXT", "4": "LINK_RX_EXT"},
             "Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Vertical")
 
     sh.note("Activity LED (GP25, core 0's updateLed()) and an optional power LED.", 279.4, 134.62)

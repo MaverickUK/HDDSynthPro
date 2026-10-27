@@ -19,7 +19,7 @@ The link uses header **J6**, the OLED's header, so the OLED and the link can't b
 
 | J6 pin | MK5 signal | Link use |
 |---|---|---|
-| 1 | 3.3 V | not connected (each board has its own supply) |
+| 1 | 3.3 V | not connected on the Mk5 (each board has its own supply). HDDSynthPro's PCB takes **5 V** on this pin to power it from the synth: a later synth revision could put 5 V here, never 3.3 V |
 | 2 | GND | ground, to HDDSynthPro's GND |
 | 3 | GP25 (OLED SCL) | **UART1 RX**: data from HDDSynthPro (through a 1 kΩ resistor at its end) |
 | 4 | GP24 (OLED SDA) | UART1 TX: reserved, not used in version 1 |

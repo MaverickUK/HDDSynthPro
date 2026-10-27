@@ -232,6 +232,13 @@ def main():
             errors.append(f"{sig} (GP{gp[sig]}) doesn't reach the link header's pin {pin} through a resistor")
     if link and nl.net_of.get((link[0], "2")) != "GND":
         errors.append("link header pin 2 is not GND")
+    if link:
+        # pin 1: 5 V from the HDD Synth, through a Schottky (anode on pin 1) into VB
+        five = nl.net_of.get((link[0], "1"))
+        ored = [r for r, p in nl.nodes.get(five, []) if nl.lib[r] == "Device:D_Schottky" and p == "2"
+                and nl.net_of.get((r, "1"), "").split("/")[-1] == "VB"]
+        if not ored:
+            errors.append("link header pin 1 doesn't reach VB through a Schottky diode")
     if not any(nl.lib[r] == "Device:LED" for r, _ in via_resistor("LED")):
         errors.append(f"LED (GP{gp['LED']}) doesn't reach an LED through a resistor")
 
