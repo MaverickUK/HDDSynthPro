@@ -2,6 +2,22 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.10.2] - 2026-10-27
+
+The slice 0 test, reworked so it can pass while the adapter probes forever.
+
+### Added
+- **The listen build's capture window** (console `w`, `cfg::LISTEN_WINDOW_EVENTS`): with it on, each RESET# assert opens a window of 3,000 bus accesses, and the rest are counted (`skipped=` in `s`) but not recorded until the next RESET#. Two windows fit in the 8,192-event ring, so the adapter's double reset pulse never drops an event, and the trace goes quiet between pulses. Off by default, so recording a real drive works as before.
+- `trace.opening_sequence()`: the first steps of a trace in printed order, repeats merged and read data left out (the bus floats with no drive), for comparing one probe with another.
+
+### Changed
+- **`test_slice0`** turns the window on, asks for a replug, and judges the trace from the first RESET# release: no stalls, drops or overlapping strobes, STATUS read or DEVICE written, and the opening sequence matches the saved reference. The reference is kept per adapter, `host/reference/slice0_probe_<adapter>.txt`, named by `HDDPRO_ADAPTER` in `host/rig.env` (adapters probe differently).
+
+### On the rig (Windows, no replug)
+- The adapter on the Windows rig enumerates as a JMicron (USB `152D:2338`), not the NS1081. With the listen build on, a read from Windows failed after 23 s, then the adapter pulsed RESET# (first a double pulse: 49 ms low, 4.4 ms high, 49 ms low; then one every 4.78 s) and ran the device-presence check after each (DEVICE=A0, SECCOUNT/LBA=A5/5A/AA/55, read DEVICE and STATUS back), about 420,000 accesses a second. Over 90 s: 18 windows of 3,000 accesses, 0 dropped, 0 stalls, 33.5 million skipped; 16 of 18 openings identical (the other two: inside the double pulse, and the window cut off when the recording ended). The test's checks pass on that trace.
+- Back on the drive build the adapter found the drive again by itself; Windows had dropped the disk, and `pnputil /restart-device` on the adapter brought it back without a replug.
+- Still to do with a physical replug: `scripts/rig.sh -m slice0 --save-reference`, then a second run to compare.
+
 ## [0.10.1] - 2026-10-27
 
 The activity link's loopback test.

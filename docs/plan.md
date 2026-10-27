@@ -118,7 +118,7 @@ Each slice ends in a passing automated test before the next starts.
   - Every pin is an input under SIO control, so PIO cannot drive it.
   - The trace shows every access and reset.
   - **Exit:** a clean, repeatable trace of the adapter's probe sequence, saved with `--save-reference`.
-  - **(amended)** Runs on the board, but the test can't pass as written: with no drive answering, the NS1081 probes forever and the trace drops events. The first few thousand events after RESET# are what's useful.
+  - **(amended)** With no drive answering, the adapter probes forever and the trace dropped events. Since 0.10.2 the listen build records a window of 3,000 accesses after each RESET# (console `w`) and the test compares the probe's opening with a reference kept per adapter. Still to run with a physical replug.
 - **Slice 1: answer status.** Done on hardware; reads are within ATA's limit since 0.6.3.
   - The register file, with status reads returning ready after reset, and soft reset through Device Control.
   - This is the first use of the IORDY read path.

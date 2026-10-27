@@ -40,7 +40,7 @@ You'll need: a multimeter with a continuity beeper, the Mac, the USB-IDE adapter
 - [ ] Run `scripts/rig.sh -m slice0 --save-reference`. It replugs the adapter and saves the trace and its summary to `host/reference/`.
 - [ ] Read the summary. Things to look for:
   - **Answered on 23 Oct 2026:** a physical replug gives a reset (two RESET# pulses) and a fresh probe; a `uhubctl` replug doesn't, because the hub doesn't cut VBUS.
-  - **Known problem:** with no drive answering, the NS1081 probes forever at about one access per µs. The bus never goes quiet and the trace drops events, so this test fails as written. The useful part is the first few thousand events after RESET#.
+  - **Was a problem:** with no drive answering, the adapter probes forever, so the bus never goes quiet and the trace dropped events. Since 0.10.2 the test turns on the capture window (`w`), which records 3,000 accesses after each RESET# and only counts the rest, and judges the trace from the first release. Set `HDDPRO_ADAPTER` in `host/rig.env`: the reference is saved per adapter.
   - **Which registers does it touch, in what order?** Turn that into a virtual-host test in `test/native/test_ata_device.cpp`, next to `test_virtual_host_probe`.
   - **Any DMA commands?** Look for `COMMAND` writes of `c8` (READ DMA) or `ef` (SET FEATURES) with a DMA mode. Those mean the NS1081 wants more than PIO.
   - **DIOR# and DIOW# never low together** (the test checks this), and no `STALL` or `DROP` lines.

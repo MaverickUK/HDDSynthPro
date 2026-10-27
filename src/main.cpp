@@ -65,6 +65,11 @@ bool core1_disable_systick = true;
 // ---- Core 1: slice 0, listen only ---------------------------------------------
 #if FIRMWARE_SLICE == 0
 
+// The capture window (console `w`, cfg::LISTEN_WINDOW_EVENTS): off, every
+// access is recorded; on, only a window after each RESET# assert.
+static std::atomic<uint32_t> g_window{0};
+static std::atomic<uint32_t> g_skipped{0};  // accesses outside the window
+
 void setup1() { listen::begin(); }
 
 CORE1_RAM void loop1() {
@@ -72,15 +77,32 @@ CORE1_RAM void loop1() {
     // FIFO word arriving and it being timestamped.
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     if (reset_low) record(TraceKind::ResetAssert, pinsAsSample());
+    bool window = false;
+    uint32_t window_left = 0;  // accesses still to record in this window
     for (;;) {
         uint32_t sample;
-        if (listen::pop(sample)) record(TraceKind::Bus, sample);
+        if (listen::pop(sample)) {
+            if (!window) {
+                record(TraceKind::Bus, sample);
+            } else if (window_left) {
+                --window_left;
+                record(TraceKind::Bus, sample);
+            } else {
+                g_skipped.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
 
         uint32_t pins = pinsAsSample();
         bool low = !bus::high(pins, cfg::PIN_RESET_N);
         if (low != reset_low) {
             reset_low = low;
-            record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
+            record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);  // always recorded
+            if (low) window_left = cfg::LISTEN_WINDOW_EVENTS;
+        }
+        bool want_window = g_window.load(std::memory_order_relaxed) != 0;
+        if (want_window != window) {
+            window = want_window;
+            window_left = 0;  // turned on: closed until the next RESET#
         }
 
         if (listen::takeStall()) {
@@ -631,6 +653,9 @@ static void printStats() {
     Serial.printf("STATS events=%lu dropped=%lu stalls=%lu ring=%u",
                   (unsigned long)g_events.load(), (unsigned long)g_dropped.load(),
                   (unsigned long)g_stalls.load(), (unsigned)g_trace.size());
+#if FIRMWARE_SLICE == 0
+    Serial.printf(" window=%lu skipped=%lu", (unsigned long)g_window.load(), (unsigned long)g_skipped.load());
+#endif
 #if FIRMWARE_SLICE != 0
     iordy_timer::poll();
     Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu iordy_max_reg=%s iordy_max_at_us=%lu",
@@ -739,8 +764,8 @@ static void handleConsole() {
             case 'h':
                 printReady();
 #if FIRMWARE_SLICE == 0
-                Serial.println("# h help, p pins, s stats, m mark, x short test (cable unplugged), "
-                               "b reboot to bootloader");
+                Serial.println("# h help, p pins, s stats, m mark, w capture window after each RESET# on/off, "
+                               "x short test (cable unplugged), b reboot to bootloader");
 #else
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
                                "m mark, S SD card and settings, C create HDDSYNTH.INI, E set a setting, ! restart, "
@@ -766,6 +791,14 @@ static void handleConsole() {
                 Serial.println("# short test not armed: type x first");
                 break;
             case 's': printStats(); break;
+#if FIRMWARE_SLICE == 0
+            case 'w': {  // the capture window on or off
+                uint32_t on = !g_window.load();
+                g_window.store(on);
+                Serial.printf("WINDOW %s\n", on ? "on" : "off");
+                break;
+            }
+#endif
 #if FIRMWARE_SLICE != 0
             case 'r':
                 iordy_timer::reset();

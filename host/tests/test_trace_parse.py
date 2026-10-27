@@ -82,3 +82,20 @@ def test_parse_slow_reads():
     t = trace.parse(["SLOWREAD 5400 STATUS 1620", "SLOWREAD 6000 ALTSTATUS"])
     assert t.slow_reads == [(5400, "STATUS", 1620)]
     assert t.other == ["SLOWREAD 6000 ALTSTATUS"]  # malformed: kept, not guessed
+
+
+def test_opening_sequence_merges_repeats_and_ignores_read_data():
+    probe = [
+        "RESET 100 ASSERT",
+        "RESET 130 RELEASE",
+        "EV 2100 RD CMD 7 STATUS 0080 x50 3000 05770080",
+        "EV 5200 RD CMD 7 STATUS 00ff x3 3 057700ff",  # floating data: the same step
+        "EV 9000 WR CMD 6 DEVICE 00a0 x1 0 05f600a0",
+        "DROP 2",
+        "EV 9100 WR CMD 6 DEVICE 00b0 x1 0 05f600b0",  # written data counts
+        "EV 9200 RD CMD 7 STATUS 0000 x1 0 05770000",
+    ]
+    assert trace.opening_sequence(probe) == [
+        "RESET ASSERT", "RESET RELEASE", "RD CMD.STATUS", "WR CMD.DEVICE 00a0",
+        "WR CMD.DEVICE 00b0", "RD CMD.STATUS"]
+    assert trace.opening_sequence(probe, length=3) == ["RESET ASSERT", "RESET RELEASE", "RD CMD.STATUS"]

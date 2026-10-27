@@ -50,6 +50,15 @@ constexpr uint32_t SD_SPI_MHZ = 25;
 // 8192 events x 12 bytes = 96 KB.
 constexpr size_t TRACE_RING_EVENTS = 8192;
 
+// The listen build's capture window (console `w`): with no drive answering,
+// the adapter probes about once a microsecond forever, faster than core 0 can
+// print, so the ring overflows. With the window on, each RESET# assert opens
+// a window of this many bus accesses, and the rest are counted but not
+// recorded until the next one. Two windows fit in the ring, so the adapter's
+// two detection resets never drop an event.
+constexpr uint32_t LISTEN_WINDOW_EVENTS = 3000;
+static_assert(2 * LISTEN_WINDOW_EVENTS + 64 < TRACE_RING_EVENTS, "two windows must fit in the trace ring");
+
 // Core 0 prints a run of identical accesses once it has been quiet this long.
 constexpr unsigned TRACE_FLUSH_MS = 20;
 

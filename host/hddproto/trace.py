@@ -136,6 +136,28 @@ def parse(lines: list[str]) -> Trace:
     return t
 
 
+def opening_sequence(lines: list[str], length: int = 40) -> list[str]:
+    """The first `length` steps of a trace, in the order printed, for comparing
+    one probe with another: reset edges and accesses, with repeats of a step
+    merged (an adapter may poll a register a different number of times) and
+    read data left out (with no drive answering, the bus floats)."""
+    steps: list[str] = []
+    for line in lines:
+        t = parse([line])
+        if t.resets:
+            step = f"RESET {t.resets[0][1]}"
+        elif t.accesses:
+            a = t.accesses[0]
+            step = f"{a.op} {a.block}.{a.reg}" + (f" {a.data:04x}" if a.op == "WR" else "")
+        else:
+            continue
+        if not steps or steps[-1] != step:
+            steps.append(step)
+            if len(steps) == length:
+                break
+    return steps
+
+
 def summary(t: Trace, sequence_lines: int = 60) -> str:
     """A readable report: totals, a histogram per register and the opening sequence."""
     out = [f"{len(t.accesses)} trace lines, {t.total_accesses()} accesses, {len(t.commands)} commands, "
