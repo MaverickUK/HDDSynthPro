@@ -320,6 +320,7 @@ void runAtaDeviceTests();
 void runShortTestTests();
 void runActivityTests();
 void runActivityLinkTests();
+void runDriveConfigTests();
 void runSectorCheckTests();
 
 int main() {
@@ -346,6 +347,7 @@ int main() {
     runShortTestTests();
     runActivityTests();
     runActivityLinkTests();
+    runDriveConfigTests();
     runSectorCheckTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

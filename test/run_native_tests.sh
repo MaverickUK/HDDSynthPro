@@ -11,6 +11,7 @@ SANITIZE="${SANITIZE:-address,undefined}"
     -Isrc test/native/test_main.cpp test/native/test_ata_device.cpp test/native/test_short_test.cpp \
     test/native/test_activity.cpp src/activity.cpp \
     test/native/test_activity_link.cpp src/activity_link.cpp \
+    test/native/test_drive_config.cpp src/drive_config.cpp \
     test/native/test_sector_check.cpp src/sector_check.cpp \
     src/trace_format.cpp src/identify.cpp src/ata_device.cpp src/short_test.cpp \
     -o .pio/native-tests/run_tests

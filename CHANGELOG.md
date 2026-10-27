@@ -2,6 +2,21 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.10.0] - 2026-10-27
+
+Settings on the SD card.
+
+### Added
+- **`HDDSYNTH.INI`** (docs/settings.md, `src/drive_config.*`): `image = <file>` chooses the disk image, and `mode = auto` (or `pio0`-`pio4`, `mdma0`-`mdma2`, `udma0`-`udma6`) the transfer mode to offer. Plain `key = value` text with comments; Notepad's CRLF and byte-order mark are fine. Missing file or keys mean the defaults (`HDDSYNTH.IMG`, `auto`), so a card without it behaves as before. Mistakes are reported and skipped, never fatal.
+- The disk, in order: `HDDBENCH.IMG` after console `J`; the configured image; `HDDSYNTH.IMG` if that can't be used (not found, or empty); the generated disk. With no card the images aren't tried, so start-up without one still takes one 2-second wait.
+- Modes other than PIO 0 are accepted with a warning and mean `auto` until they exist, so settings written now keep working.
+- Console: `S` adds `CONFIG` lines (the settings, the image served, why a configured image wasn't used, warnings); `C` creates the file with the defaults; `E` then `key = value` sets one setting, keeping the file's comments and line endings; `!` restarts. `s` shows `image_name=` and `config=`.
+- The firmware may now write `HDDSYNTH.INI` (only with `C` or `E`), as well as the image it serves and the images `I`/`K` create.
+
+### On the rig (Windows)
+- Without the file: as before. `C`, then `E image = HDDBENCH.IMG` and a restart: served the scratch image. `image = MISSING.IMG`: fell back to `HDDSYNTH.IMG`, reported as `MISSING.IMG: not found`. `mode = udma5`: warned, used auto. An unknown key was refused. `J` still wins over the file. Left the card with the default file.
+- Not yet tried on the rig: starting with no card (needs the card pulled).
+
 ## [0.9.0] - 2026-10-27
 
 The activity link to an HDD Synth, this side.

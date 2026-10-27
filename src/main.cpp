@@ -32,6 +32,7 @@
 
 #include "activity.h"
 #include "activity_link.h"
+#include "drive_config.h"
 #include "ata_device.h"
 #include "block_source.h"
 #include "bus_observer.h"
@@ -299,18 +300,112 @@ static uint32_t g_disk_ms = 0;  // how long choosing the disk took at boot (cons
 static constexpr uint32_t BENCH_MAGIC = 0x48444442;  // "HDDB"
 static bool benchRequested() { return watchdog_hw->scratch[0] == BENCH_MAGIC; }
 
+// HDDSYNTH.INI (drive_config.h) as read at boot, and what came of it. Boot
+// messages go out before USB serial is connected, so console `S` shows them.
+static drive_config::Config g_config;
+static const char* g_config_state = "none";  // "none", "present" or "truncated"
+static const char* g_image_name = "-";        // the image being served
+static char g_image_note[96] = "";            // why the configured image isn't
+
+// Opens image `name` as the disk. False, with sd_card::openError() or
+// "empty" as the reason in `why`, if it can't be used.
+static bool useImage(const char* name, const char*& why) {
+    ImageFile* file = sd_card::openImage(name, Serial);
+    if (!file) {
+        why = sd_card::openError();
+        return false;
+    }
+    static ImageDisk image(*file);  // always the same file object, reopened
+    if (image.sectors() == 0) {
+        why = "empty";
+        return false;
+    }
+    g_disk = &image;
+    g_image_name = name;
+    return true;
+}
+
+// The disk: HDDBENCH.IMG after console `J`; else the image HDDSYNTH.INI
+// names (HDDSYNTH.IMG by default); else HDDSYNTH.IMG; else the generated disk.
 static void chooseDisk() {
     uint32_t start = millis();
-    bool bench = benchRequested();
-    if (ImageFile* file = sd_card::openImage(bench ? sd_card::BENCH_IMAGE_NAME : sd_card::IMAGE_NAME, Serial)) {
-        static ImageDisk image(*file);
-        if (image.sectors() > 0) {
-            g_disk = &image;
-            g_disk_name = bench ? "bench" : "image";
-        }
+    drive_config::defaults(g_config);
+    static char text[drive_config::MAX_FILE];
+    size_t len = 0;
+    bool truncated = false;
+    if (sd_card::readConfig(text, sizeof text, len, truncated, Serial)) {
+        drive_config::parse(text, len, g_config);
+        g_config_state = truncated ? "truncated" : "present";
+    }
+    const char* why = "";
+    if (!sd_card::mounted()) {
+        // no card: the generated disk, without waiting for the card again
+    } else if (benchRequested()) {
+        if (useImage(sd_card::BENCH_IMAGE_NAME, why)) g_disk_name = "bench";
+    } else if (useImage(g_config.image, why)) {
+        g_disk_name = "image";
+    } else {
+        std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.image, why);
+        if (strcasecmp(g_config.image, drive_config::DEFAULT_IMAGE) != 0 &&
+            useImage(drive_config::DEFAULT_IMAGE, why))
+            g_disk_name = "image";
     }
     g_disk_ms = millis() - start;
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);
+}
+
+// Console `E`: sets one setting in HDDSYNTH.INI from "key = value", keeping
+// the rest of the file and its comments (the defaults if there is no file).
+static void editConfig(const char* line) {
+    const char* eq = strchr(line, '=');
+    char key[16] = "", value[drive_config::MAX_NAME + 1] = "";
+    if (eq) {
+        std::sscanf(line, " %15[^= \t]", key);
+        std::sscanf(eq + 1, " %64[^\r\n]", value);
+        for (char* p = key; *p; ++p) *p = char(tolower(*p));
+        for (size_t n = strlen(value); n && (value[n - 1] == ' ' || value[n - 1] == '\t'); --n) value[n - 1] = '\0';
+    }
+    if (!key[0] || !value[0]) {
+        Serial.println("# E: nothing changed; type key = value, e.g. image = GAMES.IMG");
+        return;
+    }
+    static char text[drive_config::MAX_FILE], edited[drive_config::MAX_FILE];
+    size_t len = 0;
+    bool truncated = false;
+    if (!sd_card::readConfig(text, sizeof text, len, truncated, Serial)) {
+        if (!sd_card::mounted()) return;  // no card: readConfig said so
+        len = strlen(drive_config::defaultFile());  // no file yet: start from the defaults
+        memcpy(text, drive_config::defaultFile(), len);
+    } else if (truncated) {
+        Serial.printf("# E: %s is longer than %u bytes: edit it on a computer\n", drive_config::FILE_NAME,
+                      unsigned(drive_config::MAX_FILE));
+        return;
+    }
+    size_t n = drive_config::setKey(text, len, key, value, edited, sizeof edited);
+    if (n == 0) {
+        Serial.printf("# E: '%s' isn't a setting (image or mode), or the file would be too long\n", key);
+        return;
+    }
+    if (!sd_card::writeConfig(edited, n, Serial)) return;
+    drive_config::Config check;
+    drive_config::parse(edited, n, check);
+    Serial.printf("# saved %s = %s in %s; restart (!) to use it\n", key, value, drive_config::FILE_NAME);
+    size_t shown = check.warning_count < drive_config::MAX_WARNINGS ? check.warning_count : drive_config::MAX_WARNINGS;
+    for (size_t i = 0; i < shown; ++i) Serial.printf("CONFIG warning: %s\n", check.warnings[i]);
+}
+
+// Console `S`: the settings and what came of them, after the card's own line.
+static void printConfig() {
+    drive_config::Mode used = drive_config::modeSupported(g_config.mode) ? g_config.mode : drive_config::Mode::Auto;
+    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s serving=%s\n", g_config_state, g_config.image,
+                  drive_config::modeName(g_config.mode), drive_config::modeName(used), g_image_name);
+    if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
+    size_t shown = g_config.warning_count < drive_config::MAX_WARNINGS ? g_config.warning_count : drive_config::MAX_WARNINGS;
+    for (size_t i = 0; i < shown; ++i) Serial.printf("CONFIG warning: %s\n", g_config.warnings[i]);
+    if (g_config.warning_count > shown)
+        Serial.printf("CONFIG warning: and %u more\n", unsigned(g_config.warning_count - shown));
+    if (strcmp(g_config_state, "truncated") == 0)
+        Serial.printf("CONFIG warning: only the first %u bytes of the file were read\n", unsigned(drive_config::MAX_FILE));
 }
 
 // Activity classification for the HDD Synth (activity.h), fed from the
@@ -443,6 +538,7 @@ static void printStats() {
                   (unsigned long)iordy_timer::stallCycles());
     Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
                   (unsigned long)g_disk_ms);
+    Serial.printf(" image_name=%s config=%s", g_image_name, g_config_state);
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
@@ -508,6 +604,19 @@ static void handleConsole() {
         int c = Serial.read();
         if (c != 'x' && c != 'Y' && c != '\r' && c != '\n') g_short_test_armed_ms = 0;
 #if FIRMWARE_SLICE != 0
+        static bool edit_line = false;  // `E`, then key = value and Enter
+        static char edit_buf[96];
+        static size_t edit_len = 0;
+        if (edit_line) {
+            if (c == '\r' || c == '\n') {
+                edit_line = false;
+                edit_buf[edit_len] = '\0';
+                editConfig(edit_buf);
+            } else if (edit_len + 1 < sizeof edit_buf) {
+                edit_buf[edit_len++] = char(c);
+            }
+            continue;
+        }
         static bool delay_digit_next = false;  // `D` then a digit
         if (delay_digit_next) {
             delay_digit_next = false;
@@ -527,7 +636,8 @@ static void handleConsole() {
                                "b reboot to bootloader");
 #else
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
-                               "m mark, S SD card check, I create SD image, K create bench image, "
+                               "m mark, S SD card and settings, C create HDDSYNTH.INI, E set a setting, ! restart, "
+                               "I create SD image, K create bench image, "
                                "J serve the bench image or back (restarts), L activity link, W write-behind, "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
@@ -585,7 +695,28 @@ static void handleConsole() {
             }
 #endif
 #if FIRMWARE_SLICE != 0
-            case 'S': sd_card::printInfo(Serial); break;
+            case 'S':
+                sd_card::printInfo(Serial);
+                printConfig();
+                break;
+            case 'C':  // create HDDSYNTH.INI with the defaults, if it isn't there
+                if (sd_card::configExists()) {
+                    Serial.printf("# %s already exists: left as it is\n", drive_config::FILE_NAME);
+                } else if (sd_card::writeConfig(drive_config::defaultFile(), strlen(drive_config::defaultFile()), Serial)) {
+                    Serial.printf("# created %s with the defaults\n", drive_config::FILE_NAME);
+                }
+                break;
+            case 'E':  // set one setting in HDDSYNTH.INI: key = value, then Enter
+                edit_line = true;
+                edit_len = 0;
+                Serial.println("# type key = value (image or mode), then Enter");
+                break;
+            case '!':  // restart, to apply HDDSYNTH.INI (keeps the `J` choice)
+                Serial.println("# restarting");
+                Serial.flush();
+                delay(50);
+                watchdog_reboot(0, 0, 10);
+                break;
             case 'I': sd_card::createImage(sd_card::IMAGE_NAME, gen_disk::DEFAULT_SECTORS, Serial); break;
             case 'K': sd_card::createImage(sd_card::BENCH_IMAGE_NAME, gen_disk::DEFAULT_SECTORS, Serial); break;
             case 'J': {  // serve the other image after a restart (replug the adapter afterwards)

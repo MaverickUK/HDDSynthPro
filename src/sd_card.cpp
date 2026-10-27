@@ -4,12 +4,14 @@
 #include <SdFat.h>
 
 #include "config.h"
+#include "drive_config.h"
 
 namespace sd_card {
 
 static SdFs s_sd;
 static FsFile s_image;
 static const char* s_open_name = nullptr;  // which image s_image is
+static const char* s_open_error = "";
 
 static const char* cardType(uint8_t type) {
     switch (type) {
@@ -56,16 +58,17 @@ static bool mount(Print& out) {
 
 // "open" (being served), "present" or "none".
 static const char* imageState(const char* name) {
-    if (s_image.isOpen() && s_open_name == name) return "open";
+    if (s_image.isOpen() && s_open_name && strcasecmp(s_open_name, name) == 0) return "open";
     return s_sd.exists(name) ? "present" : "none";
 }
 
 void printInfo(Print& out) {
     if (!mount(out)) return;
     uint32_t sectors = s_sd.card()->sectorCount();
-    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s\n", cardType(s_sd.card()->type()),
+    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s\n", cardType(s_sd.card()->type()),
                (unsigned long)(sectors / 2048), fsType(s_sd.fatType()),
-               imageState(IMAGE_NAME), imageState(BENCH_IMAGE_NAME));
+               imageState(IMAGE_NAME), imageState(BENCH_IMAGE_NAME),
+               s_sd.exists(drive_config::FILE_NAME) ? "present" : "none");
 }
 
 // The open image as the drive's ImageFile.
@@ -84,14 +87,56 @@ public:
 static SdImageFile s_image_file;
 
 ImageFile* openImage(const char* name, Print& log) {
-    if (!mount(log)) return nullptr;
-    if (!s_sd.exists(name)) return nullptr;
+    if (s_image.isOpen()) s_image.close();
+    s_open_name = nullptr;
+    if (!mount(log)) {
+        s_open_error = "no card";
+        return nullptr;
+    }
+    if (!s_sd.exists(name)) {
+        s_open_error = "not found";
+        return nullptr;
+    }
     if (!s_image.open(name, O_RDWR)) {
+        s_open_error = "can't open";
         log.printf("SD error: can't open %s\n", name);
         return nullptr;
     }
     s_open_name = name;
     return &s_image_file;
+}
+
+const char* openError() { return s_open_error; }
+
+bool configExists() { return s_sd.fatType() && s_sd.exists(drive_config::FILE_NAME); }
+
+bool mounted() { return s_sd.fatType() != 0; }
+
+bool readConfig(char* buf, size_t size, size_t& len, bool& truncated, Print& log) {
+    len = 0;
+    truncated = false;
+    if (!mount(log)) return false;
+    FsFile f;
+    if (!f.open(drive_config::FILE_NAME, O_RDONLY)) return false;
+    int n = f.read(buf, size);
+    truncated = n >= 0 && uint64_t(n) < f.fileSize();
+    f.close();
+    if (n < 0) return false;
+    len = size_t(n);
+    return true;
+}
+
+bool writeConfig(const char* text, size_t len, Print& out) {
+    if (!mount(out)) return false;
+    FsFile f;
+    if (!f.open(drive_config::FILE_NAME, O_RDWR | O_CREAT | O_TRUNC)) {
+        out.printf("SD error: can't write %s\n", drive_config::FILE_NAME);
+        return false;
+    }
+    bool ok = f.write(text, len) == len && f.sync();
+    f.close();
+    if (!ok) out.printf("SD error: writing %s failed (code %u)\n", drive_config::FILE_NAME, unsigned(s_sd.sdErrorCode()));
+    return ok;
 }
 
 bool createImage(const char* name, uint32_t sectors, Print& out) {

@@ -28,7 +28,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   `main.cpp` holds both. Rig tests skip unless the board runs the build they need, and `scripts/rig.sh` takes `PIO_ENV`.
   - The variant defines `PIN_LED` as a macro, so don't reuse Arduino pin-macro names for constants.
 - **PIO programs:** the platform assembles each `src/*.pio` into a `.pio.h` next to it (git-ignored) before every build. Include them as `"name.pio.h"`.
-- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test`, `activity`, `activity_link` and `sector_check` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
+- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test`, `activity`, `activity_link`, `drive_config` and `sector_check` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
 - **CI:** `.github/workflows/build.yml` builds the firmware and runs the C++ tests and `pytest -m sim` on every push. A `vX.Y.Z` tag that matches `FIRMWARE_VERSION` publishes a release with the UF2.
 - **Python tests:** in `host/` (pytest). One marker per slice; `sim` needs no hardware.
   - Plain `pytest` runs only the `sim` tests.
@@ -65,7 +65,7 @@ A write (WRITE SECTORS) runs the other way: DRQ first, the host writes 256 words
 
 The device doesn't touch the buffer while BSY. Core 0 must never block for long: it serves fetches before and between trace prints, and only prints when USB serial has room.
 
-The disk is `HDDSYNTH.IMG` on the SD card (`ImageDisk` over SdFat, `src/sd_card.*`) if it exists, else `RamOverlayDisk` over `GeneratedDisk` (writes stay in RAM, up to 512 sectors, until reboot). Core 1 waits at boot for core 0 to choose it. Never format the SD card or touch files on it other than `HDDSYNTH.IMG` and the scratch `HDDBENCH.IMG`: it holds the owner's data. Benchmarks that write use `HDDBENCH.IMG` (`disk=bench`). Slices 3–4 and the soak skip on an image, since they write to it.
+The disk is the image `HDDSYNTH.INI` names (`docs/settings.md`, `src/drive_config.*`; `HDDSYNTH.IMG` by default), or `HDDSYNTH.IMG` if that one can't be used, on the SD card (`ImageDisk` over SdFat, `src/sd_card.*`), else `RamOverlayDisk` over `GeneratedDisk` (writes stay in RAM, up to 512 sectors, until reboot). Core 1 waits at boot for core 0 to choose it. Never format the SD card or touch files on it other than the image being served, the scratch `HDDBENCH.IMG` and `HDDSYNTH.INI` (which the owner allowed the firmware to create and edit, with console `C`/`E` only): it holds the owner's data. Benchmarks that write use `HDDBENCH.IMG` (`disk=bench`). Slices 3–4 and the soak skip on an image, since they write to it.
 
 The bus program holds IORDY on a write while its RX FIFO is full, so a write burst can't outrun core 1. `ide_bus.pio` fills its PIO block's 32 instructions.
 
@@ -89,14 +89,15 @@ The Python parser is `host/hddproto/trace.py`; change both together.
 Console:
 - `h`: help, and the READY line with version and build;
 - `p`: pin levels (wiring check);
-- `s`: stats; on the drive build also `iordy_slow`/`iordy_max_ns`/`iordy_max_reg`/`iordy_max_at_us` (reads IORDY held over 400 ns, and the longest: how long, which register, when; measured by `iordy_timer.pio`) `iordy_early` (reads that started before IORDY was low; should be 0), `bus_sectors`/`bus_bad`/`bus_gaps` (the bus observer's check of data sectors on the cable, against the generated disk; a bad one prints `BUSERR`) and `bus_contested`/`bus_stalls` (fast peripheral bus contention), plus `write_behind`. Every read held past 1,250 ns also prints `SLOWREAD t register ns` (the time is when core 0 collected the report);
+- `s`: stats; on the drive build also `iordy_slow`/`iordy_max_ns`/`iordy_max_reg`/`iordy_max_at_us` (reads IORDY held over 400 ns, and the longest: how long, which register, when; measured by `iordy_timer.pio`) `iordy_early` (reads that started before IORDY was low; should be 0), `bus_sectors`/`bus_bad`/`bus_gaps` (the bus observer's check of data sectors on the cable, against the generated disk; a bad one prints `BUSERR`) and `bus_contested`/`bus_stalls` (fast peripheral bus contention), plus `write_behind`, `image_name`/`config` (the image served, and the settings file as read at start-up). Every read held past 1,250 ns also prints `SLOWREAD t register ns` (the time is when core 0 collected the report);
 - `r`: reset the read timings (they also restart when the host releases RESET#);
 - `t`: raw bus trace on or off;
 - `D` then a digit: debug, answer data reads that many × 250 ns late (`-m timing`; `D0` is off);
 - `F`: debug, core 1's fast lane for data reads off or on (to compare);
 - `A`: debug, read-ahead off or on (to compare);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
-- `S`: start the microSD card and report it (drive build; only reads);
+- `S`: start the microSD card and report it, then `CONFIG` lines: the settings from `HDDSYNTH.INI`, the image served, why a configured image wasn't used, warnings (drive build; only reads);
+- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting, keeping the rest of the file; `!`: restart, to apply them (keeps `J`);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
 - `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`);
 - `L`: the activity link on or off (on by default; `s` shows `link`, `link_sent` and `link_last`);
