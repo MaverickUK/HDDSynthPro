@@ -16,6 +16,7 @@ A microSD card put back while the drive runs is served again, if it's the same c
 ### On the rig
 - Card in: reads 1.23 MB/s and writes to `HDDBENCH.IMG` 0.92 MB/s, as before, worst read 1,226 ns.
 - `-m card` on Windows passes. A swap while idle is invisible: the next read found the card restarted, restarted it and was retried. Pulled during reads: the read in progress failed after 345 ms (UNC) with `CARD lost`, later ones in about 170 µs. The adapter resets and re-detects the drive about every 21 s and retries the read: with the card back within 20 s the retry succeeded and the host saw no error, only a slow read; left out 90 s, the host saw four failed reads, then the fifth retry succeeded. Either way Windows kept the disk and the data read the same afterwards. Not yet tried: a second card (`HDDPRO_SECOND_CARD=1`).
+- Starting with no card, tried on the rig at last: the built-in disk after 2.0 s (`SD error: no card`, `card=none`), and Windows reads its pattern right.
 - The overnight soak on 0.12.0 (generated disk, Windows): 10 hours clean. 26.8 GB moved (357,427 reads, 192,546 writes), 0 mismatches, 920,973 commands, 45.9 million sectors checked on the cable with 0 bad and 0 gaps, no host resets, worst read 1,240 ns (ALTSTATUS).
 
 ## [0.12.0] - 2026-10-27
