@@ -193,7 +193,7 @@ TEST(test_link_receiver_line_length_limit) {
     // 80 bytes is the limit, with \r\n not counted.
     std::string body = "HDA,1,1,S,R,";
     std::string at_limit = withChecksum(body + std::string(80 - 4 - body.size(), 'x'));
-    CHECK_EQ(at_limit.size(), activity_link::LINE_MAX);
+    CHECK_EQ(at_limit.size(), activity_link::MAX_LINE);
     activity_link::Receiver r;
     CHECK_STR(feedAll(r, at_limit + "\r\n"), sentence(true, State::Sequential, Op::Read));
     std::string over = withChecksum(body + std::string(81 - 4 - body.size(), 'x'));

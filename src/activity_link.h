@@ -40,8 +40,9 @@ constexpr size_t SENTENCE_MAX = 24;
 // length without the NUL, or 0 if `size` is too small.
 size_t formatSentence(const Fields& f, char* buf, size_t size);
 
-// The longest line a receiver accepts, without its line ending.
-constexpr size_t LINE_MAX = 80;
+// The longest line a receiver accepts, without its line ending. (Not
+// LINE_MAX: macOS's <limits.h> defines that as a macro.)
+constexpr size_t MAX_LINE = 80;
 
 // Validates one received line, without its line ending, as a receiver must
 // (docs/activity-link.md; the reference is host/hddproto/activity_link.py):
@@ -52,7 +53,7 @@ bool parseLine(const char* line, size_t len, Fields& out);
 
 // Assembles bytes into lines and validates each with parseLine(), counting
 // the valid and the rejected ones. Lines end with \n, with or without \r;
-// empty lines are skipped, and a line over LINE_MAX is rejected whole. The
+// empty lines are skipped, and a line over MAX_LINE is rejected whole. The
 // console's loopback test (`U`) uses it, and the HDD Synth's receiver can
 // be a copy.
 class Receiver {
@@ -66,7 +67,7 @@ public:
     uint32_t rejected() const { return rejected_; }
 
 private:
-    char line_[LINE_MAX + 1];  // room for a trailing \r
+    char line_[MAX_LINE + 1];  // room for a trailing \r
     size_t len_ = 0;
     bool overlong_ = false;
     uint32_t valid_ = 0;
