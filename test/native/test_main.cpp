@@ -245,6 +245,9 @@ TEST(test_identify_fields) {
     CHECK_EQ(w[47] & 0xFF, 0);   // no READ/WRITE MULTIPLE
     CHECK_EQ(w[63], 0);          // no multiword DMA
     CHECK_EQ(w[64], 0);          // no PIO 3/4
+    CHECK_EQ(w[51], 0x0000);     // PIO mode 0 (IdentifyInfo's default)...
+    CHECK_EQ(w[67], 600);        // ...and its cycle time
+    CHECK_EQ(w[68], 600);
     CHECK(!(w[53] & 4));         // word 88 (UDMA) not valid
     CHECK_EQ(w[88], 0);
     CHECK(!(w[83] & (1u << 10)));  // no 48-bit
@@ -252,6 +255,28 @@ TEST(test_identify_fields) {
     CHECK(w[85] & (1u << 5));      // ...and enabled
     CHECK(w[83] & (1u << 12));     // FLUSH CACHE supported...
     CHECK(w[86] & (1u << 12));     // ...and enabled
+}
+
+TEST(test_identify_pio_modes) {
+    uint16_t w[256];
+    const uint16_t cycle_ns[] = {600, 383, 240, 180, 120};
+    const uint16_t word64[] = {0, 0, 0, 0x0001};  // advanced mode 3
+    for (uint8_t mode = 0; mode <= MAX_PIO_MODE; ++mode) {
+        IdentifyInfo info{"HDDSYNTH PROTO", "HSP-000001", "0.1.0", 131072, mode};
+        buildIdentify(info, w);
+        CHECK_EQ(w[51], uint16_t((mode > 2 ? 2 : mode) << 8));
+        CHECK_EQ(w[67], cycle_ns[mode]);
+        CHECK_EQ(w[68], cycle_ns[mode]);
+        CHECK_EQ(w[64], word64[mode]);
+        CHECK(w[53] & 2);  // words 64-70 valid
+        uint8_t sum = 0;
+        for (int i = 0; i < 256; ++i) sum += uint8_t(w[i] & 0xFF) + uint8_t(w[i] >> 8);
+        CHECK_EQ(sum, 0);
+    }
+    // Asking for more than the drive can do offers its fastest.
+    buildIdentify(IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", "0.1.0", 131072, 9}, w);
+    CHECK_EQ(w[64], 0x0001);
+    CHECK_EQ(w[68], 180);
 }
 
 TEST(test_identify_checksum) {
@@ -340,6 +365,7 @@ int main() {
     RUN(test_ata_string_byte_order);
     RUN(test_default_geometry);
     RUN(test_identify_fields);
+    RUN(test_identify_pio_modes);
     RUN(test_identify_checksum);
     RUN(test_identify_checksum_after_geometry_change);
     RUN(test_gen_disk_known_answers);

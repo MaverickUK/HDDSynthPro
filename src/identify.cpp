@@ -74,7 +74,10 @@ void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     w[47] = 0x0000;  // READ/WRITE MULTIPLE not supported
     w[49] = (1u << 11) | (1u << 9);  // IORDY supported, LBA supported (no DMA)
     w[50] = 0x4000;  // bit 14 shall be set
-    w[51] = 0x0000;  // PIO mode 0 (obsolete field, still read by old hosts)
+    // Modes 0-2 go in word 51's high byte (an obsolete field, but how they're
+    // offered), up to 2; modes 3 and 4 are word 64's bits 0 and 1.
+    uint8_t pio_mode = info.pio_mode > MAX_PIO_MODE ? MAX_PIO_MODE : info.pio_mode;
+    w[51] = uint16_t((pio_mode > 2 ? 2 : pio_mode) << 8);
     w[53] = 0x0003;  // words 54-58 and 64-70 are valid; word 88 is not
     w[54] = g.cylinders;  // current CHS translation = the default one
     w[55] = g.heads;
@@ -84,9 +87,10 @@ void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     w[60] = uint16_t(info.total_sectors & 0xFFFF);
     w[61] = uint16_t(info.total_sectors >> 16);
     w[63] = 0x0000;  // no multiword DMA
-    w[64] = 0x0000;  // no advanced PIO modes (3, 4)
-    w[67] = 600;     // minimum PIO cycle time without IORDY, ns (mode 0)
-    w[68] = 600;     // minimum PIO cycle time with IORDY, ns
+    w[64] = pio_mode >= 4 ? 0x0003 : pio_mode == 3 ? 0x0001 : 0x0000;  // advanced PIO modes 3, 4
+    static const uint16_t CYCLE_NS[] = {600, 383, 240, 180, 120};  // ATA's t0, modes 0-4
+    w[67] = CYCLE_NS[pio_mode];  // minimum PIO cycle time without IORDY, ns
+    w[68] = CYCLE_NS[pio_mode];  // minimum PIO cycle time with IORDY, ns
     w[80] = 0x001E;  // supports ATA-1 to ATA-4
     w[82] = 1u << 5;               // write cache supported; no SMART or other sets
     w[83] = 0x4000 | (1u << 12);   // bit 14 shall be set; FLUSH CACHE; no 48-bit addressing

@@ -131,12 +131,15 @@ static SharedFlag g_command_active{false};
 
 // The disk's size, set by core 0 once it has chosen the disk (setup()).
 // Core 1 starts first, so it waits for it: IDENTIFY reports the real size.
+// The PIO mode to offer (HDDSYNTH.INI's `mode`) is set before it.
 static std::atomic<uint32_t> g_disk_sectors{0};
+static std::atomic<uint8_t> g_pio_mode{0};
 
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
 static IdentifyInfo driveIdentity() {
     return IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
-                        g_disk_sectors.load(std::memory_order_acquire)};
+                        g_disk_sectors.load(std::memory_order_acquire),
+                        g_pio_mode.load(std::memory_order_relaxed)};
 }
 
 void setup1() {
@@ -420,7 +423,8 @@ static void chooseDisk() {
             g_disk_name = "image";
     }
     g_disk_ms = millis() - start;
-    g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);
+    g_pio_mode.store(drive_config::pioModeOffered(g_config.mode), std::memory_order_relaxed);
+    g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
 // Console `E`: sets one setting in HDDSYNTH.INI from "key = value", keeping
@@ -466,8 +470,9 @@ static void editConfig(const char* line) {
 // Console `S`: the settings and what came of them, after the card's own line.
 static void printConfig() {
     drive_config::Mode used = drive_config::modeSupported(g_config.mode) ? g_config.mode : drive_config::Mode::Auto;
-    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s serving=%s\n", g_config_state, g_config.image,
-                  drive_config::modeName(g_config.mode), drive_config::modeName(used), g_image_name);
+    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s pio_offered=%u serving=%s\n", g_config_state,
+                  g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
+                  unsigned(g_pio_mode.load()), g_image_name);
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
     size_t shown = g_config.warning_count < drive_config::MAX_WARNINGS ? g_config.warning_count : drive_config::MAX_WARNINGS;
     for (size_t i = 0; i < shown; ++i) Serial.printf("CONFIG warning: %s\n", g_config.warnings[i]);

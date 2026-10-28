@@ -297,9 +297,14 @@ CORE1_RAM void Device::seek() {
 CORE1_RAM void Device::setFeatures() {
     last_.lba = features_;  // for the trace: which subcommand, and its argument
     last_.count = sector_count_;
+    // PIO default, or PIO flow-control mode 0 up to the one IDENTIFY offers.
+    // The bus program serves every mode it offers the same way, so there's
+    // nothing to switch.
+    uint8_t pio_mode = info_.pio_mode > MAX_PIO_MODE ? MAX_PIO_MODE : info_.pio_mode;
     if (features_ == SF_SET_TRANSFER_MODE &&
-        (sector_count_ == XFER_PIO_DEFAULT || sector_count_ == XFER_PIO_FLOW_0)) {
-        completeNoData();  // the only mode there is
+        (sector_count_ == XFER_PIO_DEFAULT ||
+         (sector_count_ >= XFER_PIO_FLOW_0 && sector_count_ <= XFER_PIO_FLOW_0 + pio_mode))) {
+        completeNoData();
         return;
     }
     if (features_ == SF_ENABLE_WRITE_CACHE || features_ == SF_DISABLE_WRITE_CACHE) {
@@ -308,7 +313,7 @@ CORE1_RAM void Device::setFeatures() {
         completeNoData();
         return;
     }
-    // Faster PIO modes and every DMA mode are not advertised; nor is turning
+    // Faster PIO modes and every DMA mode aren't offered; nor is turning
     // IORDY off (01h), look-ahead or the power-on defaults.
     fail(ER_ABRT);
 }

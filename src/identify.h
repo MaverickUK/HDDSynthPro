@@ -1,7 +1,7 @@
 // The 256-word IDENTIFY DEVICE block (ATA/ATA-4 layout). Pure C++.
 //
 // It advertises a deliberately plain drive: LBA28 plus a default CHS
-// geometry, PIO mode 0 only, IORDY supported, no DMA, no READ/WRITE MULTIPLE,
+// geometry, PIO modes 0-3 (up to IdentifyInfo's), IORDY supported, no DMA, no READ/WRITE MULTIPLE,
 // no 48-bit addressing. It does declare a write cache and FLUSH CACHE: the
 // storage behind it (SdFat, the card) buffers writes, so hosts should flush
 // before power goes.
@@ -27,7 +27,14 @@ struct IdentifyInfo {
     const char* serial;    // up to 20 characters
     const char* firmware;  // up to 8 characters
     uint32_t total_sectors;  // LBA28 capacity
+    uint8_t pio_mode = 0;    // the fastest PIO mode offered, 0-3 (MAX_PIO_MODE)
 };
+
+// The fastest PIO mode the drive can offer: the bus program meets modes 0-3's
+// timings, with IORDY holding the host while core 1 answers
+// (host/tests/test_pio_bus_sim.py). Not mode 4: its write data is valid only
+// 20 ns before DIOW# rises, less than the program's 35 ns sampling loop.
+constexpr uint8_t MAX_PIO_MODE = 3;
 
 // Fills `words` (256 entries, host byte order: word n is what the host reads
 // on the nth DATA access). Word 255 carries the integrity checksum.

@@ -90,4 +90,8 @@ def test_first_and_last_sectors(raw_disk):
     _, fd = raw_disk
     for lba in (0, 1, TOTAL - 2, TOTAL - 1):
         assert read(fd, lba, 1) == gen_disk.sector(lba)
-    assert pread(fd, SECTOR, TOTAL * SECTOR) == b""  # macOS stops at the end
+    try:
+        past_end = pread(fd, SECTOR, TOTAL * SECTOR)  # macOS stops at the end
+    except OSError:
+        past_end = b""  # Windows refuses the read (EINVAL)
+    assert past_end == b""

@@ -29,6 +29,8 @@ MB/s here means 10^6 bytes per second. Worst read is the longest IORDY held a re
 | 2026-10-25 | 0.8.20 | Write-behind on (not kept as the default) | PIO 0, 150 MHz, SD at 25 MHz | SD bench image | 1.26 MB/s | 76 IOPS (13.1 ms) | 10.9 ms + 318 µs/sector | 1.51 MB/s | 1546 ns |
 | 2026-10-25 | 0.8.22 | Write-behind off by default | PIO 0, 150 MHz | generated | 1.27 MB/s | 76 IOPS (13.1 ms) | 11.0 ms + 314 µs/sector | 1.55 MB/s | 1106 ns |
 | 2026-10-28 | 0.14.0 | 200 MHz (Windows rig, JMicron-ID adapter) | PIO 0, 200 MHz, SD at 25 MHz | SD image | 1.31 MB/s | 78 IOPS (12.9 ms) | 10.9 ms + 301 µs/sector | (bench image: 0.94 MB/s; 1.61 with write-behind) | 850 ns |
+| 2026-10-28 | 0.15.0 | (mode 0 by HDDSYNTH.INI, for comparison) | PIO 0, 200 MHz | generated | 1.33 MB/s | 78 IOPS (12.9 ms) | 11.0 ms + 297 µs/sector | 1.58 MB/s | 910 ns |
+| 2026-10-28 | 0.15.0 | PIO mode 3 (the adapter's choice) | PIO 3, 200 MHz | generated | 1.36 MB/s | 78 IOPS (12.8 ms) | 10.9 ms + 287 µs/sector | 1.79 MB/s | 920 ns |
 
 ## Where the time goes (0.7.3 baseline)
 

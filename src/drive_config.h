@@ -39,8 +39,16 @@ enum class Mode : uint8_t {
 
 const char* modeName(Mode m);  // "auto", "pio0", ... "udma6"
 
-// Can this firmware run `m`? Auto and PIO 0 so far.
+// Can this firmware run `m`? Auto and PIO 0-3 so far.
 bool modeSupported(Mode m);
+
+// The PIO mode IDENTIFY offers for `m`: the mode itself, or AUTO_PIO_MODE for
+// auto (and for a mode this firmware can't run, which falls back to auto).
+uint8_t pioModeOffered(Mode m);
+
+// What `auto` offers: the fastest mode there is. The adapter asks for mode 4,
+// then takes the fastest IDENTIFY offers from word 64 (3), never 1 or 2.
+constexpr uint8_t AUTO_PIO_MODE = 3;
 
 struct Config {
     char image[MAX_NAME + 1];

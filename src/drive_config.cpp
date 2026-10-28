@@ -1,5 +1,7 @@
 #include "drive_config.h"
 
+#include "identify.h"  // MAX_PIO_MODE
+
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -131,7 +133,14 @@ bool parseMode(Span v, Mode& out) {
 
 const char* modeName(Mode m) { return size_t(m) < MODE_COUNT ? MODE_NAMES[size_t(m)] : "?"; }
 
-bool modeSupported(Mode m) { return m == Mode::Auto || m == Mode::Pio0; }
+bool modeSupported(Mode m) {
+    return m == Mode::Auto || (m >= Mode::Pio0 && uint8_t(m) - uint8_t(Mode::Pio0) <= MAX_PIO_MODE);
+}
+
+uint8_t pioModeOffered(Mode m) {
+    if (m == Mode::Auto || !modeSupported(m)) return AUTO_PIO_MODE;
+    return uint8_t(uint8_t(m) - uint8_t(Mode::Pio0));
+}
 
 void defaults(Config& out) {
     std::snprintf(out.image, sizeof out.image, "%s", DEFAULT_IMAGE);

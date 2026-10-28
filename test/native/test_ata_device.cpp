@@ -1226,8 +1226,35 @@ static uint8_t command(Device& d, uint8_t cmd, uint8_t features = 0, uint8_t cou
     return uint8_t(d.read(Reg::AltStatusDevCtrl));
 }
 
+TEST(test_set_features_pio_modes_offered) {
+    // Offering PIO mode 2: flow-control modes 0-2 accepted, 3 and 4 aborted.
+    IdentifyInfo info = INFO;
+    info.pio_mode = 2;
+    Device d(info);
+    for (uint8_t mode : {uint8_t(0x08), uint8_t(0x09), uint8_t(0x0A), XFER_PIO_DEFAULT})
+        CHECK_EQ(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, mode), ST_DRDY | ST_DSC);
+    for (uint8_t mode : {uint8_t(0x0B), uint8_t(0x0C), uint8_t(0x22)}) {
+        CHECK(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, mode) & ST_ERR);
+        CHECK_EQ(d.error(), ER_ABRT);
+    }
+    // Offering mode 3: 3 accepted; 4, which the adapter asks for first (0Ch),
+    // aborted, and even asked for an IDENTIFY that can't offer it.
+    info.pio_mode = 3;
+    Device d3(info);
+    CHECK_EQ(command(d3, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, 0x0B), ST_DRDY | ST_DSC);
+    CHECK(command(d3, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, 0x0C) & ST_ERR);
+    info.pio_mode = 4;
+    Device d4(info);
+    CHECK(command(d4, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, 0x0C) & ST_ERR);
+    // Offering mode 1: 2 aborted.
+    info.pio_mode = 1;
+    Device d1(info);
+    CHECK_EQ(command(d1, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, 0x09), ST_DRDY | ST_DSC);
+    CHECK(command(d1, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, 0x0A) & ST_ERR);
+}
+
 TEST(test_set_features_transfer_mode) {
-    Device d(INFO);
+    Device d(INFO);  // offers PIO mode 0 only
     // PIO default and PIO flow-control mode 0: accepted.
     CHECK_EQ(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_PIO_DEFAULT), ST_DRDY | ST_DSC);
     CHECK(d.intrq());
@@ -1642,6 +1669,7 @@ void runAtaDeviceTests() {
     RUN(test_reset_mid_read_makes_fetch_stale);
     RUN(test_read_with_device1_selected_is_ignored);
     RUN(test_read_across_cores);
+    RUN(test_set_features_pio_modes_offered);
     RUN(test_set_features_transfer_mode);
     RUN(test_set_features_traced_with_its_subcommand);
     RUN(test_set_features_other_subcommands_abort);

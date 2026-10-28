@@ -2,6 +2,24 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.15.0] - 2026-10-28
+
+PIO modes 1-3: the adapter now runs the bus in mode 3.
+
+### Added
+- **PIO modes 1, 2 and 3.** IDENTIFY offers modes up to `HDDSYNTH.INI`'s `mode` (word 51 for 1-2, word 64 for 3, words 67-68 the cycle time), and SET FEATURES accepts flow-control modes up to the one offered. `auto` offers mode 3, the fastest there is (`drive_config::AUTO_PIO_MODE`). The bus program is the same in every mode: IORDY holds the host while core 1 answers, as in mode 0.
+- `S` shows `pio_offered=` in the CONFIG line.
+
+### On the rig (Windows)
+- **The adapter takes mode 3**: it asks for mode 4 (SET FEATURES 0Ch) and, refused, for the fastest IDENTIFY offers in word 64 (0Bh). It never asks for modes 1 or 2: offered mode 2, it fell back to mode 0.
+- On the generated disk, mode 0 against mode 3: reads 1.33 against 1.36 MB/s (297 against 287 µs per sector), writes 1.58 against 1.79 MB/s (+13%). Reads barely change because the adapter, not the bus, sets their pace: about 1.1 µs a data word in both modes, where the simulator gives the bus program about 440 ns a word in mode 3. So faster PIO modes can't speed reads up much on this adapter; DMA modes may (on the PCB, which has DMARQ and DMACK#).
+- Mode 3's data checked: slices 3 and 4 pass (reads against the generated disk, writes read back), and the bus observer checked 262,868 sectors on the cable, 0 bad. `iordy_early` now counts most reads: in mode 3 the chip selects come only 30 ns before the strobe, so IORDY falls just after it (about 10 ns), still well before the host samples it (35 ns).
+
+### Simulator
+- The host model has modes 1-4 (`ide_host_model.PIO_MODES`, `FAST_PIO_MODES`), with mode 3-4's strobe recovery (t2i), and records IORDY falling after the strobe as a negative lead. `test_pio_bus_sim.py` holds the bus program to modes 0-3's timings (IORDY low at least 15 ns before the host samples it: 24 ns in mode 3).
+- **Mode 4 is not offered**: its write data is valid only 20 ns before DIOW# rises, and the program samples a write every 35 ns, so the last sample can miss it (the simulator loses words); and a read straight after a write leaves IORDY 6 ns. It needs a reworked write path.
+- Fixed: `test_iordy_timer_sim.py` and the slice 3 test's read past the end of the disk (Windows refuses it, macOS returns nothing).
+
 ## [0.14.0] - 2026-10-28
 
 200 MHz instead of 150: headroom on every read.

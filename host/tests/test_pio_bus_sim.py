@@ -1,9 +1,11 @@
 """The slice 1 bus program (src/ide_bus.pio), co-simulated with an ATA PIO
-mode 0 host that honours IORDY and a model of core 1. No hardware needed.
+host that honours IORDY and a model of core 1, in PIO modes 0 to 3 (the
+modes IDENTIFY can offer). No hardware needed.
 
-These pin down the timings the real bus will hold the firmware to:
-  - IORDY is already low when the host samples it (tA = 35 ns after the strobe)
-  - read data is on the bus before IORDY rises, and set up t5 = 50 ns
+These pin down the timings the real bus will hold the firmware to, in each mode:
+  - IORDY is already low when the host samples it (tA = 35 ns after the
+    strobe), though the chip selects come only t1 = 70 to 30 ns earlier
+  - read data is on the bus before IORDY rises, and set up t5 = 50 to 20 ns
   - DD is released within t6z = 30 ns of DIOR# rising
   - IORDY never stays low longer than 1.25 us, given core 1's reply time
   - IORDY is never driven high, and the device never fights the host on DD
@@ -12,12 +14,20 @@ from __future__ import annotations
 
 import pytest
 
-from hddproto.ide_host_model import Access, Core1, Mode0, run_host
+from hddproto.ide_host_model import FAST_PIO_MODES, PIO_MODES, Access, Core1, Mode0, run_host
 from hddproto.pio_sim import CYCLE_PS, PioSim
 
 pytestmark = pytest.mark.sim
 
 MODE0 = Mode0()
+PIO_MODES = {**PIO_MODES, 3: FAST_PIO_MODES[3]}  # modes 0-3, the ones IDENTIFY can offer
+MODES = list(PIO_MODES)  # parametrize over these
+# How long before the host samples IORDY (tA after the strobe) it must be low:
+# room for the cable and, on the PCB, the bus switches (under a nanosecond).
+# Mode 3's chip selects come 30 ns before the strobe, which leaves 24. (Mode 4,
+# not offered: 25 ns, leaving 19; and its write data, valid only 20 ns before
+# DIOW# rises, can fall between two of the program's samples.)
+IORDY_MARGIN_NS = 15
 DIOR_BIT = 22
 PHASES_NS = [i * CYCLE_PS / 1000 / 6 for i in range(6)]  # start times across one PIO cycle
 
@@ -42,31 +52,36 @@ def check_clean(run):
     assert not run.errors, run.errors
 
 
-def check_read(r, want):
+def check_read(r, want, timing: Mode0 = MODE0):
     assert r.read_value == want, f"read {r.access}: got {r.read_value!r}, want {want:#06x}"
     assert r.iordy_low_at_tA, "IORDY was not low when the host sampled it"
     # Margin before the host samples IORDY (tA after the strobe): the chip
     # select is seen and IORDY pulled low with room to spare.
-    assert r.iordy_low_lead_ns is not None and r.iordy_low_lead_ns + MODE0.tA >= 20, \
-        f"IORDY low only {r.iordy_low_lead_ns + MODE0.tA:.0f} ns before the host samples it"
-    assert r.wait_ns is not None and r.wait_ns < MODE0.iordy_max
-    assert r.data_setup_ns is not None and r.data_setup_ns >= MODE0.t5
-    assert r.release_ns is not None and r.release_ns <= MODE0.t6z, \
-        f"DD released {r.release_ns} ns after DIOR# rose (limit {MODE0.t6z})"
+    assert r.iordy_low_lead_ns is not None and r.iordy_low_lead_ns + timing.tA >= IORDY_MARGIN_NS, \
+        f"IORDY low only {r.iordy_low_lead_ns + timing.tA:.0f} ns before the host samples it"
+    assert r.wait_ns is not None and r.wait_ns < timing.iordy_max
+    assert r.data_setup_ns is not None and r.data_setup_ns >= timing.t5
+    assert r.release_ns is not None and r.release_ns <= timing.t6z, \
+        f"DD released {r.release_ns} ns after DIOR# rose (limit {timing.t6z})"
 
 
+@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("phase_ns", PHASES_NS)
-def test_status_read(program, phase_ns):
+def test_status_read(program, phase_ns, mode):
+    timing = PIO_MODES[mode]
     core1 = Core1(200, registers({("CMD", 7): 0x50}))
-    run = run_host(make_sim(program), core1, [Access(False, "CMD", 7)], start_ns=100 + phase_ns)
+    run = run_host(make_sim(program), core1, [Access(False, "CMD", 7)], timing=timing,
+                   start_ns=100 + phase_ns)
     check_clean(run)
-    check_read(run.results[0], 0x50)
+    check_read(run.results[0], 0x50, timing)
 
 
+@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("phase_ns", PHASES_NS)
-def test_register_write(program, phase_ns):
+def test_register_write(program, phase_ns, mode):
     core1 = Core1(200, registers({}))
-    run = run_host(make_sim(program), core1, [Access(True, "CMD", 6, 0x00A0)], start_ns=100 + phase_ns)
+    run = run_host(make_sim(program), core1, [Access(True, "CMD", 6, 0x00A0)], timing=PIO_MODES[mode],
+                   start_ns=100 + phase_ns)
     check_clean(run)
     assert core1.writes == [("CMD", 6, 0x00A0)]
     r = run.results[0]
@@ -74,8 +89,10 @@ def test_register_write(program, phase_ns):
     assert r.wait_ns is not None and r.wait_ns < 150
 
 
-def test_identify_style_sequence(program):
+@pytest.mark.parametrize("mode", MODES)
+def test_identify_style_sequence(program, mode):
     """Select, command, poll, then 256 data reads with CS0# held between them."""
+    timing = PIO_MODES[mode]
     data = iter(range(0x1000, 0x1100))
     state = {"status_reads": 0}
 
@@ -93,19 +110,21 @@ def test_identify_style_sequence(program):
     accesses = [Access(True, "CMD", 6, 0xA0), Access(True, "CMD", 7, 0xEC),
                 Access(False, "CTL", 6), Access(False, "CMD", 7)]
     accesses += [Access(False, "CMD", 0, hold_cs=i < 255) for i in range(256)]
-    run = run_host(make_sim(program), core1, accesses)
+    run = run_host(make_sim(program), core1, accesses, timing=timing)
     check_clean(run)
     assert core1.writes == [("CMD", 6, 0xA0), ("CMD", 7, 0xEC)]
     reads = [r for r in run.results if not r.access.write]
-    check_read(reads[0], 0x58)
-    check_read(reads[1], 0x58)
+    check_read(reads[0], 0x58, timing)
+    check_read(reads[1], 0x58, timing)
     for i, r in enumerate(reads[2:]):
-        check_read(r, 0x1000 + i)
+        check_read(r, 0x1000 + i, timing)
     assert state["status_reads"] == 1
     assert run.rx_words == len(accesses)
 
 
-def test_write_then_read_back(program):
+@pytest.mark.parametrize("mode", MODES)
+def test_write_then_read_back(program, mode):
+    timing = PIO_MODES[mode]
     regs = {}
 
     class Echo(Core1):
@@ -118,20 +137,21 @@ def test_write_then_read_back(program):
     core1 = Echo(150, lambda block, addr: regs.get((block, addr), 0))
     accesses = [Access(True, "CMD", 2, 0x55), Access(True, "CMD", 3, 0xAA),
                 Access(False, "CMD", 2), Access(False, "CMD", 3)]
-    run = run_host(make_sim(program), core1, accesses)
+    run = run_host(make_sim(program), core1, accesses, timing=timing)
     check_clean(run)
-    check_read(run.results[2], 0x55)
-    check_read(run.results[3], 0xAA)
+    check_read(run.results[2], 0x55, timing)
+    check_read(run.results[3], 0xAA, timing)
 
 
-def test_sector_write_with_a_slow_core1(program):
+@pytest.mark.parametrize("mode", MODES)
+def test_sector_write_with_a_slow_core1(program, mode):
     # WRITE SECTORS: 256 data words back to back, while core 1 takes 1 us per
     # access. Writes don't wait for an answer, so without flow control the
     # FIFO fills and words are lost; IORDY must hold the host instead.
     words = [(i * 7919) & 0xFFFF for i in range(256)]
     core1 = Core1(200, registers({}), service_ns=1000)
     accesses = [Access(True, "CMD", 0, w, hold_cs=True) for w in words]
-    run = run_host(make_sim(program), core1, accesses, tail_ns=10000)
+    run = run_host(make_sim(program), core1, accesses, timing=PIO_MODES[mode], tail_ns=10000)
     check_clean(run)
     assert [v for (_, _, v) in core1.writes] == words
     waits = [r.wait_ns for r in run.results if r.wait_ns is not None]
@@ -157,18 +177,19 @@ def test_core1_reply_budget(program):
     check_read(run.results[0], 0x50)
 
 
-def test_release_after_dior_rises(program):
+@pytest.mark.parametrize("mode", MODES)
+def test_release_after_dior_rises(program, mode):
     """DD is released within t6z of DIOR# rising, with or without the
     input-synchroniser bypass that ide_bus.cpp sets on DIOR#; the bypass
     roughly halves the time, which leaves margin for faster PIO modes."""
     worst = 0.0
     for phase in PHASES_NS:
         run = run_host(make_sim(program, bypass_dior=False), Core1(200, registers({("CMD", 7): 0x50})),
-                       [Access(False, "CMD", 7)], start_ns=100 + phase)
+                       [Access(False, "CMD", 7)], timing=PIO_MODES[mode], start_ns=100 + phase)
         worst = max(worst, run.results[0].release_ns)
     with_bypass = max(
         run_host(make_sim(program), Core1(200, registers({("CMD", 7): 0x50})),
-                 [Access(False, "CMD", 7)], start_ns=100 + p).results[0].release_ns
+                 [Access(False, "CMD", 7)], timing=PIO_MODES[mode], start_ns=100 + p).results[0].release_ns
         for p in PHASES_NS)
     print(f"\nDD release after DIOR# rises: {with_bypass:.0f} ns with the bypass, {worst:.0f} ns without")
     assert with_bypass <= MODE0.t6z
@@ -176,7 +197,8 @@ def test_release_after_dior_rises(program):
     assert worst > with_bypass
 
 
-def test_chip_select_without_strobe(program):
+@pytest.mark.parametrize("mode", MODES)
+def test_chip_select_without_strobe(program, mode):
     """A chip select that comes and goes with no strobe: IORDY goes low while
     it is asserted, is released after, and nothing reaches core 1."""
     from hddproto.pio_sim import synced
@@ -190,6 +212,10 @@ def test_chip_select_without_strobe(program):
         sim.step(synced(history, k, sim.bypass_mask))
         iordy.append((t_ns, bool((sim.pindirs >> 24) & 1)))
     low = [t for t, l in iordy if l]
-    assert low and min(low) < 100 + MODE0.t1  # low within t1 of the chip select
+    # Low before the host samples it (tA after a strobe that comes t1 after
+    # the chip select), with the margin check_read asks for: in mode 0 and 1
+    # that's before the strobe, in mode 2 (t1 = 30 ns) just after it.
+    t = PIO_MODES[mode]
+    assert low and min(low) < 100 + t.t1 + t.tA - IORDY_MARGIN_NS
     assert max(low) < 400 + 100                # released soon after it goes
     assert not sim.rx_fifo

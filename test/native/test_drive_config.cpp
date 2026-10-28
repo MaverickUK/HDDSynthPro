@@ -85,7 +85,21 @@ TEST(test_config_modes) {
     CHECK(parsed("mode = pio0").mode == Mode::Pio0);
     CHECK_EQ(parsed("mode = pio0").warning_count, size_t(0));
     CHECK(drive_config::modeSupported(Mode::Auto) && drive_config::modeSupported(Mode::Pio0));
-    CHECK(!drive_config::modeSupported(Mode::Pio4));
+    CHECK(drive_config::modeSupported(Mode::Pio1) && drive_config::modeSupported(Mode::Pio2));
+    CHECK(drive_config::modeSupported(Mode::Pio3) && !drive_config::modeSupported(Mode::Pio4));
+    CHECK(!drive_config::modeSupported(Mode::Mdma0));
+    CHECK_EQ(parsed("mode = pio2").warning_count, size_t(0));
+    CHECK_EQ(parsed("mode = pio3").warning_count, size_t(0));
+    CHECK_EQ(parsed("mode = pio4").warning_count, size_t(1));  // not supported yet
+    // What IDENTIFY offers: the mode itself, or the fastest for auto and for
+    // a mode the firmware can't run.
+    CHECK_EQ(drive_config::pioModeOffered(Mode::Auto), drive_config::AUTO_PIO_MODE);
+    CHECK_EQ(drive_config::pioModeOffered(Mode::Pio0), 0);
+    CHECK_EQ(drive_config::pioModeOffered(Mode::Pio1), 1);
+    CHECK_EQ(drive_config::pioModeOffered(Mode::Pio2), 2);
+    CHECK_EQ(drive_config::pioModeOffered(Mode::Pio3), 3);
+    CHECK_EQ(drive_config::pioModeOffered(Mode::Pio4), drive_config::AUTO_PIO_MODE);
+    CHECK_EQ(drive_config::pioModeOffered(Mode::Udma5), drive_config::AUTO_PIO_MODE);
     CHECK_STR(std::string(drive_config::modeName(Mode::Udma6)), "udma6");
 }
 

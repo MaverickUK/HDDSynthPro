@@ -1,4 +1,4 @@
-"""An ATA PIO mode 0 host, co-simulated against a PIO program and a model of
+"""An ATA PIO host (modes 0-2), co-simulated against a PIO program and a model of
 core 1, at 1 ns resolution. It honours IORDY the way a host does and records
 every timing the device must meet, so tests can check them.
 
@@ -36,6 +36,61 @@ class Mode0:
     t2i: float = 0
 
 
+@dataclass(frozen=True)
+class Mode1(Mode0):
+    """ATA PIO mode 1 timings, ns (ATA/ATAPI-6's table; the rest as mode 0)."""
+    t0: float = 383
+    t1: float = 50
+    t2: float = 125
+    t3: float = 45
+    t4: float = 20
+    t5: float = 35
+    t9: float = 15
+
+
+@dataclass(frozen=True)
+class Mode2(Mode0):
+    """ATA PIO mode 2 timings, ns."""
+    t0: float = 240
+    t1: float = 30
+    t2: float = 100
+    t3: float = 30
+    t4: float = 15
+    t5: float = 20
+    t9: float = 10
+
+
+@dataclass(frozen=True)
+class Mode3(Mode0):
+    """ATA PIO mode 3 timings, ns. IORDY is required from mode 3 up, and a
+    strobe may follow the last one t2i after it rose, CS held."""
+    t0: float = 180
+    t1: float = 30
+    t2: float = 80
+    t3: float = 30
+    t4: float = 10
+    t5: float = 20
+    t9: float = 10
+    t2i: float = 70
+
+
+@dataclass(frozen=True)
+class Mode4(Mode0):
+    """ATA PIO mode 4 timings, ns."""
+    t0: float = 120
+    t1: float = 25
+    t2: float = 70
+    t3: float = 20
+    t4: float = 10
+    t5: float = 20
+    t9: float = 10
+    t2i: float = 25
+
+
+PIO_MODES = {0: Mode0(), 1: Mode1(), 2: Mode2()}
+FAST_PIO_MODES = {3: Mode3(), 4: Mode4()}  # 3 is offered; 4 fails the bus program (writes)
+
+
 @dataclass
 class Access:
     write: bool
@@ -51,7 +106,7 @@ class Result:
     fall_ns: float = 0
     rise_ns: float = 0
     iordy_low_at_tA: bool = False
-    iordy_low_lead_ns: float | None = None  # how long before the strobe IORDY was already low
+    iordy_low_lead_ns: float | None = None  # how long before the strobe IORDY was low (negative: after it)
     wait_ns: float | None = None            # strobe falling to IORDY seen high (if it waited)
     read_value: int | None = None           # what the host latched (None: nobody drove DD)
     release_ns: float | None = None         # strobe rising to DD released (reads)
@@ -174,6 +229,9 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             iordy_seen_high_at = None
             state = "strobe"
         elif state == "strobe":
+            # IORDY falling after the strobe (in time or not): a negative lead.
+            if cur.iordy_low_lead_ns is None and iordy_low and not tA_checked:
+                cur.iordy_low_lead_ns = (fall - t) / 1000
             if not tA_checked and t >= fall + T["tA"]:
                 cur.iordy_low_at_tA = iordy_low
                 tA_checked = True
