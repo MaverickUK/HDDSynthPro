@@ -757,6 +757,30 @@ static bool printLine(const char* line, size_t n) {
 }
 
 #if FIRMWARE_SLICE != 0
+// A CARD line when the card the image is on is pulled out, comes back, or a
+// different card (or the image changed) comes back, which isn't served.
+static void printCardChanges() {
+    static media_watch::State shown = sd_card::media().state();
+    const media_watch::Watch& card = sd_card::media();
+    if (card.state() == shown) return;
+    char line[160];
+    int n;
+    switch (card.state()) {
+        case media_watch::State::Present:
+            n = std::snprintf(line, sizeof line, "CARD back %s\n", g_image_name);
+            break;
+        case media_watch::State::Changed:
+            n = std::snprintf(line, sizeof line,
+                              "CARD changed: %s; not served (eject the disk on the computer, then restart the drive)\n",
+                              card.why());
+            break;
+        default:
+            n = std::snprintf(line, sizeof line, "CARD lost: the image's reads and writes fail until it's back\n");
+            break;
+    }
+    if (printLine(line, size_t(n))) shown = card.state();
+}
+
 // A SLOWREAD line for each read IORDY held past ATA's limit. The time is when
 // core 0 collected the report: up to a sector's store (about 0.5 ms on the
 // SD card) after the read.
@@ -815,6 +839,9 @@ static void printStats() {
     Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
                   (unsigned long)g_disk_ms);
     Serial.printf(" image_name=%s config=%s", g_image_name, g_config_state);
+    const media_watch::Watch& card = sd_card::media();
+    Serial.printf(" card=%s card_lost=%lu card_back=%lu", media_watch::stateName(card.state()),
+                  (unsigned long)card.losses(), (unsigned long)card.returns());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
@@ -1048,6 +1075,8 @@ void loop() {
     serviceLoopback();
     serviceAbsence();
     checkStuck();
+    sd_card::serviceMedia();
+    printCardChanges();
 
     // Re-evaluate the activity state once a millisecond, before anything
     // below can return early on a busy serial link.

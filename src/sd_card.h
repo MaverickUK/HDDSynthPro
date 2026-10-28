@@ -8,6 +8,7 @@
 #include <Arduino.h>
 
 #include "block_source.h"
+#include "media_watch.h"
 
 namespace sd_card {
 
@@ -41,5 +42,17 @@ bool mounted();
 // serves nothing else; the drive goes on using its current disk until reboot.
 // Returns false (and says why) without changing anything if it can't.
 bool createImage(const char* name, uint32_t sectors, Print& out);
+
+// The card the image is on (media_watch.h). A card pulled out is noticed when
+// an image read or write fails; from then on they fail at once, and the image
+// is served again only when the same card comes back with it unchanged.
+// A read or write that fails is retried once after restarting the card, so a
+// card pulled and put back while the drive was idle costs nothing.
+const media_watch::Watch& media();
+// Core 0's loop: while the card is lost, looks for it coming back (a CMD0
+// every media_watch::PROBE_MS, under a millisecond); while a different card
+// is in, checks that it still is. Restarting a card that answers takes tens
+// of milliseconds.
+void serviceMedia();
 
 }  // namespace sd_card

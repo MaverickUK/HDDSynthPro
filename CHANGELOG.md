@@ -2,6 +2,21 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.13.0] - 2026-10-28
+
+A microSD card put back while the drive runs is served again, if it's the same card with the same image.
+
+### Added
+- **Re-mounting the card** (`src/media_watch.*`, host-tested; `sd_card.cpp`). A card pulled out is noticed when an image read or write fails: the drive prints `CARD lost`, and from then on the image's reads and writes fail at once instead of each waiting on the card. Every 250 ms core 0 looks for the card coming back, with a single CMD0 sent by hand (about half a millisecond; SdFat's own start-up retries it for 2 s with no card). A card that answers is started again and the image reopened, and it's served again (`CARD back HDDSYNTH.IMG`) only if it's the same card (its CID's maker and serial number) and the image is unchanged: the same size, place on the card and modify time (the drive never sets that time, so only a computer changes it).
+- **Anything else isn't served**: `CARD changed: another card` (or `image modified`, `image replaced`, `image not found`, `can't mount`) and reads and writes keep failing until the right card is back, or the drive restarts. The host caches what it knows of the disk's file system, and its next writes would corrupt a different card or an edited image. While a different card is in, the drive checks once a second that it still is (reading its CID).
+- **A card pulled and put back while the drive is idle costs nothing**: a read or write that fails is retried once after restarting the card, if it comes back as the same card.
+- `s` shows `card=` (`none`, `present`, `lost` or `changed`), `card_lost=` and `card_back=`.
+- **`-m card`** (`host/tests/test_card.py`): the card pulled and put back while idle and during reads, with the data compared before and after; with `HDDPRO_SECOND_CARD=1`, another card refused. Needs someone at the rig; reads only.
+
+### On the rig
+- Card in, nothing pulled yet (that needs the bench): reads 1.23 MB/s and writes to `HDDBENCH.IMG` 0.92 MB/s, as before, worst read 1,226 ns.
+- The overnight soak on 0.12.0 (generated disk, Windows): 10 hours clean. 26.8 GB moved (357,427 reads, 192,546 writes), 0 mismatches, 920,973 commands, 45.9 million sectors checked on the cable with 0 bad and 0 gaps, no host resets, worst read 1,240 ns (ALTSTATUS).
+
 ## [0.12.0] - 2026-10-27
 
 Serve the built-in test disk with the card in.

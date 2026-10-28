@@ -30,6 +30,10 @@ An image is used as it is: its size (a multiple of 512 bytes) is the disk's size
 
 **Transfer modes:** this firmware supports PIO mode 0 only. Any other mode is accepted in the file, with a warning, and the drive uses `auto` until that mode is added, so a settings file written now keeps working later.
 
+## Pulling the card out
+
+Eject the disk on the computer first, as you would before unplugging any disk. If the card comes out while the drive is serving an image, the computer gets read and write errors for that disk until the card is back. The drive serves the image again (`CARD back` on the console) only if **the same card** comes back with **the image unchanged**. A different card, or the image edited on another computer meanwhile, isn't served (`CARD changed`): the computer still has the old disk's file system in its cache, and its next writes would corrupt the new one. To use a different card or an edited image, eject the disk on the computer, then restart the drive (console `!`, or power).
+
 ## From the serial console
 
 | Key | Does |

@@ -43,12 +43,18 @@ static bool spiPins(Print& out) {
     return true;
 }
 
+// Starts the card and mounts its volume (a fresh volume: whatever SdFat had
+// cached from a card before is dropped).
+static bool startCard() {
+    SdSpiConfig config(cfg::PIN_SD_DAT3, DEDICATED_SPI, SD_SCK_MHZ(cfg::SD_SPI_MHZ), &SPI);
+    return s_sd.begin(config);
+}
+
 // Mounts the card's volume, unless it already is.
 static bool mount(Print& out) {
     if (s_sd.fatType()) return true;
     if (!spiPins(out)) return false;
-    SdSpiConfig config(cfg::PIN_SD_DAT3, DEDICATED_SPI, SD_SCK_MHZ(cfg::SD_SPI_MHZ), &SPI);
-    if (!s_sd.begin(config)) {
+    if (!startCard()) {
         out.printf("SD error: no card, or no FAT volume on it (code %u, data %u)\n",
                    unsigned(s_sd.sdErrorCode()), unsigned(s_sd.sdErrorData()));
         return false;
@@ -71,24 +77,118 @@ void printInfo(Print& out) {
                s_sd.exists(drive_config::FILE_NAME) ? "present" : "none");
 }
 
-// The open image as the drive's ImageFile.
+// ---- Watching the card (media_watch.h) ---------------------------------------
+
+static media_watch::Watch s_watch;
+static const char* s_served_name = nullptr;  // the image being served, kept while the card is out
+static uint64_t s_served_size = 0;           // its size, which the drive told the host
+
+// Whether a card answers CMD0 (go idle, and into SPI mode), the first step of
+// starting one. Sent by hand at 400 kHz, because SdFat's start-up retries it
+// for 2 s when there's no card; this takes about half a millisecond. With no
+// card the pull-up on DAT0 reads 0xFF. Only while the card is lost: CMD0
+// resets a card, so SdFat must start it again afterwards.
+static bool cardAnswers() {
+    SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+    digitalWrite(cfg::PIN_SD_DAT3, HIGH);
+    for (int i = 0; i < 10; ++i) SPI.transfer(0xFF);  // 80 clocks with CS high wake a card just put in
+    digitalWrite(cfg::PIN_SD_DAT3, LOW);
+    static const uint8_t CMD0[6] = {0x40, 0, 0, 0, 0, 0x95};
+    for (uint8_t b : CMD0) SPI.transfer(b);
+    uint8_t r1 = 0xFF;
+    for (int i = 0; i < 10 && r1 == 0xFF; ++i) r1 = SPI.transfer(0xFF);
+    digitalWrite(cfg::PIN_SD_DAT3, HIGH);
+    SPI.transfer(0xFF);
+    SPI.endTransaction();
+    return r1 == 0x01;  // idle
+}
+
+// The card in, and the open image on it.
+static bool identify(media_watch::Identity& id) {
+    cid_t cid;
+    if (!s_sd.card()->readCID(&cid)) return false;
+    id.maker = cid.mid;
+    id.serial = cid.psn();
+    id.size = s_image.fileSize();
+    id.first_sector = uint32_t(s_image.firstSector());
+    return s_image.getModifyDateTime(&id.date, &id.time);
+}
+
+// While the card is lost: starts a card that answers and reopens the image.
+// True if it's the card and image served, which can then be used again.
+static bool reattach(uint32_t now) {
+    if (!cardAnswers()) return false;
+    // The card is idle now and accepts no writes, so nothing SdFat still has
+    // cached from before can reach it as the file is closed.
+    s_image.close();
+    if (!startCard()) {
+        s_watch.cameBackWithout("can't mount", now);
+        return false;
+    }
+    if (!s_image.open(s_served_name, O_RDWR)) {
+        s_watch.cameBackWithout(s_sd.exists(s_served_name) ? "can't open" : "image not found", now);
+        return false;
+    }
+    media_watch::Identity id;
+    if (!identify(id)) {
+        s_watch.cameBackWithout("can't read the card's ID", now);
+    } else if (s_watch.cameBack(id, now) == media_watch::State::Present) {
+        return true;
+    }
+    s_image.close();
+    return false;
+}
+
+// An image read, write or flush. Refused at once while the card is lost or
+// changed. One that fails is retried once if the card restarts as the same
+// card: it may have been pulled and put back while the drive was idle, or
+// have stopped answering for a moment.
+template <typename Op>
+static bool attempt(Op op) {
+    if (!s_watch.usable()) return false;
+    if (op()) return true;
+    uint32_t now = millis();
+    s_watch.failed(now);
+    if (reattach(now) && op()) return true;
+    s_watch.failed(millis());  // the retry failed too
+    return false;
+}
+
+const media_watch::Watch& media() { return s_watch; }
+
+void serviceMedia() {
+    uint32_t now = millis();
+    if (!s_watch.due(now)) return;
+    if (s_watch.state() == media_watch::State::Lost) {
+        reattach(now);
+    } else {
+        cid_t cid;  // a different card: still in?
+        if (!s_sd.card()->readCID(&cid)) s_watch.gone(now);
+    }
+}
+
+// The open image as the drive's ImageFile. Its size is the one the host was
+// given, even while the card is out.
 class SdImageFile : public ImageFile {
 public:
-    uint64_t size() const override { return s_image.fileSize(); }
+    uint64_t size() const override { return s_served_size; }
     bool readAt(uint64_t offset, void* data, size_t bytes) override {
-        return s_image.seekSet(offset) && s_image.read(data, bytes) == int(bytes);
+        return attempt([&] { return s_image.seekSet(offset) && s_image.read(data, bytes) == int(bytes); });
     }
     bool writeAt(uint64_t offset, const void* data, size_t bytes) override {
-        return s_image.seekSet(offset) && s_image.write(data, bytes) == bytes;
+        return attempt([&] { return s_image.seekSet(offset) && s_image.write(data, bytes) == bytes; });
     }
     // SdFat's cache to the card, then waits until the card isn't busy.
-    bool sync() override { return s_image.sync(); }
+    bool sync() override {
+        return attempt([] { return s_image.sync(); });
+    }
 };
 static SdImageFile s_image_file;
 
 ImageFile* openImage(const char* name, Print& log) {
     if (s_image.isOpen()) s_image.close();
     s_open_name = nullptr;
+    s_watch = media_watch::Watch();
     if (!mount(log)) {
         s_open_error = "no card";
         return nullptr;
@@ -102,7 +202,17 @@ ImageFile* openImage(const char* name, Print& log) {
         log.printf("SD error: can't open %s\n", name);
         return nullptr;
     }
+    media_watch::Identity id;
+    if (!identify(id)) {
+        s_image.close();
+        s_open_error = "can't open";
+        log.printf("SD error: can't read the card's ID\n");
+        return nullptr;
+    }
     s_open_name = name;
+    s_served_name = name;
+    s_served_size = id.size;
+    s_watch.serve(id);
     return &s_image_file;
 }
 
