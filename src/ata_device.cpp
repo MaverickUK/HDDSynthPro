@@ -66,6 +66,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
         device_control_ = v;
         if (v & DC_SRST) {
             abandonCommand();
+            dma_ = dma_burst_running_ = false;
             in_reset_ = true;
             status_ = ST_BSY;
             irq_pending_ = false;
@@ -127,6 +128,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         status_ = ST_BSY;
         irq_pending_ = false;
         waking_ = false;
+        dma_ = dma_burst_running_ = false;
         command_queued_ = false;
         device_control_ = 0;
         reading_ = false;
@@ -163,6 +165,7 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
     // and the drive stays BSY for good. A write can't be left like this: it
     // ends only when every sector is stored, and holds BSY until then.
     abandonCommand();  // whatever was running ends here
+    dma_ = dma_burst_running_ = false;
     if (data_ || reading_) {
         data_ = nullptr;
         data_count_ = data_index_ = 0;
@@ -190,6 +193,26 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
         case CMD_READ_SECTORS_NO_RETRY:
             standby_ = false;
             startRead();
+            break;
+        case CMD_READ_DMA:
+        case CMD_READ_DMA_NO_RETRY:
+            if (info_.mdma_mode == NO_DMA) {
+                fail(ER_ABRT);  // not offered
+                break;
+            }
+            standby_ = false;
+            dma_ = true;
+            startRead();  // the same fetches and read-ahead; the words go by DMA
+            break;
+        case CMD_WRITE_DMA:
+        case CMD_WRITE_DMA_NO_RETRY:
+            if (info_.mdma_mode == NO_DMA) {
+                fail(ER_ABRT);
+                break;
+            }
+            standby_ = false;
+            dma_ = true;
+            startWrite();
             break;
         case CMD_WRITE_SECTORS:
         case CMD_WRITE_SECTORS_NO_RETRY:
@@ -307,6 +330,14 @@ CORE1_RAM void Device::setFeatures() {
         completeNoData();
         return;
     }
+    // Multiword DMA mode 0 up to the one IDENTIFY offers.
+    uint8_t mdma = info_.mdma_mode > MAX_MDMA_MODE ? MAX_MDMA_MODE : info_.mdma_mode;
+    if (features_ == SF_SET_TRANSFER_MODE && info_.mdma_mode != NO_DMA &&
+        sector_count_ >= XFER_MDMA_0 && sector_count_ <= XFER_MDMA_0 + mdma) {
+        setMdmaModeSelected(identify_, uint8_t(sector_count_ - XFER_MDMA_0));
+        completeNoData();
+        return;
+    }
     if (features_ == SF_ENABLE_WRITE_CACHE || features_ == SF_DISABLE_WRITE_CACHE) {
         write_cache_ = features_ == SF_ENABLE_WRITE_CACHE;
         setWriteCacheEnabled(identify_, write_cache_);
@@ -395,7 +426,7 @@ CORE1_RAM void Device::finishDataOut() {
     --recv_left_;
     filled_ = true;
     filled_buf_ = recv_buf_;
-    if (recv_left_ > 0) out_hold_ = true;  // BSY before the next block is wanted
+    if (recv_left_ > 0 && !dma_) out_hold_ = true;  // PIO: BSY before the next block is wanted
     settleWrite();
 }
 
@@ -429,12 +460,13 @@ CORE1_RAM void Device::settleWrite() {
     if (!receiving_ && !out_hold_ && recv_left_ > 0 && !filled_ && (write_behind_ || !fetch_pending_)) {
         recv_buf_ = fetch_pending_ ? uint8_t(fetch_buf_ ^ 1) : 0;  // the buffer not being stored
         startDataOut();
-        irq_pending_ = true;  // PIO data-out: interrupt when each later block is wanted
+        if (!dma_) irq_pending_ = true;  // PIO data-out: interrupt when each later block is wanted
         return;
     }
     if (receiving_) return;
     if (write_left_ == 0) {
         writing_ = false;
+        dma_ = false;
         completeNoData();  // all stored: the command ends with an interrupt
         return;
     }
@@ -522,6 +554,7 @@ CORE1_RAM void Device::setTaskFileLba(uint32_t lba) {
 }
 
 CORE1_RAM void Device::fail(uint8_t error) {
+    dma_ = dma_burst_running_ = false;
     error_ = error;
     status_ = ST_DRDY | ST_DSC | ST_ERR;
     irq_pending_ = true;
@@ -541,7 +574,7 @@ CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
     data_count_ = count;
     data_index_ = 0;
     status_ = ST_DRDY | ST_DSC | ST_DRQ;
-    irq_pending_ = true;  // PIO data-in: interrupt when each block is ready
+    if (!dma_) irq_pending_ = true;  // PIO data-in: interrupt when each block is ready
 }
 
 CORE1_RAM void Device::finishDataIn() {
@@ -562,7 +595,37 @@ CORE1_RAM void Device::finishDataIn() {
         return;
     }
     reading_ = false;
-    complete();  // no interrupt at the end of a data-in transfer
+    if (dma_) {
+        dma_ = false;
+        completeNoData();  // DMA: the interrupt comes at the end
+        return;
+    }
+    complete();  // no interrupt at the end of a PIO data-in transfer
+}
+
+CORE1_RAM bool Device::dmaBurstReady(DmaBurst& burst) {
+    if (!dma_ || dma_burst_running_ || device1Selected()) return false;
+    if (reading_ && data_ && (status_ & ST_DRQ)) {
+        burst = DmaBurst{data_ + data_index_, nullptr, uint16_t(data_count_ - data_index_)};
+    } else if (writing_ && receiving_) {
+        burst = DmaBurst{nullptr, sectors_[recv_buf_] + received_, uint16_t(SECTOR_WORDS - received_)};
+    } else {
+        return false;  // BSY: a fetch, a store or a full buffer first
+    }
+    dma_burst_running_ = true;
+    return true;
+}
+
+CORE1_RAM void Device::dmaBurstDone() {
+    if (!dma_burst_running_) return;
+    dma_burst_running_ = false;
+    if (data_) {
+        data_index_ = data_count_;
+        finishDataIn();  // the next sector at once if read-ahead has it, else BSY
+    } else if (receiving_) {
+        received_ = SECTOR_WORDS;
+        finishDataOut();  // its store, and the next buffer
+    }
 }
 
 }  // namespace ata

@@ -1617,7 +1617,226 @@ TEST(test_virtual_host_bridge_setup) {
     CHECK(sameAsDisk(got, 0, 8));
 }
 
+// ---- READ DMA, WRITE DMA (multiword DMA) -----------------------------------
+
+static IdentifyInfo dmaInfo(uint8_t mdma = 2) {
+    IdentifyInfo info = INFO;
+    info.mdma_mode = mdma;
+    return info;
+}
+
+// Runs a DMA command's bursts as core 1 and ide_dma would: serves fetches,
+// moves each burst's words (`out` gets a read's, `in` gives a write's), and
+// checks no interrupt comes before the end. Returns false on an error, a
+// burst that isn't a whole sector, or a command that never ends.
+static bool runDma(Device& d, VirtualHost& h, std::vector<uint16_t>* out, const std::vector<uint16_t>* in,
+                   int* bursts = nullptr, bool* early_irq = nullptr) {
+    size_t used = 0;
+    int n = 0;
+    for (int i = 0; i < 100000 && d.dmaCommand(); ++i) {
+        if (d.intrq() && early_irq) *early_irq = true;
+        CHECK(!d.transferring());  // DMA words don't pass through core 1
+        const uint16_t* next;
+        uint16_t left;
+        CHECK(!d.dataInRemaining(next, left));  // nor through the fast lane
+        DmaBurst b;
+        if (d.dmaBurstReady(b)) {
+            if (b.count != SECTOR_WORDS) return false;
+            CHECK(!d.dmaBurstReady(b));  // once per burst
+            if (b.from && out) out->insert(out->end(), b.from, b.from + b.count);
+            if (b.to && in) {
+                std::copy(in->begin() + long(used), in->begin() + long(used + b.count), b.to);
+                used += b.count;
+            }
+            ++n;
+            d.dmaBurstDone();
+        }
+        h.pump();
+    }
+    if (bursts) *bursts = n;
+    return !d.dmaCommand() && !(h.altStatus() & (ST_ERR | ST_BSY | ST_DRQ));
+}
+
+TEST(test_identify_offers_multiword_dma) {
+    Device d(dmaInfo(2));
+    VirtualHost h{d};
+    uint16_t id[256];
+    CHECK(h.identify(id));
+    CHECK(id[49] & (1u << 8));  // DMA supported
+    CHECK_EQ(id[63], 0x0407);   // modes 0-2 supported, 2 selected
+    Device none(INFO);
+    VirtualHost hn{none};
+    CHECK(hn.identify(id));
+    CHECK(!(id[49] & (1u << 8)));
+    CHECK_EQ(id[63], 0);
+}
+
+TEST(test_set_features_multiword_dma) {
+    Device d(dmaInfo(2));
+    VirtualHost h{d};
+    uint16_t id[256];
+    CHECK_EQ(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_MDMA_0 + 1), ST_DRDY | ST_DSC);
+    CHECK(h.identify(id));
+    CHECK_EQ(id[63], 0x0207);  // mode 1 selected now
+    uint8_t sum = 0;
+    for (int i = 0; i < 256; ++i) sum += uint8_t(id[i] & 0xFF) + uint8_t(id[i] >> 8);
+    CHECK_EQ(sum, 0);          // checksum kept
+    CHECK(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_MDMA_0 + 3) & ST_ERR);  // not offered
+    Device d0(dmaInfo(0));
+    CHECK(command(d0, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_MDMA_0 + 1) & ST_ERR);
+    Device none(INFO);
+    CHECK(command(none, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_MDMA_0) & ST_ERR);
+}
+
+TEST(test_read_dma_not_offered_aborts) {
+    Device d(INFO);
+    VirtualHost h{d};
+    h.setLba(0, 1);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK_EQ(d.error(), ER_ABRT);
+    CHECK(!d.dmaCommand());
+    DmaBurst b;
+    CHECK(!d.dmaBurstReady(b));
+}
+
+TEST(test_read_dma_sectors) {
+    Device d(dmaInfo());
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    h.setLba(4000, 3);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    CHECK(d.dmaCommand());
+    std::vector<uint16_t> got;
+    int bursts = 0;
+    bool early_irq = false;
+    CHECK(runDma(d, h, &got, nullptr, &bursts, &early_irq));
+    CHECK_EQ(bursts, 3);
+    CHECK(sameAsDisk(got, 4000, 3));
+    CHECK(!early_irq);  // DMA: one interrupt, at the end
+    CHECK(d.intrq());
+    CHECK_EQ(h.status(), ST_DRDY | ST_DSC);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+    CHECK_EQ(d.lastCommand().command, CMD_READ_DMA);
+}
+
+TEST(test_read_dma_uses_read_ahead) {
+    // While the host takes a burst, the next sector is fetched, so the next
+    // burst is ready the moment this one ends.
+    Device d(dmaInfo());
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    h.setLba(10, 2);
+    d.write(Reg::StatusCommand, CMD_READ_DMA_NO_RETRY);
+    h.pump();  // the first sector
+    DmaBurst b;
+    CHECK(d.dmaBurstReady(b));
+    h.pump();  // the read-ahead, during the burst
+    d.dmaBurstDone();
+    CHECK(d.dmaBurstReady(b));  // no BSY in between
+    CHECK_EQ(b.from[0], 11);     // LBA 11's first word
+    d.dmaBurstDone();
+    CHECK(!d.dmaCommand());
+    CHECK(d.intrq());
+}
+
+TEST(test_write_dma_sectors) {
+    Device d(dmaInfo());
+    GeneratedDisk base;
+    RamOverlayDisk<8> disk(base);
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> words = pattern(3, 77);
+    h.setLba(300, 3);
+    d.write(Reg::StatusCommand, CMD_WRITE_DMA);
+    int bursts = 0;
+    bool early_irq = false;
+    CHECK(runDma(d, h, nullptr, &words, &bursts, &early_irq));
+    CHECK_EQ(bursts, 3);
+    CHECK(!early_irq);
+    CHECK(d.intrq());
+    std::vector<uint16_t> back;
+    CHECK(h.readSectors(300, 3, back));
+    CHECK(back == words);
+}
+
+TEST(test_read_dma_fetch_failure) {
+    Device d(dmaInfo());
+    FailingDisk disk(5001);
+    VirtualHost h{d, &disk};
+    h.setLba(5000, 3);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    std::vector<uint16_t> got;
+    CHECK(!runDma(d, h, &got, nullptr));
+    CHECK_EQ(got.size(), 256u);  // the first sector went; the second failed
+    CHECK_EQ(d.error(), ER_UNC);
+    CHECK(d.intrq());
+    CHECK(!d.dmaCommand());
+}
+
+TEST(test_read_dma_out_of_range) {
+    Device d(dmaInfo());
+    VirtualHost h{d};
+    h.setLba(131071, 2);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    CHECK_EQ(d.error(), ER_IDNF);
+    CHECK(!d.dmaCommand());
+}
+
+TEST(test_reset_ends_dma) {
+    Device d(dmaInfo());
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    h.setLba(0, 4);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    h.pump();
+    DmaBurst b;
+    CHECK(d.dmaBurstReady(b));
+    d.hardReset(true);
+    CHECK(!d.dmaCommand());
+    d.dmaBurstDone();  // a burst that ends after the reset changes nothing
+    d.hardReset(false);
+    CHECK(!d.dmaBurstReady(b));
+    CHECK(h.ataSignature());
+    // A soft reset too.
+    h.setLba(0, 4);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    h.pump();
+    CHECK(d.dmaCommand());
+    h.softReset();
+    CHECK(!d.dmaCommand());
+}
+
+TEST(test_new_command_ends_dma) {
+    // A host that gives up mid-transfer and sends another command (the
+    // JMicron does this with PIO): the DMA command ends.
+    Device d(dmaInfo());
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    h.setLba(0, 4);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    h.pump();
+    DmaBurst b;
+    CHECK(d.dmaBurstReady(b));
+    d.dmaBurstDone();
+    h.pump();  // the read-ahead: DRQ, not BSY, so the drive takes the next command
+    CHECK(d.dmaCommand());
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(20, 1, got));  // PIO: works, and the DMA command is over
+    CHECK(sameAsDisk(got, 20, 1));
+    CHECK(!d.dmaCommand());
+}
+
 void runAtaDeviceTests() {
+    RUN(test_identify_offers_multiword_dma);
+    RUN(test_set_features_multiword_dma);
+    RUN(test_read_dma_not_offered_aborts);
+    RUN(test_read_dma_sectors);
+    RUN(test_read_dma_uses_read_ahead);
+    RUN(test_write_dma_sectors);
+    RUN(test_read_dma_fetch_failure);
+    RUN(test_read_dma_out_of_range);
+    RUN(test_reset_ends_dma);
+    RUN(test_new_command_ends_dma);
     RUN(test_reg_mapping);
     RUN(test_power_on_state);
     RUN(test_hard_reset);

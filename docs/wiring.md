@@ -48,9 +48,9 @@ BB48 header pins: GPIO 0–23 are on EXT1 pins 4–27, and GPIO 24–47 are on E
 
 **Not connected:**
 - 20 (key)
-- 21 DMARQ
+- 21 DMARQ (for multiword DMA: GPIO 31, as on the PCB; see [dma.md](dma.md))
 - 28 CSEL
-- 29 DMACK#
+- 29 DMACK# (for multiword DMA: GPIO 3, as on the PCB)
 - 32 IOCS16#
 - 34 PDIAG#
 - 39 DASP#

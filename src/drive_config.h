@@ -39,12 +39,17 @@ enum class Mode : uint8_t {
 
 const char* modeName(Mode m);  // "auto", "pio0", ... "udma6"
 
-// Can this firmware run `m`? Auto and PIO 0-3 so far.
+// Can this firmware run `m`? Auto, PIO 0-3 and multiword DMA 0-2 so far.
 bool modeSupported(Mode m);
 
 // The PIO mode IDENTIFY offers for `m`: the mode itself, or AUTO_PIO_MODE for
 // auto (and for a mode this firmware can't run, which falls back to auto).
 uint8_t pioModeOffered(Mode m);
+
+// The multiword DMA mode IDENTIFY offers for `m`: mdma0-2's, else NO_DMA
+// (identify.h). Only on request: on the BB48 rig DMARQ isn't wired, and a
+// host told the drive does DMA would wait for DMARQ forever.
+uint8_t mdmaModeOffered(Mode m);
 
 // What `auto` offers: the fastest mode there is. The adapter asks for mode 4,
 // then takes the fastest IDENTIFY offers from word 64 (3), never 1 or 2.

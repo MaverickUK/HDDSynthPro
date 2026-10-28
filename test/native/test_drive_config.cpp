@@ -6,6 +6,7 @@
 
 #include "check.h"
 #include "drive_config.h"
+#include "identify.h"  // NO_DMA
 
 using drive_config::Config;
 using drive_config::Mode;
@@ -82,12 +83,20 @@ TEST(test_config_modes) {
     CHECK(parsed("mode = udma5").mode == Mode::Udma5);
     CHECK_EQ(parsed("mode = udma5").warning_count, size_t(1));  // not supported yet
     CHECK(parsed("mode = MDMA2").mode == Mode::Mdma2);
+    CHECK_EQ(parsed("mode = mdma2").warning_count, size_t(0));
     CHECK(parsed("mode = pio0").mode == Mode::Pio0);
     CHECK_EQ(parsed("mode = pio0").warning_count, size_t(0));
     CHECK(drive_config::modeSupported(Mode::Auto) && drive_config::modeSupported(Mode::Pio0));
     CHECK(drive_config::modeSupported(Mode::Pio1) && drive_config::modeSupported(Mode::Pio2));
     CHECK(drive_config::modeSupported(Mode::Pio3) && !drive_config::modeSupported(Mode::Pio4));
-    CHECK(!drive_config::modeSupported(Mode::Mdma0));
+    CHECK(drive_config::modeSupported(Mode::Mdma0) && drive_config::modeSupported(Mode::Mdma2));
+    CHECK(!drive_config::modeSupported(Mode::Udma0));
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma2), 2);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma0), 0);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto), NO_DMA);  // only on request
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Pio3), NO_DMA);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Udma2), NO_DMA);
+    CHECK_EQ(drive_config::pioModeOffered(Mode::Mdma2), drive_config::AUTO_PIO_MODE);
     CHECK_EQ(parsed("mode = pio2").warning_count, size_t(0));
     CHECK_EQ(parsed("mode = pio3").warning_count, size_t(0));
     CHECK_EQ(parsed("mode = pio4").warning_count, size_t(1));  // not supported yet

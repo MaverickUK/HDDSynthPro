@@ -133,13 +133,23 @@ bool parseMode(Span v, Mode& out) {
 
 const char* modeName(Mode m) { return size_t(m) < MODE_COUNT ? MODE_NAMES[size_t(m)] : "?"; }
 
+static bool isPio(Mode m) { return m >= Mode::Pio0 && m <= Mode::Pio4; }
+static bool isMdma(Mode m) { return m >= Mode::Mdma0 && m <= Mode::Mdma2; }
+
 bool modeSupported(Mode m) {
-    return m == Mode::Auto || (m >= Mode::Pio0 && uint8_t(m) - uint8_t(Mode::Pio0) <= MAX_PIO_MODE);
+    return m == Mode::Auto || (isPio(m) && uint8_t(m) - uint8_t(Mode::Pio0) <= MAX_PIO_MODE) ||
+           (isMdma(m) && uint8_t(m) - uint8_t(Mode::Mdma0) <= MAX_MDMA_MODE);
 }
 
 uint8_t pioModeOffered(Mode m) {
-    if (m == Mode::Auto || !modeSupported(m)) return AUTO_PIO_MODE;
+    // A DMA mode offers the fastest PIO mode too, for the commands that use it.
+    if (!isPio(m) || !modeSupported(m)) return AUTO_PIO_MODE;
     return uint8_t(uint8_t(m) - uint8_t(Mode::Pio0));
+}
+
+uint8_t mdmaModeOffered(Mode m) {
+    if (!isMdma(m) || !modeSupported(m)) return NO_DMA;
+    return uint8_t(uint8_t(m) - uint8_t(Mode::Mdma0));
 }
 
 void defaults(Config& out) {

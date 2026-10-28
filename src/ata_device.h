@@ -79,6 +79,10 @@ constexpr uint8_t CMD_SEEK = 0x70;  // 70h-7Fh: obsolete, all alike
 constexpr uint8_t CMD_EXECUTE_DEVICE_DIAGNOSTIC = 0x90;
 constexpr uint8_t CMD_INITIALIZE_DEVICE_PARAMETERS = 0x91;
 constexpr uint8_t CMD_SET_MULTIPLE_MODE = 0xC6;  // aborted: no READ/WRITE MULTIPLE
+constexpr uint8_t CMD_READ_DMA = 0xC8;              // when IDENTIFY offers multiword DMA
+constexpr uint8_t CMD_READ_DMA_NO_RETRY = 0xC9;     // obsolete alias
+constexpr uint8_t CMD_WRITE_DMA = 0xCA;
+constexpr uint8_t CMD_WRITE_DMA_NO_RETRY = 0xCB;
 constexpr uint8_t CMD_STANDBY_IMMEDIATE = 0xE0;
 constexpr uint8_t CMD_IDLE_IMMEDIATE = 0xE1;
 constexpr uint8_t CMD_STANDBY = 0xE2;
@@ -101,6 +105,7 @@ constexpr uint8_t SF_ENABLE_WRITE_CACHE = 0x02;
 constexpr uint8_t SF_DISABLE_WRITE_CACHE = 0x82;
 constexpr uint8_t XFER_PIO_DEFAULT = 0x00;  // PIO default mode
 constexpr uint8_t XFER_PIO_FLOW_0 = 0x08;   // PIO flow-control mode 0 (with IORDY)
+constexpr uint8_t XFER_MDMA_0 = 0x20;       // multiword DMA mode 0 (+1, +2 for modes 1, 2)
 
 // CHECK POWER MODE results (Sector Count register)
 constexpr uint8_t POWER_STANDBY = 0x00;
@@ -119,6 +124,14 @@ struct Fetch {
     bool store;        // true: write `buffer` to `lba`; false: fill it from `lba`
     bool flush;        // true: then make everything stored so far permanent. Alone: FLUSH
                        // CACHE; with store: a write with the write cache off
+};
+
+// A DMA burst for core 1 to run (READ DMA or WRITE DMA): the rest of a
+// sector, sent from `from` (read) or received into `to` (write).
+struct DmaBurst {
+    const uint16_t* from;  // read: the words to send; nullptr for a write
+    uint16_t* to;          // write: where the host's words go; nullptr for a read
+    uint16_t count;
 };
 
 // What the trace reports about a command.
@@ -154,7 +167,7 @@ public:
     // the same as n read(Reg::Data) calls. Any other access in between must
     // come after consumeDataWords().
     bool dataInRemaining(const uint16_t*& next, uint16_t& left) const {
-        if (device1Selected() || !(status_ & ST_DRQ) || !data_) return false;
+        if (device1Selected() || !(status_ & ST_DRQ) || !data_ || dma_) return false;
         next = data_ + data_index_;
         left = uint16_t(data_count_ - data_index_);
         return true;
@@ -205,6 +218,16 @@ public:
     // Core 0 finished fetch `id`: the sector was moved (ok), or it failed.
     void fetchDone(uint32_t id, bool ok);
 
+    // ---- DMA (READ DMA, WRITE DMA) --------------------------------------------
+
+    // True while a DMA command runs: core 1 keeps DMARQ an output (ide_dma).
+    bool dmaCommand() const { return dma_; }
+    // A burst due: the device has a sector for the host (read) or a buffer for
+    // it (write). True once per burst: core 1 starts it, and calls
+    // dmaBurstDone() when the host has moved every word.
+    bool dmaBurstReady(DmaBurst& burst);
+    void dmaBurstDone();
+
     // ---- Waking from standby -------------------------------------------------
 
     // True while IDLE (IMMEDIATE) is waking the drive from standby. The drive
@@ -227,8 +250,10 @@ public:
     // The CHS translation in use: the default, or set by INITIALIZE DEVICE PARAMETERS.
     const Geometry& geometry() const { return geometry_; }
     bool standby() const { return standby_; }
-    // True mid-sector: the host is reading or writing the 256 words of a DRQ block.
-    bool transferring() const { return data_ != nullptr || receiving_; }
+    // True mid-sector in PIO: the host is reading or writing the 256 words of a
+    // DRQ block, one register access each. Not in DMA, where the words don't
+    // pass through core 1.
+    bool transferring() const { return !dma_ && (data_ != nullptr || receiving_); }
 
 private:
     bool device1Selected() const { return (device_ & DEV_DEV) != 0; }
@@ -316,6 +341,9 @@ private:
     bool write_cache_ = true;
     bool read_ahead_ = true;
     bool write_behind_ = true;  // SET FEATURES 02h/82h; off: each sector synced as it's stored
+
+    bool dma_ = false;              // READ DMA or WRITE DMA running
+    bool dma_burst_running_ = false;  // between dmaBurstReady() and dmaBurstDone()
 
     bool irq_pending_ = false;
     bool command_queued_ = false;  // see queueCommand()

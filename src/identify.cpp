@@ -52,6 +52,13 @@ CORE1_RAM void setCurrentGeometry(uint16_t w[256], const Geometry& g) {
     w[255] = uint16_t((checksum << 8) | 0xA5);
 }
 
+CORE1_RAM void setMdmaModeSelected(uint16_t w[256], uint8_t mode) {
+    uint16_t word = uint16_t((w[63] & 0x00FF) | (1u << (8 + mode)));
+    uint8_t checksum = uint8_t(uint8_t(w[255] >> 8) + byteSum(w[63]) - byteSum(word));
+    w[63] = word;
+    w[255] = uint16_t((checksum << 8) | 0xA5);
+}
+
 CORE1_RAM void setWriteCacheEnabled(uint16_t w[256], bool on) {
     uint16_t word = on ? uint16_t(w[85] | (1u << 5)) : uint16_t(w[85] & ~(1u << 5));
     uint8_t checksum = uint8_t(uint8_t(w[255] >> 8) + byteSum(w[85]) - byteSum(word));
@@ -72,7 +79,10 @@ void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     putAtaString(&w[23], 4, info.firmware);
     putAtaString(&w[27], 20, info.model);
     w[47] = 0x0000;  // READ/WRITE MULTIPLE not supported
-    w[49] = (1u << 11) | (1u << 9);  // IORDY supported, LBA supported (no DMA)
+    w[49] = (1u << 11) | (1u << 9);  // IORDY supported, LBA supported
+    uint8_t mdma = info.mdma_mode == NO_DMA ? NO_DMA
+                   : info.mdma_mode > MAX_MDMA_MODE ? MAX_MDMA_MODE : info.mdma_mode;
+    if (mdma != NO_DMA) w[49] |= 1u << 8;  // DMA supported
     w[50] = 0x4000;  // bit 14 shall be set
     // Modes 0-2 go in word 51's high byte (an obsolete field, but how they're
     // offered), up to 2; modes 3 and 4 are word 64's bits 0 and 1.
@@ -86,7 +96,9 @@ void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     w[58] = uint16_t(chs_sectors >> 16);
     w[60] = uint16_t(info.total_sectors & 0xFFFF);
     w[61] = uint16_t(info.total_sectors >> 16);
-    w[63] = 0x0000;  // no multiword DMA
+    // Multiword DMA modes 0 to `mdma` supported, and the fastest selected
+    // until SET FEATURES picks another (a host that skips it can use DMA).
+    w[63] = mdma == NO_DMA ? 0 : uint16_t(((1u << (mdma + 1)) - 1) | (1u << (8 + mdma)));
     w[64] = pio_mode >= 4 ? 0x0003 : pio_mode == 3 ? 0x0001 : 0x0000;  // advanced PIO modes 3, 4
     static const uint16_t CYCLE_NS[] = {600, 383, 240, 180, 120};  // ATA's t0, modes 0-4
     w[67] = CYCLE_NS[pio_mode];  // minimum PIO cycle time without IORDY, ns

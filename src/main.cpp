@@ -40,6 +40,7 @@
 #include <hardware/watchdog.h>
 #include "fetch_mailbox.h"
 #include "ide_bus.h"
+#include "ide_dma.h"
 #include "iordy_timer.h"
 #include "sd_card.h"
 #endif
@@ -134,12 +135,14 @@ static SharedFlag g_command_active{false};
 // The PIO mode to offer (HDDSYNTH.INI's `mode`) is set before it.
 static std::atomic<uint32_t> g_disk_sectors{0};
 static std::atomic<uint8_t> g_pio_mode{0};
+static std::atomic<uint8_t> g_mdma_mode{NO_DMA};
 
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
 static IdentifyInfo driveIdentity() {
     return IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
                         g_disk_sectors.load(std::memory_order_acquire),
-                        g_pio_mode.load(std::memory_order_relaxed)};
+                        g_pio_mode.load(std::memory_order_relaxed),
+                        g_mdma_mode.load(std::memory_order_relaxed)};
 }
 
 void setup1() {
@@ -149,9 +152,31 @@ void setup1() {
     ide_bus::begin();
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
     bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity());
+    ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
     // delay its PIO accesses while the host waits on a read.
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
+}
+
+// The DMA command's data phase (READ DMA, WRITE DMA): one bookkeeping step.
+// A burst that ended goes back to the device; a new one starts when the
+// device has a sector (or buffer) for it; and when the command is over, done
+// or cut short (RESET#, SRST, a new command, an error), ide_dma tidies up.
+CORE1_RAM static void serviceDma(ata::Device& dev) {
+    if (ide_dma::burstRunning()) {
+        if (!ide_dma::burstDone()) {
+            if (!dev.dmaCommand()) ide_dma::endCommand();  // cut short mid-burst
+            return;
+        }
+        dev.dmaBurstDone();
+        ide_bus::updateIntrq(dev.intrq());
+    }
+    if (!dev.dmaCommand()) {
+        ide_dma::endCommand();  // nothing to do unless one ran
+        return;
+    }
+    ata::DmaBurst burst;
+    if (dev.dmaBurstReady(burst)) ide_dma::startBurst(burst);
 }
 
 // Posts the device's fetch to core 0, once per fetch.
@@ -177,6 +202,7 @@ static SharedFlag g_absent{false};
 __attribute__((noinline)) static void stayAbsent(ata::Device& dev) {
     dev.hardReset(true);
     ide_bus::stop();
+    ide_dma::endCommand();
     while (g_absent.load()) tight_loop_contents();
     dev.hardReset(false);
     ide_bus::restart();
@@ -278,8 +304,9 @@ CORE1_RAM void loop1() {
                                            t - command_start_us));
                 }
                 break;
-            case 1:  // a sector fetch, posted once
+            case 1:  // a sector fetch, posted once; DMA bursts
                 postFetch(dev, posted_fetch);
+                serviceDma(dev);
                 break;
             case 2: {  // a fetch result, which may complete a DRQ block
                 FetchResult result;
@@ -424,6 +451,7 @@ static void chooseDisk() {
     }
     g_disk_ms = millis() - start;
     g_pio_mode.store(drive_config::pioModeOffered(g_config.mode), std::memory_order_relaxed);
+    g_mdma_mode.store(drive_config::mdmaModeOffered(g_config.mode), std::memory_order_relaxed);
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
@@ -470,9 +498,13 @@ static void editConfig(const char* line) {
 // Console `S`: the settings and what came of them, after the card's own line.
 static void printConfig() {
     drive_config::Mode used = drive_config::modeSupported(g_config.mode) ? g_config.mode : drive_config::Mode::Auto;
-    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s pio_offered=%u serving=%s\n", g_config_state,
+    uint8_t mdma = g_mdma_mode.load();
+    char mdma_text[8] = "none";
+    if (mdma != NO_DMA) std::snprintf(mdma_text, sizeof mdma_text, "%u", unsigned(mdma));
+    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s pio_offered=%u mdma_offered=%s serving=%s\n",
+                  g_config_state,
                   g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
-                  unsigned(g_pio_mode.load()), g_image_name);
+                  unsigned(g_pio_mode.load()), mdma_text, g_image_name);
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
     size_t shown = g_config.warning_count < drive_config::MAX_WARNINGS ? g_config.warning_count : drive_config::MAX_WARNINGS;
     for (size_t i = 0; i < shown; ++i) Serial.printf("CONFIG warning: %s\n", g_config.warnings[i]);

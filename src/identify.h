@@ -1,7 +1,7 @@
 // The 256-word IDENTIFY DEVICE block (ATA/ATA-4 layout). Pure C++.
 //
 // It advertises a deliberately plain drive: LBA28 plus a default CHS
-// geometry, PIO modes 0-3 (up to IdentifyInfo's), IORDY supported, no DMA, no READ/WRITE MULTIPLE,
+// geometry, PIO modes 0-3 and multiword DMA 0-2 (up to IdentifyInfo's), IORDY supported, no READ/WRITE MULTIPLE,
 // no 48-bit addressing. It does declare a write cache and FLUSH CACHE: the
 // storage behind it (SdFat, the card) buffers writes, so hosts should flush
 // before power goes.
@@ -28,7 +28,13 @@ struct IdentifyInfo {
     const char* firmware;  // up to 8 characters
     uint32_t total_sectors;  // LBA28 capacity
     uint8_t pio_mode = 0;    // the fastest PIO mode offered, 0-3 (MAX_PIO_MODE)
+    uint8_t mdma_mode = 0xFF;  // the fastest multiword DMA mode offered, 0-2, or NO_DMA
 };
+
+// No DMA offered (IdentifyInfo::mdma_mode), and the fastest multiword DMA mode
+// there is (ide_dma.pio meets modes 0-2: host/tests/test_dma_sim.py).
+constexpr uint8_t NO_DMA = 0xFF;
+constexpr uint8_t MAX_MDMA_MODE = 2;
 
 // The fastest PIO mode the drive can offer: the bus program meets modes 0-3's
 // timings, with IORDY holding the host while core 1 answers
@@ -45,6 +51,10 @@ void buildIdentify(const IdentifyInfo& info, uint16_t words[256]);
 // valid IDENTIFY block (from buildIdentify): the checksum is adjusted for the
 // changed words only, because core 1 runs this while the host may be waiting.
 void setCurrentGeometry(uint16_t words[256], const Geometry& g);
+
+// Marks multiword DMA mode `mode` selected (word 63's high byte) after SET
+// FEATURES 20h-22h, and fixes up the checksum, as setCurrentGeometry does.
+void setMdmaModeSelected(uint16_t words[256], uint8_t mode);
 
 // Sets the "write cache enabled" bit (word 85 bit 5) after SET FEATURES 02h
 // or 82h, and fixes up the checksum, as setCurrentGeometry does.

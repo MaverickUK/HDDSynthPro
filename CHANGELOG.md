@@ -2,6 +2,20 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.16.0] - 2026-10-28
+
+Multiword DMA, built but not yet tried on hardware: it needs DMARQ wired.
+
+### Added
+- **READ DMA and WRITE DMA** (C8h-CBh) in multiword DMA modes 0-2 ([docs/dma.md](docs/dma.md)), offered only when `HDDSYNTH.INI` says `mode = mdma0`, `mdma1` or `mdma2`: on the BB48 rig DMARQ and DMACK# aren't wired yet, and a host told the drive does DMA would wait for DMARQ forever. The PIO mode offered alongside is `auto`'s (3).
+  - `ide_dma.pio`: the data phase, in a PIO block of its own, fed (reads) or drained (writes) by an RP2350 DMA channel, since DMA has no IORDY and mode 2 gives 50 ns from DIOR# to data. Proven in the simulator against a multiword DMA host in modes 0-2 (`host/tests/test_dma_sim.py`).
+  - `ide_dma.cpp`: core 1 runs a burst per sector, handing DD0-15 to the DMA block for a read burst and back to `ide_bus`'s after it, and drives DMARQ (GPIO 31) only during a DMA command (its output forced off otherwise). A command cut short (RESET#, SRST, a new command, an error) stops the burst and releases both.
+  - `ata_device`: the same fetches, read-ahead and write-behind as PIO; one interrupt, at the end; no BSY between sectors. IDENTIFY word 49 bit 8 and word 63 (modes supported, the fastest selected), SET FEATURES 20h-22h. 10 new unit tests.
+- `cfg::PIN_DMARQ` (GPIO 31) and `cfg::PIN_DMACK_N` (GPIO 3), as on the PCB. `S` shows `mdma_offered=`.
+
+### On the rig
+- With DMA not offered (the default), nothing changes: slices 3 and 4 pass in PIO mode 3, reads 1.38 MB/s and writes 1.79, and the bus observer checked 335,019 sectors on the cable, 0 bad (1 gap: words it missed, not wrong ones). The worst read during the tests was 1,030 ns (920 on 0.15.0): the new code moved core 1's in RAM; to watch in the next soak.
+
 ## [0.15.0] - 2026-10-28
 
 PIO modes 1-3: the adapter now runs the bus in mode 3.

@@ -23,6 +23,12 @@ constexpr unsigned PIN_IORDY = 28;   // host pulls up to 5 V via 1k: only ever d
 constexpr unsigned PIN_INTRQ = 29;
 constexpr unsigned PIN_RESET_N = 30;
 
+// Multiword DMA's handshake (docs/dma.md). Wired on the PCB; on the BB48 rig
+// only if added by hand (IDE pin 21 to GPIO 31, pin 29 to GPIO 3). DMARQ is
+// driven only during a DMA command; DMACK# isn't read yet (Ultra DMA will).
+constexpr unsigned PIN_DMARQ = 31;
+constexpr unsigned PIN_DMACK_N = 3;
+
 // The activity link to an HDD Synth (docs/activity-link.md): UART0 TX on
 // GPIO 0, one way. GPIO 1 (UART0 RX) is reserved for a reply and unused.
 constexpr unsigned PIN_LINK_TX = 0;
