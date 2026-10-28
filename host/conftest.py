@@ -42,7 +42,7 @@ def assemble():
         if os.environ.get("CI"):
             pytest.fail(message)
         pytest.skip(message)
-    return lambda name: pio_sim.assemble(REPO / "src" / f"{name}.pio", pioasm)
+    return lambda name, program=None: pio_sim.assemble(REPO / "src" / f"{name}.pio", pioasm, program)
 
 
 @pytest.fixture(scope="session")

@@ -34,7 +34,9 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
 - **Python tests:** in `host/` (pytest). One marker per slice; `sim` needs no hardware.
   - Plain `pytest` runs only the `sim` tests.
   - `host/hddproto/pio_sim.py` simulates the PIO instructions the programs use and runs the real `pioasm` output. Extend it when a program uses a new instruction, rather than letting it guess.
-  - `host/hddproto/ide_host_model.py` is a mode 0 host that honours IORDY. `tests/test_pio_bus_sim.py` uses it to hold `ide_bus.pio` to the ATA timings, and the sim must be configured as `ide_bus.cpp` configures the state machine.
+  - `host/hddproto/ide_host_model.py` is a PIO host (modes 0-4) that honours IORDY. `tests/test_pio_bus_sim.py` uses it to hold `ide_bus.pio` to modes 0-3's timings, and the sim must be configured as `ide_bus.cpp` configures the state machine.
+  - `host/hddproto/mdma_host_model.py` is a multiword DMA host; `tests/test_dma_sim.py` holds `ide_dma.pio` (the DMA data phase, [docs/dma.md](docs/dma.md)) to MDMA modes 0-2's timings. `pio_sim.assemble(..., program=)` picks one program from a file that holds several.
+  - After a `git stash`/checkout that rewrites a `.py` within the same second and at the same size, Python can keep running the old one from `__pycache__`: delete the caches if a result looks stale.
 - **On the rig:** `scripts/rig.sh -m sliceN` runs the unit tests, builds, flashes and runs the rig tests.
   - Evidence goes to `host/runs/` (git-ignored); reference traces live in `host/reference/`.
 - **Rig:**
@@ -132,4 +134,5 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
   3. The activity link to the HDD Synth: this side built in 0.9.0 (`src/activity_link.*`, `host/hddproto/activity_link.py`), sending on the rig. Loopback test built in 0.10.1 (console `U`, `-m link`); next, run it with the jumper (GPIO 0 to GPIO 1), then the synth's side (`docs/hddsynth-activity-link-brief.md`).
   4. The last slow reads at detection: gone at 200 MHz (0.14.0: 0 in 12 redetect cycles, worst 850 ns; 0.13.0 had 2 in 24 at 1,253-1,320 ns). The attempt to shuffle work out of a command's start at 150 MHz lost A-B-A (patch in `host/runs/tools/step_timing_and_intrq_fix.diff`): the margin there was tens of ns.
   5. Smaller: a second card refused (`-m card` with `HDDPRO_SECOND_CARD=1`; same card re-mount passes, 0.13.0); why handling the mailbox mid-block broke detection (0.8.17).
-  6. Later: PIO modes 3–4 (the adapter asks for mode 4), SD at 37.5 MHz and then SDIO, both waiting for the custom PCB (the card didn't start at 37.5 MHz on the hand-wired leads; the PCB's shorter traces should fix that), DMA feeding the bus program, slice 6's pass-through tests from a Pi 5, retro hosts.
+  6. Multiword DMA ([docs/dma.md](docs/dma.md)): the adapter paces PIO reads at about 1.1 µs a word in any mode, so DMA is the route to faster reads. Step 1, `ide_dma.pio` proven in the simulator, is done; next the firmware (READ/WRITE DMA, DMA channels, handing DD0-15 between PIO blocks per burst), offered only with `mode = mdma0-2` until DMARQ/DMACK# are wired (the PCB has them on GPIO 31/3).
+  7. Later: PIO mode 4 (the adapter asks for it, but its write data can fall between the bus program's samples), SD at 37.5 MHz and then SDIO, both waiting for the custom PCB (the card didn't start at 37.5 MHz on the hand-wired leads; the PCB's shorter traces should fix that), DMA feeding the bus program, slice 6's pass-through tests from a Pi 5, retro hosts.

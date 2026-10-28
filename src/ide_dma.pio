@@ -1,0 +1,78 @@
+; Multiword DMA's data phase: the words of a READ DMA or WRITE DMA, which the
+; host strobes back to back with the chip selects off (ide_bus ignores them).
+; There's no IORDY in DMA, and in mode 2 a read's data must be on the bus 50 ns
+; (tE) after DIOR# falls, too soon for core 1, so these programs serve the
+; words from the FIFOs, which RP2350 DMA keeps fed from the sector buffer.
+;
+; Pin mapping (bit numbers as in bus_sample.h; the C side sets them):
+;   IN_BASE  = GPIO4 (DD0): `in pins, 16` reads DD0-15
+;   OUT_BASE = GPIO4, 16 pins: DD0-15, driven only while DIOR# is low
+;   SIDE-SET = GPIO31 (DMARQ), a value: 1 = asking the host for a burst. The
+;              C side makes it an output only during a DMA command.
+;   DIOR# (bit 22) and DIOW# (bit 23) skip the input synchroniser; DD doesn't.
+;
+; A burst: core 1 puts the number of words, less one, in the TX FIFO. DMARQ
+; goes high, and the host strobes until DMARQ falls. It falls as the last
+; word's strobe begins (within tL = 35 ns in mode 2), never before: side-set
+; takes effect when an instruction issues, even one that then waits, so it
+; goes on the instruction after the strobe is seen. When that strobe ends the
+; program raises IRQ 0 and waits for the next burst. Core 1 sizes each burst
+; to what's ready: a sector.
+;
+; DMACK# isn't needed: a strobe with the chip selects off only comes after it,
+; and the program drives DD only while DIOR# is low, so a host that stops early
+; never finds the bus driven.
+
+.pio_version 1
+
+; READ DMA: device to host. After the count, the TX FIFO carries one word per
+; entry (16-bit DMA writes), and the program must never wait for one: DMA
+; keeps the FIFO ahead of the host.
+.program ide_dma_read
+.side_set 1 opt
+.define DIOR 22
+public start:
+    pull block              side 0  ; DMARQ low; the burst's words, less one
+    mov x, osr
+    pull block              side 1  ; the first word; DMARQ high: ready
+word:
+    jmp !x last                     ; the burst's last word?
+    wait 0 pin DIOR                 ; the host's strobe
+    out pins, 16                    ; its word onto DD (presented within tE)
+    mov pindirs, ~null              ; drive DD
+    pull block                      ; the next word, while DIOR# is low
+    wait 1 pin DIOR                 ; the host takes the word as DIOR# rises
+    mov pindirs, null               ; release DD (tF: the 5 ns hold is the wait's delay)
+    jmp x-- word
+last:
+    wait 0 pin DIOR
+    out pins, 16            side 0  ; DMARQ low: no more strobes after this one (tL)
+    mov pindirs, ~null
+    wait 1 pin DIOR
+    mov pindirs, null
+    irq set 0                       ; burst done; wraps to start
+
+; WRITE DMA: host to device. Each word goes to the RX FIFO, in the low half,
+; as DIOW# rises, and DMA moves it to the sector buffer.
+.program ide_dma_write
+.side_set 1 opt
+.define DIOW 23
+public start:
+    pull block              side 0  ; DMARQ low; the burst's words, less one
+    mov x, osr              side 1  ; DMARQ high: ready
+word:
+    jmp !x last
+    wait 0 pin DIOW
+    wait 1 pin DIOW                 ; DIOW# rises: the word is valid (tG before it)
+    in pins, 16                     ; DD as it was just before the edge: DD goes
+                                    ; through the synchroniser, DIOW# doesn't
+    in null, 16                     ; into the low half
+    push block                      ; DMA keeps the RX FIFO from filling
+    jmp x-- word
+last:
+    wait 0 pin DIOW
+    wait 1 pin DIOW         side 0  ; DMARQ low as the last strobe begins (tL)
+    in pins, 16
+    in null, 16
+    push block
+    irq set 0                       ; burst done; wraps to start

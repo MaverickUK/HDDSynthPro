@@ -8,7 +8,8 @@ built. Modelled:
     instruction issues, even if it then stalls;
   - OUT and IN shifting right, PUSH/PULL with blocking, and joined or 4-deep FIFOs;
   - WAIT on gpio/pin/jmppin, JMP conditions including pin;
-  - MOV from STATUS, as the RX FIFO level test (EXECCTRL STATUS_SEL = RX).
+  - MOV from STATUS, as the RX FIFO level test (EXECCTRL STATUS_SEL = RX);
+  - IRQ set and clear (not wait), into `irq_flags`.
 Anything else raises NotImplementedError rather than guessing.
 
 Pins use the sample layout of src/bus_sample.h throughout: bit n is GPIO
@@ -52,10 +53,19 @@ class Program:
     sideset_pindirs: bool = False
 
 
-def assemble(pio_file: Path, pioasm: str) -> Program:
-    """Assembles a single-program .pio file and reads back its configuration."""
+def assemble(pio_file: Path, pioasm: str, program: str | None = None) -> Program:
+    """Assembles a .pio file and reads back one program's configuration: the
+    only one, or the one named `program`."""
     out = subprocess.run([pioasm, "-o", "c-sdk", str(pio_file)], check=True,
                          capture_output=True, text=True).stdout
+    if program is not None:
+        # pioasm's output has a section per program, each opening with a
+        # banner comment holding its name.
+        sections = re.split(r"^// -+ //\n// (\w+) //\n// -+ //$", out, flags=re.M)
+        named = dict(zip(sections[1::2], sections[2::2]))
+        if program not in named:
+            raise ValueError(f"no program {program!r} in {pio_file.name} (has {sorted(named)})")
+        out = named[program]
     instructions = [int(h, 16) for h in re.findall(r"^\s+0x([0-9a-f]{4}), //", out, re.M)]
     wrap_target = int(re.search(r"_wrap_target (\d+)", out).group(1))
     wrap = int(re.search(r"_wrap (\d+)", out).group(1))
@@ -91,6 +101,7 @@ class PioSim:
     rx_fifo: list[int] = field(default_factory=list)
     tx_fifo: list[int] = field(default_factory=list)
     rx_stall: bool = False
+    irq_flags: int = 0           # IRQ 0-7, as IRQ SET/CLEAR leave them
     _delay: int = 0
 
     def __post_init__(self):
@@ -259,6 +270,17 @@ class PioSim:
                 else:
                     self.rx_fifo.append(self.isr)
                 self.isr = 0
+            self._advance()
+            return True
+
+        if opcode == 0b110:  # IRQ
+            clear, wait, index = (instr >> 6) & 1, (instr >> 5) & 1, instr & 7
+            if wait or instr & 0x18:
+                raise NotImplementedError("irq wait, or a relative/other-block index")
+            if clear:
+                self.irq_flags &= ~(1 << index)
+            else:
+                self.irq_flags |= 1 << index
             self._advance()
             return True
 
