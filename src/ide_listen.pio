@@ -11,7 +11,7 @@
 ;
 ; Each strobe pulse (DIOR# or DIOW# low) produces one word in the RX FIFO:
 ; the last pin sample taken while a strobe was still low. Sampling is every
-; 6 cycles (40 ns at 150 MHz). In PIO mode 0 a write's data is valid at least
+; 6 cycles (30 ns at 200 MHz). In PIO mode 0 a write's data is valid at least
 ; 60 ns before DIOW# rises, so the kept sample always holds valid data.
 ;
 ; Glitches are recorded too: a pulse seen in a single sample still produces

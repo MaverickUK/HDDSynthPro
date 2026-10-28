@@ -20,7 +20,8 @@ IORDY = 1 << IORDY_BIT
 CS1 = 1 << 20      # CS1# high: a command-block access (with CS0# low)
 STATUS_ADDR = 7
 
-THRESHOLD_ITERATIONS = 30  # 2 cycles each: 400 ns at 150 MHz, as iordy_timer.cpp sets it
+# 400 ns (cfg::IORDY_REPORT_NS) in loop iterations of 2 cycles, as iordy_timer.cpp works it out
+THRESHOLD_ITERATIONS = 400 * pio_sim.CLOCK_HZ // 1_000_000_000 // 2
 
 
 @pytest.fixture(scope="module")

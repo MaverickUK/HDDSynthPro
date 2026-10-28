@@ -2,6 +2,21 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.14.0] - 2026-10-28
+
+200 MHz instead of 150: headroom on every read.
+
+### Changed
+- **The RP2350 runs at 200 MHz** (`board_build.f_cpu` in `platformio.ini`; Raspberry Pi certifies it), up from the default 150. Core 1 answers every read in instructions, so the time a read is held shrinks with the clock: the worst read during traffic and detection fell from 1,173-1,320 ns to 850-920 ns.
+- **The peripheral clock stays on the system clock** (`peripheralClockFromSystem()`, before SPI and the link's UART start). Setting another clock moves it to the 48 MHz USB clock, where the card's SPI would top out at 24 MHz; at 200 MHz, 25 MHz is ÷8, exact as ÷6 was at 150.
+- The bus program's data settle before IORDY is released is 8 cycles: 40 ns now, 53 before. ATA asks only that the data be valid when IORDY rises (tRD = 0), and the delay was already at its maximum. The PIO simulator runs at 200 MHz (`pio_sim.CLOCK_HZ`), and `ide_bus.pio` meets every ATA mode 0 timing there; the IORDY timer's test works its threshold out from the clock, as the firmware does.
+- `s` shows `clk_sys_mhz=` and `clk_peri_mhz=`.
+
+### On the rig (Windows)
+- Reads 1.31 MB/s, up from 1.23 (`-m speed`: 10.9 ms per command + 301 µs per sector, against 318-328), worst read 850 ns.
+- Detection: 12 redetect cycles, 0 slow reads (0.13.0: 2 in 24, 1,253-1,320 ns), worst 850 ns; 29 IDENTIFY blocks checked on the cable, 0 bad.
+- Writes to `HDDBENCH.IMG`: 0.94 MB/s with write-behind off, as before. With write-behind on (`W`), 1.61 MB/s, and 160 MB written and read back with 0 bad sectors and 0 slow reads, against about 2,000 reads held 1.5-2.0 µs per 16 MB at 150 MHz; but the worst read was 1,250 ns, the limit itself, so write-behind stays off by default for now.
+
 ## [0.13.0] - 2026-10-28
 
 A microSD card put back while the drive runs is served again, if it's the same card with the same image.

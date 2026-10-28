@@ -64,8 +64,11 @@ read:
     pull block                      ; its value
     out pins, 16                    ; onto DD0-15 (still inputs)
     mov pindirs, ~null      [7]     ; drive DD0-15, then let them settle: IORDY rises
-                                    ; 8 cycles (53 ns) later, meeting t5 (50 ns) even
-                                    ; for a host that ignores IORDY's tRD of 0
+                                    ; 8 cycles (40 ns at 200 MHz) later. ATA asks only
+                                    ; that data be valid when IORDY rises (tRD = 0), and
+                                    ; the host's pull-up adds its rise time on top. (At
+                                    ; 150 MHz this was 53 ns, beyond t5's 50 ns; the
+                                    ; delay is at its maximum.)
     wait 1 jmppin           side 0  ; release IORDY; hold the data until DIOR# rises
     mov pindirs, null               ; release DD0-15
 .wrap

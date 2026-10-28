@@ -27,6 +27,7 @@
 #if FIRMWARE_SLICE == 0
 #include "ide_listen.h"
 #else
+#include <hardware/clocks.h>
 #include <hardware/structs/busctrl.h>
 #include <hardware/uart.h>
 
@@ -836,6 +837,8 @@ static void printStats() {
                   (unsigned long)bus_observer::identifyBad());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
+    Serial.printf(" clk_sys_mhz=%lu clk_peri_mhz=%lu", (unsigned long)(clock_get_hz(clk_sys) / 1000000),
+                  (unsigned long)(clock_get_hz(clk_peri) / 1000000));
     Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
                   (unsigned long)g_disk_ms);
     Serial.printf(" image_name=%s config=%s", g_image_name, g_config_state);
@@ -1053,7 +1056,17 @@ static void handleConsole() {
     }
 }
 
+// The peripheral clock (SPI for the card, the link's UART) runs from the
+// system clock, as it does at the default 150 MHz. Setting another clock
+// (board_build.f_cpu in platformio.ini) moves it to the 48 MHz USB clock,
+// where SPI would top out at 24 MHz.
+static void peripheralClockFromSystem() {
+    clock_configure_undivided(clk_peri, 0, CLOCKS_CLK_PERI_CTRL_AUXSRC_VALUE_CLK_SYS,
+                              clock_get_hz(clk_sys));
+}
+
 void setup() {
+    peripheralClockFromSystem();  // before SPI and the UART work out their dividers
     Serial.begin(115200);
 #if FIRMWARE_SLICE != 0
     gpio_init(cfg::PIN_BOARD_LED);

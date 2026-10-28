@@ -24,8 +24,8 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CLOCK_HZ = 150_000_000
-CYCLE_PS = round(1e12 / CLOCK_HZ)  # 6667 ps
+CLOCK_HZ = 200_000_000
+CYCLE_PS = round(1e12 / CLOCK_HZ)  # 5000 ps
 SYNC_CYCLES = 2  # input synchroniser delay
 MASK32 = 0xFFFFFFFF
 GPIO_OFFSET = 4  # sample bit n = GPIO (n + 4)

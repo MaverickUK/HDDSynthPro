@@ -41,9 +41,11 @@ constexpr unsigned PIN_SD_CLK = 34;   // SPI0 SCK
 constexpr unsigned PIN_SD_CMD = 35;   // SPI0 TX (card DI)
 constexpr unsigned PIN_SD_DAT0 = 36;  // SPI0 RX (card DO); DAT1-3 on 37-39
 constexpr unsigned PIN_SD_DAT3 = 39;  // SPI chip select
-// The SPI clock for the card, MHz. SPI0 divides the 150 MHz peripheral clock
-// by an even number, so this rounds down: 25 is exact, 50 gives 37.5. The
-// leads are hand-wired; each step up was checked by hashing the whole image.
+// The SPI clock for the card, MHz. SPI0 divides the peripheral clock, which
+// main.cpp keeps at the 200 MHz system clock, by an even number, so this
+// rounds down: 25 is exact (÷8), the next step is 33.3 (÷6). At 150 MHz (up
+// to 0.13.0) 25 was ÷6, and 37.5 didn't start on the hand-wired leads. Each
+// step up was checked by hashing the whole image.
 constexpr uint32_t SD_SPI_MHZ = 25;
 
 // After a command starts, core 1 only serves the bus for this long before its
