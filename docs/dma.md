@@ -33,6 +33,8 @@ A burst is a sector: the device has the next one fetched (read-ahead) or a buffe
 
 **DMACK# isn't watched.** A strobe with the chip selects off only comes after DMACK#, and DD is driven only while DIOR# is low, so a host that stops early never finds the bus driven. On the PCB DMACK# is on GPIO 3 for later use (Ultra DMA needs it).
 
+**PIO blocks:** `ide_dma` takes the third block, which SDIO will want too; how they and the diagnostics share the three is in [pio-allocation.md](pio-allocation.md).
+
 **The data lines change hands each burst.** On the RP2350 a GPIO is driven by one PIO block at a time (its function select), and `ide_bus` fills one block, so the DMA programs go in another (the IORDY timer and bus observer share the second; the third is free). Core 1 hands DD0-15 to the DMA block before a burst and back after it, so a status read between bursts is still answered by `ide_bus`. Inputs aren't affected: every block reads every pin.
 
 **DMARQ is driven only during a DMA command**: an input otherwise, which the host pulls down.
