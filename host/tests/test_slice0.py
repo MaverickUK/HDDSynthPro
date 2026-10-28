@@ -38,8 +38,11 @@ def listen_build(firmware_slice):
 
 
 FIRST_RESET_TIMEOUT_S = 90  # covers a manual replug
+PROBE_START_TIMEOUT_S = 10  # the first access comes about 2.6 s after the RESET# release
 QUIET_S = 2                 # the windows have closed once the trace is quiet this long
 QUIET_TIMEOUT_S = 30
+UNPLUGGED_QUIET_S = 8       # longer than the adapter's RESET# pulses with no drive (every 4.8 s)
+UNPLUG_TIMEOUT_S = 120
 OPENING_STEPS = 40          # how much of the probe must match the reference
 
 
@@ -62,13 +65,34 @@ def window(drive):
 
 
 @pytest.fixture
-def probe(drive, rig, run_dir, request, window) -> list[str]:
+def probe(drive, rig, ask, run_dir, request, window) -> list[str]:
     """Replugs the adapter and returns the trace lines from the first RESET# release."""
+    if not rig.automatic_replug:
+        # By hand: unplugged first, until the bus is quiet. Plugged in with
+        # no drive answering, the adapter pulses RESET# every few seconds,
+        # which would be taken for the power-up probe.
+        ask("Unplug the USB-IDE adapter's USB cable and leave it out until asked "
+            "(the BB48 stays powered).")
+        try:
+            drive.wait_quiet(UNPLUGGED_QUIET_S, timeout=UNPLUG_TIMEOUT_S)
+        except TimeoutError:
+            pytest.fail("the adapter kept resetting the bus: was it unplugged?")
     before = drive.command("s", "STATS")
     mark = drive.mark()
-    rig.replug()
+    if rig.automatic_replug:
+        rig.replug()
+    else:
+        ask("Now plug the adapter's USB cable back in.")
     drive.wait_for(lambda l: l.startswith("RESET") and l.endswith("RELEASE"), since=mark,
                    timeout=FIRST_RESET_TIMEOUT_S)
+    # After power-up the adapter resets twice, then waits about 2.6 s before
+    # its first command-block access: wait for that, not for quiet, since the
+    # pause is longer than QUIET_S and its next RESET# pulse comes too soon
+    # for a longer one.
+    try:
+        drive.wait_for(lambda l: l.startswith("EV") and " CMD " in l, since=mark, timeout=PROBE_START_TIMEOUT_S)
+    except TimeoutError:
+        pass  # judged below: no accesses
     quiet = True
     try:
         drive.wait_quiet(QUIET_S, timeout=QUIET_TIMEOUT_S)
@@ -93,14 +117,10 @@ def probe(drive, rig, run_dir, request, window) -> list[str]:
     ]) + "\n"
     (run_dir / "summary.txt").write_text(report)
     print(report)
-    if request.config.getoption("--save-reference"):
-        REFERENCE.mkdir(exist_ok=True)
-        reference_path().write_text("\n".join(probe_lines) + "\n")
-        shutil.copy(run_dir / "summary.txt", reference_path("_summary"))
     return probe_lines
 
 
-def test_probe_sequence(probe: list[str], request):
+def test_probe_sequence(probe: list[str], request, run_dir):
     t = trace.parse(probe)
     assert t.accesses, "no bus activity after the RESET# release"
     assert not t.stalls, "the PIO FIFO filled: accesses were missed"
@@ -113,6 +133,10 @@ def test_probe_sequence(probe: list[str], request):
     # Repeatable: the same opening as the saved reference.
     reference = reference_path()
     if request.config.getoption("--save-reference"):
+        # Only a probe that passed the checks above becomes the reference.
+        REFERENCE.mkdir(exist_ok=True)
+        reference.write_text("\n".join(probe) + "\n")
+        shutil.copy(run_dir / "summary.txt", reference_path("_summary"))
         return  # this run is the reference now
     if not reference.exists():
         pytest.skip("clean, but no reference to compare with: run once with --save-reference")
