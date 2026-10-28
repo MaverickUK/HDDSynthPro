@@ -156,6 +156,7 @@ Each slice ends in a passing automated test before the next starts.
 9. An adapter PCB with transceivers: targets and a draft BOM in [pcb-bom.md](pcb-bom.md).
 10. HDD Synth integration.
 11. An ATAPI CD-ROM drive serving a data ISO: a first exploration, planned in [atapi.md](atapi.md).
+12. Later still: Iomega ZIP and LS-120 drives (also ATAPI, removable and writable), with their own sounds on the HDD Synth: see [atapi.md](atapi.md#a-future-idea-iomega-zip-and-ls-120).
 
 ## Risks and open questions
 

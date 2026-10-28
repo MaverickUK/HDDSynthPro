@@ -121,3 +121,19 @@ A new pytest marker, `cdrom`, with tests that skip unless the board runs the `bb
 - Swapping discs at run time from the console or the HDD Synth (UNIT ATTENTION, "medium may have changed", 06h/28h, and GET EVENT STATUS NOTIFICATION's media events).
 - Audio tracks: BIN/CUE images, PLAY AUDIO through the HDD Synth's speaker, READ CD for raw sectors.
 - The Amiga, which needs Kickstart 3.1.4 or later, or a third-party ATAPI driver, and a CD file system.
+
+## A future idea: Iomega ZIP and LS-120
+
+Beyond the CD-ROM, and only once it works. Noted 28 Oct 2026.
+
+The IDE versions of the Iomega ZIP 100 and the LS-120 superdisk are removable ATAPI drives too, so this exploration's work carries over: the reset signature, IDENTIFY PACKET DEVICE, the PACKET protocol, sense data and UNIT ATTENTION.
+
+What they add:
+- **Direct-access devices** (device type 00h, not 05h), with 512-byte sectors, so the hard disk's sector path fits them unchanged.
+- **Writes:** WRITE(10), with VERIFY and MODE SENSE's write-protect bit. These are the first writable packet devices, so the image on the card changes, as with the hard disk.
+- **READ FORMAT CAPACITIES** (23h), which hosts use to size removable media, and the eject and write-protect commands.
+- **Iomega's vendor commands**, which its own tools (IomegaWare, ZIP Tools) use for disk status and protection modes. Find them from a trace of a real drive, as in slice C0.
+- **The images:** a ZIP 100 disk is 196,608 sectors (96 MB). The LS-120 also reads 1.44 MB floppies, so it could serve floppy images (`.IMA`) to a host whose BIOS boots from an LS-120.
+- **Changing disks** is the point of these drives, so it can't wait as it does for the CD-ROM. Eject and insert come from the console, the settings file or the HDD Synth, reported to the host as "medium may have changed".
+
+**On the HDD Synth:** the activity link could tell the synth which drive it's emulating, so it plays a ZIP drive's whir, clicks and eject in place of a hard disk's sounds. The link's version 1 already lets a later version add fields at the end ([activity-link.md](activity-link.md)): a device type field (hard disk, CD-ROM, ZIP, LS-120), plus insert and eject events, would fit. The synth needs a sound set per drive.
