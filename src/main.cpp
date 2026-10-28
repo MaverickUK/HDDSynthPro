@@ -4,9 +4,9 @@
 //   bb48        slice 0, listen only: core 1 drains the PIO listener and
 //               records every bus access. Every pin stays an input.
 //   bb48_drive  slices 1-3, the drive: core 1 serves the bus (ide_bus) and
-//               runs the ATA device; core 0 fetches sectors from the
-//               generated disk for it. Commands are traced; raw accesses
-//               on request (console `t`).
+//               runs the ATA device; core 0 fetches sectors for it from
+//               the SD card's image, the welcome disk or the test disk.
+//               Commands are traced; raw accesses on request (console `t`).
 // In both, core 1 records events into the trace ring and core 0 owns USB
 // serial: it prints the trace and runs the console.
 #include <Arduino.h>
@@ -43,6 +43,8 @@
 #include "ide_dma.h"
 #include "iordy_timer.h"
 #include "sd_card.h"
+#include "welcome_disk.h"
+#include "welcome_text.h"
 #endif
 
 static SpscRing<TraceEvent, cfg::TRACE_RING_EVENTS> g_trace;
@@ -363,13 +365,19 @@ CORE1_RAM void loop1() {
 }
 
 // Core 0's share of the drive: move the sectors core 1 asks for. The disk is
-// the generated one, with writes kept in a RAM overlay on top.
-// The disk is HDDSYNTH.IMG on the SD card if it is there (slice 5), else the
-// generated one with writes kept in a RAM overlay on top.
+// an image on the SD card (slice 5) if there is one to serve (chooseDisk()),
+// else the welcome disk, or the generated test disk with `image = none` or
+// console `T`. Both keep writes in the one RAM overlay, until a restart.
+static const welcome_disk::File WELCOME_FILES[] = {
+    {"README.TXT", welcome_text::README, welcome_text::README_SIZE},
+    {drive_config::FILE_NAME, drive_config::defaultFile(), uint32_t(strlen(drive_config::defaultFile()))},
+};
+static WelcomeDisk g_welcome(WELCOME_FILES, 2, welcome_text::FAT_DATE);
 static GeneratedDisk g_generated;
-static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_overlay(g_generated);
+static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_overlay(g_welcome);
 static BlockSource* g_disk = &g_overlay;
-static const char* g_disk_name = "generated";
+static const char* g_disk_name = "welcome";
+static bool g_test_disk = false;  // the generated disk: the bus observer can check its data
 
 // The BB48's LED as the drive's activity light, like a hard disk's: lit while
 // a command runs, and for at least LED_MIN_MS after any command starts. The
@@ -396,6 +404,17 @@ static uint32_t g_disk_ms = 0;  // how long choosing the disk took at boot (cons
 // so the drive is always back on HDDSYNTH.IMG after power-off.
 static constexpr uint32_t BENCH_MAGIC = 0x48444442;  // "HDDB"
 static bool benchRequested() { return watchdog_hw->scratch[0] == BENCH_MAGIC; }
+// Console `T`: serve the test disk after the restart it triggers, card or no
+// card, in the same register (so `T` and `J` undo each other).
+static constexpr uint32_t TEST_DISK_MAGIC = 0x48444454;  // "HDDT"
+static bool testDiskRequested() { return watchdog_hw->scratch[0] == TEST_DISK_MAGIC; }
+
+// The generated test disk instead of the welcome disk, under the RAM overlay.
+static void useTestDisk() {
+    g_overlay.setBase(g_generated);
+    g_disk_name = "generated";
+    g_test_disk = true;
+}
 
 // HDDSYNTH.INI (drive_config.h) as read at boot, and what came of it. Boot
 // messages go out before USB serial is connected, so console `S` shows them.
@@ -422,8 +441,9 @@ static bool useImage(const char* name, const char*& why) {
     return true;
 }
 
-// The disk: HDDBENCH.IMG after console `J`; else the image HDDSYNTH.INI
-// names (HDDSYNTH.IMG by default); else HDDSYNTH.IMG; else the generated disk.
+// The disk: the test disk after console `T`, or HDDBENCH.IMG after `J`; else
+// the image HDDSYNTH.INI names (HDDSYNTH.IMG by default), or the test disk
+// for `image = none`; else HDDSYNTH.IMG; else the welcome disk.
 static void chooseDisk() {
     uint32_t start = millis();
     drive_config::defaults(g_config);
@@ -435,12 +455,14 @@ static void chooseDisk() {
         g_config_state = truncated ? "truncated" : "present";
     }
     const char* why = "";
-    if (!sd_card::mounted()) {
-        // no card: the generated disk, without waiting for the card again
+    if (testDiskRequested()) {
+        useTestDisk();  // the card, if any, left alone
+    } else if (!sd_card::mounted()) {
+        // no card: the welcome disk, without waiting for the card again
     } else if (benchRequested()) {
         if (useImage(sd_card::BENCH_IMAGE_NAME, why)) g_disk_name = "bench";
     } else if (!drive_config::servesImage(g_config)) {
-        // image = none: the generated disk, with the card left alone
+        useTestDisk();  // image = none: the card left alone
     } else if (useImage(g_config.image, why)) {
         g_disk_name = "image";
     } else {
@@ -981,7 +1003,8 @@ static void handleConsole() {
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
                                "m mark, S SD card and settings, C create HDDSYNTH.INI, E set a setting, ! restart, "
                                "I create SD image, K create bench image, "
-                               "J serve the bench image or back (restarts), L activity link, U link loopback test, V drive gone/back, W write-behind, "
+                               "J serve the bench image or back (restarts), T serve the test disk or back (restarts), "
+                               "L activity link, U link loopback test, V drive gone/back, W write-behind, "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -1064,7 +1087,7 @@ static void handleConsole() {
                 edit_len = 0;
                 Serial.println("# type key = value (image or mode), then Enter");
                 break;
-            case '!':  // restart, to apply HDDSYNTH.INI (keeps the `J` choice)
+            case '!':  // restart, to apply HDDSYNTH.INI (keeps a `J` or `T` choice)
                 Serial.println("# restarting");
                 Serial.flush();
                 delay(50);
@@ -1076,6 +1099,15 @@ static void handleConsole() {
                 bool bench = !benchRequested();
                 watchdog_hw->scratch[0] = bench ? BENCH_MAGIC : 0;
                 Serial.printf("# restarting to serve %s\n", bench ? sd_card::BENCH_IMAGE_NAME : sd_card::IMAGE_NAME);
+                Serial.flush();
+                delay(50);
+                watchdog_reboot(0, 0, 10);
+                break;
+            }
+            case 'T': {  // serve the test disk after a restart, or back (replug the adapter afterwards)
+                bool test = !testDiskRequested();
+                watchdog_hw->scratch[0] = test ? TEST_DISK_MAGIC : 0;
+                Serial.printf("# restarting to serve %s\n", test ? "the test disk" : "the card's image or the welcome disk");
                 Serial.flush();
                 delay(50);
                 watchdog_reboot(0, 0, 10);
@@ -1120,7 +1152,7 @@ void loop() {
     iordy_timer::poll();
     printSlowReads();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.
-    bus_observer::poll(Serial, g_disk == &g_overlay, int32_t(g_identify_check_until_ms - millis()) > 0);
+    bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0);
     updateLed();
     serviceLoopback();
     serviceAbsence();

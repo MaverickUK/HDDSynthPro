@@ -245,13 +245,14 @@ const char* defaultFile() {
            "# One setting per line, as key = value; # starts a comment.\r\n"
            "\r\n"
            "# The disk image to serve: a file in the card's root folder. If it\r\n"
-           "# isn't there, the drive uses HDDSYNTH.IMG, or else its built-in test disk.\r\n"
+           "# isn't there, the drive uses HDDSYNTH.IMG, or else its welcome disk.\r\n"
            "# none: the built-in test disk (64 MB; writes are lost when it restarts).\r\n"
            "image = HDDSYNTH.IMG\r\n"
            "\r\n"
            "# The transfer mode to offer the host: auto (the fastest both sides\r\n"
            "# support), or one of pio0-pio4, mdma0-mdma2, udma0-udma6. This\r\n"
-           "# firmware supports PIO 0 only; others mean auto until they're added.\r\n"
+           "# firmware supports pio0-pio3, and mdma0-mdma2 where DMARQ and DMACK#\r\n"
+           "# are wired; others mean auto until they're added.\r\n"
            "mode = auto\r\n";
 }
 

@@ -5,6 +5,7 @@ __pycache__/
 host/runs/
 host/.venv/
 src/*.pio.h
+src/welcome_text.h
 host/rig.env
 
 # Personal Claude Code settings

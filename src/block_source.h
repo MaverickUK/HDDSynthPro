@@ -44,19 +44,22 @@ private:
     uint32_t sectors_;
 };
 
-// Slice 4: writes kept in RAM on top of another disk (the generated one), so
-// the disk keeps its size and contents and every written sector reads back.
-// Holds up to SLOTS distinct sectors; a write to a new sector when all are in
-// use fails (the host sees a write error) rather than losing data.
+// Slice 4: writes kept in RAM on top of another disk (the welcome disk or
+// the generated one), so the disk keeps its size and contents and every
+// written sector reads back. Holds up to SLOTS distinct sectors; a write to a
+// new sector when all are in use fails (the host sees a write error) rather
+// than losing data.
 template <size_t SLOTS>
 class RamOverlayDisk : public BlockSource {
 public:
-    explicit RamOverlayDisk(BlockSource& base) : base_(base) {}
-    uint32_t sectors() const override { return base_.sectors(); }
+    explicit RamOverlayDisk(BlockSource& base) : base_(&base) {}
+    // The disk underneath, chosen at boot: only before anything is written.
+    void setBase(BlockSource& base) { base_ = &base; }
+    uint32_t sectors() const override { return base_->sectors(); }
 
     bool read(uint32_t lba, uint16_t words[256]) override {
         int slot = find(lba);
-        if (slot < 0) return base_.read(lba, words);
+        if (slot < 0) return base_->read(lba, words);
         std::memcpy(words, data_[slot], sizeof data_[slot]);
         return true;
     }
@@ -82,7 +85,7 @@ private:
         return -1;
     }
 
-    BlockSource& base_;
+    BlockSource* base_;
     uint32_t lbas_[SLOTS];
     uint16_t data_[SLOTS][256];
     size_t used_ = 0;

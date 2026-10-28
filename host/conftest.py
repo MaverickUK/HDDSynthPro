@@ -80,8 +80,10 @@ def require_generated_disk(drive):
     (slice 5): their writes would corrupt the filesystem on it."""
     stats = drive.command("s", "STATS")
     if "disk=generated" not in stats:
-        pytest.skip("the drive serves an image from the SD card; these tests need the "
-                    "generated disk (remove the card)")
+        served = "the welcome disk" if "disk=welcome" in stats else "an image from the SD card"
+        pytest.skip(f"the drive serves {served}; these tests need the generated test disk: "
+                    "console T (the drive restarts; then replug the adapter), or "
+                    "`E image = none` and `!` with a card in")
 
 
 @pytest.fixture(scope="module")

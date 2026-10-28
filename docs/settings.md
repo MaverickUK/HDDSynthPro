@@ -21,10 +21,14 @@ mode = auto
 | `mode` | The transfer mode to offer the host: `auto` (the fastest both sides support), or one of `pio0`–`pio4`, `mdma0`–`mdma2`, `udma0`–`udma6` to allow at most that one | `auto` |
 
 **Which disk the drive serves**, in order:
-1. `HDDBENCH.IMG`, if console `J` asked for it (a scratch disk for tests; a power cycle undoes it).
+1. The built-in test disk if console `T` asked for it, or `HDDBENCH.IMG` if console `J` did (both for tests; a power cycle undoes them).
 2. The `image` from the settings, or with `image = none` the built-in test disk.
 3. If that isn't on the card, or is empty: `HDDSYNTH.IMG`.
-4. If there's no card, or neither image can be used: the built-in 64 MB test disk, whose writes stay in RAM until the drive restarts.
+4. If there's no card, or neither image can be used: the welcome disk.
+
+**The welcome disk** is 64 MB, partitioned as a PC's disk would be, with one FAT16 volume, `HDDSYNTHPRO`, that macOS, Windows, Linux and DOS 3.31 or later can read. It holds `README.TXT`, which explains how to set the drive up, and `HDDSYNTH.INI` with the defaults, ready to copy to a card. Writes to it stay in RAM (up to 256 KB) until the drive restarts. To change the README, edit [welcome/README.TXT](../welcome/README.TXT): plain ASCII, at most 80 characters a line, `{VERSION}` for the firmware version. The build checks it and embeds it (`scripts/embed_welcome.py`). To see the disk before flashing, run `test/run_native_tests.sh`, then `.pio/native-tests/make_welcome_img welcome.img` and open `welcome.img`.
+
+**The test disk** is 64 MB with every sector's content computed from its LBA, so the rig tests and the bus observer can check every byte read. It has no file system: a computer offers to initialise it.
 
 An image is used as it is: its size (a multiple of 512 bytes) is the disk's size. Console `I` creates a blank 64 MB `HDDSYNTH.IMG`.
 
@@ -41,7 +45,8 @@ Eject the disk on the computer first, as you would before unplugging any disk. I
 | `S` | Reports the card, then `CONFIG` lines: what the file says, which image is being served, any image that couldn't be used and why, and any warnings |
 | `C` | Creates `HDDSYNTH.INI` with the defaults and comments, if there isn't one |
 | `E` | Sets one setting: type `E`, then e.g. `image = GAMES.IMG`, then Enter. The rest of the file, comments included, stays as it was |
-| `!` | Restarts the drive, so the settings take effect (keeps a `J` choice) |
+| `!` | Restarts the drive, so the settings take effect (keeps a `J` or `T` choice) |
+| `T` | Restarts the drive serving the built-in test disk, card or no card, or back (a power cycle undoes it too); replug the adapter afterwards |
 
 `s` also shows `image_name=` (the image being served) and `config=` (`none`, `present` or `truncated`, as read at start-up).
 
