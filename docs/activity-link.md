@@ -20,6 +20,20 @@ Three things, all of which the drive already knows:
 
 The synth plays its access sound while busy, as today, and chooses the sample by class: `sequential.wav` while sequential, `access.wav` otherwise.
 
+## HDD Synth side
+
+Built in HDDSynth_Native **v0.18.0**. On the synth's SD card, in `settings.json`:
+
+```json
+"EXPERIMENTAL_HDDSYNTHPRO_SUPPORT": true,
+"SEQUENTIAL_LED_COLOUR": "#FF1800"
+```
+
+- `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` (default `false`) turns on the receiver on J6 and `sequential.wav`; it switches the synth's OLED off, since they share J6.
+- `SEQUENTIAL_LED_COLOUR` is optional (default orange, `#FF1800`): the activity LED's colour during sequential transfers.
+- `sequential.wav` is optional per pack; a pack without it plays `access.wav` for sequential transfers too.
+- The synth's serial `s` stats show the link (`up`/`lost`, the last class, valid and rejected sentence counts), and it logs `[link] up` and `[link] lost`.
+
 ## Wiring
 
 Ground and one data wire. **Never connect the two boards' 3.3 V pins:** each is powered on its own.
@@ -30,6 +44,8 @@ Ground and one data wire. **Never connect the two boards' 3.3 V pins:** each is 
 | GND, EXT1 pin 2 | | pin 2, GND |
 | GPIO 1 (UART0 RX), EXT1 pin 5 | reserved, not connected | pin 4, GP24 (UART1 TX; the OLED's SDA) |
 | (not connected) | | pin 1, 3.3 V |
+
+- **Power over the link (HDDSynthPro PCB, rev 0.3 on):** the board's J3 pin 1 takes **5 V** through a Schottky diode into its supply, so a future HDD Synth can power both boards from one supply. The Mk5's J6 pin 1 carries 3.3 V, so with the Mk5 leave pin 1 unconnected (the BB48 has no such input at all).
 
 - The 1 kΩ resistor limits the current into the synth's pin if one board is powered and the other isn't (the HDD Synth runs on its supercap after a power cut, and an unpowered RP2350's pin would otherwise be fed through its protection diodes). It doesn't matter at 115200 baud.
 - J6 carries either the OLED or the link, not both: the same pins.

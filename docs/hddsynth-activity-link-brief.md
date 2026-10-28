@@ -1,5 +1,7 @@
 # Brief: activity link from HDDSynthPro, and `sequential.wav`
 
+> **Done:** implemented in HDDSynth_Native **v0.18.0**, behind the feature flag `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` (in place of the `ACTIVITY_LINK` setting proposed below). It also adds `SEQUENTIAL_LED_COLOUR` (default orange, `#FF1800`): the activity LED's colour during sequential transfers, as a debugging aid. Verified there in simulation mode; not yet with HDDSynthPro attached. The brief is kept as written, apart from the setting's name.
+
 For Claude Code working in **HDDSynth_Native** (the MK5 firmware). Read this repo's CLAUDE.md first; everything below fits its rules (core 0 owns all I/O, core 1 only mixes from RAM, host-testable pure C++, SemVer and CHANGELOG with every change).
 
 ## Goal
@@ -17,7 +19,7 @@ The link uses header **J6**, the OLED's header, so the OLED and the link can't b
 
 | J6 pin | MK5 signal | Link use |
 |---|---|---|
-| 1 | 3.3 V | not connected (each board has its own supply) |
+| 1 | 3.3 V | not connected on the Mk5 (each board has its own supply). HDDSynthPro's PCB takes **5 V** on this pin to power it from the synth: a later synth revision could put 5 V here, never 3.3 V |
 | 2 | GND | ground, to HDDSynthPro's GND |
 | 3 | GP25 (OLED SCL) | **UART1 RX**: data from HDDSynthPro (through a 1 kΩ resistor at its end) |
 | 4 | GP24 (OLED SDA) | UART1 TX: reserved, not used in version 1 |
@@ -56,7 +58,7 @@ $HDA,1,0,R,R*4C      not busy this instant, recent mix still random
 
 ## Changes
 
-1. **Setting `ACTIVITY_LINK`** (bool, default `false`) in `settings.cpp`, and in the README's settings table. If both `ACTIVITY_LINK` and `OLED_ENABLED` are true, the link wins: don't start the OLED, and log why.
+1. **Setting `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT`** (bool, default `false`) in `settings.cpp`, and in the README's settings table. If both `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` and `OLED_ENABLED` are true, the link wins: don't start the OLED, and log why.
 2. **`src/link_parser.h/.cpp`, pure C++ (no Arduino headers), host-tested:**
    - feed it bytes one at a time; it assembles lines (dropping anything over 80 bytes) and validates them. HDDSynthPro's `activity_link::parseLine` and `Receiver` (`src/activity_link.*`, with its tests in `test/native/test_activity_link.cpp`) do exactly this and are pure C++: copy them;
    - it yields `LinkState { bool busy; Class cls; Op op; }` for each valid sentence;
@@ -84,7 +86,7 @@ $HDA,1,0,R,R*4C      not busy this instant, recent mix still random
   - extra trailing fields accepted.
 - Host tests for `LinkWatch` (present, still present at 999 ms, lost at 1000 ms, back again) and for the sample choice (class × pack has `sequential.wav` × busy → which voice is at the access level).
 - Run the host tests under ASan/UBSan as usual. On hardware:
-  - with `ACTIVITY_LINK` on and nothing attached, the synth behaves exactly as now (optocoupler);
+  - with `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` on and nothing attached, the synth behaves exactly as now (optocoupler);
   - with a USB-serial adapter on J6 pin 3, typing or pasting the example sentences switches the sound;
   - with HDDSynthPro attached, a large file copy plays `sequential.wav`, and random access plays `access.wav`.
 
