@@ -9,8 +9,9 @@ the host still has cached of the old one (`CARD changed`, not served).
 Exit criteria:
   - pulled and put back while idle: the next reads succeed, the same data;
   - pulled during reads: `CARD lost`, then `CARD back` once it's in, and the
-    host reads the same data again (after the adapter's own recovery, about
-    a minute);
+    host reads the same data again. If the card is back within about 20 s,
+    the adapter's reset retries the failed read and it succeeds, so the host
+    sees no error, only a slow read (seen on Windows, 28 Oct 2026);
   - with HDDPRO_SECOND_CARD=1, another card is refused (`CARD changed:
     another card`) until the right one is back.
 
@@ -127,8 +128,11 @@ def test_card_out_during_reads(drive, rig, ask, before):
         stop.set()
         reader.join(timeout=120)
         os.close(fd)
-    assert errors, "the host saw no read errors while the card was out"
-    ask("The drive has it again. Waiting for the host to recover (about a minute).")
+    # The host may not see an error at all: when the card is back before the
+    # adapter's reset (about 20 s after the failed read), the adapter retries
+    # the read and it succeeds, so the host only sees it take that long.
+    print(f"read errors seen by the host while the card was out: {len(errors)}")
+    ask("The drive has it again. Waiting for the host to read the disk (up to a few minutes).")
     assert reopen_and_read(rig) == before, "the image reads differently after the card came back"
     assert card_stats(drive)[0] == "present"
 
