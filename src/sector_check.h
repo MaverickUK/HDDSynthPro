@@ -60,7 +60,7 @@ public:
     uint32_t identifyChecked() const { return identify_checked_; }
     uint32_t identifyBad() const { return identify_bad_; }
     uint32_t gaps() const { return gaps_; }  // reads missed (sequence jumps)
-    uint32_t dmaWords() const { return dma_words_; }  // DMA read words seen (data checked as any other)
+    uint64_t dmaWords() const { return dma_words_; }  // DMA read words seen (data checked as any other)
 
     // After reads were discarded on purpose: start afresh, without a gap.
     void resync() {
@@ -80,7 +80,7 @@ private:
     uint32_t identify_checked_ = 0, identify_bad_ = 0;
     uint16_t words_[256];
     unsigned count_ = 0;
-    uint32_t dma_words_ = 0;
+    uint64_t dma_words_ = 0;  // 64-bit: DMA's rate wraps 32 bits in a few hours
     bool have_seq_ = false;
     uint32_t last_seq_ = 0;
     Mismatch mismatch_{};

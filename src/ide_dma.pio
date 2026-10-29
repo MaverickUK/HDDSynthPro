@@ -42,7 +42,10 @@ word:
                                     ; finds nothing on DD (seen on the rig, 0.16.1)
     wait 0 pin DIOR                 ; the host's strobe
     out pins, 16                    ; its word onto DD (presented within tE)
-    mov pindirs, ~null              ; drive DD
+    mov pindirs, ~null      [4]     ; drive DD, then let the switching noise pass before
+                                    ; watching DIOR#: with all 16 lines rising at once it
+                                    ; looked like DIOR# rising on the rig (LBA 65535's
+                                    ; word 3, 0.17.0), and the word went too soon
     pull block                      ; the next word, while DIOR# is low
     wait 1 pin DIOR                 ; the host takes the word as DIOR# rises
     mov pindirs, null               ; release DD (tF: the 5 ns hold is the wait's delay)
@@ -50,7 +53,7 @@ word:
 last:
     wait 0 pin DIOR
     out pins, 16            side 0  ; DMARQ low: no more strobes after this one (tL)
-    mov pindirs, ~null
+    mov pindirs, ~null      [5]     ; as above
     wait 1 pin DIOR
     mov pindirs, null
     irq set 0                       ; burst done; wraps to start

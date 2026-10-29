@@ -2,6 +2,15 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.17.1] - 2026-10-29
+
+The three bus observer findings from the 6-hour DMA soak, fixed.
+
+### Fixed
+- **LBA 65535's word 3 in multiword DMA** (`ide_dma.pio`). That word takes all 16 data lines from 0 to 1 at once, and the switching was enough for the DMA read program, which watches DIOR# without the input synchroniser, to see the strobe end early and release DD before it had. The host had already latched the word (it read it right all through the soak), but the bus observer, sampling as DIOR# rises, saw `0000` in about one read of that sector in four. The program now waits 4-5 cycles (20-25 ns) after driving DD before watching DIOR#, well inside mode 2's 70 ns strobe (tD). On the rig (`host/runs/tools/dma_settle.py`, 5,000 reads of LBA 65535): 24% flagged before, 0 in 3 runs (about 7,600 checked) after; the host 0 wrong throughout. Stronger drive made it worse, as more switching noise would: 8 mA with fast slew failed the read at the host every time, so DD stays on the RP2350's default 4 mA, slow slew.
+- **The observer's ring is 16 KB** (4,096 samples, from 1,024), and `s` shows its high-water mark, `bus_ring_max=used/size`. Sequential DMA reads on the built-in disk now peak at about 1,030 samples waiting, just over the old size: hence the soak's 94,071 missed words. 48 MB read in 64 KB requests: 0 gaps.
+- **`bus_dma_words` is 64-bit**: at DMA's rate 32 bits wrap in a few hours.
+
 ## [0.17.0] - 2026-10-29
 
 Write-behind on by default, and settings for it and the other options in `HDDSYNTH.INI`.
