@@ -2,6 +2,27 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.18.0] - 2026-10-29
+
+A welcome disk with a README, instead of the test disk, when there's no card or no image to serve.
+
+### Added
+- **The welcome disk** (`src/welcome_disk.*`, host-tested): with no microSD card, or no image it can use, the drive serves a 64 MB disk with an MBR partition table and one FAT16 volume, `HDDSYNTHPRO` (partition type 06h, 2 KB clusters, ending with the last whole cylinder of IDENTIFY's 16-head, 63-sector geometry). It holds `README.TXT`, how to set the drive up, and `HDDSYNTH.INI` with the defaults, ready to copy to a card. Every sector is computed when read, like the test disk's, so it costs no RAM; writes go to the same RAM overlay, until a restart. Neither the MBR nor the boot record boots: both run INT 18h.
+- **`welcome/README.TXT`**, the README's text, with ASCII art. `scripts/embed_welcome.py` checks it (plain ASCII, at most 80 characters a line), turns its line endings into CRLF, fills in `{VERSION}` and writes `src/welcome_text.h` (git-ignored) before each build (`extra_scripts` in `platformio.ini`) and before the host tests.
+- **`.pio/native-tests/make_welcome_img`**, built by `test/run_native_tests.sh`: writes the welcome disk to a file, to see the README as a computer will before flashing. macOS's `fsck_msdos` passes it, and mounts it as `HDDSYNTHPRO` with both files.
+- **Console `T`**: restarts the drive serving the test disk, card or no card, or back. It shares `J`'s watchdog scratch register, so a power cycle undoes it, and `T` and `J` undo each other. `s` shows `disk=welcome` or `disk=generated`.
+
+### Changed
+- **The test disk is served only on request** (`image = none`, or `T`), no longer whenever there's no card. The bus observer checks data sectors only on it, as before. Rig tests that need it (slices 3-4, the soak, `-m timing`) now skip on the welcome disk too, and say how to get the test disk.
+- `RamOverlayDisk` takes the disk underneath at boot (`setBase()`), so the welcome disk and the test disk share its 256 KB.
+- The defaults in `HDDSYNTH.INI` (console `C`, and the welcome disk's copy): the image falls back to the welcome disk.
+
+### Fixed
+- The host tests didn't compile on macOS: `activity_link::LINE_MAX` clashed with the `LINE_MAX` macro in macOS's `<limits.h>` (not seen on Windows or Linux). Now `MAX_LINE`.
+
+### On the rig
+- Not yet tried. To check: macOS and Windows mount the welcome disk and show the README; what they write to a fresh volume (`.fseventsd`, `.Spotlight-V100`, `System Volume Information`) fits in the 256 KB overlay; slices 1-2 pass on it (it's the test disk's size); `T` brings the test disk back for slices 3-4.
+
 ## [0.17.1] - 2026-10-29
 
 The three bus observer findings from the 6-hour DMA soak, fixed.

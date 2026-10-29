@@ -32,7 +32,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - The variant defines `PIN_LED` as a macro, so don't reuse Arduino pin-macro names for constants.
   - The clock is 200 MHz (`board_build.f_cpu`, since 0.14.0), and `setup()` keeps the peripheral clock (SPI, UART) on it. Anything timed in cycles must say which clock: `pio_sim.CLOCK_HZ` matches the firmware's, and C++ works cycle counts out from `clock_get_hz(clk_sys)`.
 - **PIO programs:** the platform assembles each `src/*.pio` into a `.pio.h` next to it (git-ignored) before every build. Include them as `"name.pio.h"`.
-- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test`, `activity`, `activity_link`, `drive_config`, `sector_check` and `media_watch` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
+- **Host unit tests:** `test/run_native_tests.sh` (plain `c++` with ASan/UBSan). Keep `bus_sample`, `trace_format`, `spsc_ring`, `identify`, `ata_device`, `gen_disk`, `block_source`, `fetch_mailbox`, `short_test`, `activity`, `activity_link`, `drive_config`, `sector_check`, `media_watch` and `welcome_disk` free of Arduino and SDK headers so they stay testable here. When touching the ring, the mailbox or the fetch handshake, also run `SANITIZE=thread test/run_native_tests.sh`.
 - **CI:** `.github/workflows/build.yml` builds the firmware and runs the C++ tests and `pytest -m sim` on every push. A `vX.Y.Z` tag that matches `FIRMWARE_VERSION` publishes a release with the UF2.
 - **Python tests:** in `host/` (pytest). One marker per slice; `sim` needs no hardware.
   - Plain `pytest` runs only the `sim` tests.
@@ -73,7 +73,7 @@ A write (WRITE SECTORS) runs the other way: DRQ first, the host writes 256 words
 
 The device doesn't touch the buffer while BSY. Core 0 must never block for long: it serves fetches before and between trace prints, and only prints when USB serial has room.
 
-The disk is the image `HDDSYNTH.INI` names (`docs/settings.md`, `src/drive_config.*`; `HDDSYNTH.IMG` by default), or `HDDSYNTH.IMG` if that one can't be used, on the SD card (`ImageDisk` over SdFat, `src/sd_card.*`), else `RamOverlayDisk` over `GeneratedDisk` (writes stay in RAM, up to 512 sectors, until reboot). Core 1 waits at boot for core 0 to choose it. Never format the SD card or touch files on it other than the image being served, the scratch `HDDBENCH.IMG` and `HDDSYNTH.INI` (which the owner allowed the firmware to create and edit, with console `C`/`E` only): it holds the owner's data. Benchmarks that write use `HDDBENCH.IMG` (`disk=bench`). Slices 3–4 and the soak skip on an image, since they write to it: for them, `E image = none` and `!` serve the generated disk with the card in (0.12.0), and `E image = HDDSYNTH.IMG` and `!` put the image back.
+The disk is the image `HDDSYNTH.INI` names (`docs/settings.md`, `src/drive_config.*`; `HDDSYNTH.IMG` by default), or `HDDSYNTH.IMG` if that one can't be used, on the SD card (`ImageDisk` over SdFat, `src/sd_card.*`), else `RamOverlayDisk` (writes stay in RAM, up to 512 sectors, until reboot) over the welcome disk (`src/welcome_disk.*`: a FAT16 volume computed per sector, holding `README.TXT` from `welcome/README.TXT`, embedded by `scripts/embed_welcome.py` into the git-ignored `src/welcome_text.h` before each build, and the sample `HDDSYNTH.INI`), or over `GeneratedDisk`, the test disk, with `image = none` or console `T` (`disk=generated`; the bus observer checks data only there). Core 1 waits at boot for core 0 to choose it. Never format the SD card or touch files on it other than the image being served, the scratch `HDDBENCH.IMG` and `HDDSYNTH.INI` (which the owner allowed the firmware to create and edit, with console `C`/`E` only): it holds the owner's data. Benchmarks that write use `HDDBENCH.IMG` (`disk=bench`). Slices 3–4 and the soak skip on an image, since they write to it, and on the welcome disk: for them, `T` (no card needed; then replug the adapter), or `E image = none` and `!` serve the generated disk with the card in (0.12.0), and `E image = HDDSYNTH.IMG` and `!` put the image back.
 
 The bus program holds IORDY on a write while its RX FIFO is full, so a write burst can't outrun core 1. `ide_bus.pio` fills its PIO block's 32 instructions.
 
@@ -105,9 +105,9 @@ Console:
 - `A`: read-ahead off or on until a restart (`read_ahead` in `HDDSYNTH.INI`);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it, then `CONFIG` lines: the settings from `HDDSYNTH.INI`, the image served, why a configured image wasn't used, warnings (drive build; only reads);
-- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`image`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`), keeping the rest of the file; `!`: restart, to apply them (keeps `J`);
+- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`image`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`), keeping the rest of the file; `!`: restart, to apply them (keeps `J` or `T`);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
-- `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`);
+- `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`); `T`: restart serving the test disk, card or no card, or back (the same register, so `T` and `J` undo each other);
 - `L`: the activity link on or off until a restart (`activity_link` in `HDDSYNTH.INI`; `s` shows `link`, `link_sent` and `link_last`);
 - `U`: the link's loopback test, with a jumper from GPIO 0 to GPIO 1 (`LOOPBACK pass|fail|no-data ...`; `-m link`);
 - `V`: the drive leaves the bus (`ABSENT on`) until the adapter's next RESET#, a second `V`, or 120 s (`ABSENT off ...`); for re-detection without a replug (`HDDPRO_REPLUG=redetect`);
@@ -120,7 +120,7 @@ Console:
 
 SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it with any firmware change, add a `CHANGELOG.md` entry (Keep a Changelog), and tag `vX.Y.Z`.
 
-## Status (29 Oct 2026, 0.17.0)
+## Status (29 Oct 2026, 0.18.0)
 
 - **What works on the rig** (Windows, the JMicron-ID adapter, the BB48 with DMARQ/DMACK# wired): a read/write disk in PIO modes 0-3 (the adapter takes 3) and multiword DMA mode 2 (offered with `mode = mdma2`, or by `auto` with `dma = on`), serving the SD image or the built-in disk, at 200 MHz. Detection and re-detection, standby and wake (seen from macOS), FLUSH CACHE, no card at boot, a card pulled and put back (0.13.0), the activity link sending. Slices 0-5, `-m card`, `-m speed` and the soak pass. History, with every measurement, is in `CHANGELOG.md` and `docs/speed-log.md`.
 - **Speeds:** on the built-in disk, PIO mode 3 reads 1.36 MB/s and writes 1.79; multiword DMA 2 reads 5.14 MB/s (2.6 while the bus observer checks every DMA word, which costs core 0), 969 random 4 KB reads a second and writes 9.76 MB/s. The adapter paces PIO reads itself (about 1.1 µs a word, and 10 ms before polling each READ); DMA avoids both. On the SD image the card over SPI tops out near 1.8 MB/s for reads; writes are 1.65 MB/s with write-behind (the default since 0.17.0), 1.05 without.
@@ -132,7 +132,7 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
   - `ide_dma.pio` and `ide_dma.cpp`, multiword DMA's data phase in a PIO block of its own, fed by a DMA channel ([docs/dma.md](docs/dma.md));
   - the diagnostics: `iordy_timer.pio` (slow reads), `iordy_check.pio` (hosts that don't wait for IORDY), `bus_observer.pio` (data and IDENTIFY checked on the cable, PIO and DMA);
   - `ata_device`: IDENTIFY, READ/WRITE SECTORS and DMA, DIAGNOSTIC and the housekeeping commands bridges send; everything else gets ABRT;
-  - the disk through the mailbox: the SD image (`sd_card`, with `media_watch` for a card pulled and put back) or the generated disk with its RAM overlay; settings from `HDDSYNTH.INI` (`drive_config`).
+  - the disk through the mailbox: the SD image (`sd_card`, with `media_watch` for a card pulled and put back) or, with no card or image, the welcome disk (0.18.0: `README.TXT` and a sample `HDDSYNTH.INI` on FAT16; not yet tried on the rig), or the generated disk on request (`image = none`, console `T`), both with the RAM overlay; settings from `HDDSYNTH.INI` (`drive_config`).
 - **Next:**
   1. DMA as the default (`drive_config::DEFAULT_DMA`): ready since 0.17.1's 60-minute soak (11.1 million sectors checked, 0 bad, 0 gaps), but kept off until a retro PC has run in PIO first.
   2. The activity link: the loopback test with a jumper from GPIO 0 to GPIO 1 (console `U`, `-m link`), then the HDD Synth's side (`docs/hddsynth-activity-link-brief.md`; HDDSynth_Native v0.18.0 has it).

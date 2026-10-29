@@ -52,7 +52,7 @@ static int hexValue(char c) {
 bool parseLine(const char* line, size_t len, Fields& out) {
     static const char PREFIX[] = "$HDA,";
     const size_t prefix_len = sizeof PREFIX - 1;
-    if (len > LINE_MAX || len < prefix_len) return false;
+    if (len > MAX_LINE || len < prefix_len) return false;
     for (size_t i = 0; i < prefix_len; ++i)
         if (line[i] != PREFIX[i]) return false;
 
