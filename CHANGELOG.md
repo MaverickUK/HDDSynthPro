@@ -14,7 +14,8 @@ Multiword DMA, built but not yet tried on hardware: it needs DMARQ wired.
 - `cfg::PIN_DMARQ` (GPIO 31) and `cfg::PIN_DMACK_N` (GPIO 3), as on the PCB. `S` shows `mdma_offered=`.
 
 ### On the rig
-- With DMA not offered (the default), nothing changes: slices 3 and 4 pass in PIO mode 3, reads 1.38 MB/s and writes 1.79, and the bus observer checked 335,019 sectors on the cable, 0 bad (1 gap: words it missed, not wrong ones). The worst read during the tests was 1,030 ns (920 on 0.15.0): the new code moved core 1's in RAM; to watch in the next soak.
+- With DMA not offered (the default), nothing changes: slices 3 and 4 pass in PIO mode 3, reads 1.38 MB/s and writes 1.79, and the bus observer checked 335,019 sectors on the cable, 0 bad (1 gap: words it missed, not wrong ones). The worst read during the tests was 1,030 ns (920 on 0.15.0): the new code moved core 1's in RAM.
+- **10-hour soak** (Windows, generated disk, PIO mode 3, 200 MHz; 28-29 Oct): clean. 28.9 GB moved (385,288 reads, 209,009 writes), 0 mismatches, 995,797 commands, 49.5 million sectors checked on the cable with 0 bad and 0 gaps, no host resets, worst read 1,060 ns (steady all night). Against the 0.12.0 soak (150 MHz, PIO mode 0) at the same point: 7.8% more data, and 180 ns more margin on the worst read.
 
 ## [0.15.0] - 2026-10-28
 
