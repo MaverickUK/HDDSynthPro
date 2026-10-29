@@ -843,6 +843,22 @@ static void printCardChanges() {
     if (printLine(line, size_t(n))) shown = card.state();
 }
 
+// A NOIORDY line when the host ends reads without waiting for IORDY, at most
+// once a second: such a host reads garbage whenever core 1 is slower than its
+// strobe (iordy_check.pio).
+static void printIgnoredIordy() {
+    static uint32_t shown = 0, last_ms = 0;
+    uint32_t n = iordy_timer::ignoredReads();
+    if (n == shown || millis() - last_ms < 1000) return;
+    char line[96];
+    int len = std::snprintf(line, sizeof line, "NOIORDY %lu reads=%lu last=%s: the host didn't wait for IORDY\n",
+                            (unsigned long)time_us_32(), (unsigned long)n, iordy_timer::ignoredRegister());
+    if (printLine(line, size_t(len))) {
+        shown = n;
+        last_ms = millis();
+    }
+}
+
 // A SLOWREAD line for each read IORDY held past ATA's limit. The time is when
 // core 0 collected the report: up to a sector's store (about 0.5 ms on the
 // SD card) after the read.
@@ -895,6 +911,8 @@ static void printStats() {
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
                   iordy_timer::earlyRegister());
+    Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
+                  iordy_timer::ignoredRegister());
     Serial.printf(" bus_sectors=%lu bus_bad=%lu bus_skipped=%lu bus_gaps=%lu bus_dma_words=%lu",
                   (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
                   (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps(),
@@ -1148,6 +1166,7 @@ void loop() {
     serveFetches();
     iordy_timer::poll();
     printSlowReads();
+    printIgnoredIordy();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.
     bus_observer::poll(Serial, g_disk == &g_overlay, int32_t(g_identify_check_until_ms - millis()) > 0);
     updateLed();

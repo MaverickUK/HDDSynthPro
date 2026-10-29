@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.16.5] - 2026-10-29
+
+Catches a host that doesn't wait for IORDY, before trying a retro machine.
+
+### Added
+- **`iordy_check.pio`**: counts reads the host ended (DIOR# rising) while IORDY was still low, so it didn't wait for the data. ATA lets hosts ignore IORDY in PIO modes 0-2, and some older controllers do; they'd read garbage whenever core 1 is slower than their strobe. `s` shows `iordy_ignored=` and `iordy_ignored_reg=` (should be 0), and a `NOIORDY` line appears, at most once a second, if it isn't. It runs in the diagnostics' PIO block beside the IORDY timer and the bus observer (now 29 of its 32 instructions). Simulator tests: a host that waits, one that doesn't, back-to-back data reads where `ide_bus` pulls IORDY low again 20 ns after each strobe, and DMA strobes.
+- On the rig, through the USB adapter (which honours IORDY): 0 across detection, reads and `-m speed`.
+
 ## [0.16.4] - 2026-10-29
 
 The drive finds out at start-up whether DMARQ is wired.

@@ -1,0 +1,30 @@
+; Drive build: catches a host that doesn't wait for IORDY. A host that honours
+; it raises DIOR# only once IORDY is high again; one that ignores it ends the
+; read on its own timing (165 ns in PIO mode 0), often before core 1 has put
+; the data on the bus, and so reads garbage. ATA lets hosts ignore IORDY in
+; PIO modes 0-2, and some older controllers do. Only reads pins.
+;
+; Pin mapping (see iordy_timer.cpp, which runs it beside the IORDY timer):
+;   IN_BASE      = GPIO4 (DD0), as in bus_sample.h
+;   wait gpio 26 = DIOR#
+;   JMP_PIN      = GPIO28 (IORDY)
+;
+; Each read whose DIOR# rose while IORDY was still low gives one word: the pin
+; sample taken as DIOR# fell (bits 16-20: which register). Reads that waited
+; give nothing, nor do DMA strobes (IORDY is high then). A host that ignores
+; IORDY on every read fills the FIFO; the extra reports are dropped.
+;
+; IORDY is checked one cycle after DIOR# is seen rising. For back-to-back data
+; reads ide_bus pulls IORDY low again for the next one, but that's later than
+; this check (host/tests/test_iordy_check_sim.py).
+
+.pio_version 1
+.program iordy_check
+.wrap_target
+top:
+    wait 0 gpio 26          ; DIOR# falls: a read starts
+    mov isr, pins           ; which register (kept for a report)
+    wait 1 gpio 26          ; DIOR# rises: the host has taken its data
+    jmp pin top             ; IORDY high by then: the host waited
+    push noblock            ; it didn't
+.wrap
