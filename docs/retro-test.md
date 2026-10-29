@@ -3,7 +3,7 @@
 The first time the drive sits on a real IDE controller rather than the USB adapter. In order: each step either passes or says what to note before the next. Plan item 6 in [plan.md](plan.md) (a 486-class host); firmware **0.17.1 or later**.
 
 Two passes, ideally on separate evenings:
-1. **The built-in disk, PIO mode 0.** Every sector read is checked on the cable by the bus observer, so this pass says whether the controller works with the drive at all, and whether it waits for IORDY.
+1. **The test disk, PIO mode 0.** Every sector read is checked on the cable by the bus observer, so this pass says whether the controller works with the drive at all, and whether it waits for IORDY.
 2. **The scratch image, `auto`.** FDISK, FORMAT, copying files and benchmarks, on `HDDBENCH.IMG`. The SD card's `HDDSYNTH.IMG` isn't touched.
 
 ## What to bring
@@ -45,14 +45,14 @@ Watch the console as the PC starts. The BIOS resets the bus (a `RESET` line), th
   - `iordy_max_ns` (under 1,250).
 - [ ] Which commands the BIOS sent: the `CMD` lines (e.g. `ec IDENTIFY`, `91 INIT_PARAMS`, `ef SET_FEATURES`, `20 READ_SECTORS`). An unknown one shows as `?` after its code, and gets ABRT: note them all.
 
-## 4. Pass 1: reads on the built-in disk
+## 4. Pass 1: reads on the test disk
 
-The built-in disk holds a test pattern, with no partitions or file system: DOS sees an unpartitioned disk. That's what lets the observer check every sector read.
+The test disk holds a pattern computed from each LBA, with no partitions or file system: DOS sees an unpartitioned disk. That's what lets the observer check every sector read.
 
 - [ ] Boot DOS from floppy. `FDISK`, option 4 (display): no partitions, about 64 MB. Don't create any yet.
 - [ ] Benchmarks that only read (CORETEST's transfer rate and seek tests, SPEEDSYS's disk test). Photos of the results.
 - [ ] `s`: `bus_sectors` has grown, **`bus_bad=0`** and no `BUSERR` lines; `iordy_ignored=0` still; `iordy_max_ns`. `SLOWREAD` or `STUCK` lines: note them.
-- [ ] Optional, writes: `FDISK` a primary partition, reboot, `FORMAT C:` (without `/S`). The built-in disk keeps up to 512 written sectors in RAM (enough for FDISK and FORMAT, not for system files), lost when the BB48 restarts. A write past that fails at the PC ("write fault"): that's the limit, not a fault.
+- [ ] Optional, writes: `FDISK` a primary partition, reboot, `FORMAT C:` (without `/S`). The test disk keeps up to 512 written sectors in RAM (enough for FDISK and FORMAT, not for system files), lost when the BB48 restarts. A write past that fails at the PC ("write fault"): that's the limit, not a fault.
 - [ ] Console `s` once more, and save the log.
 
 ## 5. Pass 2: the scratch image
