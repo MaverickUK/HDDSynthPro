@@ -6,6 +6,10 @@ The drive reads its settings from `HDDSYNTH.INI` in the root folder of the micro
 # HDDSynthPro settings. Changes take effect when the drive restarts.
 image = HDDSYNTH.IMG
 mode = auto
+dma = off
+write_behind = on
+read_ahead = on
+activity_link = on
 ```
 
 - One setting per line, as `key = value`. Spaces around `=` and the case of the key don't matter.
@@ -19,6 +23,12 @@ mode = auto
 |---|---|---|
 | `image` | The disk image to serve: a file in the card's root folder, e.g. `GAMES.IMG` (quotes optional), or `none` for the built-in 64 MB test disk (its writes are lost when the drive restarts; the soak test uses it, since only its data can be checked on the cable) | `HDDSYNTH.IMG` |
 | `mode` | The transfer mode to offer the host: `auto` (the fastest both sides support), or one of `pio0`–`pio4`, `mdma0`–`mdma2`, `udma0`–`udma6` to allow at most that one | `auto` |
+| `dma` | `on` or `off`: whether `auto` may offer multiword DMA, where DMARQ is wired. Much faster with DMA-capable hosts (reads about 4 times, writes 5 times through the USB adapter) | `off` until DMA has had a long test |
+| `write_behind` | `on` or `off`: the drive acknowledges each written sector while storing it on the card, so the host sends the next one meanwhile. About 50% faster writes to the card; if power is cut in the millisecond a sector is being stored, that sector is lost | `on` |
+| `read_ahead` | `on` or `off`: the drive fetches the next sector while the host reads this one | `on` |
+| `activity_link` | `on` or `off`: tell an HDD Synth what the drive is doing ([activity-link.md](activity-link.md)) | `on` |
+
+The on/off settings also take `yes`/`no`, `true`/`false` and `1`/`0`. The console's `W`, `A` and `L` switch write-behind, read-ahead and the activity link until the next restart, without changing the file.
 
 **Which disk the drive serves**, in order:
 1. `HDDBENCH.IMG`, if console `J` asked for it (a scratch disk for tests; a power cycle undoes it).
@@ -28,7 +38,7 @@ mode = auto
 
 An image is used as it is: its size (a multiple of 512 bytes) is the disk's size. Console `I` creates a blank 64 MB `HDDSYNTH.IMG`.
 
-**Transfer modes:** this firmware supports PIO modes 0 to 3, and `auto` offers mode 3. `mdma0` to `mdma2` offer multiword DMA up to that mode as well (and PIO mode 3). DMA needs DMARQ and DMACK# wired: the PCB has them, the BB48 rig only if added by hand ([dma.md](dma.md)). The drive checks DMARQ when it starts, and without it offers PIO only, with a warning in `S`. `auto` will offer DMA too, where DMARQ is wired, once DMA has had a long test (`cfg::AUTO_DMA`). Any other mode (PIO 4, Ultra DMA) is accepted in the file, with a warning, and the drive uses `auto` until that mode is added, so a settings file written now keeps working later.
+**Transfer modes:** this firmware supports PIO modes 0 to 3, and `auto` offers mode 3. `mdma0` to `mdma2` offer multiword DMA up to that mode as well (and PIO mode 3). DMA needs DMARQ and DMACK# wired: the PCB has them, the BB48 rig only if added by hand ([dma.md](dma.md)). The drive checks DMARQ when it starts, and without it offers PIO only, with a warning in `S`. With `dma = on`, `auto` offers DMA too, where DMARQ is wired. Any other mode (PIO 4, Ultra DMA) is accepted in the file, with a warning, and the drive uses `auto` until that mode is added, so a settings file written now keeps working later.
 
 ## Pulling the card out
 
@@ -40,9 +50,9 @@ Eject the disk on the computer first, as you would before unplugging any disk. I
 |---|---|
 | `S` | Reports the card, then `CONFIG` lines: what the file says, which image is being served, any image that couldn't be used and why, and any warnings |
 | `C` | Creates `HDDSYNTH.INI` with the defaults and comments, if there isn't one |
-| `E` | Sets one setting: type `E`, then e.g. `image = GAMES.IMG`, then Enter. The rest of the file, comments included, stays as it was |
+| `E` | Sets one setting: type `E`, then e.g. `image = GAMES.IMG` or `write_behind = off`, then Enter. The rest of the file, comments included, stays as it was; a setting the file doesn't have yet is added at the end |
 | `!` | Restarts the drive, so the settings take effect (keeps a `J` choice) |
 
-`s` also shows `image_name=` (the image being served) and `config=` (`none`, `present` or `truncated`, as read at start-up).
+`S` shows the settings in use (`CONFIG dmarq=wired dma=off write_behind=on read_ahead=on activity_link=on`, with `dmarq` saying whether DMA can be offered at all). `s` also shows `image_name=` (the image being served) and `config=` (`none`, `present` or `truncated`, as read at start-up).
 
 The drive never formats the card, and the only files it writes are the image it serves, images created with `I` or `K`, and `HDDSYNTH.INI` (only with `C` or `E`).

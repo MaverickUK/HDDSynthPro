@@ -45,7 +45,7 @@ The bus switches isolate the bus when the board is unpowered (Ioff), so the BB48
 
 - [ ] `E mode = mdma2`, `!`. The adapter asks for `SET_FEATURES 3 34` (multiword DMA mode 2) and reads with `READ_DMA`.
 - [ ] Slices 3-4 and `-m speed` again. The rig's figures: reads about 5.1 MB/s, random 4 KB reads about 970 a second, writes about 9.8 MB/s (2.6 MB/s reads with the observer checking every DMA word, which costs core 0).
-- [ ] `E mode = auto`, `!` before serving an image, until DMA has had a soak (`cfg::AUTO_DMA`).
+- [ ] `E mode = auto`, `!` before serving an image, until DMA has had a soak (then `dma = on` lets `auto` offer it).
 
 ## 7. The SD image
 

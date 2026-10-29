@@ -35,6 +35,10 @@ TEST(test_config_default_file_is_the_defaults) {
     Config c = parsed(f);
     CHECK_STR(std::string(c.image), "HDDSYNTH.IMG");
     CHECK(c.mode == Mode::Auto);
+    CHECK_EQ(c.dma, drive_config::DEFAULT_DMA);
+    CHECK_EQ(c.write_behind, drive_config::DEFAULT_WRITE_BEHIND);
+    CHECK_EQ(c.read_ahead, drive_config::DEFAULT_READ_AHEAD);
+    CHECK_EQ(c.activity_link, drive_config::DEFAULT_ACTIVITY_LINK);
     CHECK_EQ(c.warning_count, size_t(0));
     CHECK(std::strlen(f) < drive_config::MAX_FILE);
 }
@@ -122,6 +126,41 @@ TEST(test_config_modes) {
     CHECK_STR(std::string(drive_config::modeName(Mode::Udma6)), "udma6");
 }
 
+TEST(test_config_switches) {
+    Config d = parsed("");
+    CHECK(!d.dma);
+    CHECK(d.write_behind && d.read_ahead && d.activity_link);
+    Config c = parsed("dma = on\nwrite_behind = OFF\nRead_Ahead = no\nactivity_link = 0\n");
+    CHECK(c.dma);
+    CHECK(!c.write_behind && !c.read_ahead && !c.activity_link);
+    CHECK_EQ(c.warning_count, size_t(0));
+    Config y = parsed("dma = yes\nwrite_behind = true\nread_ahead = 1\n");
+    CHECK(y.dma && y.write_behind && y.read_ahead);
+    // Not on or off: a warning, and the default stays.
+    Config w = parsed("write_behind = maybe\n");
+    CHECK(w.write_behind);
+    CHECK_EQ(w.warning_count, size_t(1));
+    // Set twice: a warning, the last counts.
+    Config t = parsed("dma = on\ndma = off\n");
+    CHECK(!t.dma);
+    CHECK_EQ(t.warning_count, size_t(1));
+}
+
+TEST(test_config_switch_keys_editable) {
+    CHECK(drive_config::isKey("write_behind") && drive_config::isKey("DMA") && drive_config::isKey("activity_link"));
+    CHECK(drive_config::isKey("image") && drive_config::isKey("mode"));
+    CHECK(!drive_config::isKey("speed"));
+    std::string e = edited(drive_config::defaultFile(), "write_behind", "off");
+    Config c = parsed(e);
+    CHECK(!c.write_behind);
+    CHECK(c.read_ahead);
+    CHECK_EQ(c.warning_count, size_t(0));
+    CHECK(e.find("faster writes") != std::string::npos);  // its comment kept
+    // A key the file doesn't have yet is added at the end.
+    std::string a = edited("image = A.IMG\n", "dma", "on");
+    CHECK(parsed(a).dma);
+}
+
 TEST(test_config_many_mistakes_keep_the_first_few) {
     std::string text;
     for (int i = 0; i < 10; ++i) text += "bad" + std::to_string(i) + " = 1\n";
@@ -179,6 +218,8 @@ void runDriveConfigTests() {
     RUN(test_config_mistakes_are_reported_and_skipped);
     RUN(test_config_last_setting_counts);
     RUN(test_config_modes);
+    RUN(test_config_switches);
+    RUN(test_config_switch_keys_editable);
     RUN(test_config_many_mistakes_keep_the_first_few);
     RUN(test_config_set_key_keeps_comments);
     RUN(test_config_set_key_adds_a_missing_one);

@@ -102,16 +102,16 @@ Console:
 - `t`: raw bus trace on or off;
 - `D` then a digit: debug, answer data reads that many × 250 ns late (`-m timing`; `D0` is off);
 - `F`: debug, core 1's fast lane for data reads off or on (to compare);
-- `A`: debug, read-ahead off or on (to compare);
+- `A`: read-ahead off or on until a restart (`read_ahead` in `HDDSYNTH.INI`);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it, then `CONFIG` lines: the settings from `HDDSYNTH.INI`, the image served, why a configured image wasn't used, warnings (drive build; only reads);
-- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting, keeping the rest of the file; `!`: restart, to apply them (keeps `J`);
+- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`image`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`), keeping the rest of the file; `!`: restart, to apply them (keeps `J`);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
 - `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`);
-- `L`: the activity link on or off (on by default; `s` shows `link`, `link_sent` and `link_last`);
+- `L`: the activity link on or off until a restart (`activity_link` in `HDDSYNTH.INI`; `s` shows `link`, `link_sent` and `link_last`);
 - `U`: the link's loopback test, with a jumper from GPIO 0 to GPIO 1 (`LOOPBACK pass|fail|no-data ...`; `-m link`);
 - `V`: the drive leaves the bus (`ABSENT on`) until the adapter's next RESET#, a second `V`, or 120 s (`ABSENT off ...`); for re-detection without a replug (`HDDPRO_REPLUG=redetect`);
-- `W`: debug, write-behind on or off (off by default: it holds some status reads past 1.25 µs during writes);
+- `W`: write-behind on or off until a restart (on by default since 0.17.0; `write_behind` in `HDDSYNTH.INI`);
 - `x` then `Y`: the solder-bridge test, IDE cable unplugged (`short_test.*`; the board reboots afterwards);
 - `w` (listen build): the capture window on or off: each RESET# assert opens a window of `cfg::LISTEN_WINDOW_EVENTS` accesses, the rest are counted (`skipped=` in `s`) but not recorded (`-m slice0` uses it);
 - `b`: reboot to the bootloader.
@@ -139,7 +139,7 @@ SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it w
   3. The activity link to the HDD Synth: this side built in 0.9.0 (`src/activity_link.*`, `host/hddproto/activity_link.py`), sending on the rig. Loopback test built in 0.10.1 (console `U`, `-m link`); next, run it with the jumper (GPIO 0 to GPIO 1), then the synth's side (`docs/hddsynth-activity-link-brief.md`).
   4. The last slow reads at detection: gone at 200 MHz (0.14.0: 0 in 12 redetect cycles, worst 850 ns; 0.13.0 had 2 in 24 at 1,253-1,320 ns). The attempt to shuffle work out of a command's start at 150 MHz lost A-B-A (patch in `host/runs/tools/step_timing_and_intrq_fix.diff`): the margin there was tens of ns.
   5. Smaller: a second card refused (`-m card` with `HDDPRO_SECOND_CARD=1`; same card re-mount passes, 0.13.0); why handling the mailbox mid-block broke detection (0.8.17).
-  6. Multiword DMA ([docs/dma.md](docs/dma.md)): since 0.16.4 the drive tests DMARQ at start-up (a pull-up against the host's pull-down; `S`: `dmarq=`), never offers DMA without it, and `cfg::AUTO_DMA` (off until the DMA soak, `host/runs/tools/soak_dma.sh`) lets `auto` offer it. working on the rig in 0.16.2 (reads 3.8×, writes 5.5×, random reads 12× PIO mode 3), offered only with `mode = mdma0-2` (it stays opt-in: without DMARQ wired a host would wait forever). The bus observer checks DMA data (0.16.3). Next: a DMA soak; then SDIO, since on an image the card's ~1.8 MB/s over SPI is now the limit.
+  6. Multiword DMA ([docs/dma.md](docs/dma.md)): since 0.16.4 the drive tests DMARQ at start-up (a pull-up against the host's pull-down; `S`: `dmarq=`), never offers DMA without it, and `dma = on` in `HDDSYNTH.INI` (default off until the DMA soak, `host/runs/tools/soak_dma.sh`; `drive_config::DEFAULT_DMA`) lets `auto` offer it. working on the rig in 0.16.2 (reads 3.8×, writes 5.5×, random reads 12× PIO mode 3), offered only with `mode = mdma0-2` (it stays opt-in: without DMARQ wired a host would wait forever). The bus observer checks DMA data (0.16.3). Next: a DMA soak; then SDIO, since on an image the card's ~1.8 MB/s over SPI is now the limit.
   7. SDIO for the card ([docs/pio-allocation.md](docs/pio-allocation.md), designed, not built). Tried on the rig on 29 Oct: unreliable on the hand-wired leads (25 MHz: directory lookups failed; 12.5 MHz: writes failed and the card dropped out), so it waits for the PCB. all three PIO blocks are taken, so SDIO and `ide_dma` take blocks 2 and 3 from the diagnostics only when an image is served with DMA offered; one build. A card put in SPI mode stays there until power-cycled, so SDIO must start it from power-up.
   8. PCB rev 0.4 ([docs/pcb-rev04.md](docs/pcb-rev04.md)): DASP#, PDIAG#, CSEL and IOCS16# on U6's spare channels, PSRAM on GPIO 47, an SD power switch, DD series-resistor footprints, a debug header. Rev 0.3 bring-up needs firmware for BUS_EN# (GPIO 41) and SD_CD (GPIO 40).
   8. Later: PIO mode 4 (the adapter asks for it, but its write data can fall between the bus program's samples), SD at 37.5 MHz and then SDIO, both waiting for the custom PCB (the card didn't start at 37.5 MHz on the hand-wired leads; the PCB's shorter traces should fix that), DMA feeding the bus program, slice 6's pass-through tests from a Pi 5, retro hosts.

@@ -135,10 +135,11 @@ CORE1_RAM void loop1() {
 static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
-static SharedFlag g_read_ahead{true};  // console `A` (debug)
+static SharedFlag g_read_ahead{true};  // HDDSYNTH.INI read_ahead; console `A` (debug)
 // Off by default: with it on, writes hold some status reads 1.5-2 us (ATA
 // allows 1.25), not yet understood. Console `W` turns it on to work on that.
-static SharedFlag g_write_behind{false};  // console `W`
+static SharedFlag g_write_behind{true};  // HDDSYNTH.INI write_behind; console `W`
+static bool g_link_on = true;  // HDDSYNTH.INI activity_link; console `L` (core 0 only)
 
 // For the activity LED (core 0's updateLed): core 1 counts commands as they
 // start and says whether one is running.
@@ -153,6 +154,7 @@ static std::atomic<uint8_t> g_pio_mode{0};
 static std::atomic<uint8_t> g_mdma_mode{NO_DMA};       // set by core 1 at start-up (setup1)
 static std::atomic<uint8_t> g_mode_asked{0};            // HDDSYNTH.INI's mode, for core 1
 static SharedFlag g_dmarq_wired{false};                 // found by core 1 at start-up
+static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: auto may offer DMA
 
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
 static IdentifyInfo driveIdentity() {
@@ -185,7 +187,7 @@ void setup1() {
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
     g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
-                                                    g_dmarq_wired.load(), cfg::AUTO_DMA),
+                                                    g_dmarq_wired.load(), g_dma_auto.load()),
                       std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
     bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity());
@@ -489,6 +491,11 @@ static void chooseDisk() {
     g_disk_ms = millis() - start;
     g_pio_mode.store(drive_config::pioModeOffered(g_config.mode), std::memory_order_relaxed);
     g_mode_asked.store(uint8_t(g_config.mode), std::memory_order_relaxed);  // core 1 decides DMA from it
+    // The on/off settings (the console's W, A and L change them until a restart).
+    g_dma_auto.store(g_config.dma);
+    g_write_behind.store(g_config.write_behind);
+    g_read_ahead.store(g_config.read_ahead);
+    g_link_on = g_config.activity_link;
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
@@ -521,7 +528,8 @@ static void editConfig(const char* line) {
     }
     size_t n = drive_config::setKey(text, len, key, value, edited, sizeof edited);
     if (n == 0) {
-        Serial.printf("# E: '%s' isn't a setting (image or mode), or the file would be too long\n", key);
+        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link), "
+                      "or the file would be too long\n", key);
         return;
     }
     if (!sd_card::writeConfig(edited, n, Serial)) return;
@@ -543,7 +551,10 @@ static void printConfig() {
                   g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name);
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
-    Serial.printf("CONFIG dmarq=%s auto_dma=%d\n", g_dmarq_wired.load() ? "wired" : "absent", (int)cfg::AUTO_DMA);
+    Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s\n",
+                  g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
+                  drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
+                  drive_config::onOff(g_config.activity_link));
     if (drive_config::dmaRefusedForWiring(g_config.mode, g_dmarq_wired.load()))
         Serial.printf("CONFIG warning: mode = %s needs DMARQ wired (IDE pin 21 to GPIO 31); offering PIO only\n",
                       drive_config::modeName(g_config.mode));
@@ -567,7 +578,6 @@ static bool g_activity_unprinted = false;
 // and goes a millisecond later, with whatever is current then.
 static activity_link::Sender g_link(cfg::LINK_HEARTBEAT_MS);
 static activity_link::Op g_link_op = activity_link::Op::None;  // the last media command's
-static bool g_link_on = true;  // console `L`
 
 static void beginLink() {
     uart_init(uart0, cfg::LINK_BAUD);  // 8N1
@@ -952,7 +962,7 @@ static void printStats() {
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
-    Serial.printf(" write_behind=%d", (int)g_write_behind.load());
+    Serial.printf(" write_behind=%d read_ahead=%d", (int)g_write_behind.load(), (int)g_read_ahead.load());
     char last[activity_link::SENTENCE_MAX] = "-";
     if (g_link.count()) {
         size_t n = activity_link::formatSentence(g_link.last(), last, sizeof last);

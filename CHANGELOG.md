@@ -2,6 +2,18 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.17.0] - 2026-10-29
+
+Write-behind on by default, and settings for it and the other options in `HDDSYNTH.INI`.
+
+### Added
+- **Four on/off settings in `HDDSYNTH.INI`** ([docs/settings.md](docs/settings.md)): `dma` (whether `mode = auto` may offer multiword DMA where DMARQ is wired; off), `write_behind` (on), `read_ahead` (on) and `activity_link` (on). They take on/off, yes/no, true/false or 1/0; a bad value or a repeat is a warning, as for the other settings. Console `E` sets them, and adds one the file doesn't have yet. `S` shows them all. The console's `W`, `A` and `L` still switch them until the next restart.
+- The file `C` creates has them, with comments, and no longer says the firmware supports PIO mode 0 only.
+
+### Changed
+- **Write-behind is on by default.** Re-measured on 0.16.5: card writes 1.65 MB/s against 1.05, 192 MB written and read back clean, worst read 1,040 ns (its slow reads at 150 MHz are gone). The drive acknowledges a sector while storing it, so a power cut in that millisecond loses it; this adapter never sends FLUSH CACHE. `write_behind = off` puts it back.
+- `cfg::AUTO_DMA` is now the `dma` setting (default `drive_config::DEFAULT_DMA`, off until the DMA soak).
+
 ## [0.16.6] - 2026-10-29
 
 Ready for the PCB: the firmware switches its IDE bus on.
