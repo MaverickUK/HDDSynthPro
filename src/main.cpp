@@ -424,6 +424,24 @@ static bool useImage(const char* name, const char*& why) {
 
 // The disk: HDDBENCH.IMG after console `J`; else the image HDDSYNTH.INI
 // names (HDDSYNTH.IMG by default); else HDDSYNTH.IMG; else the generated disk.
+// Whether DMARQ is wired to a host, found once at start-up (dmarqWired()).
+static bool g_dmarq_wired = false;
+
+// DMARQ wired? The host pulls DMARQ down (ATA asks for 5.6 kΩ), so with the
+// pin undriven and the RP2350's own pull-up on (about 50 kΩ: only pull-downs
+// are forbidden, erratum E9), a wired pin reads 0 and a bare one 1. Before
+// ide_dma takes the pin, and before the disk and modes are chosen. An
+// unpowered host's pull-down still holds it low. On the PCB the bus switches
+// must be on (BUS_EN#), or the pin looks bare and DMA isn't offered.
+static bool dmarqWired() {
+    gpio_init(cfg::PIN_DMARQ);  // an input
+    gpio_pull_up(cfg::PIN_DMARQ);
+    busy_wait_us(1000);  // the pull-up charges the wire, if there's no pull-down
+    bool wired = !gpio_get(cfg::PIN_DMARQ);
+    gpio_disable_pulls(cfg::PIN_DMARQ);
+    return wired;
+}
+
 static void chooseDisk() {
     uint32_t start = millis();
     drive_config::defaults(g_config);
@@ -451,7 +469,9 @@ static void chooseDisk() {
     }
     g_disk_ms = millis() - start;
     g_pio_mode.store(drive_config::pioModeOffered(g_config.mode), std::memory_order_relaxed);
-    g_mdma_mode.store(drive_config::mdmaModeOffered(g_config.mode), std::memory_order_relaxed);
+    g_dmarq_wired = dmarqWired();
+    g_mdma_mode.store(drive_config::mdmaModeOffered(g_config.mode, g_dmarq_wired, cfg::AUTO_DMA),
+                      std::memory_order_relaxed);
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
@@ -506,6 +526,10 @@ static void printConfig() {
                   g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name);
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
+    Serial.printf("CONFIG dmarq=%s auto_dma=%d\n", g_dmarq_wired ? "wired" : "absent", (int)cfg::AUTO_DMA);
+    if (drive_config::dmaRefusedForWiring(g_config.mode, g_dmarq_wired))
+        Serial.printf("CONFIG warning: mode = %s needs DMARQ wired (IDE pin 21 to GPIO 31); offering PIO only\n",
+                      drive_config::modeName(g_config.mode));
     size_t shown = g_config.warning_count < drive_config::MAX_WARNINGS ? g_config.warning_count : drive_config::MAX_WARNINGS;
     for (size_t i = 0; i < shown; ++i) Serial.printf("CONFIG warning: %s\n", g_config.warnings[i]);
     if (g_config.warning_count > shown)

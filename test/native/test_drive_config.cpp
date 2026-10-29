@@ -91,11 +91,21 @@ TEST(test_config_modes) {
     CHECK(drive_config::modeSupported(Mode::Pio3) && !drive_config::modeSupported(Mode::Pio4));
     CHECK(drive_config::modeSupported(Mode::Mdma0) && drive_config::modeSupported(Mode::Mdma2));
     CHECK(!drive_config::modeSupported(Mode::Udma0));
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma2), 2);
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma0), 0);
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto), NO_DMA);  // only on request
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Pio3), NO_DMA);
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Udma2), NO_DMA);
+    // DMARQ wired, auto not yet allowed DMA: only on request.
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma2, true, false), 2);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma0, true, false), 0);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto, true, false), NO_DMA);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Pio3, true, true), NO_DMA);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Udma2, true, true), NO_DMA);
+    // Auto allowed DMA: the fastest, when DMARQ is wired.
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto, true, true), MAX_MDMA_MODE);
+    // No DMARQ: never, even on request; and that request is worth a warning.
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma2, false, true), NO_DMA);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto, false, true), NO_DMA);
+    CHECK(drive_config::dmaRefusedForWiring(Mode::Mdma2, false));
+    CHECK(!drive_config::dmaRefusedForWiring(Mode::Mdma2, true));
+    CHECK(!drive_config::dmaRefusedForWiring(Mode::Auto, false));  // auto just uses PIO
+    CHECK(!drive_config::dmaRefusedForWiring(Mode::Pio3, false));
     CHECK_EQ(drive_config::pioModeOffered(Mode::Mdma2), drive_config::AUTO_PIO_MODE);
     CHECK_EQ(parsed("mode = pio2").warning_count, size_t(0));
     CHECK_EQ(parsed("mode = pio3").warning_count, size_t(0));

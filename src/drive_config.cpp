@@ -147,9 +147,15 @@ uint8_t pioModeOffered(Mode m) {
     return uint8_t(uint8_t(m) - uint8_t(Mode::Pio0));
 }
 
-uint8_t mdmaModeOffered(Mode m) {
+uint8_t mdmaModeOffered(Mode m, bool dmarq_wired, bool auto_dma) {
+    if (!dmarq_wired) return NO_DMA;
+    if (m == Mode::Auto) return auto_dma ? MAX_MDMA_MODE : NO_DMA;
     if (!isMdma(m) || !modeSupported(m)) return NO_DMA;
     return uint8_t(uint8_t(m) - uint8_t(Mode::Mdma0));
+}
+
+bool dmaRefusedForWiring(Mode m, bool dmarq_wired) {
+    return !dmarq_wired && isMdma(m) && modeSupported(m);
 }
 
 void defaults(Config& out) {

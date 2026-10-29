@@ -28,7 +28,7 @@ mode = auto
 
 An image is used as it is: its size (a multiple of 512 bytes) is the disk's size. Console `I` creates a blank 64 MB `HDDSYNTH.IMG`.
 
-**Transfer modes:** this firmware supports PIO modes 0 to 3, and `auto` offers mode 3. `mdma0` to `mdma2` offer multiword DMA up to that mode as well (and PIO mode 3), but only set them when DMARQ and DMACK# are wired: the PCB has them, the BB48 rig only if added by hand ([dma.md](dma.md)). Without DMARQ a host that chooses DMA waits forever. Any other mode (PIO 4, Ultra DMA) is accepted in the file, with a warning, and the drive uses `auto` until that mode is added, so a settings file written now keeps working later.
+**Transfer modes:** this firmware supports PIO modes 0 to 3, and `auto` offers mode 3. `mdma0` to `mdma2` offer multiword DMA up to that mode as well (and PIO mode 3). DMA needs DMARQ and DMACK# wired: the PCB has them, the BB48 rig only if added by hand ([dma.md](dma.md)). The drive checks DMARQ when it starts, and without it offers PIO only, with a warning in `S`. `auto` will offer DMA too, where DMARQ is wired, once DMA has had a long test (`cfg::AUTO_DMA`). Any other mode (PIO 4, Ultra DMA) is accepted in the file, with a warning, and the drive uses `auto` until that mode is added, so a settings file written now keeps working later.
 
 ## Pulling the card out
 

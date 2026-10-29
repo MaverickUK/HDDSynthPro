@@ -29,6 +29,11 @@ constexpr unsigned PIN_RESET_N = 30;
 constexpr unsigned PIN_DMARQ = 31;
 constexpr unsigned PIN_DMACK_N = 3;
 
+// Whether HDDSYNTH.INI's `mode = auto` offers multiword DMA when DMARQ is
+// wired (found at start-up). Off until DMA has had a soak; `mode = mdma2`
+// asks for it meanwhile. Never offered without DMARQ, whatever this says.
+constexpr bool AUTO_DMA = false;
+
 // The activity link to an HDD Synth (docs/activity-link.md): UART0 TX on
 // GPIO 0, one way. GPIO 1 (UART0 RX) is reserved for a reply and unused.
 constexpr unsigned PIN_LINK_TX = 0;

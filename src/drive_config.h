@@ -46,10 +46,15 @@ bool modeSupported(Mode m);
 // auto (and for a mode this firmware can't run, which falls back to auto).
 uint8_t pioModeOffered(Mode m);
 
-// The multiword DMA mode IDENTIFY offers for `m`: mdma0-2's, else NO_DMA
-// (identify.h). Only on request: on the BB48 rig DMARQ isn't wired, and a
-// host told the drive does DMA would wait for DMARQ forever.
-uint8_t mdmaModeOffered(Mode m);
+// The multiword DMA mode IDENTIFY offers for `m`, or NO_DMA (identify.h).
+// Never without DMARQ wired (`dmarq_wired`, tested at start-up): a host told
+// the drive does DMA would wait for DMARQ forever. mdma0-2 offer that mode;
+// auto offers the fastest only when `auto_dma` (cfg::AUTO_DMA) allows it.
+uint8_t mdmaModeOffered(Mode m, bool dmarq_wired, bool auto_dma);
+
+// True if `m` asks for DMA that mdmaModeOffered() won't give, for want of
+// DMARQ: worth a warning.
+bool dmaRefusedForWiring(Mode m, bool dmarq_wired);
 
 // What `auto` offers: the fastest mode there is. The adapter asks for mode 4,
 // then takes the fastest IDENTIFY offers from word 64 (3), never 1 or 2.

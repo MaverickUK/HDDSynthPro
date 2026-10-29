@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.16.4] - 2026-10-29
+
+The drive finds out at start-up whether DMARQ is wired.
+
+### Added
+- **DMARQ detection:** before choosing the disk and modes, core 0 turns on GPIO 31's internal pull-up (only pull-downs are forbidden) and reads it 1 ms later. The host pulls DMARQ down, so a wired pin reads 0 and a bare one 1; the pull-up goes off again. `S` shows `CONFIG dmarq=wired|absent auto_dma=0|1`. On the rig: `wired`.
+- **DMA is never offered without DMARQ**, even when `HDDSYNTH.INI` asks for it (`mode = mdma2`): `S` warns, and the drive offers PIO. A host told the drive does DMA would otherwise wait for DMARQ forever.
+- **`cfg::AUTO_DMA`**: whether `mode = auto` offers DMA when DMARQ is wired. Off until DMA has had a soak; then `auto` gives DMA on the PCB and the wired rig, and PIO mode 3 on a BB48 without the wire. On the PCB the bus switches must be on (BUS_EN#) for the test to see the host.
+- Not yet tried on the rig: a BB48 without the wire reading `absent`.
+
 ## [0.16.3] - 2026-10-29
 
 The bus observer checks DMA data on the cable.
