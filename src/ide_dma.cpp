@@ -155,10 +155,18 @@ CORE1_RAM bool active() { return s_active; }
 CORE1_RAM void endCommand() {
     if (!s_active) return;
     setOutputEnable(cfg::PIN_DMARQ, OE_OFF);
-    dma_channel_abort(s_dma);
-    dataLinesTo(s_bus_funcsel);
-    useProgram(s_writing);  // back at the start, FIFOs empty, DMARQ low
-    s_running = false;
+    if (s_running) {
+        // Cut short mid-burst (RESET#, SRST, a new command): stop everything and
+        // put the program back at its start. A command that finished needs none
+        // of it: its last burst left the program waiting at the start, FIFOs
+        // empty and DD back with ide_bus. Skipping it keeps this step short, as
+        // the host polls status straight after (the full reset here held a poll
+        // 1.54 us in 0.16.2's first DMA writes).
+        dma_channel_abort(s_dma);
+        dataLinesTo(s_bus_funcsel);
+        useProgram(s_writing);
+        s_running = false;
+    }
     s_active = false;
 }
 

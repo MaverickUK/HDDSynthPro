@@ -66,9 +66,10 @@ def test_full_disk(raw_disk, drive):
     print(f"\nRead {TOTAL * SECTOR // 2**20} MB in {seconds:.1f} s "
           f"({TOTAL * SECTOR / seconds / 1e6:.2f} MB/s)")
 
-    # The drive's view: every sector went out through READ SECTORS without an error.
+    # The drive's view: every sector went out through READ SECTORS (or READ DMA,
+    # when the drive offers DMA) without an error.
     drive.wait_quiet(1, timeout=30)
-    reads = [c for c in trace.parse(drive.lines_since(mark)).commands if c.command in (0x20, 0x21)]
+    reads = [c for c in trace.parse(drive.lines_since(mark)).commands if c.command in (0x20, 0x21, 0xC8, 0xC9)]
     assert all(c.ok for c in reads), [str(c) for c in reads if not c.ok][:5]
     assert sum(c.count for c in reads) >= TOTAL
 

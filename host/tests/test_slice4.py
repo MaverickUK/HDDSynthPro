@@ -92,11 +92,11 @@ def test_write_then_read_cycles(raw_disk_rw, drive):
     bad = first_diff(read(fd, WINDOW_START, WINDOW), bytes(shadow), WINDOW_START)
     assert bad is None, f"window doesn't match what was written: {bad}"
 
-    # The drive's view: every WRITE SECTORS completed without an error.
+    # The drive's view: every WRITE SECTORS (or WRITE DMA) completed without an error.
     drive.wait_quiet(1, timeout=30)
     t = trace.parse(drive.lines_since(mark))
-    writes = [c for c in t.commands if c.command in (0x30, 0x31)]
-    assert writes, "no WRITE SECTORS in the drive's trace"
+    writes = [c for c in t.commands if c.command in (0x30, 0x31, 0xCA, 0xCB)]
+    assert writes, "no WRITE SECTORS or WRITE DMA in the drive's trace"
     assert all(c.ok for c in writes), [str(c) for c in writes if not c.ok][:5]
 
 

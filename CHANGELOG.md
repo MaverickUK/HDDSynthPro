@@ -2,6 +2,21 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.16.2] - 2026-10-29
+
+Multiword DMA works on the rig: reads 3.8 times faster, writes 5.5 times, random reads 12 times.
+
+### Fixed
+- **The first word of every DMA read burst was lost.** `ide_dma_read` raised DMARQ on its `pull` of the first word, and side-set takes effect when an instruction issues, even one that then waits. Core 1 puts the burst's count in the FIFO and only then starts the DMA channel, so DMARQ rose while the FIFO was empty, and the host's first strobe found nothing on DD: word 0 of every sector read 0048h on the rig, the other 255 right. DMARQ now rises on the first instruction after the pull. The simulator's DMA model now brings the words a little after the count, as the hardware does (`dma_delay_ns`); with the old program 9 of its 15 DMA tests fail.
+- **A status poll after each DMA command was held 1,540 ns.** `ide_dma::endCommand()` reset the whole program even after a command that finished normally, in one bookkeeping step, just as the host polls. It now only switches DMARQ off then; the full reset is kept for a command cut short mid-burst.
+- The trace names READ DMA's no-retry form and WRITE DMA (`ca ?` before). The activity classification and the HDD Synth link already counted DMA commands as reads and writes.
+- Rig tests count DMA commands as well as PIO ones (slices 3-4, `-m speed`).
+
+### On the rig (Windows, the built-in disk, with DMARQ and DMACK# wired; `mode = mdma2`)
+- **The adapter takes multiword DMA mode 2** (SET FEATURES 03h, 22h) and reads and writes by READ DMA and WRITE DMA.
+- Against PIO mode 3 on the same disk (`-m speed`): sequential reads 5.14 against 1.36 MB/s; random 4 KB reads 969 against 78 a second; sequential writes 9.76 against 1.79 MB/s. **The adapter's 10.9 ms per read command is gone (0.11 ms)**: in DMA the drive tells the adapter it's ready, where in PIO the adapter waited about 10 ms before polling. Reads now cost 98 µs a sector on the drive's side (the bus, fetches from the built-in disk, and a burst per sector), where the bus itself would allow 31.
+- Data: slices 3 and 4 pass in DMA (the whole disk read and compared, writes read back), and 8,200 sectors read and checked by hand, 0 wrong. Six redetect cycles took DMA every time, no slow reads, no lost disk. Worst read 1,080-1,100 ns. The bus observer can't check DMA data yet.
+
 ## [0.16.1] - 2026-10-29
 
 ### Fixed

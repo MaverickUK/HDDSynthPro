@@ -23,8 +23,8 @@ constexpr unsigned PIN_IORDY = 28;   // host pulls up to 5 V via 1k: only ever d
 constexpr unsigned PIN_INTRQ = 29;
 constexpr unsigned PIN_RESET_N = 30;
 
-// Multiword DMA's handshake (docs/dma.md). Wired on the PCB; on the BB48 rig
-// only if added by hand (IDE pin 21 to GPIO 31, pin 29 to GPIO 3). DMARQ is
+// Multiword DMA's handshake (docs/dma.md). Wired on the PCB, and on the BB48
+// rig since 29 Oct 2026 (IDE pin 21 to GPIO 31, pin 29 to GPIO 3). DMARQ is
 // driven only during a DMA command; DMACK# isn't read yet (Ultra DMA will).
 constexpr unsigned PIN_DMARQ = 31;
 constexpr unsigned PIN_DMACK_N = 3;

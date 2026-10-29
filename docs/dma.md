@@ -43,15 +43,16 @@ A burst is a sector: the device has the next one fetched (read-ahead) or a buffe
 
 1. **Simulator (done):** `ide_dma.pio` against a multiword DMA host (`host/hddproto/mdma_host_model.py`, `host/tests/test_dma_sim.py`) in modes 0-2: every word right over two-sector transfers, read data within tE and held tF, DMARQ falling 10 ns after each burst's last strobe begins, short and single-word bursts, DD released between strobes.
 2. **Firmware (done, 0.16.0; not yet tried on hardware):** READ DMA and WRITE DMA in `ata_device` (unit-tested), IDENTIFY's multiword DMA words (49 bit 8, 63) and SET FEATURES 20h-22h; `ide_dma.cpp` (the DMA channel, handing DD between blocks, DMARQ only during a DMA command, tidying up when a command is cut short). Offered only when `HDDSYNTH.INI` says `mode = mdma0-2`: a host told the drive does DMA would wait for DMARQ forever where it isn't wired.
-3. **Hardware:** the PCB, or the rig with the two wires below. Then: which mode the adapter picks, its DMA speed, data checks (slices 3-4 run in DMA when the drive offers it), and a soak. The bus observer can't check DMA data yet: it looks for data reads with a chip select.
+3. **Hardware (done on the rig, 0.16.2, 29 Oct):** the adapter takes multiword DMA mode 2. Against PIO mode 3 on the built-in disk: sequential reads 5.14 MB/s (1.36), random 4 KB reads 969 a second (78), writes 9.76 MB/s (1.79). The adapter's 10 ms poll after each READ, a PIO behaviour, is gone. Slices 3-4 pass in DMA. Found and fixed on the way: DMARQ rose before the first word was in the FIFO, so word 0 of every sector was lost, and the end of each command held a status poll 1.54 µs.
+4. **Next:** a soak in DMA; teach the bus observer DMA strobes (with the chip selects off), so the soak checks DMA data on the cable; then SDIO ([pio-allocation.md](pio-allocation.md)), since on an SD image the card (about 1.8 MB/s over SPI) is now the limit.
 
-## Adding the two wires to the BB48 rig
+## The two wires on the BB48 rig
 
-The PCB's pins, so the same firmware runs on both:
+Added on 29 Oct 2026; the PCB's pins, so the same firmware runs on both:
 
 | IDE pin | Signal | GPIO | BB48 pin | Direction |
 |---|---|---|---|---|
 | 21 | DMARQ | 31 | EXT2-11 | out, only during a DMA command |
 | 29 | DMACK# | 3 | EXT1-7 | in (not read yet) |
 
-GPIO 3 carries the BB48's 2.2 kΩ pull-up to 3.3 V (R17, for I2C). The host drives DMACK#, so that's harmless. With the wires in, set `mode = mdma2` (console `E`, then `!`), and the adapter can choose DMA.
+GPIO 3 carries the BB48's 2.2 kΩ pull-up to 3.3 V (R17, for I2C). The host drives DMACK#, so that's harmless. With the wires in, set `mode = mdma2` (console `E`, then `!`), and the adapter can choose DMA. At rest console `p` shows `DMARQ=0 DMACK#=1`; those levels don't prove the wires (a loose DMARQ also reads 0), DMA working does.
