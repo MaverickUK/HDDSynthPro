@@ -871,9 +871,10 @@ static void printStats() {
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
                   iordy_timer::earlyRegister());
-    Serial.printf(" bus_sectors=%lu bus_bad=%lu bus_skipped=%lu bus_gaps=%lu",
+    Serial.printf(" bus_sectors=%lu bus_bad=%lu bus_skipped=%lu bus_gaps=%lu bus_dma_words=%lu",
                   (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
-                  (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps());
+                  (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps(),
+                  (unsigned long)bus_observer::dmaWords());
     Serial.printf(" bus_identify=%lu bus_identify_bad=%lu", (unsigned long)bus_observer::identifyChecked(),
                   (unsigned long)bus_observer::identifyBad());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),

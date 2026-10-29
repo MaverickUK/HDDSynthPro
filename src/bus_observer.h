@@ -34,6 +34,7 @@ uint32_t sectorsSkipped();
 uint32_t identifyChecked();
 uint32_t identifyBad();
 uint32_t gaps();
+uint32_t dmaWords();  // multiword DMA read words seen (checked like PIO data)
 void resetCounts();
 
 }  // namespace bus_observer

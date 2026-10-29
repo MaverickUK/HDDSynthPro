@@ -95,6 +95,7 @@ uint32_t sectorsSkipped() { return s_checker ? s_checker->sectorsSkipped() : 0; 
 uint32_t identifyChecked() { return s_checker ? s_checker->identifyChecked() : 0; }
 uint32_t identifyBad() { return s_checker ? s_checker->identifyBad() : 0; }
 uint32_t gaps() { return s_checker ? s_checker->gaps() : 0; }
+uint32_t dmaWords() { return s_checker ? s_checker->dmaWords() : 0; }
 
 void resetCounts() {
     if (s_checker) s_checker->resetCounts();

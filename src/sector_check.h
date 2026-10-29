@@ -2,8 +2,11 @@
 // disk, from the bus observer's samples (bus_observer.pio): one per read,
 // taken just before DIOR# rose. Pure C++, host-tested.
 //
-// Reads of the data register are gathered into sectors of 256 words; any
-// other read (the host polls status between sectors) starts a new one. A
+// Reads of the data register, and multiword DMA's read strobes (DIOR# with
+// no chip select: the observer records every DIOR#), are gathered into
+// sectors of 256 words; any other read (the host polls status between
+// sectors, and after each DMA command) starts a new one. A DMA transfer is
+// whole sectors back to back, so they stay in step. A
 // sector is recognised as generated sector N from its first words, which
 // hold N and ~N (gen_disk.h), and then compared word by word.
 //
@@ -57,6 +60,7 @@ public:
     uint32_t identifyChecked() const { return identify_checked_; }
     uint32_t identifyBad() const { return identify_bad_; }
     uint32_t gaps() const { return gaps_; }  // reads missed (sequence jumps)
+    uint32_t dmaWords() const { return dma_words_; }  // DMA read words seen (data checked as any other)
 
     // After reads were discarded on purpose: start afresh, without a gap.
     void resync() {
@@ -64,7 +68,7 @@ public:
         count_ = 0;
     }
 
-    void resetCounts() { checked_ = bad_ = skipped_ = gaps_ = identify_checked_ = identify_bad_ = 0; }
+    void resetCounts() { checked_ = bad_ = skipped_ = gaps_ = identify_checked_ = identify_bad_ = dma_words_ = 0; }
 
 private:
     bool finishSector(bool data);
@@ -76,6 +80,7 @@ private:
     uint32_t identify_checked_ = 0, identify_bad_ = 0;
     uint16_t words_[256];
     unsigned count_ = 0;
+    uint32_t dma_words_ = 0;
     bool have_seq_ = false;
     uint32_t last_seq_ = 0;
     Mismatch mismatch_{};

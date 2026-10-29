@@ -68,10 +68,13 @@ bool Checker::observe(uint32_t word, bool data) {
         count_ = 0;  // part of this sector is missing
     }
     uint32_t sample = word & ((1u << SEQ_SHIFT) - 1);
-    if (bus::block(sample) != bus::Block::Command || bus::address(sample) != 0) {
+    bus::Block block = bus::block(sample);
+    bool dma = block == bus::Block::None;  // DIOR# with no chip select: a DMA word
+    if (!dma && (block != bus::Block::Command || bus::address(sample) != 0)) {
         count_ = 0;  // not the data register: the next data read starts a sector
         return false;
     }
+    if (dma) ++dma_words_;
     words_[count_++] = bus::data(sample);
     if (count_ < 256) return false;
     count_ = 0;

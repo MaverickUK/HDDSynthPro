@@ -2,6 +2,17 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.16.3] - 2026-10-29
+
+The bus observer checks DMA data on the cable.
+
+### Added
+- **The bus observer checks multiword DMA reads**, as it does PIO data reads. It already recorded every DIOR# strobe; the checker (`sector_check`) now takes a read with no chip select, which is a DMA word, as data. A DMA transfer is whole sectors back to back, and the status poll after each command starts a new sector, so they stay in step. `s` shows `bus_dma_words=`. Three new unit tests, one replaying 0.16.1's lost first word (caught).
+
+### On the rig (built-in disk, `mode = mdma2`)
+- Slices 3-4 and `-m speed` pass with the observer checking: 331,090 sectors checked on the cable, 0 bad, 0 gaps, from 89 million DMA words (the 17,188 skipped were the tests' own random writes read back). Worst read 1,030-1,100 ns.
+- **With the observer checking every DMA word, reads on the built-in disk run at 2.60 MB/s instead of 5.14**: core 0 now computes each sector twice, once to serve it and once to check it. Writes (9.77 MB/s) and images (where the observer checks only IDENTIFY) aren't affected. A soak checks everything; if full speed is wanted under test, the checker could skip sectors when it falls behind.
+
 ## [0.16.2] - 2026-10-29
 
 Multiword DMA works on the rig: reads 3.8 times faster, writes 5.5 times, random reads 12 times.
