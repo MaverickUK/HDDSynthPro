@@ -2,6 +2,18 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.16.6] - 2026-10-29
+
+Ready for the PCB: the firmware switches its IDE bus on.
+
+### Added
+- **BUS_EN# (GPIO 41)**: rev 0.3's bus switches stay off until the firmware drives it low. Core 1 does, right after `ide_bus` has set the bus pins up, so the host never sees them in another state; the listen build does too, after setting its pins up. On the BB48 GPIO 41 is unconnected. With it, JP1 (which bypasses BUS_EN#) can stay open.
+- `p` also shows `SD_CD=` (GPIO 40, the PCB's card detect; it floats on the BB48) and `BUS_EN#=`.
+- [docs/pcb-bringup.md](docs/pcb-bringup.md): the first day with the board, step by step.
+
+### Changed
+- **The DMARQ test runs on core 1, after the bus switches are on** (it ran on core 0 before the bus was set up, so on the PCB it would have found the pin bare and never offered DMA). Core 1 also decides the DMA offer there, before anything builds IDENTIFY. On the rig: still `dmarq=wired`, reads unchanged.
+
 ## [0.16.5] - 2026-10-29
 
 Catches a host that doesn't wait for IORDY, before trying a retro machine.

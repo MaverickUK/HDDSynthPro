@@ -46,6 +46,6 @@ A 2.54 mm header with a few spare GPIOs (44-46, and 32/33 if they aren't used ab
 - **SD card detect on GPIO 40**: the re-mount code (0.13.0) can use it instead of probing.
 - **DAT0-3 on consecutive GPIOs (36-39)**, as PIO SDIO needs, and CLK/CMD on 34/35.
 
-## Firmware needed for rev 0.3 itself (not hardware)
+## Firmware for rev 0.3 itself
 
-For bring-up, not rev 0.4, but listed so it isn't missed: the firmware must drive **BUS_EN# (GPIO 41) low** to connect the bus (JP1 closed bypasses it for today's firmware), and can use **SD_CD (GPIO 40)**. Neither is in `src/config.h` yet.
+Done in 0.16.6: the firmware drives **BUS_EN# (GPIO 41) low** once the bus pins are set up, so JP1 can stay open, and `p` reads **SD_CD (GPIO 40)**. The first day with the board: [pcb-bringup.md](pcb-bringup.md).

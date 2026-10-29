@@ -64,6 +64,18 @@ CORE1_RAM static void record(TraceKind kind, uint32_t pins) { record(TraceEvent{
 // to; each one delays the bus loop by about 1 us. Core 1 needs no ticks.
 bool core1_disable_systick = true;
 
+// On the PCB, connects the IDE bus: its bus switches stay off until BUS_EN#
+// goes low. Called once the bus pins are set up (inputs, no pulls; on the
+// drive build DD and IORDY released), so the host never sees them in another
+// state. BUS_EN# isn't a bus line, so the listen build may drive it too. On
+// the BB48 GPIO 41 is unconnected.
+static void busSwitchesOn() {
+    gpio_init(cfg::PIN_BUS_EN_N);
+    gpio_put(cfg::PIN_BUS_EN_N, false);
+    gpio_set_dir(cfg::PIN_BUS_EN_N, true);
+    busy_wait_us(10);  // the switches close within nanoseconds; margin for the wiring
+}
+
 // ---- Core 1: slice 0, listen only ---------------------------------------------
 #if FIRMWARE_SLICE == 0
 
@@ -72,7 +84,10 @@ bool core1_disable_systick = true;
 static std::atomic<uint32_t> g_window{0};
 static std::atomic<uint32_t> g_skipped{0};  // accesses outside the window
 
-void setup1() { listen::begin(); }
+void setup1() {
+    listen::begin();
+    busSwitchesOn();
+}
 
 CORE1_RAM void loop1() {
     // Never returns: one tight loop, so nothing slow ever sits between a
@@ -135,7 +150,9 @@ static SharedFlag g_command_active{false};
 // The PIO mode to offer (HDDSYNTH.INI's `mode`) is set before it.
 static std::atomic<uint32_t> g_disk_sectors{0};
 static std::atomic<uint8_t> g_pio_mode{0};
-static std::atomic<uint8_t> g_mdma_mode{NO_DMA};
+static std::atomic<uint8_t> g_mdma_mode{NO_DMA};       // set by core 1 at start-up (setup1)
+static std::atomic<uint8_t> g_mode_asked{0};            // HDDSYNTH.INI's mode, for core 1
+static SharedFlag g_dmarq_wired{false};                 // found by core 1 at start-up
 
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
 static IdentifyInfo driveIdentity() {
@@ -145,11 +162,31 @@ static IdentifyInfo driveIdentity() {
                         g_mdma_mode.load(std::memory_order_relaxed)};
 }
 
+// DMARQ wired? The host pulls DMARQ down (ATA asks for 5.6 kΩ), so with the
+// pin undriven and the RP2350's own pull-up on (about 50 kΩ: only pull-downs
+// are forbidden, erratum E9), a wired pin reads 0 and a bare one 1. After the
+// bus switches are on (on the PCB the pin would look bare otherwise), before
+// ide_dma takes the pin. An unpowered host's pull-down still holds it low.
+static bool dmarqWired() {
+    gpio_init(cfg::PIN_DMARQ);  // an input
+    gpio_pull_up(cfg::PIN_DMARQ);
+    busy_wait_us(1000);  // the pull-up charges the wire, if there's no pull-down
+    bool wired = !gpio_get(cfg::PIN_DMARQ);
+    gpio_disable_pulls(cfg::PIN_DMARQ);
+    return wired;
+}
+
 void setup1() {
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
     ide_bus::begin();
+    busSwitchesOn();
+    // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
+    g_dmarq_wired.store(dmarqWired());
+    g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
+                                                    g_dmarq_wired.load(), cfg::AUTO_DMA),
+                      std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
     bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity());
     ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
@@ -424,24 +461,6 @@ static bool useImage(const char* name, const char*& why) {
 
 // The disk: HDDBENCH.IMG after console `J`; else the image HDDSYNTH.INI
 // names (HDDSYNTH.IMG by default); else HDDSYNTH.IMG; else the generated disk.
-// Whether DMARQ is wired to a host, found once at start-up (dmarqWired()).
-static bool g_dmarq_wired = false;
-
-// DMARQ wired? The host pulls DMARQ down (ATA asks for 5.6 kΩ), so with the
-// pin undriven and the RP2350's own pull-up on (about 50 kΩ: only pull-downs
-// are forbidden, erratum E9), a wired pin reads 0 and a bare one 1. Before
-// ide_dma takes the pin, and before the disk and modes are chosen. An
-// unpowered host's pull-down still holds it low. On the PCB the bus switches
-// must be on (BUS_EN#), or the pin looks bare and DMA isn't offered.
-static bool dmarqWired() {
-    gpio_init(cfg::PIN_DMARQ);  // an input
-    gpio_pull_up(cfg::PIN_DMARQ);
-    busy_wait_us(1000);  // the pull-up charges the wire, if there's no pull-down
-    bool wired = !gpio_get(cfg::PIN_DMARQ);
-    gpio_disable_pulls(cfg::PIN_DMARQ);
-    return wired;
-}
-
 static void chooseDisk() {
     uint32_t start = millis();
     drive_config::defaults(g_config);
@@ -469,9 +488,7 @@ static void chooseDisk() {
     }
     g_disk_ms = millis() - start;
     g_pio_mode.store(drive_config::pioModeOffered(g_config.mode), std::memory_order_relaxed);
-    g_dmarq_wired = dmarqWired();
-    g_mdma_mode.store(drive_config::mdmaModeOffered(g_config.mode, g_dmarq_wired, cfg::AUTO_DMA),
-                      std::memory_order_relaxed);
+    g_mode_asked.store(uint8_t(g_config.mode), std::memory_order_relaxed);  // core 1 decides DMA from it
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
@@ -526,8 +543,8 @@ static void printConfig() {
                   g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name);
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
-    Serial.printf("CONFIG dmarq=%s auto_dma=%d\n", g_dmarq_wired ? "wired" : "absent", (int)cfg::AUTO_DMA);
-    if (drive_config::dmaRefusedForWiring(g_config.mode, g_dmarq_wired))
+    Serial.printf("CONFIG dmarq=%s auto_dma=%d\n", g_dmarq_wired.load() ? "wired" : "absent", (int)cfg::AUTO_DMA);
+    if (drive_config::dmaRefusedForWiring(g_config.mode, g_dmarq_wired.load()))
         Serial.printf("CONFIG warning: mode = %s needs DMARQ wired (IDE pin 21 to GPIO 31); offering PIO only\n",
                       drive_config::modeName(g_config.mode));
     size_t shown = g_config.warning_count < drive_config::MAX_WARNINGS ? g_config.warning_count : drive_config::MAX_WARNINGS;
@@ -893,7 +910,10 @@ static void printPins() {
                   bus::high(s, cfg::PIN_INTRQ), bus::high(s, cfg::PIN_RESET_N));
 #if FIRMWARE_SLICE != 0
     // Multiword DMA's handshake: set up by ide_dma, so only on the drive build.
-    Serial.printf("PINS DMARQ=%d DMACK#=%d\n", (int)gpio_get(cfg::PIN_DMARQ), (int)gpio_get(cfg::PIN_DMACK_N));
+    // Also the PCB's card detect and bus-switch enable: unconnected on the
+    // BB48, where SD_CD floats.
+    Serial.printf("PINS DMARQ=%d DMACK#=%d SD_CD=%d BUS_EN#=%d\n", (int)gpio_get(cfg::PIN_DMARQ),
+                  (int)gpio_get(cfg::PIN_DMACK_N), (int)gpio_get(cfg::PIN_SD_CD), (int)gpio_get(cfg::PIN_BUS_EN_N));
 #endif
 }
 
@@ -1152,6 +1172,10 @@ static void peripheralClockFromSystem() {
 void setup() {
     peripheralClockFromSystem();  // before SPI and the UART work out their dividers
     Serial.begin(115200);
+    // The PCB's card detect, readable for `p` (not used yet): an input with no
+    // internal pulls (erratum E9; the PCB pulls it up).
+    gpio_init(cfg::PIN_SD_CD);
+    gpio_disable_pulls(cfg::PIN_SD_CD);
 #if FIRMWARE_SLICE != 0
     gpio_init(cfg::PIN_BOARD_LED);
     gpio_set_dir(cfg::PIN_BOARD_LED, true);

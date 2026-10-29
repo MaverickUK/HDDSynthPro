@@ -14,6 +14,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - GPIO 25 is the LED: the drive build's activity light (core 0's `updateLed()`, `cfg::LED_MIN_MS`).
   - GPIO 0 is the activity link's UART0 TX (`cfg::PIN_LINK_TX`, docs/activity-link.md); GPIO 1 is reserved for its reply and stays untouched.
   - DD/DA/CS# must stay on consecutive pins (one PIO read).
+  - PCB only (unconnected on the BB48): GPIO 40 SD card detect, GPIO 41 BUS_EN# (the bus switches stay off until the firmware drives it low, which core 1 does once `ide_bus` has set the bus pins up, 0.16.6). First day with the board: [docs/pcb-bringup.md](docs/pcb-bringup.md).
 - **Never use internal pull-downs** (RP2350 erratum E9). The host provides the bus pulls.
 - **IORDY is open drain:** only pull it low or release it, never drive it high. The host pulls it up to 5 V.
 - **Slice 0 never drives a pin:** the bus pins stay under SIO control, so the PIO program cannot drive them even if it is wrong. Driving starts in slice 1, and only on DD (during reads), IORDY, INTRQ and, during a DMA command only, DMARQ (GPIO 31, `ide_dma`; its output is forced off otherwise).

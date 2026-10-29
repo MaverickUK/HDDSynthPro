@@ -29,6 +29,14 @@ constexpr unsigned PIN_RESET_N = 30;
 constexpr unsigned PIN_DMARQ = 31;
 constexpr unsigned PIN_DMACK_N = 3;
 
+// PCB only (rev 0.3; on the BB48 rig these GPIOs are unconnected, so driving
+// and reading them there is harmless). The IDE bus goes through bus switches
+// that start off: BUS_EN# held high by a pull-up until the firmware drives it
+// low (closing JP1 bypasses it). SD_CD is the card socket's detect switch,
+// pulled up, low with a card in (to be checked on the first board).
+constexpr unsigned PIN_SD_CD = 40;
+constexpr unsigned PIN_BUS_EN_N = 41;
+
 // Whether HDDSYNTH.INI's `mode = auto` offers multiword DMA when DMARQ is
 // wired (found at start-up). Off until DMA has had a soak; `mode = mdma2`
 // asks for it meanwhile. Never offered without DMARQ, whatever this says.
