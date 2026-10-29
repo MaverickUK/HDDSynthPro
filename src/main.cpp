@@ -851,6 +851,10 @@ static void printPins() {
                   bus::high(s, cfg::PIN_CS1_N), bus::high(s, cfg::PIN_DIOR_N),
                   bus::high(s, cfg::PIN_DIOW_N), bus::high(s, cfg::PIN_IORDY),
                   bus::high(s, cfg::PIN_INTRQ), bus::high(s, cfg::PIN_RESET_N));
+#if FIRMWARE_SLICE != 0
+    // Multiword DMA's handshake: set up by ide_dma, so only on the drive build.
+    Serial.printf("PINS DMARQ=%d DMACK#=%d\n", (int)gpio_get(cfg::PIN_DMARQ), (int)gpio_get(cfg::PIN_DMACK_N));
+#endif
 }
 
 static void printStats() {

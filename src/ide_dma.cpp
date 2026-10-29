@@ -89,7 +89,14 @@ void begin() {
     // DMARQ: this block's output, but forced off until a DMA command
     // (pio_gpio_init rewrites the whole control register, override included).
     pio_gpio_init(s_pio, cfg::PIN_DMARQ);
+    gpio_disable_pulls(cfg::PIN_DMARQ);  // no internal pull-down (erratum E9): the host pulls DMARQ low
     setOutputEnable(cfg::PIN_DMARQ, OE_OFF);
+
+    // DMACK#: an input, not read yet (Ultra DMA will), but readable for console `p`.
+    // No internal pulls: the host drives it (the BB48 also pulls GPIO 3 up, R17).
+    gpio_init(cfg::PIN_DMACK_N);
+    gpio_set_dir(cfg::PIN_DMACK_N, false);
+    gpio_disable_pulls(cfg::PIN_DMACK_N);
     pio_sm_set_pins_with_mask(s_pio, s_sm, 0, 1u << cfg::PIN_DMARQ);
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 1u << cfg::PIN_DMARQ, 1u << cfg::PIN_DMARQ);
 

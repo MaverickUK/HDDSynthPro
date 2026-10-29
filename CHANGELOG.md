@@ -2,6 +2,15 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.16.1] - 2026-10-29
+
+### Fixed
+- **DMARQ (GPIO 31) was left with the RP2350's internal pull-down on**, its power-on default: `ide_dma` never turned it off. The rules forbid internal pull-downs (erratum E9), and the host pulls DMARQ low anyway. Off now.
+- DMACK# (GPIO 3) is set up as an input with no internal pulls, so it can be read.
+
+### Added
+- `p` also prints `PINS DMARQ=... DMACK#=...` (drive build). With the two DMA wires added on the rig (29 Oct): DMARQ 0, DMACK# 1 at rest, as expected; idle levels can't prove the wires, DMA working does.
+
 ## [0.16.0] - 2026-10-28
 
 Multiword DMA, built but not yet tried on hardware: it needs DMARQ wired.
