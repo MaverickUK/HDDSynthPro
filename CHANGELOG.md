@@ -11,6 +11,9 @@ The three bus observer findings from the 6-hour DMA soak, fixed.
 - **The observer's ring is 16 KB** (4,096 samples, from 1,024), and `s` shows its high-water mark, `bus_ring_max=used/size`. Sequential DMA reads on the built-in disk now peak at about 1,030 samples waiting, just over the old size: hence the soak's 94,071 missed words. 48 MB read in 64 KB requests: 0 gaps.
 - **`bus_dma_words` is 64-bit**: at DMA's rate 32 bits wrap in a few hours.
 
+### On the rig
+- **A 60-minute DMA soak** (29 Oct, `soak_dma.sh 60`, built-in disk, write-behind on): passed. 6,455 MB, no mismatches, 221,957 commands all DMA, no resets, worst read 1,150 ns. The bus observer checked 11.1 million sectors: 0 bad (the 6-hour soak's rate would have given about 22), 0 gaps, `bus_ring_max` 1,034 of 4,096, and `bus_dma_words` 3.03 billion. The soak's progress lines now show `ring max`.
+
 ## [0.17.0] - 2026-10-29
 
 Write-behind on by default, and settings for it and the other options in `HDDSYNTH.INI`.

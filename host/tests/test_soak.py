@@ -134,7 +134,7 @@ def check_drive(drive, start_mark: int) -> str:
             f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']}), "
             f"early {fields.get('iordy_early', '?')} ({fields.get('iordy_early_reg', '-')}); "
             f"bus observer: {fields.get('bus_sectors', '?')} sectors checked, {fields.get('bus_bad', '?')} bad, "
-            f"{fields.get('bus_gaps', '?')} gaps, {fields.get('bus_dma_words', '?')} DMA words")
+            f"{fields.get('bus_gaps', '?')} gaps, {fields.get('bus_dma_words', '?')} DMA words, ring max {fields.get('bus_ring_max', '?')}")
 
 
 def on_the_bus(drive, start_mark: int, lba: int) -> str:
