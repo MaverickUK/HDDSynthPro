@@ -19,6 +19,15 @@ Four users need four blocks; there are three. SDIO can't share a block with anyt
 
 Why SDIO at all: over SPI at 25 MHz the card delivers about 1.8 MB/s (about 280 µs a sector) and writes 0.94 MB/s (`speed-log.md`). Card writes are card-limited today; reads will be once DMA lifts the USB adapter's PIO pace. 4-bit SDIO at the same 25 MHz is about four times SPI's raw rate, but that speeds up only the transfer itself: a store takes about 550 µs a sector, of which moving 512 bytes over SPI at 25 MHz is about 165 µs. SDIO cuts that to about 40 µs, so expect writes of about 1.2 MB/s rather than the adapter's limit, unless the rest of the 550 µs turns out to be SPI overhead too (time it first); 50 MHz (high speed) should wait for the PCB, since 37.5 MHz over SPI failed on the rig's hand-wired leads.
 
+## Tried on the rig (29 Oct 2026): not reliable on the hand-wired leads
+
+A quick experiment (not kept): SdFat's PIO SDIO for the card, with `ide_dma` left out so SDIO had a block.
+- **The card has to be power-cycled to leave SPI mode.** After the SPI firmware it wouldn't start over SDIO until it was taken out and put back. Going the other way, back to SPI, needs no power cycle.
+- **25 MHz:** the card mounted and `HDDSYNTH.INI` was read, but 17 of 20 directory lookups failed to find `HDDSYNTH.IMG` (they always found `HDDBENCH.IMG`), so the drive fell back to the built-in disk.
+- **12.5 MHz:** 20 of 20 lookups worked and the image was served (reads through the adapter in PIO stayed at 1.38 MB/s, the adapter's pace). But writing to `HDDBENCH.IMG` failed: a card error, `card=lost`, and Windows dropped the disk.
+- At 6.25 MHz, four data lines would carry no more than SPI does at 25 MHz, so there's nothing to gain on these leads. DAT1 and DAT2 had never carried a signal before (SPI uses only DAT0); a bad joint on one of them would look like this, as would the leads' length (37.5 MHz SPI also failed on them).
+- **So SDIO waits for the PCB** (short traces, and card detect on GPIO 40), or for a check of DAT1-DAT3 on the rig. The design below stands.
+
 ## The options considered
 
 **A. One build, chosen at start-up:** serving an image means SDIO and no diagnostics; the built-in disk means diagnostics and SPI.

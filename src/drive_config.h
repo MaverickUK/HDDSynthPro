@@ -5,6 +5,10 @@
 //
 //   image = HDDSYNTH.IMG   # the disk image, in the card's root folder; none: the built-in disk
 //   mode = auto            # auto, or a transfer mode such as pio0
+//   dma = off              # whether auto may offer multiword DMA (where DMARQ is wired)
+//   write_behind = on      # acknowledge a write while it's stored (faster)
+//   read_ahead = on        # fetch the next sector while the host reads this one
+//   activity_link = on     # tell an HDD Synth what the drive is doing
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -46,18 +50,34 @@ bool modeSupported(Mode m);
 // auto (and for a mode this firmware can't run, which falls back to auto).
 uint8_t pioModeOffered(Mode m);
 
-// The multiword DMA mode IDENTIFY offers for `m`: mdma0-2's, else NO_DMA
-// (identify.h). Only on request: on the BB48 rig DMARQ isn't wired, and a
-// host told the drive does DMA would wait for DMARQ forever.
-uint8_t mdmaModeOffered(Mode m);
+// The multiword DMA mode IDENTIFY offers for `m`, or NO_DMA (identify.h).
+// Never without DMARQ wired (`dmarq_wired`, tested at start-up): a host told
+// the drive does DMA would wait for DMARQ forever. mdma0-2 offer that mode;
+// auto offers the fastest only when `auto_dma` (the `dma` setting) allows it.
+uint8_t mdmaModeOffered(Mode m, bool dmarq_wired, bool auto_dma);
+
+// True if `m` asks for DMA that mdmaModeOffered() won't give, for want of
+// DMARQ: worth a warning.
+bool dmaRefusedForWiring(Mode m, bool dmarq_wired);
 
 // What `auto` offers: the fastest mode there is. The adapter asks for mode 4,
 // then takes the fastest IDENTIFY offers from word 64 (3), never 1 or 2.
 constexpr uint8_t AUTO_PIO_MODE = 3;
 
+// The on/off settings' defaults. DMA stays off for `auto` until it has had a
+// long test (the DMA soak); `mode = mdma2` asks for it meanwhile.
+constexpr bool DEFAULT_DMA = false;
+constexpr bool DEFAULT_WRITE_BEHIND = true;
+constexpr bool DEFAULT_READ_AHEAD = true;
+constexpr bool DEFAULT_ACTIVITY_LINK = true;
+
 struct Config {
     char image[MAX_NAME + 1];
     Mode mode = Mode::Auto;
+    bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
+    bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
+    bool read_ahead = DEFAULT_READ_AHEAD;      // see Device::setReadAhead
+    bool activity_link = DEFAULT_ACTIVITY_LINK;
     char warnings[MAX_WARNINGS][MAX_WARNING];
     size_t warning_count = 0;  // may exceed MAX_WARNINGS: only the first ones are kept
 };
@@ -76,10 +96,16 @@ bool servesImage(const Config& c);
 // setting it is replaced in place, keeping its comment, or a new line is
 // added at the end. Comments, other lines and the line endings in use are
 // kept. Returns the new length, or 0 if `out` is too small or `key` is not
-// a known key.
+// a known key (isKey).
 size_t setKey(const char* text, size_t len, const char* key, const char* value, char* out, size_t size);
 
 // The file a `C` console command creates: the defaults, commented.
 const char* defaultFile();
+
+// True for a key the file can set (case doesn't matter).
+bool isKey(const char* key);
+
+// "on" or "off", for printing a setting.
+inline const char* onOff(bool on) { return on ? "on" : "off"; }
 
 }  // namespace drive_config

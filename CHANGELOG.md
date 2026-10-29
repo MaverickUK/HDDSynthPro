@@ -2,7 +2,7 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
-## [0.17.0] - 2026-10-28
+## [0.18.0] - 2026-10-29
 
 A welcome disk with a README, instead of the test disk, when there's no card or no image to serve.
 
@@ -15,13 +15,107 @@ A welcome disk with a README, instead of the test disk, when there's no card or 
 ### Changed
 - **The test disk is served only on request** (`image = none`, or `T`), no longer whenever there's no card. The bus observer checks data sectors only on it, as before. Rig tests that need it (slices 3-4, the soak, `-m timing`) now skip on the welcome disk too, and say how to get the test disk.
 - `RamOverlayDisk` takes the disk underneath at boot (`setBase()`), so the welcome disk and the test disk share its 256 KB.
-- The defaults in `HDDSYNTH.INI` (console `C`, and the welcome disk's copy): the image falls back to the welcome disk, and the modes line names what's supported (PIO 0-3, multiword DMA 0-2 where wired), not "PIO 0 only".
+- The defaults in `HDDSYNTH.INI` (console `C`, and the welcome disk's copy): the image falls back to the welcome disk.
 
 ### Fixed
 - The host tests didn't compile on macOS: `activity_link::LINE_MAX` clashed with the `LINE_MAX` macro in macOS's `<limits.h>` (not seen on Windows or Linux). Now `MAX_LINE`.
 
 ### On the rig
 - Not yet tried. To check: macOS and Windows mount the welcome disk and show the README; what they write to a fresh volume (`.fseventsd`, `.Spotlight-V100`, `System Volume Information`) fits in the 256 KB overlay; slices 1-2 pass on it (it's the test disk's size); `T` brings the test disk back for slices 3-4.
+
+## [0.17.1] - 2026-10-29
+
+The three bus observer findings from the 6-hour DMA soak, fixed.
+
+### Fixed
+- **LBA 65535's word 3 in multiword DMA** (`ide_dma.pio`). That word takes all 16 data lines from 0 to 1 at once, and the switching was enough for the DMA read program, which watches DIOR# without the input synchroniser, to see the strobe end early and release DD before it had. The host had already latched the word (it read it right all through the soak), but the bus observer, sampling as DIOR# rises, saw `0000` in about one read of that sector in four. The program now waits 4-5 cycles (20-25 ns) after driving DD before watching DIOR#, well inside mode 2's 70 ns strobe (tD). On the rig (`host/runs/tools/dma_settle.py`, 5,000 reads of LBA 65535): 24% flagged before, 0 in 3 runs (about 7,600 checked) after; the host 0 wrong throughout. Stronger drive made it worse, as more switching noise would: 8 mA with fast slew failed the read at the host every time, so DD stays on the RP2350's default 4 mA, slow slew.
+- **The observer's ring is 16 KB** (4,096 samples, from 1,024), and `s` shows its high-water mark, `bus_ring_max=used/size`. Sequential DMA reads on the built-in disk now peak at about 1,030 samples waiting, just over the old size: hence the soak's 94,071 missed words. 48 MB read in 64 KB requests: 0 gaps.
+- **`bus_dma_words` is 64-bit**: at DMA's rate 32 bits wrap in a few hours.
+
+### On the rig
+- **A 60-minute DMA soak** (29 Oct, `soak_dma.sh 60`, built-in disk, write-behind on): passed. 6,455 MB, no mismatches, 221,957 commands all DMA, no resets, worst read 1,150 ns. The bus observer checked 11.1 million sectors: 0 bad (the 6-hour soak's rate would have given about 22), 0 gaps, `bus_ring_max` 1,034 of 4,096, and `bus_dma_words` 3.03 billion. The soak's progress lines now show `ring max`.
+
+## [0.17.0] - 2026-10-29
+
+Write-behind on by default, and settings for it and the other options in `HDDSYNTH.INI`.
+
+### Added
+- **Four on/off settings in `HDDSYNTH.INI`** ([docs/settings.md](docs/settings.md)): `dma` (whether `mode = auto` may offer multiword DMA where DMARQ is wired; off), `write_behind` (on), `read_ahead` (on) and `activity_link` (on). They take on/off, yes/no, true/false or 1/0; a bad value or a repeat is a warning, as for the other settings. Console `E` sets them, and adds one the file doesn't have yet. `S` shows them all. The console's `W`, `A` and `L` still switch them until the next restart.
+- The file `C` creates has them, with comments, and no longer says the firmware supports PIO mode 0 only.
+
+### Changed
+- **Write-behind is on by default.** Re-measured on 0.16.5: card writes 1.65 MB/s against 1.05, 192 MB written and read back clean, worst read 1,040 ns (its slow reads at 150 MHz are gone). The drive acknowledges a sector while storing it, so a power cut in that millisecond loses it; this adapter never sends FLUSH CACHE. `write_behind = off` puts it back.
+- `cfg::AUTO_DMA` is now the `dma` setting (default `drive_config::DEFAULT_DMA`, off until the DMA soak).
+
+### On the rig
+- **A 20-minute DMA soak** (`host/runs/tools/soak_dma.sh 20`, the dry run for the long one): 2,242 MB, 0 mismatches, 77,415 commands all DMA, 3.84 million sectors checked on the cable, 0 bad, worst read 1,150 ns, no host resets. About 112 MB a minute, twice the PIO mode 3 soak's rate, with the observer checking every DMA word.
+- **The 6-hour DMA soak** (29 Oct, multiword DMA mode 2, built-in disk, write-behind on): passed. 32.9 GB moved in 6 hours (439,693 reads, 237,479 writes), no mismatches, 1,134,579 commands all DMA, no host resets, worst read 1,150 ns; about 92% more data than the PIO mode 3 soak in the same time. The bus observer checked 51.6 million sectors and flagged 102, every one LBA 65535 word 3 (`0000` seen where `ffff` was due, all 16 lines rising at once, which the host read correctly): the bus still settling when the observer samples, up to about 15 ns before the host does, so later than DMA mode 2's 50 ns (tE). The data lines run on the RP2350's default 4 mA, slow-slew drive, the first suspect. It also missed 94,071 words (`bus_gaps`), almost all after the first idle pause: core 0 falling behind its 1,024-word buffer at DMA's rate. And `bus_dma_words` wraps at 2^32. All three to fix before DMA becomes the default.
+- **DMA writes to the card**, with write-behind (the scratch image, `writeverify.py`): 2.23 MB/s against 1.65 in PIO mode 3, 128 MB written and read back clean, worst read 1,150 ns. The card is the limit (the built-in disk takes DMA writes at 9.8 MB/s).
+
+## [0.16.6] - 2026-10-29
+
+Ready for the PCB: the firmware switches its IDE bus on.
+
+### Added
+- **BUS_EN# (GPIO 41)**: rev 0.3's bus switches stay off until the firmware drives it low. Core 1 does, right after `ide_bus` has set the bus pins up, so the host never sees them in another state; the listen build does too, after setting its pins up. On the BB48 GPIO 41 is unconnected. With it, JP1 (which bypasses BUS_EN#) can stay open.
+- `p` also shows `SD_CD=` (GPIO 40, the PCB's card detect; it floats on the BB48) and `BUS_EN#=`.
+- [docs/pcb-bringup.md](docs/pcb-bringup.md): the first day with the board, step by step.
+
+### Changed
+- **The DMARQ test runs on core 1, after the bus switches are on** (it ran on core 0 before the bus was set up, so on the PCB it would have found the pin bare and never offered DMA). Core 1 also decides the DMA offer there, before anything builds IDENTIFY. On the rig: still `dmarq=wired`, reads unchanged.
+
+## [0.16.5] - 2026-10-29
+
+Catches a host that doesn't wait for IORDY, before trying a retro machine.
+
+### Added
+- **`iordy_check.pio`**: counts reads the host ended (DIOR# rising) while IORDY was still low, so it didn't wait for the data. ATA lets hosts ignore IORDY in PIO modes 0-2, and some older controllers do; they'd read garbage whenever core 1 is slower than their strobe. `s` shows `iordy_ignored=` and `iordy_ignored_reg=` (should be 0), and a `NOIORDY` line appears, at most once a second, if it isn't. It runs in the diagnostics' PIO block beside the IORDY timer and the bus observer (now 29 of its 32 instructions). Simulator tests: a host that waits, one that doesn't, back-to-back data reads where `ide_bus` pulls IORDY low again 20 ns after each strobe, and DMA strobes.
+- On the rig, through the USB adapter (which honours IORDY): 0 across detection, reads and `-m speed`.
+
+## [0.16.4] - 2026-10-29
+
+The drive finds out at start-up whether DMARQ is wired.
+
+### Added
+- **DMARQ detection:** before choosing the disk and modes, core 0 turns on GPIO 31's internal pull-up (only pull-downs are forbidden) and reads it 1 ms later. The host pulls DMARQ down, so a wired pin reads 0 and a bare one 1; the pull-up goes off again. `S` shows `CONFIG dmarq=wired|absent auto_dma=0|1`. On the rig: `wired`.
+- **DMA is never offered without DMARQ**, even when `HDDSYNTH.INI` asks for it (`mode = mdma2`): `S` warns, and the drive offers PIO. A host told the drive does DMA would otherwise wait for DMARQ forever.
+- **`cfg::AUTO_DMA`**: whether `mode = auto` offers DMA when DMARQ is wired. Off until DMA has had a soak; then `auto` gives DMA on the PCB and the wired rig, and PIO mode 3 on a BB48 without the wire. On the PCB the bus switches must be on (BUS_EN#) for the test to see the host.
+- Not yet tried on the rig: a BB48 without the wire reading `absent`.
+
+## [0.16.3] - 2026-10-29
+
+The bus observer checks DMA data on the cable.
+
+### Added
+- **The bus observer checks multiword DMA reads**, as it does PIO data reads. It already recorded every DIOR# strobe; the checker (`sector_check`) now takes a read with no chip select, which is a DMA word, as data. A DMA transfer is whole sectors back to back, and the status poll after each command starts a new sector, so they stay in step. `s` shows `bus_dma_words=`. Three new unit tests, one replaying 0.16.1's lost first word (caught).
+
+### On the rig (built-in disk, `mode = mdma2`)
+- Slices 3-4 and `-m speed` pass with the observer checking: 331,090 sectors checked on the cable, 0 bad, 0 gaps, from 89 million DMA words (the 17,188 skipped were the tests' own random writes read back). Worst read 1,030-1,100 ns.
+- **With the observer checking every DMA word, reads on the built-in disk run at 2.60 MB/s instead of 5.14**: core 0 now computes each sector twice, once to serve it and once to check it. Writes (9.77 MB/s) and images (where the observer checks only IDENTIFY) aren't affected. A soak checks everything; if full speed is wanted under test, the checker could skip sectors when it falls behind.
+
+## [0.16.2] - 2026-10-29
+
+Multiword DMA works on the rig: reads 3.8 times faster, writes 5.5 times, random reads 12 times.
+
+### Fixed
+- **The first word of every DMA read burst was lost.** `ide_dma_read` raised DMARQ on its `pull` of the first word, and side-set takes effect when an instruction issues, even one that then waits. Core 1 puts the burst's count in the FIFO and only then starts the DMA channel, so DMARQ rose while the FIFO was empty, and the host's first strobe found nothing on DD: word 0 of every sector read 0048h on the rig, the other 255 right. DMARQ now rises on the first instruction after the pull. The simulator's DMA model now brings the words a little after the count, as the hardware does (`dma_delay_ns`); with the old program 9 of its 15 DMA tests fail.
+- **A status poll after each DMA command was held 1,540 ns.** `ide_dma::endCommand()` reset the whole program even after a command that finished normally, in one bookkeeping step, just as the host polls. It now only switches DMARQ off then; the full reset is kept for a command cut short mid-burst.
+- The trace names READ DMA's no-retry form and WRITE DMA (`ca ?` before). The activity classification and the HDD Synth link already counted DMA commands as reads and writes.
+- Rig tests count DMA commands as well as PIO ones (slices 3-4, `-m speed`).
+
+### On the rig (Windows, the built-in disk, with DMARQ and DMACK# wired; `mode = mdma2`)
+- **The adapter takes multiword DMA mode 2** (SET FEATURES 03h, 22h) and reads and writes by READ DMA and WRITE DMA.
+- Against PIO mode 3 on the same disk (`-m speed`): sequential reads 5.14 against 1.36 MB/s; random 4 KB reads 969 against 78 a second; sequential writes 9.76 against 1.79 MB/s. **The adapter's 10.9 ms per read command is gone (0.11 ms)**: in DMA the drive tells the adapter it's ready, where in PIO the adapter waited about 10 ms before polling. Reads now cost 98 µs a sector on the drive's side (the bus, fetches from the built-in disk, and a burst per sector), where the bus itself would allow 31.
+- Data: slices 3 and 4 pass in DMA (the whole disk read and compared, writes read back), and 8,200 sectors read and checked by hand, 0 wrong. Six redetect cycles took DMA every time, no slow reads, no lost disk. Worst read 1,080-1,100 ns. The bus observer can't check DMA data yet.
+
+## [0.16.1] - 2026-10-29
+
+### Fixed
+- **DMARQ (GPIO 31) was left with the RP2350's internal pull-down on**, its power-on default: `ide_dma` never turned it off. The rules forbid internal pull-downs (erratum E9), and the host pulls DMARQ low anyway. Off now.
+- DMACK# (GPIO 3) is set up as an input with no internal pulls, so it can be read.
+
+### Added
+- `p` also prints `PINS DMARQ=... DMACK#=...` (drive build). With the two DMA wires added on the rig (29 Oct): DMARQ 0, DMACK# 1 at rest, as expected; idle levels can't prove the wires, DMA working does.
 
 ## [0.16.0] - 2026-10-28
 
@@ -35,7 +129,8 @@ Multiword DMA, built but not yet tried on hardware: it needs DMARQ wired.
 - `cfg::PIN_DMARQ` (GPIO 31) and `cfg::PIN_DMACK_N` (GPIO 3), as on the PCB. `S` shows `mdma_offered=`.
 
 ### On the rig
-- With DMA not offered (the default), nothing changes: slices 3 and 4 pass in PIO mode 3, reads 1.38 MB/s and writes 1.79, and the bus observer checked 335,019 sectors on the cable, 0 bad (1 gap: words it missed, not wrong ones). The worst read during the tests was 1,030 ns (920 on 0.15.0): the new code moved core 1's in RAM; to watch in the next soak.
+- With DMA not offered (the default), nothing changes: slices 3 and 4 pass in PIO mode 3, reads 1.38 MB/s and writes 1.79, and the bus observer checked 335,019 sectors on the cable, 0 bad (1 gap: words it missed, not wrong ones). The worst read during the tests was 1,030 ns (920 on 0.15.0): the new code moved core 1's in RAM.
+- **10-hour soak** (Windows, generated disk, PIO mode 3, 200 MHz; 28-29 Oct): clean. 28.9 GB moved (385,288 reads, 209,009 writes), 0 mismatches, 995,797 commands, 49.5 million sectors checked on the cable with 0 bad and 0 gaps, no host resets, worst read 1,060 ns (steady all night). Against the 0.12.0 soak (150 MHz, PIO mode 0) at the same point: 7.8% more data, and 180 ns more margin on the worst read.
 
 ## [0.15.0] - 2026-10-28
 

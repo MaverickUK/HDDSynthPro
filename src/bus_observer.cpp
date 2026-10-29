@@ -17,11 +17,14 @@ static PIO s_pio;
 static uint s_sm;
 static int s_dma = -1;
 
-// 1024 words. The ring wraps at its size, so it must be aligned to it.
-static constexpr unsigned RING_BITS = 12;
+// 4,096 samples (16 KB): at multiword DMA's rate 1,024 overflowed while core
+// 0 was busy (0.17.0's soak missed 94,071 words). The ring wraps at its size,
+// so it must be aligned to it.
+static constexpr unsigned RING_BITS = 14;
 static constexpr uint32_t RING_WORDS = (1u << RING_BITS) / 4;
 alignas(1u << RING_BITS) static uint32_t s_ring[RING_WORDS];
 static uint32_t s_read = 0;  // next word for core 0
+static uint32_t s_ring_max = 0;  // the most samples ever waiting (ringMax)
 
 static sector_check::Checker* s_checker = nullptr;
 static std::atomic<bool> s_started{false};
@@ -61,6 +64,8 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity) {
 void poll(Print& out, bool check, bool check_identify) {
     if (!s_started.load(std::memory_order_acquire)) return;
     uint32_t written = (dma_hw->ch[s_dma].write_addr - uint32_t(uintptr_t(s_ring))) / 4;
+    uint32_t waiting = (written - s_read) % RING_WORDS;
+    if (waiting > s_ring_max) s_ring_max = waiting;
     static bool checking = false;
     if (!check && !check_identify) {
         // Nothing to check: discard, which costs core 0 next to nothing.
@@ -95,9 +100,13 @@ uint32_t sectorsSkipped() { return s_checker ? s_checker->sectorsSkipped() : 0; 
 uint32_t identifyChecked() { return s_checker ? s_checker->identifyChecked() : 0; }
 uint32_t identifyBad() { return s_checker ? s_checker->identifyBad() : 0; }
 uint32_t gaps() { return s_checker ? s_checker->gaps() : 0; }
+uint64_t dmaWords() { return s_checker ? s_checker->dmaWords() : 0; }
+uint32_t ringMax() { return s_ring_max; }
+uint32_t ringSize() { return RING_WORDS; }
 
 void resetCounts() {
     if (s_checker) s_checker->resetCounts();
+    s_ring_max = 0;
 }
 
 }  // namespace bus_observer

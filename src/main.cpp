@@ -66,6 +66,18 @@ CORE1_RAM static void record(TraceKind kind, uint32_t pins) { record(TraceEvent{
 // to; each one delays the bus loop by about 1 us. Core 1 needs no ticks.
 bool core1_disable_systick = true;
 
+// On the PCB, connects the IDE bus: its bus switches stay off until BUS_EN#
+// goes low. Called once the bus pins are set up (inputs, no pulls; on the
+// drive build DD and IORDY released), so the host never sees them in another
+// state. BUS_EN# isn't a bus line, so the listen build may drive it too. On
+// the BB48 GPIO 41 is unconnected.
+static void busSwitchesOn() {
+    gpio_init(cfg::PIN_BUS_EN_N);
+    gpio_put(cfg::PIN_BUS_EN_N, false);
+    gpio_set_dir(cfg::PIN_BUS_EN_N, true);
+    busy_wait_us(10);  // the switches close within nanoseconds; margin for the wiring
+}
+
 // ---- Core 1: slice 0, listen only ---------------------------------------------
 #if FIRMWARE_SLICE == 0
 
@@ -74,7 +86,10 @@ bool core1_disable_systick = true;
 static std::atomic<uint32_t> g_window{0};
 static std::atomic<uint32_t> g_skipped{0};  // accesses outside the window
 
-void setup1() { listen::begin(); }
+void setup1() {
+    listen::begin();
+    busSwitchesOn();
+}
 
 CORE1_RAM void loop1() {
     // Never returns: one tight loop, so nothing slow ever sits between a
@@ -122,10 +137,11 @@ CORE1_RAM void loop1() {
 static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
-static SharedFlag g_read_ahead{true};  // console `A` (debug)
+static SharedFlag g_read_ahead{true};  // HDDSYNTH.INI read_ahead; console `A` (debug)
 // Off by default: with it on, writes hold some status reads 1.5-2 us (ATA
 // allows 1.25), not yet understood. Console `W` turns it on to work on that.
-static SharedFlag g_write_behind{false};  // console `W`
+static SharedFlag g_write_behind{true};  // HDDSYNTH.INI write_behind; console `W`
+static bool g_link_on = true;  // HDDSYNTH.INI activity_link; console `L` (core 0 only)
 
 // For the activity LED (core 0's updateLed): core 1 counts commands as they
 // start and says whether one is running.
@@ -137,7 +153,10 @@ static SharedFlag g_command_active{false};
 // The PIO mode to offer (HDDSYNTH.INI's `mode`) is set before it.
 static std::atomic<uint32_t> g_disk_sectors{0};
 static std::atomic<uint8_t> g_pio_mode{0};
-static std::atomic<uint8_t> g_mdma_mode{NO_DMA};
+static std::atomic<uint8_t> g_mdma_mode{NO_DMA};       // set by core 1 at start-up (setup1)
+static std::atomic<uint8_t> g_mode_asked{0};            // HDDSYNTH.INI's mode, for core 1
+static SharedFlag g_dmarq_wired{false};                 // found by core 1 at start-up
+static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: auto may offer DMA
 
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
 static IdentifyInfo driveIdentity() {
@@ -147,11 +166,31 @@ static IdentifyInfo driveIdentity() {
                         g_mdma_mode.load(std::memory_order_relaxed)};
 }
 
+// DMARQ wired? The host pulls DMARQ down (ATA asks for 5.6 kΩ), so with the
+// pin undriven and the RP2350's own pull-up on (about 50 kΩ: only pull-downs
+// are forbidden, erratum E9), a wired pin reads 0 and a bare one 1. After the
+// bus switches are on (on the PCB the pin would look bare otherwise), before
+// ide_dma takes the pin. An unpowered host's pull-down still holds it low.
+static bool dmarqWired() {
+    gpio_init(cfg::PIN_DMARQ);  // an input
+    gpio_pull_up(cfg::PIN_DMARQ);
+    busy_wait_us(1000);  // the pull-up charges the wire, if there's no pull-down
+    bool wired = !gpio_get(cfg::PIN_DMARQ);
+    gpio_disable_pulls(cfg::PIN_DMARQ);
+    return wired;
+}
+
 void setup1() {
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
     ide_bus::begin();
+    busSwitchesOn();
+    // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
+    g_dmarq_wired.store(dmarqWired());
+    g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
+                                                    g_dmarq_wired.load(), g_dma_auto.load()),
+                      std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
     bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity());
     ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
@@ -473,7 +512,12 @@ static void chooseDisk() {
     }
     g_disk_ms = millis() - start;
     g_pio_mode.store(drive_config::pioModeOffered(g_config.mode), std::memory_order_relaxed);
-    g_mdma_mode.store(drive_config::mdmaModeOffered(g_config.mode), std::memory_order_relaxed);
+    g_mode_asked.store(uint8_t(g_config.mode), std::memory_order_relaxed);  // core 1 decides DMA from it
+    // The on/off settings (the console's W, A and L change them until a restart).
+    g_dma_auto.store(g_config.dma);
+    g_write_behind.store(g_config.write_behind);
+    g_read_ahead.store(g_config.read_ahead);
+    g_link_on = g_config.activity_link;
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
@@ -506,7 +550,8 @@ static void editConfig(const char* line) {
     }
     size_t n = drive_config::setKey(text, len, key, value, edited, sizeof edited);
     if (n == 0) {
-        Serial.printf("# E: '%s' isn't a setting (image or mode), or the file would be too long\n", key);
+        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link), "
+                      "or the file would be too long\n", key);
         return;
     }
     if (!sd_card::writeConfig(edited, n, Serial)) return;
@@ -528,6 +573,13 @@ static void printConfig() {
                   g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name);
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
+    Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s\n",
+                  g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
+                  drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
+                  drive_config::onOff(g_config.activity_link));
+    if (drive_config::dmaRefusedForWiring(g_config.mode, g_dmarq_wired.load()))
+        Serial.printf("CONFIG warning: mode = %s needs DMARQ wired (IDE pin 21 to GPIO 31); offering PIO only\n",
+                      drive_config::modeName(g_config.mode));
     size_t shown = g_config.warning_count < drive_config::MAX_WARNINGS ? g_config.warning_count : drive_config::MAX_WARNINGS;
     for (size_t i = 0; i < shown; ++i) Serial.printf("CONFIG warning: %s\n", g_config.warnings[i]);
     if (g_config.warning_count > shown)
@@ -548,7 +600,6 @@ static bool g_activity_unprinted = false;
 // and goes a millisecond later, with whatever is current then.
 static activity_link::Sender g_link(cfg::LINK_HEARTBEAT_MS);
 static activity_link::Op g_link_op = activity_link::Op::None;  // the last media command's
-static bool g_link_on = true;  // console `L`
 
 static void beginLink() {
     uart_init(uart0, cfg::LINK_BAUD);  // 8N1
@@ -841,6 +892,22 @@ static void printCardChanges() {
     if (printLine(line, size_t(n))) shown = card.state();
 }
 
+// A NOIORDY line when the host ends reads without waiting for IORDY, at most
+// once a second: such a host reads garbage whenever core 1 is slower than its
+// strobe (iordy_check.pio).
+static void printIgnoredIordy() {
+    static uint32_t shown = 0, last_ms = 0;
+    uint32_t n = iordy_timer::ignoredReads();
+    if (n == shown || millis() - last_ms < 1000) return;
+    char line[96];
+    int len = std::snprintf(line, sizeof line, "NOIORDY %lu reads=%lu last=%s: the host didn't wait for IORDY\n",
+                            (unsigned long)time_us_32(), (unsigned long)n, iordy_timer::ignoredRegister());
+    if (printLine(line, size_t(len))) {
+        shown = n;
+        last_ms = millis();
+    }
+}
+
 // A SLOWREAD line for each read IORDY held past ATA's limit. The time is when
 // core 0 collected the report: up to a sector's store (about 0.5 ms on the
 // SD card) after the read.
@@ -873,6 +940,13 @@ static void printPins() {
                   bus::high(s, cfg::PIN_CS1_N), bus::high(s, cfg::PIN_DIOR_N),
                   bus::high(s, cfg::PIN_DIOW_N), bus::high(s, cfg::PIN_IORDY),
                   bus::high(s, cfg::PIN_INTRQ), bus::high(s, cfg::PIN_RESET_N));
+#if FIRMWARE_SLICE != 0
+    // Multiword DMA's handshake: set up by ide_dma, so only on the drive build.
+    // Also the PCB's card detect and bus-switch enable: unconnected on the
+    // BB48, where SD_CD floats.
+    Serial.printf("PINS DMARQ=%d DMACK#=%d SD_CD=%d BUS_EN#=%d\n", (int)gpio_get(cfg::PIN_DMARQ),
+                  (int)gpio_get(cfg::PIN_DMACK_N), (int)gpio_get(cfg::PIN_SD_CD), (int)gpio_get(cfg::PIN_BUS_EN_N));
+#endif
 }
 
 static void printStats() {
@@ -889,9 +963,14 @@ static void printStats() {
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
                   iordy_timer::earlyRegister());
-    Serial.printf(" bus_sectors=%lu bus_bad=%lu bus_skipped=%lu bus_gaps=%lu",
+    Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
+                  iordy_timer::ignoredRegister());
+    Serial.printf(" bus_sectors=%lu bus_bad=%lu bus_skipped=%lu bus_gaps=%lu bus_dma_words=%llu",
                   (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
-                  (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps());
+                  (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps(),
+                  (unsigned long long)bus_observer::dmaWords());
+    Serial.printf(" bus_ring_max=%lu/%lu", (unsigned long)bus_observer::ringMax(),
+                  (unsigned long)bus_observer::ringSize());
     Serial.printf(" bus_identify=%lu bus_identify_bad=%lu", (unsigned long)bus_observer::identifyChecked(),
                   (unsigned long)bus_observer::identifyBad());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
@@ -907,7 +986,7 @@ static void printStats() {
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
-    Serial.printf(" write_behind=%d", (int)g_write_behind.load());
+    Serial.printf(" write_behind=%d read_ahead=%d", (int)g_write_behind.load(), (int)g_read_ahead.load());
     char last[activity_link::SENTENCE_MAX] = "-";
     if (g_link.count()) {
         size_t n = activity_link::formatSentence(g_link.last(), last, sizeof last);
@@ -1137,6 +1216,10 @@ static void peripheralClockFromSystem() {
 void setup() {
     peripheralClockFromSystem();  // before SPI and the UART work out their dividers
     Serial.begin(115200);
+    // The PCB's card detect, readable for `p` (not used yet): an input with no
+    // internal pulls (erratum E9; the PCB pulls it up).
+    gpio_init(cfg::PIN_SD_CD);
+    gpio_disable_pulls(cfg::PIN_SD_CD);
 #if FIRMWARE_SLICE != 0
     gpio_init(cfg::PIN_BOARD_LED);
     gpio_set_dir(cfg::PIN_BOARD_LED, true);
@@ -1151,6 +1234,7 @@ void loop() {
     serveFetches();
     iordy_timer::poll();
     printSlowReads();
+    printIgnoredIordy();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.
     bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0);
     updateLed();

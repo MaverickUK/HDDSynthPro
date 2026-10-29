@@ -67,6 +67,10 @@ MAX_RESETS = 3
 DETECT_SETTLE_S = 10     # after a host reset, let the adapter detect the drive again
 DISK_BACK_S = 180        # and wait this long for the disk to reappear
 STANDBY_COMMANDS = (0xE0, 0xE2, 0x94, 0x96)  # STANDBY (IMMEDIATE), both opcodes
+DMA_COMMANDS = (0xC8, 0xC9, 0xCA, 0xCB)       # READ DMA, WRITE DMA
+# A DMA soak (the drive offering DMA, mode = mdma2): fail if the host moves
+# data any other way, so a quiet fallback to PIO can't pass as a DMA soak.
+REQUIRE_DMA = os.environ.get("HDDPRO_SOAK_REQUIRE_DMA", "") not in ("", "0")
 WAKE_COMMANDS = (0xE1, 0x95)                 # IDLE IMMEDIATE
 
 
@@ -122,11 +126,15 @@ def check_drive(drive, start_mark: int) -> str:
     assert not failed, f"failed commands: {failed[:5]}"
     standbys = sum(1 for c in t.commands if c.command in STANDBY_COMMANDS)
     wakes = sum(1 for c in t.commands if c.command in WAKE_COMMANDS)
-    return (f"commands {len(t.commands)}, standbys {standbys}, wakes {wakes}, "
+    dma = sum(1 for c in t.commands if c.command in DMA_COMMANDS)
+    if REQUIRE_DMA:
+        pio = [str(c) for c in t.commands if c.command in (0x20, 0x21, 0x30, 0x31)]
+        assert dma and not pio, f"not a DMA soak: {dma} DMA commands, PIO data commands {pio[:3]}"
+    return (f"commands {len(t.commands)} ({dma} DMA), standbys {standbys}, wakes {wakes}, "
             f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']}), "
             f"early {fields.get('iordy_early', '?')} ({fields.get('iordy_early_reg', '-')}); "
             f"bus observer: {fields.get('bus_sectors', '?')} sectors checked, {fields.get('bus_bad', '?')} bad, "
-            f"{fields.get('bus_gaps', '?')} gaps")
+            f"{fields.get('bus_gaps', '?')} gaps, {fields.get('bus_dma_words', '?')} DMA words, ring max {fields.get('bus_ring_max', '?')}")
 
 
 def on_the_bus(drive, start_mark: int, lba: int) -> str:

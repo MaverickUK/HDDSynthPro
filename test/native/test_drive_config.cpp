@@ -35,6 +35,10 @@ TEST(test_config_default_file_is_the_defaults) {
     Config c = parsed(f);
     CHECK_STR(std::string(c.image), "HDDSYNTH.IMG");
     CHECK(c.mode == Mode::Auto);
+    CHECK_EQ(c.dma, drive_config::DEFAULT_DMA);
+    CHECK_EQ(c.write_behind, drive_config::DEFAULT_WRITE_BEHIND);
+    CHECK_EQ(c.read_ahead, drive_config::DEFAULT_READ_AHEAD);
+    CHECK_EQ(c.activity_link, drive_config::DEFAULT_ACTIVITY_LINK);
     CHECK_EQ(c.warning_count, size_t(0));
     CHECK(std::strlen(f) < drive_config::MAX_FILE);
 }
@@ -91,11 +95,21 @@ TEST(test_config_modes) {
     CHECK(drive_config::modeSupported(Mode::Pio3) && !drive_config::modeSupported(Mode::Pio4));
     CHECK(drive_config::modeSupported(Mode::Mdma0) && drive_config::modeSupported(Mode::Mdma2));
     CHECK(!drive_config::modeSupported(Mode::Udma0));
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma2), 2);
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma0), 0);
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto), NO_DMA);  // only on request
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Pio3), NO_DMA);
-    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Udma2), NO_DMA);
+    // DMARQ wired, auto not yet allowed DMA: only on request.
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma2, true, false), 2);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma0, true, false), 0);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto, true, false), NO_DMA);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Pio3, true, true), NO_DMA);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Udma2, true, true), NO_DMA);
+    // Auto allowed DMA: the fastest, when DMARQ is wired.
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto, true, true), MAX_MDMA_MODE);
+    // No DMARQ: never, even on request; and that request is worth a warning.
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Mdma2, false, true), NO_DMA);
+    CHECK_EQ(drive_config::mdmaModeOffered(Mode::Auto, false, true), NO_DMA);
+    CHECK(drive_config::dmaRefusedForWiring(Mode::Mdma2, false));
+    CHECK(!drive_config::dmaRefusedForWiring(Mode::Mdma2, true));
+    CHECK(!drive_config::dmaRefusedForWiring(Mode::Auto, false));  // auto just uses PIO
+    CHECK(!drive_config::dmaRefusedForWiring(Mode::Pio3, false));
     CHECK_EQ(drive_config::pioModeOffered(Mode::Mdma2), drive_config::AUTO_PIO_MODE);
     CHECK_EQ(parsed("mode = pio2").warning_count, size_t(0));
     CHECK_EQ(parsed("mode = pio3").warning_count, size_t(0));
@@ -110,6 +124,41 @@ TEST(test_config_modes) {
     CHECK_EQ(drive_config::pioModeOffered(Mode::Pio4), drive_config::AUTO_PIO_MODE);
     CHECK_EQ(drive_config::pioModeOffered(Mode::Udma5), drive_config::AUTO_PIO_MODE);
     CHECK_STR(std::string(drive_config::modeName(Mode::Udma6)), "udma6");
+}
+
+TEST(test_config_switches) {
+    Config d = parsed("");
+    CHECK(!d.dma);
+    CHECK(d.write_behind && d.read_ahead && d.activity_link);
+    Config c = parsed("dma = on\nwrite_behind = OFF\nRead_Ahead = no\nactivity_link = 0\n");
+    CHECK(c.dma);
+    CHECK(!c.write_behind && !c.read_ahead && !c.activity_link);
+    CHECK_EQ(c.warning_count, size_t(0));
+    Config y = parsed("dma = yes\nwrite_behind = true\nread_ahead = 1\n");
+    CHECK(y.dma && y.write_behind && y.read_ahead);
+    // Not on or off: a warning, and the default stays.
+    Config w = parsed("write_behind = maybe\n");
+    CHECK(w.write_behind);
+    CHECK_EQ(w.warning_count, size_t(1));
+    // Set twice: a warning, the last counts.
+    Config t = parsed("dma = on\ndma = off\n");
+    CHECK(!t.dma);
+    CHECK_EQ(t.warning_count, size_t(1));
+}
+
+TEST(test_config_switch_keys_editable) {
+    CHECK(drive_config::isKey("write_behind") && drive_config::isKey("DMA") && drive_config::isKey("activity_link"));
+    CHECK(drive_config::isKey("image") && drive_config::isKey("mode"));
+    CHECK(!drive_config::isKey("speed"));
+    std::string e = edited(drive_config::defaultFile(), "write_behind", "off");
+    Config c = parsed(e);
+    CHECK(!c.write_behind);
+    CHECK(c.read_ahead);
+    CHECK_EQ(c.warning_count, size_t(0));
+    CHECK(e.find("faster writes") != std::string::npos);  // its comment kept
+    // A key the file doesn't have yet is added at the end.
+    std::string a = edited("image = A.IMG\n", "dma", "on");
+    CHECK(parsed(a).dma);
 }
 
 TEST(test_config_many_mistakes_keep_the_first_few) {
@@ -169,6 +218,8 @@ void runDriveConfigTests() {
     RUN(test_config_mistakes_are_reported_and_skipped);
     RUN(test_config_last_setting_counts);
     RUN(test_config_modes);
+    RUN(test_config_switches);
+    RUN(test_config_switch_keys_editable);
     RUN(test_config_many_mistakes_keep_the_first_few);
     RUN(test_config_set_key_keeps_comments);
     RUN(test_config_set_key_adds_a_missing_one);

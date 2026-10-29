@@ -23,11 +23,23 @@ constexpr unsigned PIN_IORDY = 28;   // host pulls up to 5 V via 1k: only ever d
 constexpr unsigned PIN_INTRQ = 29;
 constexpr unsigned PIN_RESET_N = 30;
 
-// Multiword DMA's handshake (docs/dma.md). Wired on the PCB; on the BB48 rig
-// only if added by hand (IDE pin 21 to GPIO 31, pin 29 to GPIO 3). DMARQ is
+// Multiword DMA's handshake (docs/dma.md). Wired on the PCB, and on the BB48
+// rig since 29 Oct 2026 (IDE pin 21 to GPIO 31, pin 29 to GPIO 3). DMARQ is
 // driven only during a DMA command; DMACK# isn't read yet (Ultra DMA will).
 constexpr unsigned PIN_DMARQ = 31;
 constexpr unsigned PIN_DMACK_N = 3;
+
+// PCB only (rev 0.3; on the BB48 rig these GPIOs are unconnected, so driving
+// and reading them there is harmless). The IDE bus goes through bus switches
+// that start off: BUS_EN# held high by a pull-up until the firmware drives it
+// low (closing JP1 bypasses it). SD_CD is the card socket's detect switch,
+// pulled up, low with a card in (to be checked on the first board).
+constexpr unsigned PIN_SD_CD = 40;
+constexpr unsigned PIN_BUS_EN_N = 41;
+
+// Whether `mode = auto` offers multiword DMA where DMARQ is wired is the
+// `dma` setting in HDDSYNTH.INI (drive_config::DEFAULT_DMA: off until DMA has
+// had a soak). Never offered without DMARQ, whatever it says.
 
 // The activity link to an HDD Synth (docs/activity-link.md): UART0 TX on
 // GPIO 0, one way. GPIO 1 (UART0 RX) is reserved for a reply and unused.

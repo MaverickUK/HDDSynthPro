@@ -31,6 +31,9 @@ MB/s here means 10^6 bytes per second. Worst read is the longest IORDY held a re
 | 2026-10-28 | 0.14.0 | 200 MHz (Windows rig, JMicron-ID adapter) | PIO 0, 200 MHz, SD at 25 MHz | SD image | 1.31 MB/s | 78 IOPS (12.9 ms) | 10.9 ms + 301 µs/sector | (bench image: 0.94 MB/s; 1.61 with write-behind) | 850 ns |
 | 2026-10-28 | 0.15.0 | (mode 0 by HDDSYNTH.INI, for comparison) | PIO 0, 200 MHz | generated | 1.33 MB/s | 78 IOPS (12.9 ms) | 11.0 ms + 297 µs/sector | 1.58 MB/s | 910 ns |
 | 2026-10-28 | 0.15.0 | PIO mode 3 (the adapter's choice) | PIO 3, 200 MHz | generated | 1.36 MB/s | 78 IOPS (12.8 ms) | 10.9 ms + 287 µs/sector | 1.79 MB/s | 920 ns |
+| 2026-10-29 | 0.16.5 | Write-behind, re-measured (writeverify, 64 KB writes) | PIO 3, 200 MHz, SD at 25 MHz | SD bench image | — | — | — | 1.05 MB/s off, 1.65 on (192 MB verified) | 1040 ns |
+| 2026-10-29 | 0.17.0 | DMA writes to the card, write-behind on (writeverify, 64 KB writes) | MDMA 2, 200 MHz, SD at 25 MHz | SD bench image | — | — | — | 2.23 MB/s (128 MB verified) | 1150 ns |
+| 2026-10-29 | 0.16.2 | Multiword DMA (`mode = mdma2`, DMARQ/DMACK# wired) | MDMA 2, 200 MHz | generated | 5.14 MB/s | 969 IOPS (1.0 ms) | 0.11 ms + 98 µs/sector | 9.76 MB/s | 1080 ns |
 
 ## Where the time goes (0.7.3 baseline)
 

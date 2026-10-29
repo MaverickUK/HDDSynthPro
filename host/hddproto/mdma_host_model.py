@@ -60,13 +60,17 @@ class DmaRun:
 
 
 def run_mdma(sim: PioSim, timing: MdmaTiming, bursts: list[list[int]], write: bool,
-             core1_gap_ns: float = 2000, timeout_ns: float = 200_000) -> DmaRun:
+             core1_gap_ns: float = 2000, timeout_ns: float = 200_000,
+             dma_delay_ns: float = 300) -> DmaRun:
     """Moves `bursts` (lists of 16-bit words) through the program: read, the
     device sends them; write, the host does. Core 1 starts a burst by putting
     its length less one in the TX FIFO (and, reading, DMA its words), and
-    starts the next `core1_gap_ns` after IRQ 0."""
+    starts the next `core1_gap_ns` after IRQ 0. DMA's first word reaches the
+    FIFO `dma_delay_ns` after the count, as on the hardware, where core 1 puts
+    the count first and then starts the DMA channel."""
     run = DmaRun()
     feed: list[int] = []  # TX FIFO entries still to come: the count (core 1), then words (DMA)
+    words_from_ns = 0.0   # DMA's words reach the FIFO from then on
     host_words = [w for b in bursts for w in b]  # write: what the host sends, in order
     host_i = 0
     next_burst = 0
@@ -107,7 +111,9 @@ def run_mdma(sim: PioSim, timing: MdmaTiming, bursts: list[list[int]], write: bo
             burst_running = True
             # A 16-bit DMA write to a FIFO puts the halfword in both halves.
             feed = [len(words) - 1] + ([] if write else [w * 0x10001 for w in words])
-        while feed and len(sim.tx_fifo) < sim.tx_depth:
+            sim.tx_fifo.append(feed.pop(0))  # the count, from core 1
+            words_from_ns = t + dma_delay_ns
+        while feed and t >= words_from_ns and len(sim.tx_fifo) < sim.tx_depth:
             sim.tx_fifo.append(feed.pop(0))
         if write:
             while sim.rx_fifo:

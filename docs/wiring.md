@@ -6,7 +6,7 @@ The pin map lives in [src/config.h](../src/config.h); this table must match it.
 
 ## Why these pins
 
-- **GPIO 0–3 are off the IDE bus.** The BB48 pulls GPIO 2 and 3 up to 3.3 V through 2.2 kΩ (R17/R18, for the UEXT and Qwiic I2C connectors). GPIO 0 (EXT1 pin 4) is UART0 TX for the activity link to an HDD Synth, and GPIO 1 (EXT1 pin 5) is reserved for its reply; wiring in [activity-link.md](activity-link.md).
+- **GPIO 0–2 are off the IDE bus, and GPIO 3 carries only DMACK#.** The BB48 pulls GPIO 2 and 3 up to 3.3 V through 2.2 kΩ (R17/R18, for the UEXT and Qwiic I2C connectors); DMACK# is driven by the host, so its pull-up is harmless. DMARQ is on GPIO 31 (multiword DMA, [dma.md](dma.md); added 29 Oct 2026, as on the PCB). GPIO 0 (EXT1 pin 4) is UART0 TX for the activity link to an HDD Synth, and GPIO 1 (EXT1 pin 5) is reserved for its reply; wiring in [activity-link.md](activity-link.md).
 - **GPIO 25 is off the bus.** It drives the board's LED, which the drive build uses as its activity light.
 - **DD0–15, DA0–2, CS0#, CS1# are on 21 consecutive pins (GPIO 4–24)**, so one PIO read captures a whole register access.
 - **Everything is within GPIO 0–31**, the range one PIO block can reach.
@@ -35,9 +35,11 @@ BB48 header pins: GPIO 0–23 are on EXT1 pins 4–27, and GPIO 24–47 are on E
 | 16 | DD14 | in/out | 18 | EXT1-22 |
 | 17 | DD0 | in/out | 4 | EXT1-8 |
 | 18 | DD15 | in/out | 19 | EXT1-23 |
+| 21 | DMARQ | out, only during a DMA command | 31 | EXT2-11 |
 | 23 | DIOW# | in | 27 | EXT2-7 |
 | 25 | DIOR# | in | 26 | EXT2-6 |
 | 27 | IORDY | out, open drain | 28 | EXT2-8 |
+| 29 | DMACK# | in | 3 | EXT1-7 |
 | 31 | INTRQ | out | 29 | EXT2-9 |
 | 33 | DA1 | in | 21 | EXT1-25 |
 | 35 | DA0 | in | 20 | EXT1-24 |
@@ -48,9 +50,7 @@ BB48 header pins: GPIO 0–23 are on EXT1 pins 4–27, and GPIO 24–47 are on E
 
 **Not connected:**
 - 20 (key)
-- 21 DMARQ (for multiword DMA: GPIO 31, as on the PCB; see [dma.md](dma.md))
 - 28 CSEL
-- 29 DMACK# (for multiword DMA: GPIO 3, as on the PCB)
 - 32 IOCS16#
 - 34 PDIAG#
 - 39 DASP#

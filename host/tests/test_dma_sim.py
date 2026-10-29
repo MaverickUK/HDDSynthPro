@@ -98,6 +98,22 @@ def test_dmarq_falls_on_each_bursts_last_strobe(read_program, write_program, mod
     assert got == [w for b in bursts for w in b]
 
 
+@pytest.mark.parametrize("delay_ns", [0, 300, 2000])
+def test_dmarq_waits_for_the_first_word(read_program, delay_ns):
+    """Core 1 puts the count in the FIFO, then starts DMA, so the first word
+    comes a little later. DMARQ must not rise before it: the host's first
+    strobe would find nothing on DD (0.16.1 on the rig: word 0 of every
+    sector read 0048h)."""
+    t = MDMA_MODES[2]
+    bursts = sectors(2)
+    run = run_mdma(make_sim(read_program, write=False), t, bursts, write=False,
+                   timeout_ns=timeout_for(t, 512), dma_delay_ns=delay_ns)
+    assert not run.errors, run.errors
+    assert [s.value for s in run.strobes] == [w for b in bursts for w in b]
+    for s in run.strobes:
+        assert s.valid_from_ns is not None and s.valid_from_ns <= s.fall_ns + t.tE
+
+
 @pytest.mark.parametrize("mode", MODES)
 def test_dd_driven_only_during_read_strobes(read_program, mode):
     """Between strobes, and once a burst is over, DD is released, so a host

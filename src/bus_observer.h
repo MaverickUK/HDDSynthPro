@@ -34,6 +34,11 @@ uint32_t sectorsSkipped();
 uint32_t identifyChecked();
 uint32_t identifyBad();
 uint32_t gaps();
+uint64_t dmaWords();  // multiword DMA read words seen (checked like PIO data)
+// The most samples ever waiting in the ring for core 0, of ringSize(): near
+// the size, samples were overwritten before they were checked (gaps).
+uint32_t ringMax();
+uint32_t ringSize();
 void resetCounts();
 
 }  // namespace bus_observer

@@ -252,9 +252,9 @@ pre {
     9: ["DD4", "data", 8], 10: ["DD11", "data", 15], 11: ["DD3", "data", 7], 12: ["DD12", "data", 16],
     13: ["DD2", "data", 6], 14: ["DD13", "data", 17], 15: ["DD1", "data", 5], 16: ["DD14", "data", 18],
     17: ["DD0", "data", 4], 18: ["DD15", "data", 19], 19: ["GND", "gnd"], 20: ["key", "nc"],
-    21: ["DMARQ", "nc"], 22: ["GND", "gnd"], 23: ["DIOW#", "strobe", 27], 24: ["GND", "gnd"],
+    21: ["DMARQ", "ctl", 31], 22: ["GND", "gnd"], 23: ["DIOW#", "strobe", 27], 24: ["GND", "gnd"],
     25: ["DIOR#", "strobe", 26], 26: ["GND", "gnd"], 27: ["IORDY", "ctl", 28], 28: ["CSEL", "nc"],
-    29: ["DMACK#", "nc"], 30: ["GND", "gnd"], 31: ["INTRQ", "ctl", 29], 32: ["IOCS16#", "nc"],
+    29: ["DMACK#", "ctl", 3], 30: ["GND", "gnd"], 31: ["INTRQ", "ctl", 29], 32: ["IOCS16#", "nc"],
     33: ["DA1", "addr", 21], 34: ["PDIAG#", "nc"], 35: ["DA0", "addr", 20], 36: ["DA2", "addr", 22],
     37: ["CS0#", "cs", 23], 38: ["CS1#", "cs", 24], 39: ["DASP#", "nc"], 40: ["GND", "gnd"],
   };
@@ -263,6 +263,7 @@ pre {
     "IORDY": "Open drain; host pulls up to 5 V", "INTRQ": "Host pulls down",
     "DD7": "Host pulls down", "RESET#": "From the host", "CS0#": "ATA “CS1FX-”, command block",
     "CS1#": "ATA “CS3FX-”, control block", "GND": "To the ground rail",
+    "DMARQ": "Multiword DMA; driven only during a DMA command", "DMACK#": "Multiword DMA; from the host",
   };
   const bbPin = g => (g <= 23 ? { ext: 1, n: g + 4 } : { ext: 2, n: g - 20 });
   const bbName = (ext, n) => `EXT${ext}-${n}`;

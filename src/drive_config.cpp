@@ -147,20 +147,67 @@ uint8_t pioModeOffered(Mode m) {
     return uint8_t(uint8_t(m) - uint8_t(Mode::Pio0));
 }
 
-uint8_t mdmaModeOffered(Mode m) {
+uint8_t mdmaModeOffered(Mode m, bool dmarq_wired, bool auto_dma) {
+    if (!dmarq_wired) return NO_DMA;
+    if (m == Mode::Auto) return auto_dma ? MAX_MDMA_MODE : NO_DMA;
     if (!isMdma(m) || !modeSupported(m)) return NO_DMA;
     return uint8_t(uint8_t(m) - uint8_t(Mode::Mdma0));
+}
+
+bool dmaRefusedForWiring(Mode m, bool dmarq_wired) {
+    return !dmarq_wired && isMdma(m) && modeSupported(m);
 }
 
 void defaults(Config& out) {
     std::snprintf(out.image, sizeof out.image, "%s", DEFAULT_IMAGE);
     out.mode = Mode::Auto;
+    out.dma = DEFAULT_DMA;
+    out.write_behind = DEFAULT_WRITE_BEHIND;
+    out.read_ahead = DEFAULT_READ_AHEAD;
+    out.activity_link = DEFAULT_ACTIVITY_LINK;
     out.warning_count = 0;
+}
+
+namespace {
+
+// The on/off settings: their keys and where each goes.
+struct Switch {
+    const char* key;
+    bool Config::*field;
+};
+const Switch SWITCHES[] = {
+    {"dma", &Config::dma},
+    {"write_behind", &Config::write_behind},
+    {"read_ahead", &Config::read_ahead},
+    {"activity_link", &Config::activity_link},
+};
+constexpr size_t SWITCH_COUNT = sizeof SWITCHES / sizeof SWITCHES[0];
+
+// on/off, yes/no, true/false, 1/0, in any case.
+bool parseOnOff(Span v, bool& on) {
+    static const char* const ON[] = {"on", "yes", "true", "1"};
+    static const char* const OFF[] = {"off", "no", "false", "0"};
+    for (const char* w : ON)
+        if (equalsNoCase(v, w)) return on = true, true;
+    for (const char* w : OFF)
+        if (equalsNoCase(v, w)) return on = false, true;
+    return false;
+}
+
+}  // namespace
+
+bool isKey(const char* key) {
+    Span k{key, key + std::strlen(key)};
+    if (equalsNoCase(k, "image") || equalsNoCase(k, "mode")) return true;
+    for (const Switch& s : SWITCHES)
+        if (equalsNoCase(k, s.key)) return true;
+    return false;
 }
 
 void parse(const char* text, size_t len, Config& out) {
     defaults(out);
     bool seen_image = false, seen_mode = false;
+    bool seen_switch[SWITCH_COUNT] = {};
     forEachLine(text, len, [&](int n, const Line& l) {
         if (l.blank) return;
         if (!l.has_equals) {
@@ -190,13 +237,25 @@ void parse(const char* text, size_t len, Config& out) {
             if (!modeSupported(m))
                 warn(out, "line %d: mode %.*s isn't supported yet%s", n, l.value, "; using auto (PIO 0)");
         } else {
+            for (size_t i = 0; i < SWITCH_COUNT; ++i) {
+                if (!equalsNoCase(l.key, SWITCHES[i].key)) continue;
+                if (seen_switch[i]) warn(out, "line %d: '%.*s' is set again; this one counts%s", n, l.key);
+                seen_switch[i] = true;
+                bool on;
+                if (!parseOnOff(l.value, on)) {
+                    warn(out, "line %d: '%.*s' isn't on or off; ignored%s", n, l.value);
+                    return;
+                }
+                out.*SWITCHES[i].field = on;
+                return;
+            }
             warn(out, "line %d: unknown key '%.*s'; ignored%s", n, l.key);
         }
     });
 }
 
 size_t setKey(const char* text, size_t len, const char* key, const char* value, char* out, size_t size) {
-    if (std::strcmp(key, "image") != 0 && std::strcmp(key, "mode") != 0) return 0;
+    if (!isKey(key)) return 0;
     // The last line setting `key` is the one that counts: that's the one to change.
     const char* target_begin = nullptr;
     const char* target_value_begin = nullptr;
@@ -250,10 +309,23 @@ const char* defaultFile() {
            "image = HDDSYNTH.IMG\r\n"
            "\r\n"
            "# The transfer mode to offer the host: auto (the fastest both sides\r\n"
-           "# support), or one of pio0-pio4, mdma0-mdma2, udma0-udma6. This\r\n"
-           "# firmware supports pio0-pio3, and mdma0-mdma2 where DMARQ and DMACK#\r\n"
-           "# are wired; others mean auto until they're added.\r\n"
-           "mode = auto\r\n";
+           "# support), or at most one of pio0-pio4, mdma0-mdma2, udma0-udma6.\r\n"
+           "# This firmware supports pio0-pio3 and mdma0-mdma2; others mean auto.\r\n"
+           "# DMA needs DMARQ wired (IDE pin 21); without it the drive offers PIO.\r\n"
+           "mode = auto\r\n"
+           "\r\n"
+           "# Whether auto may offer multiword DMA, where DMARQ is wired: on or off.\r\n"
+           "dma = off\r\n"
+           "\r\n"
+           "# Acknowledge each written sector while it's being stored: about 50%\r\n"
+           "# faster writes to the card; a power cut mid-store loses that sector.\r\n"
+           "write_behind = on\r\n"
+           "\r\n"
+           "# Fetch the next sector while the host reads this one.\r\n"
+           "read_ahead = on\r\n"
+           "\r\n"
+           "# Tell an HDD Synth what the drive is doing (GPIO 0, docs/activity-link.md).\r\n"
+           "activity_link = on\r\n";
 }
 
 }  // namespace drive_config

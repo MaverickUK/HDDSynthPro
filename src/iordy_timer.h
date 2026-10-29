@@ -29,6 +29,13 @@ uint32_t maxAtUs();
 // waited for the data, and the register the last one read. Should stay 0.
 uint32_t earlyReads();
 const char* earlyRegister();
+
+// Reads the host ended while IORDY was still low, so it didn't wait for the
+// data (iordy_check.pio): should be 0. ATA lets hosts ignore IORDY in PIO
+// modes 0-2, and some older controllers do; they'd read garbage. The last
+// such read's register.
+uint32_t ignoredReads();
+const char* ignoredRegister();
 // The reads held past ATA's limit (cfg::IORDY_LIMIT_NS), one at a time, for
 // a SLOWREAD line each: how long, which register, and when core 0 collected
 // the report. The last few are kept; older ones are dropped if nobody takes them.

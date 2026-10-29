@@ -29,6 +29,13 @@ struct Observer {
     }
     uint32_t status() { return read(true, 7, 0x58); }
     uint32_t data(uint16_t v) { return read(true, 0, v); }
+    // A multiword DMA read strobe: DIOR# with neither chip select.
+    uint32_t dma(uint16_t v) {
+        uint32_t s = v | bus::maskOf(cfg::PIN_CS0_N) | bus::maskOf(cfg::PIN_CS1_N);
+        uint32_t w = s | ((seq & SEQ_MASK) << SEQ_SHIFT);
+        seq = (seq - 1) & SEQ_MASK;
+        return w;
+    }
 };
 
 std::vector<uint16_t> sectorWords(uint32_t lba) {
@@ -105,6 +112,46 @@ TEST(test_sector_check_skips_other_data) {
     CHECK_EQ(feed(c, o, written), 0);
     CHECK_EQ(c.sectorsSkipped(), 2u);
     CHECK_EQ(c.sectorsChecked(), 0u);
+}
+
+TEST(test_sector_check_dma_sectors) {
+    // READ DMA of three sectors: 768 strobes back to back, then the status poll.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.observe(o.status());
+    int bad = 0;
+    for (uint32_t lba = 9000; lba < 9003; ++lba)
+        for (uint16_t v : sectorWords(lba)) bad += c.observe(o.dma(v));
+    c.observe(o.status());
+    CHECK_EQ(bad, 0);
+    CHECK_EQ(c.sectorsChecked(), 3u);
+    CHECK_EQ(c.dmaWords(), 768u);
+}
+
+TEST(test_sector_check_dma_lost_first_word) {
+    // 0.16.1's bug: the first word of each DMA sector read 0048h.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.observe(o.status());
+    auto w = sectorWords(777);
+    w[0] = 0x0048;
+    int bad = 0;
+    for (uint16_t v : w) bad += c.observe(o.dma(v));
+    CHECK_EQ(bad, 1);  // recognised from ~words 2-3, and caught
+    CHECK_EQ(c.sectorsBad(), 1u);
+    CHECK_EQ(c.mismatch().lba, 777u);
+    CHECK_EQ(c.mismatch().first_word, 0);
+    CHECK_EQ(c.mismatch().bad_words, 1);
+}
+
+TEST(test_sector_check_dma_then_pio) {
+    // DMA and PIO reads of data alike; a status poll between keeps them apart.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.observe(o.status());
+    for (uint16_t v : sectorWords(10)) c.observe(o.dma(v));
+    CHECK_EQ(feed(c, o, sectorWords(11)), 0);  // status, then PIO data
+    CHECK_EQ(c.sectorsChecked(), 2u);
 }
 
 TEST(test_sector_check_sectors_split_by_status_reads) {
@@ -229,6 +276,9 @@ void runSectorCheckTests() {
     RUN(test_sector_check_overnight_mismatch);
     RUN(test_sector_check_lba_from_inverted_words);
     RUN(test_sector_check_skips_other_data);
+    RUN(test_sector_check_dma_sectors);
+    RUN(test_sector_check_dma_lost_first_word);
+    RUN(test_sector_check_dma_then_pio);
     RUN(test_sector_check_sectors_split_by_status_reads);
     RUN(test_sector_check_gap_drops_the_sector);
     RUN(test_sector_check_sequence_wraps);

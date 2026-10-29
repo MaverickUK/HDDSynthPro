@@ -46,12 +46,17 @@ def stats(drive) -> dict:
     return dict(re.findall(r"(\w+)=(\S+)", drive.command("s", "STATS")))
 
 
-def commands_since(drive, mark: int, name: str) -> list[trace.Command]:
+# The host's media commands, PIO or DMA (the drive offers DMA with mode = mdma0-2).
+READS = ("READ_SECTORS", "READ_DMA")
+WRITES = ("WRITE_SECTORS", "WRITE_DMA")
+
+
+def commands_since(drive, mark: int, names: tuple[str, ...]) -> list[trace.Command]:
     time.sleep(0.3)  # let the last DONE lines arrive
     t = trace.parse(drive.lines_since(mark))
     failed = [str(c) for c in t.commands if c.status is not None and not c.ok]
     assert not failed, f"failed commands: {failed[:5]}"
-    return [c for c in t.commands if c.name == name and c.duration_us is not None]
+    return [c for c in t.commands if c.name in names and c.duration_us is not None]
 
 
 def fit(points: list[tuple[int, float]]) -> tuple[float, float]:
@@ -82,10 +87,10 @@ def test_speed(raw_disk, drive, run_dir):
         assert len(pread(fd, REQUEST, offset)) == REQUEST
         offset += REQUEST
     seconds = time.monotonic() - start
-    reads = commands_since(drive, mark, "READ_SECTORS")
+    reads = commands_since(drive, mark, READS)
     per_cmd = sum(c.duration_us for c in reads) / len(reads) / 1000
     lines.append(f"sequential read   {SEQ_READ_BYTES / MB / seconds:6.2f} MB/s   "
-                 f"({len(reads)} commands of {reads[0].count} sectors, {per_cmd:.1f} ms each in the drive)")
+                 f"({len(reads)} {reads[0].name} of {reads[0].count} sectors, {per_cmd:.1f} ms each in the drive)")
 
     # Random 4 KB reads
     start = time.monotonic()
@@ -101,7 +106,7 @@ def test_speed(raw_disk, drive, run_dir):
         for _ in range(FIT_REPEATS):
             lba = rng.randrange(0, sectors - count)
             pread(fd, count * SECTOR, lba * SECTOR)
-    points = [(c.count, c.duration_us / 1000) for c in commands_since(drive, mark, "READ_SECTORS")]
+    points = [(c.count, c.duration_us / 1000) for c in commands_since(drive, mark, READS)]
     fixed, per_sector = fit(points)
     lines.append(f"read command      {fixed:6.2f} ms fixed + {per_sector * 1000:.0f} us per sector "
                  f"(the bus and fetches: {SECTOR / per_sector / 1000:.2f} MB/s)")
@@ -121,10 +126,10 @@ def test_speed(raw_disk, drive, run_dir):
                 assert pwrite(wfd, data, base * SECTOR) == REQUEST
                 written += REQUEST
             seconds = time.monotonic() - start
-            writes = commands_since(drive, mark, "WRITE_SECTORS")
+            writes = commands_since(drive, mark, WRITES)
             per_cmd = sum(c.duration_us for c in writes) / len(writes) / 1000
             lines.append(f"sequential write  {SEQ_WRITE_BYTES / MB / seconds:6.2f} MB/s   "
-                         f"({len(writes)} commands of {writes[0].count} sectors, {per_cmd:.1f} ms each in the drive)")
+                         f"({len(writes)} {writes[0].name} of {writes[0].count} sectors, {per_cmd:.1f} ms each in the drive)")
         finally:
             pwrite(wfd, gen_disk.sectors(WINDOW_START, WINDOW), WINDOW_START * SECTOR)
             os.close(wfd)

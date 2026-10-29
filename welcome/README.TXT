@@ -41,6 +41,15 @@ Plain text, one setting per line as key = value. # starts a comment.
   mode = auto            The transfer mode to offer the computer: auto (the
                          fastest both support), or pio0-pio4, mdma0-mdma2
                          or udma0-udma6 to allow at most that mode.
+  dma = off              Whether auto may offer multiword DMA: on or off.
+  write_behind = on      Acknowledge each written sector while storing it:
+                         faster writes, but a power cut mid-store loses
+                         that sector.
+  read_ahead = on        Fetch the next sector while the computer reads
+                         this one.
+  activity_link = on     Tell an HDD Synth what the drive is doing.
+
+The on/off settings also take yes/no, true/false and 1/0.
 
 Changes take effect when the drive restarts. A mistake in the file never
 stops the drive: it's reported on the serial console and skipped.
