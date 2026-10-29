@@ -14,6 +14,10 @@ Write-behind on by default, and settings for it and the other options in `HDDSYN
 - **Write-behind is on by default.** Re-measured on 0.16.5: card writes 1.65 MB/s against 1.05, 192 MB written and read back clean, worst read 1,040 ns (its slow reads at 150 MHz are gone). The drive acknowledges a sector while storing it, so a power cut in that millisecond loses it; this adapter never sends FLUSH CACHE. `write_behind = off` puts it back.
 - `cfg::AUTO_DMA` is now the `dma` setting (default `drive_config::DEFAULT_DMA`, off until the DMA soak).
 
+### On the rig
+- **A 20-minute DMA soak** (`host/runs/tools/soak_dma.sh 20`, the dry run for the long one): 2,242 MB, 0 mismatches, 77,415 commands all DMA, 3.84 million sectors checked on the cable, 0 bad, worst read 1,150 ns, no host resets. About 112 MB a minute, twice the PIO mode 3 soak's rate, with the observer checking every DMA word.
+- **DMA writes to the card**, with write-behind (the scratch image, `writeverify.py`): 2.23 MB/s against 1.65 in PIO mode 3, 128 MB written and read back clean, worst read 1,150 ns. The card is the limit (the built-in disk takes DMA writes at 9.8 MB/s).
+
 ## [0.16.6] - 2026-10-29
 
 Ready for the PCB: the firmware switches its IDE bus on.
