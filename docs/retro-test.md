@@ -40,7 +40,7 @@ Watch the console as the PC starts. The BIOS resets the bus (a `RESET` line), th
 - [ ] The BIOS detects **`HDDSYNTH PROTO`** (auto-detect, or the IDE setup utility). Photo of the screen.
 - [ ] Its geometry: **130 cylinders, 16 heads, 63 sectors** (64 MB). A BIOS without auto-detect: user type (47) with those numbers, landing zone 130, write precompensation none (or 65535).
 - [ ] Console `s`, and note:
-  - **`iordy_ignored=0`**: the controller waits while the drive holds IORDY. **This is the result that matters most.** If it isn't 0 (with `NOIORDY` lines), the controller reads the registers without waiting, and gets values the drive hasn't put out yet. Many plain ISA IDE cards don't wire IORDY. Then detection may be flaky or garbled, and that's expected: such hosts need the register table planned for them ([pcb-bom.md](pcb-bom.md)). Note the card's make and stop pass 1 here.
+  - **`iordy_ignored=0`**: the controller waits while the drive holds IORDY. **This is the result that matters most.** If it isn't 0 (with `NOIORDY` lines), the controller reads the registers without waiting, and gets values the drive hasn't put out yet. Many plain ISA IDE cards don't wire IORDY. Then detection may be flaky or garbled, and that's expected: such hosts need the register table designed in [no-iordy.md](no-iordy.md). Note the card's make and stop pass 1 here.
   - `bus_identify` and `bus_identify_bad=0`: the IDENTIFY block was right on the cable.
   - `iordy_max_ns` (under 1,250).
 - [ ] Which commands the BIOS sent: the `CMD` lines (e.g. `ec IDENTIFY`, `91 INIT_PARAMS`, `ef SET_FEATURES`, `20 READ_SECTORS`). An unknown one shows as `?` after its code, and gets ABRT: note them all.
@@ -80,5 +80,6 @@ Write-behind is on, so a power cut in the few ms while a sector is being stored 
 | No `RESET` or `CMD` lines at all | The cable (pin 1, the right header), the channel enabled in the BIOS, `p` showing the bus lines high with the PC on |
 | `IDENTIFY` seen, but the BIOS finds nothing, or a garbled name | `s`: `iordy_ignored` above 0 (the card doesn't wait for IORDY), `bus_identify_bad`; and the `CMD` lines after IDENTIFY |
 | Detected, but DOS hangs or reports errors reading | `STUCK`, `SLOWREAD`, `BUSERR` lines; the `CMD` before the hang. Save the log |
+| The BIOS shows the name with every other character missing or garbled, yet `bus_identify_bad=0` | A 16-bit ISA card that needs the drive's IOCS16#, which the BB48 doesn't have (PCB rev 0.4 adds it); [no-iordy.md](no-iordy.md). Note the card and stop |
 | The wrong size, or the BIOS rejects the geometry | Enter 130/16/63 as a user type; a BIOS with a 504 MB limit is no problem at 64 MB |
 | Detection works once, not after a warm reboot | The `RESET` lines on the reboot: some BIOSes only do a soft reset (SRST) |
