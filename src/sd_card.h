@@ -26,6 +26,9 @@ ImageFile* openImage(const char* name, Print& log);
 // Why the last openImage() returned nullptr: "no card", "not found" or "can't open".
 const char* openError();
 
+// Whether the open image is one unbroken run of clusters (then seeks are fast).
+bool imageContiguous();
+
 // The settings file (drive_config.h). readConfig() reads up to `size` bytes
 // of it into `buf`: false if there is no card or no file; `truncated` if the
 // file was longer. writeConfig() replaces it (or creates it) with `text`.

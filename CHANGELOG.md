@@ -2,6 +2,11 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.9] - 2026-10-30
+
+### Fixed
+- **Seeks in a large image are direct again.** The image is opened with `seekSet()` reads, and SdFat seeks directly only in a file it knows is one unbroken run (`FILE_FLAG_CONTIGUOUS`). Otherwise a seek backwards walks the cluster chain from the file's start. With the Pentium's 4 GB image, FC comparing two files in safe mode took 172 ms a read, alternating between sectors 33,371 and 5,504,290. `sd_card` now calls `contiguousRange()` after opening the image (and after a card comes back), which sets the flag. `CONFIG ... contiguous=yes|no` reports it: a fragmented image still seeks slowly.
+
 ## [0.23.8] - 2026-10-30
 
 With 0.23.7 and a fresh copy of the CF card, Windows got as far as its desktop stage, then MSGSRV32 failed: corrupt data still, though only a few data reads were counted late (after Windows' own IDENTIFY). Two ways to deliver bad data without `iordy_ignored` counting it, both when core 1 is in its 660 ns main loop after a quiet spell of over 50 µs, between Windows' commands:

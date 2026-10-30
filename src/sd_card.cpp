@@ -103,6 +103,8 @@ static bool cardAnswers() {
     return r1 == 0x01;  // idle
 }
 
+static void checkContiguous();  // below, with s_contiguous
+
 // The card in, and the open image on it.
 static bool identify(media_watch::Identity& id) {
     cid_t cid;
@@ -133,6 +135,7 @@ static bool reattach(uint32_t now) {
     if (!identify(id)) {
         s_watch.cameBackWithout("can't read the card's ID", now);
     } else if (s_watch.cameBack(id, now) == media_watch::State::Present) {
+        checkContiguous();
         return true;
     }
     s_image.close();
@@ -184,6 +187,16 @@ public:
     }
 };
 static SdImageFile s_image_file;
+static bool s_contiguous = false;
+
+// Checks the image's cluster chain once, which also tells SdFat the file is one
+// unbroken run if it is (FILE_FLAG_CONTIGUOUS): then every seek is a sum.
+// Otherwise a seek backwards walks the chain from the file's start, which for a
+// 4 GB image took 172 ms a read (a Pentium's FC comparing two files, 0.23.9).
+static void checkContiguous() {
+    Sector_t first = 0, last = 0;
+    s_contiguous = s_image.contiguousRange(&first, &last);
+}
 
 ImageFile* openImage(const char* name, Print& log) {
     if (s_image.isOpen()) s_image.close();
@@ -209,6 +222,7 @@ ImageFile* openImage(const char* name, Print& log) {
         log.printf("SD error: can't read the card's ID\n");
         return nullptr;
     }
+    checkContiguous();
     s_open_name = name;
     s_served_name = name;
     s_served_size = id.size;
@@ -217,6 +231,8 @@ ImageFile* openImage(const char* name, Print& log) {
 }
 
 const char* openError() { return s_open_error; }
+
+bool imageContiguous() { return s_contiguous; }
 
 bool configExists() { return s_sd.fatType() && s_sd.exists(drive_config::FILE_NAME); }
 
