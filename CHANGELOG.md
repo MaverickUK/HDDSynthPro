@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.7] - 2026-10-30
+
+**With 0.23.6 the Pentium 200 got through its BIOS's detection** (IDENTIFY, INIT_PARAMS, SET FEATURES for PIO mode 3) **and started Windows from `P200.IMG`:** 1,047 reads and 92 writes, all completing cleanly. Then a fatal exception 0D. Seven data reads had been late, all in the second after Windows' own disk driver identified the drive again; it evidently reads in the PIIX's compatible timing for a moment (data words get t1 80 ns and strobes of 185 ns).
+
+### Changed
+- `early_answers`' data lane only polls the FIFO and RESET# while waiting. The fetch handshake (posting the read-ahead, taking results) happens straight after each data read, when the next request is a recovery time away; each item took 100-200 ns, enough to make a request miss.
+
 ## [0.23.6] - 2026-10-30
 
 With 0.23.5 eight data reads failed, all among IDENTIFY's first words, answered 1.3-3 µs late: core 1 left its tight loops for the main loop around the command (its bookkeeping, a timer read) and whenever the lane met a status poll.

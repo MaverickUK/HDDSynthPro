@@ -257,22 +257,14 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
     bool to_post = false;
     while (served < left) {
         // A request must be answered within about 200 ns of its chip select (the
-        // PIIX's data reads: t1 80 ns, strobes 175 ns), so the FIFO is checked
-        // again between each housekeeping item (rxWaiting), not once a round.
-        while (!rxWaiting(s_pio, s_sm)) {
+        // PIIX's data reads: t1 80 ns, strobes 175 ns), so while waiting only the
+        // FIFO and RESET# are watched; the fetch handshake waits until just after
+        // a data read, when the next request is a recovery time away.
+        while (rxEmpty(s_pio, s_sm)) {
             if (gpio_get(cfg::PIN_RESET_N) == reset_low) {
                 reset_changed = true;
                 break;
             }
-            if (rxWaiting(s_pio, s_sm)) break;
-            if (to_post) {  // the read-ahead, so core 0 fetches while the host reads
-                if (mailbox.post(fetch)) posted_fetch = fetch.id;
-                to_post = false;
-                continue;
-            }
-            if (rxWaiting(s_pio, s_sm)) break;
-            FetchResult result;
-            if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);  // the read-ahead is in
         }
         if (reset_changed) break;
         uint32_t sample = pio_sm_get(s_pio, s_sm);
@@ -283,6 +275,13 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
             }
             if (sample & bus::maskOf(cfg::PIN_DIOW_N)) {  // a data read happened
                 if (served++ == 0) to_post = dev.pendingFetch(fetch) && fetch.id != posted_fetch;
+                if (to_post) {  // the read-ahead, so core 0 fetches while the host reads
+                    if (mailbox.post(fetch)) posted_fetch = fetch.id;
+                    to_post = false;
+                } else {
+                    FetchResult result;
+                    if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);  // the read-ahead is in
+                }
                 continue;
             }
         }
