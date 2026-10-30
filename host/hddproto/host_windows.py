@@ -49,6 +49,12 @@ class WindowsHost(Host):
 
     def open_raw(self, disk: Disk, write: bool = False) -> int:
         mode = (os.O_RDWR if write else os.O_RDONLY) | os.O_BINARY
+        if write:
+            # After the drive switches disks (console T, J, an image change)
+            # Windows can keep the old disk's partitions mounted, and refuses
+            # writes inside them (EBADF): seen going from the welcome disk to
+            # the test disk (0.18.0). Make it read the partition table again.
+            powershell(f"Update-Disk -Number {disk.name.removeprefix('PhysicalDrive')}")
         try:
             return os.open(disk.raw, mode)
         except PermissionError as e:

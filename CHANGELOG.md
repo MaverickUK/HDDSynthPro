@@ -21,7 +21,9 @@ A welcome disk with a README, instead of the test disk, when there's no card or 
 - The host tests didn't compile on macOS: `activity_link::LINE_MAX` clashed with the `LINE_MAX` macro in macOS's `<limits.h>` (not seen on Windows or Linux). Now `MAX_LINE`.
 
 ### On the rig
-- Not yet tried. To check: macOS and Windows mount the welcome disk and show the README; what they write to a fresh volume (`.fseventsd`, `.Spotlight-V100`, `System Volume Information`) fits in the 256 KB overlay; slices 1-2 pass on it (it's the test disk's size); `T` brings the test disk back for slices 3-4.
+- **Windows** (30 Oct, no card): mounts the welcome disk as `HDDSYNTHPRO` (FAT, healthy) with `README.TXT` and `HDDSYNTH.INI`, and adds its `System Volume Information` folder, which fits in the overlay. Slices 1-2 pass on it (20 re-detections each). `-m speed` on the test disk (`T`), PIO mode 3: reads 1.41 MB/s, writes 1.87, worst read 1,030 ns (0.17.x: 1.36 and 1.79), so the core 1 changes cost nothing.
+- **Windows keeps the old disk's partitions after a switch**: after `T` from the welcome disk it still listed D: on the test disk, and refused raw writes inside it (`EBADF`), failing `-m speed`. The rig's Windows host now runs `Update-Disk` before opening the disk for writing, which makes Windows read the partition table again (`host_windows.py`; not firmware).
+- Still to check: macOS mounting it (`.fseventsd`, `.Spotlight-V100`, in the 256 KB overlay).
 
 ## [0.17.1] - 2026-10-29
 
@@ -34,6 +36,7 @@ The three bus observer findings from the 6-hour DMA soak, fixed.
 
 ### On the rig
 - **A 60-minute DMA soak** (29 Oct, `soak_dma.sh 60`, built-in disk, write-behind on): passed. 6,455 MB, no mismatches, 221,957 commands all DMA, no resets, worst read 1,150 ns. The bus observer checked 11.1 million sectors: 0 bad (the 6-hour soak's rate would have given about 22), 0 gaps, `bus_ring_max` 1,034 of 4,096, and `bus_dma_words` 3.03 billion. The soak's progress lines now show `ring max`.
+- **A 10-hour DMA soak** (29-30 Oct, `soak_dma.sh 600`, the same setup, with the soak's hourly 11-minute idle pauses): passed. 51.9 GB moved (693,681 reads, 375,843 writes), no mismatches, 1,791,444 commands all DMA, no resets, worst read 1,170 ns. The bus observer checked 89.0 million sectors: 0 bad and 0 gaps, through eight idle pauses (where 0.17.0's soak lost most of its words); `bus_ring_max` 2,570 of 4,096 (it rose in steps, to 2,322 by 4 hours and 2,570 at 8); `bus_dma_words` 24.4 billion. 5.2 GB an hour with the pauses, as 0.17.0's 6-hour soak.
 
 ## [0.17.0] - 2026-10-29
 
