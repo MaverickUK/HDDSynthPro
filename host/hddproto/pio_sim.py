@@ -91,6 +91,7 @@ class PioSim:
     tx_depth: int = 4
     bypass_mask: int = 0         # pins that skip the input synchroniser
     autopush: bool = False       # push when 32 bits have been shifted in (threshold 32 only)
+    in_shift_left: bool = False  # IN shifts left (new bits at the bottom)
     set_base: int = 0            # SET pins/pindirs mapping
     set_count: int = 1
     # STATUS (for MOV): all ones while the RX FIFO holds fewer than this many
@@ -208,7 +209,12 @@ class PioSim:
             if full and len(self.rx_fifo) >= self.fifo_depth:
                 self.rx_stall = True
                 return False  # stalls, as `push block` does, until there's room
-            self.isr = ((self.isr >> count) | (value << (32 - count))) & MASK32 if count < 32 else value
+            if count == 32:
+                self.isr = value
+            elif self.in_shift_left:
+                self.isr = ((self.isr << count) | value) & MASK32
+            else:
+                self.isr = ((self.isr >> count) | (value << (32 - count))) & MASK32
             self.isr_count = min(32, self.isr_count + count)
             if full:
                 self.rx_fifo.append(self.isr)

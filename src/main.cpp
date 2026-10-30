@@ -47,6 +47,7 @@
 #include "ide_bus.h"
 #include "ide_dma.h"
 #include "iocs16.h"
+#include "bus_timing.h"
 #include "iordy_timer.h"
 #include "sd_card.h"
 #include "welcome_disk.h"
@@ -211,6 +212,7 @@ void setup1() {
         gpio_init(cfg::PIN_DMACK_N);
         gpio_disable_pulls(cfg::PIN_DMACK_N);
     }
+    bus_timing::begin();  // the read timing probe, where there's room (not beside ide_dma)
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
     // delay its PIO accesses while the host waits on a read.
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
@@ -1195,6 +1197,10 @@ static void printStats() {
                   iordy_timer::earlyRegister());
     Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
                   iordy_timer::ignoredRegister());
+    bus_timing::poll();
+    Serial.printf(" rd_timed=%lu rd_t1_ns=%lu-%lu rd_strobe_ns=%lu-%lu", (unsigned long)bus_timing::count(),
+                  (unsigned long)bus_timing::t1MinNs(), (unsigned long)bus_timing::t1MaxNs(),
+                  (unsigned long)bus_timing::strobeMinNs(), (unsigned long)bus_timing::strobeMaxNs());
     Serial.printf(" bus_sectors=%lu bus_bad=%lu bus_skipped=%lu bus_gaps=%lu bus_dma_words=%llu",
                   (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
                   (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps(),
@@ -1365,6 +1371,7 @@ static void handleConsole() {
 #if FIRMWARE_SLICE != 0
             case 'r':
                 iordy_timer::reset();
+                bus_timing::reset();
                 bus_observer::resetCounts();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
@@ -1495,6 +1502,8 @@ void loop() {
 #if FIRMWARE_SLICE != 0
     serveFetches();
     iordy_timer::poll();
+    bus_timing::poll();
+    bus_timing::printPending(2);
     printSlowReads();
     printIgnoredIordy();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.

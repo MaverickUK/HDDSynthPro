@@ -2,6 +2,12 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.2] - 2026-10-30
+
+### Added
+- **`bus_timing.pio`, a read timing probe** (22 instructions, only reads pins, in the third PIO block when DMA isn't offered). For each read it measures t1 (chip select to DIOR# falling) and the strobe (DIOR# low), to ±20 ns. Core 0 prints the first 64 after start-up or console `r` as `RDTIME n t1_ns= strobe_ns=` lines; `s` shows `rd_timed`, `rd_t1_ns` and `rd_strobe_ns` (minimum-maximum). It sizes the no-IORDY design to a real host: on the Pentium's PIIX, IORDY was often not yet low when DIOR# fell (`iordy_early`), so t1 there is short.
+- `pio_sim`: `in` shifting left (`in_shift_left`). `test_bus_timing_sim.py` checks t1 from 0 to 200 ns and strobes from 100 to 400 ns.
+
 ## [0.23.1] - 2026-10-30
 
 On the Pentium, 0.23.0 got the BIOS as far as IDENTIFY, but data reads took 1.3-2 µs and 28 words were wrong: core 1 answered each request only after a pass of its main loop.

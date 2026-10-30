@@ -1,0 +1,46 @@
+; Drive build: measures the host's read timing, for hosts that don't wait for
+; IORDY (docs/no-iordy.md): for each read, t1 (a chip select to DIOR# falling)
+; and the strobe (DIOR# low). Only reads pins. One report per read:
+;   bits 31-16  the strobe, in passes of 2 cycles (10 ns at 200 MHz)
+;   bits 15-0   t1, in passes of 6 cycles (30 ns)
+; After each read it waits for the chip select to go, so every t1 is measured
+; from a chip select's start; reads in a run with the chip select held aren't.
+;
+; Pin mapping (bus_timing.cpp):
+;   IN_BASE  = GPIO4 (DD0): the sample, as bus_sample.h
+;   JMP_PIN  = GPIO26 (DIOR#), through the synchroniser (as are the chip
+;              selects, so the two are compared fairly)
+;   ISR shifts left, so `in x, 16` puts t1 under the strobe.
+
+.pio_version 1
+.program bus_timing
+.wrap_target
+top:
+    mov osr, ~pins
+    out null, 19
+    out x, 2                ; x = CS0#/CS1# asserted
+    jmp !x top
+    mov y, ~null
+t1:
+    jmp pin t1_cs           ; DIOR# still high
+    mov x, ~y               ; DIOR# low: t1, in passes
+    mov y, ~null
+strobe:
+    jmp pin done            ; DIOR# high again: the strobe is over
+    jmp y-- strobe
+done:
+    mov isr, ~y             ; the strobe, in passes
+    in x, 16                ; under it, t1
+    push noblock            ; a full FIFO drops the report, not the next read
+wait_cs:
+    mov osr, ~pins
+    out null, 19
+    out x, 2
+    jmp x-- wait_cs         ; until the chip select goes
+.wrap
+t1_cs:
+    mov osr, ~pins
+    out null, 19
+    out x, 2
+    jmp !x top              ; the chip select went first: a write, or nothing
+    jmp y-- t1
