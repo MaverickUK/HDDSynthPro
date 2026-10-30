@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.3] - 2026-10-30
+
+On the Pentium the timing probe measured t1 = 110 ns and strobes of 335-345 ns in the PIIX's compatible timing. That's more relaxed than PIO mode 0's minimum, yet the drive answered as late as 490 ns into the strobe. So it's core 1's response time, not the host's speed.
+
+### Added
+- **`c1_gap_ns` in `s`:** core 1's longest main-loop pass, by what the pass did (an access, the fast lane, a command, bus-only, steps 0-4), timed with core 1's own cycle counter (DWT CYCCNT, enabled in `setup1`). A long pass is a register read left waiting. Console `r` clears it.
+
 ## [0.23.2] - 2026-10-30
 
 ### Added

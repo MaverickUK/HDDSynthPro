@@ -48,6 +48,7 @@
 #include "ide_dma.h"
 #include "iocs16.h"
 #include "bus_timing.h"
+#include <hardware/structs/m33.h>
 #include "iordy_timer.h"
 #include "sd_card.h"
 #include "welcome_disk.h"
@@ -189,7 +190,18 @@ static bool dmarqWired() {
     return wired;
 }
 
+// Core 1's longest loop passes, in cycles (DWT CYCCNT), by what the pass did,
+// for console `s` (`c1_gap_ns`): a pass that takes long is a register read
+// left waiting. Racy across cores, as diagnostics may be; `r` clears it.
+enum : uint8_t { GAP_ACCESS = 1, GAP_LANE, GAP_COMMAND, GAP_BUS_ONLY, GAP_STEP0 };  // steps 0-4 follow
+constexpr unsigned GAP_KINDS = GAP_STEP0 + 5;
+static volatile uint32_t g_c1_gap[GAP_KINDS];
+static const char* const GAP_NAMES[GAP_KINDS] = {"-", "access", "lane", "command", "busonly",
+                                                  "step0", "step1", "step2", "step3", "step4"};
+
 void setup1() {
+    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 1's own cycle counter, for g_c1_gap
+    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
@@ -293,13 +305,20 @@ CORE1_RAM void loop1() {
     ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
     unsigned step = 0;
 
+    uint32_t last_pass = m33_hw->dwt_cyccnt;
+    uint8_t pass_kind = 0;
     for (;;) {
+        uint32_t now = m33_hw->dwt_cyccnt;
+        if (now - last_pass > g_c1_gap[pass_kind]) g_c1_gap[pass_kind] = now - last_pass;
+        last_pass = now;
+        pass_kind = GAP_ACCESS;
         uint32_t sample;
         if (ide_bus::serviceOnce(dev, sample)) {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
             if (early) last_access_us = time_us_32();
             continue;
         }
+        pass_kind = GAP_LANE;
         // Mid-block, the fast lane answers data reads with nothing else in
         // between. Not while the raw trace or the debug delay is on.
         const uint16_t* next;
@@ -313,6 +332,7 @@ CORE1_RAM void loop1() {
                 postFetch(dev, posted_fetch);  // the read-ahead, without the lane
             }
         }
+        pass_kind = GAP_COMMAND;
         if (dev.commandQueued()) {  // a Command write: the first job, ahead of the rest
             // The host polls status about 1 us after writing a command, so run
             // it and get back to the bus; its CMD line waits for step 0.
@@ -342,6 +362,7 @@ CORE1_RAM void loop1() {
         }
         // early_answers: for a while after any access, only the bus, so a host
         // that doesn't wait finds core 1 free to answer its next request.
+        pass_kind = GAP_BUS_ONLY;
         if (early && time_us_32() - last_access_us < cfg::EARLY_BUS_ONLY_US) continue;
         // For a moment after a command starts, only the bus: the host's first
         // status poll comes within a few microseconds and must find core 1
@@ -360,6 +381,7 @@ CORE1_RAM void loop1() {
             step = 4;
         }
 
+        pass_kind = uint8_t(GAP_STEP0 + step);
         switch (step) {
             case 0:  // the trace's CMD and DONE lines, in that order, at most one per pass
                 if (start_unrecorded) {
@@ -1197,6 +1219,11 @@ static void printStats() {
                   iordy_timer::earlyRegister());
     Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
                   iordy_timer::ignoredRegister());
+    Serial.print(" c1_gap_ns=");
+    for (unsigned k = 1; k < GAP_KINDS; ++k)
+        if (g_c1_gap[k])
+            Serial.printf("%s:%lu,", GAP_NAMES[k],
+                          (unsigned long)(uint64_t(g_c1_gap[k]) * 1000000000ull / clock_get_hz(clk_sys)));
     bus_timing::poll();
     Serial.printf(" rd_timed=%lu rd_t1_ns=%lu-%lu rd_strobe_ns=%lu-%lu", (unsigned long)bus_timing::count(),
                   (unsigned long)bus_timing::t1MinNs(), (unsigned long)bus_timing::t1MaxNs(),
@@ -1372,6 +1399,7 @@ static void handleConsole() {
             case 'r':
                 iordy_timer::reset();
                 bus_timing::reset();
+                for (auto& g : g_c1_gap) g = 0;
                 bus_observer::resetCounts();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
