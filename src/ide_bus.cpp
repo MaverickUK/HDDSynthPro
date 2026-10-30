@@ -118,6 +118,12 @@ void begin(bool isa, bool early) {
     }
 }
 
+// The RX FIFO's empty flag, always inlined: the SDK's pio_sm_is_rx_fifo_empty()
+// can end up out of line, in flash, once core 1 calls it from several places.
+__attribute__((always_inline)) static inline bool rxEmpty(PIO pio, uint sm) {
+    return (pio->fstat & (1u << (PIO_FSTAT_RXEMPTY_LSB + sm))) != 0;
+}
+
 // Console `D`'s delay, always inlined: the SDK's busy_wait_at_least_cycles()
 // can end up out of line, in flash.
 __attribute__((always_inline)) static inline void waitCycles(uint32_t cycles) {
@@ -159,7 +165,7 @@ __attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32
 }
 
 CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
-    if (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) return false;
+    if (rxEmpty(s_pio, s_sm)) return false;
     sample = pio_sm_get(s_pio, s_sm);
     serve(dev, sample);
     return true;
@@ -196,7 +202,7 @@ CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailb
     ata::Fetch fetch;
     bool to_post = false;
     while (served < left) {
-        while (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
+        while (rxEmpty(s_pio, s_sm)) {
             if (gpio_get(cfg::PIN_RESET_N) == reset_low) {  // high when it was low, or low when high
                 reset_changed = true;
                 break;
@@ -223,6 +229,16 @@ CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailb
     return !reset_changed;
 }
 
+// The early loops' FIFO check: up to SPIN_POLLS reads of the RX FIFO's level
+// in a row (a few cycles each), true as soon as a word is waiting. Called
+// between housekeeping items, so a request waits a few cycles, not an item.
+static constexpr unsigned SPIN_POLLS = 32;
+__attribute__((always_inline)) static inline bool rxWaiting(PIO pio, uint sm) {
+    for (unsigned n = 0; n < SPIN_POLLS; ++n)
+        if (!rxEmpty(pio, sm)) return true;
+    return false;
+}
+
 // ide_bus_early's fast lane for a data-in block: as serveDataIn, but the
 // program asks for each word at the chip select (a request) and reports each
 // read afterwards, so a request for the data register gets the word after the
@@ -240,18 +256,23 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
     ata::Fetch fetch;
     bool to_post = false;
     while (served < left) {
-        while (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
+        // A request must be answered within about 200 ns of its chip select (the
+        // PIIX's data reads: t1 80 ns, strobes 175 ns), so the FIFO is checked
+        // again between each housekeeping item (rxWaiting), not once a round.
+        while (!rxWaiting(s_pio, s_sm)) {
             if (gpio_get(cfg::PIN_RESET_N) == reset_low) {
                 reset_changed = true;
                 break;
             }
+            if (rxWaiting(s_pio, s_sm)) break;
             if (to_post) {  // the read-ahead, so core 0 fetches while the host reads
                 if (mailbox.post(fetch)) posted_fetch = fetch.id;
                 to_post = false;
                 continue;
             }
+            if (rxWaiting(s_pio, s_sm)) break;
             FetchResult result;
-            if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);
+            if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);  // the read-ahead is in
         }
         if (reset_changed) break;
         uint32_t sample = pio_sm_get(s_pio, s_sm);
@@ -287,7 +308,7 @@ CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mai
     uint sm = s_sm;
     uint32_t last = m33_hw->dwt_cyccnt;
     for (;;) {
-        if (!pio_sm_is_rx_fifo_empty(pio, sm)) {
+        if (rxWaiting(pio, sm)) {
             serve(dev, pio_sm_get(pio, sm));
             const uint16_t* next;
             uint16_t left;
@@ -296,12 +317,15 @@ CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mai
             continue;
         }
         if (m33_hw->dwt_cyccnt - last > quiet_cycles) return;
+        if (rxWaiting(pio, sm)) continue;
         if (gpio_get(cfg::PIN_RESET_N) == reset_low) return;  // high when it was low, or low when high
+        if (rxWaiting(pio, sm)) continue;
         uint32_t id = dev.pendingFetchId();
         if (id != 0 && id != posted_fetch) {
             ata::Fetch fetch;
             if (dev.pendingFetch(fetch) && mailbox.post(fetch)) posted_fetch = fetch.id;
         }
+        if (rxWaiting(pio, sm)) continue;
         FetchResult result;
         if (mailbox.takeResult(result)) {
             dev.fetchDone(result.id, result.ok);

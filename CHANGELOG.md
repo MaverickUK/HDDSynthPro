@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.5] - 2026-10-30
+
+With 0.23.4 only the first status read after the reset failed, but 12 of IDENTIFY's 256 data words were late. The PIIX drops the chip select between data words and gives each t1 80 ns and a strobe of 175-195 ns (`RDTIME`), so core 1 has about 200 ns.
+
+### Changed
+- The early lane and bus loop check the RX FIFO (up to 32 reads in a row, `rxWaiting`) between each housekeeping item (RESET#, fetch posts and results), not once a round, so a request waits a few cycles.
+- `ide_bus.cpp` reads the FIFO's empty flag with its own always-inlined `rxEmpty()`; the SDK's had ended up out of line in flash.
+
 ## [0.23.4] - 2026-10-30
 
 `c1_gap_ns` showed core 1's main loop taking about 660 ns a pass on average, and up to 880, even idle. That's about 150 cycles of calls and checks, not slow memory: a micro-benchmark (`c1_bench_*`, in `s`) puts PIO, RAM and SIO reads at about a cycle each from RAM code. A request could wait most of the PIIX's 400 ns before core 1 looked at it.
