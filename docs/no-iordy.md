@@ -1,6 +1,6 @@
 # Hosts that don't wait for IORDY: a design
 
-**Status: a design, not built.** Build it if a retro PC shows `iordy_ignored` above 0 ([retro-test.md](retro-test.md)). It's the firmware half of [pcb-bom.md](pcb-bom.md)'s "register reads answered from a table" (section 4, and open question 3).
+**Status: a design, not built; a first step (early answers) under way on branch `no-iordy`.** Build it if a retro PC shows `iordy_ignored` above 0 ([retro-test.md](retro-test.md)). It's the firmware half of [pcb-bom.md](pcb-bom.md)'s "register reads answered from a table" (section 4, and open question 3).
 
 ## The problem
 
@@ -15,6 +15,22 @@ Many early controllers don't wait. Plain ISA IDE cards often leave IORDY unconne
 | Data needed by, from chip select | about **215 ns** | about 400-550 ns |
 
 Core 1's 1,100 ns misses either deadline, so the host reads whatever was on DD (usually the pulls: `FF`) or a half-driven value. `iordy_check.pio` (0.16.5) already detects this: `iordy_ignored` counts the reads the host ended while IORDY was still low.
+
+## Seen on a Pentium 200 (30 Oct 2026)
+
+An Intel PIIX-era Pentium 200 (Phoenix BIOS) runs its IDE controller in "compatible" timing until the BIOS has identified the drive, and compatible timing doesn't sample IORDY. With 0.22.0 the BIOS never got that far:
+- **Drive type Auto:** a soft reset, status reads, then IDENTIFY five times, about a second apart. Each failed: `iordy_ignored` counted the status and LBA reads the host ended before the drive answered, and the bus observer found 31 of IDENTIFY's 256 words wrong on the cable (`bus_identify_bad`). Then "Insert bootable media".
+- **Drive type User (7769/16/63, LBA, PIO 3, multiple sectors off):** the BIOS selects the master (DEVICE = A0h), reads the status four times, selects it again and reads DEVICE back. The read-back ended before core 1 answered (the bus held `9004`), so the BIOS decided there was no drive, and stopped. So a manual PIO mode doesn't get round it: this BIOS checks the drive in compatible timing first.
+- Most data words were in time (225 of 256), but register reads weren't. Core 1 learns which register is read only once the strobe has started, and takes 150-250 ns, sometimes µs straight after a command or a reset.
+
+## First step: early answers (planned)
+
+Before the full table design below, a smaller change, which may be enough for hosts like the Pentium whose strobe is a little short rather than very short:
+- **The bus program asks core 1 at the chip select, not at the strobe.** On `arm` it pushes an answer request: the address bits, with bits 21-31 zero, so both strobe bits read as asserted, which no real access shows. Core 1 answers into the TX FIFO, and on DIOR# the program has the value at once: t1 (70 ns or more) earlier than now.
+- **A write discards the answer;** an address or chip select that changes while armed discards it and asks again (Y holds the address asked about).
+- **Reads still report themselves to core 1,** in a sample taken during the strobe, for their side effects (STATUS clears the interrupt; data words advance the block).
+- **Data words come ahead for free:** after each access the program re-arms and asks again, so the next data word is usually in the FIFO before the host's next strobe.
+- **IORDY works as now** for hosts that wait, which just see shorter holds. About 30 instructions, so no room for `iordy_watchdog`: a separate variant chosen by a setting, until it has been through the USB adapter's tests.
 
 ## The idea: answers ready before the host asks
 
