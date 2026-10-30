@@ -2,6 +2,8 @@
 
 HDDSynthPro knows exactly what the emulated drive is doing; the HDD Synth only sees an activity LED. This link sends the drive's activity to an HDD Synth over a one-way UART, so the synth can play a different sound for sustained sequential transfers than for random access.
 
+> **Next: protocol version 2.** Head positions (`$HDE`) for the HDD Synth's modelled drives, and authentic seek timing (`seek_timing`, with the model from the synth's `$HDM` on the reply wire): see [hddsynth-head-position-brief.md](hddsynth-head-position-brief.md). The HDD Synth side is in its firmware v0.21.0.
+
 Status: **the HDDSynthPro side is built (0.9.0)** and sends on the rig, with a loopback test (0.10.1): fit a jumper from GPIO 0 to GPIO 1 (EXT1 pins 4 and 5), then console `U`, or `pytest -m link`. Not yet run with the jumper; with the UART's internal loopback it passes. Still to do: the HDD Synth side, briefed in [hddsynth-activity-link-brief.md](hddsynth-activity-link-brief.md); its receiver can copy `activity_link::Receiver`.
 
 As built, it differs from the plan below in two places:
