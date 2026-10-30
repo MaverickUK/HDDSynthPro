@@ -36,6 +36,11 @@ constexpr unsigned PIN_DMACK_N = 3;
 // drain signal the host also pulls up. Wired on the rig since 30 Oct 2026.
 constexpr unsigned PIN_IOCS16_N = 2;
 
+// early_answers: after each access, core 1 watches only the bus this long, so
+// it answers the next request within the 160 ns a host that doesn't wait for
+// IORDY leaves (test_pio_bus_early_sim.py), not after a bookkeeping step.
+constexpr uint32_t EARLY_BUS_ONLY_US = 50;
+
 // PCB only (rev 0.3; on the BB48 rig these GPIOs are unconnected, so driving
 // and reading them there is harmless). The IDE bus goes through bus switches
 // that start off: BUS_EN# held high by a pull-up until the firmware drives it

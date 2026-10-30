@@ -214,6 +214,57 @@ CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailb
     return !reset_changed;
 }
 
+// ide_bus_early's fast lane for a data-in block: as serveDataIn, but the
+// program asks for each word at the chip select (a request) and reports each
+// read afterwards, so a request for the data register gets the word after the
+// ones read so far, and a data read's report moves on by one. Anything else
+// catches the device up and is served as serviceOnce would.
+static constexpr uint32_t ADDRESS_BITS = 31u << REG_INDEX_SHIFT;
+static constexpr uint32_t DATA_ADDRESS = bus::maskOf(cfg::PIN_CS1_N);  // CS0# low, CS1# high, DA2-0 = 0
+
+CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
+    const uint16_t* next;
+    uint16_t left;
+    if (!dev.dataInRemaining(next, left)) return true;
+    uint16_t served = 0;  // reads reported
+    bool reset_changed = false;
+    ata::Fetch fetch;
+    bool to_post = false;
+    while (served < left) {
+        while (pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
+            if (gpio_get(cfg::PIN_RESET_N) == reset_low) {
+                reset_changed = true;
+                break;
+            }
+            if (to_post) {  // the read-ahead, so core 0 fetches while the host reads
+                if (mailbox.post(fetch)) posted_fetch = fetch.id;
+                to_post = false;
+                continue;
+            }
+            FetchResult result;
+            if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);
+        }
+        if (reset_changed) break;
+        uint32_t sample = pio_sm_get(s_pio, s_sm);
+        if ((sample & ADDRESS_BITS) == DATA_ADDRESS) {
+            if ((sample & STROBE_BITS) == 0) {  // the next word, asked for ahead
+                pio_sm_put(s_pio, s_sm, DRIVE_DD | next[served]);
+                continue;
+            }
+            if (sample & bus::maskOf(cfg::PIN_DIOW_N)) {  // a data read happened
+                if (served++ == 0) to_post = dev.pendingFetch(fetch) && fetch.id != posted_fetch;
+                continue;
+            }
+        }
+        dev.consumeDataWords(served);  // anything else: catch the device up first
+        serve(dev, sample);
+        return true;
+    }
+    dev.consumeDataWords(served);  // the block may be done: BSY for the next fetch
+    updateIntrq(dev);
+    return !reset_changed;
+}
+
 CORE1_RAM bool dataReadDelayed() { return s_data_delay_cycles.load(std::memory_order_relaxed) != 0; }
 
 void restart() {

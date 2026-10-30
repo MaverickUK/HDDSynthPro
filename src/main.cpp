@@ -286,6 +286,8 @@ CORE1_RAM void loop1() {
     uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
+    const bool early = g_early.load();  // ide_bus_early's samples (early_answers)
+    uint32_t last_access_us = 0;
     ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
     unsigned step = 0;
 
@@ -293,6 +295,7 @@ CORE1_RAM void loop1() {
         uint32_t sample;
         if (ide_bus::serviceOnce(dev, sample)) {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
+            if (early) last_access_us = time_us_32();
             continue;
         }
         // Mid-block, the fast lane answers data reads with nothing else in
@@ -300,9 +303,10 @@ CORE1_RAM void loop1() {
         const uint16_t* next;
         uint16_t left;
         if (dev.dataInRemaining(next, left)) {
-            // ide_bus_early asks for each word ahead itself; the lane expects ide_bus's samples.
-            if (g_fast_lane.load() && !g_trace_bus.load() && !ide_bus::dataReadDelayed() && !g_early.load()) {
-                if (ide_bus::serveDataIn(dev, reset_low, g_mailbox, posted_fetch)) continue;
+            if (g_fast_lane.load() && !g_trace_bus.load() && !ide_bus::dataReadDelayed()) {
+                if (early ? ide_bus::serveDataInEarly(dev, reset_low, g_mailbox, posted_fetch)
+                          : ide_bus::serveDataIn(dev, reset_low, g_mailbox, posted_fetch))
+                    continue;
             } else {
                 postFetch(dev, posted_fetch);  // the read-ahead, without the lane
             }
@@ -334,6 +338,9 @@ CORE1_RAM void loop1() {
             }
             continue;
         }
+        // early_answers: for a while after any access, only the bus, so a host
+        // that doesn't wait finds core 1 free to answer its next request.
+        if (early && time_us_32() - last_access_us < cfg::EARLY_BUS_ONLY_US) continue;
         // For a moment after a command starts, only the bus: the host's first
         // status poll comes within a few microseconds and must find core 1
         // free, not in the middle of a step (CMD line, fetch post).

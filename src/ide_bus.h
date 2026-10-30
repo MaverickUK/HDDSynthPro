@@ -38,6 +38,9 @@ bool serviceOnce(ata::Device& dev, uint32_t& sample);
 // when the block ends, and the next sector's DRQ comes at once; and a read
 // never waits behind more than one job, nor a status read behind any.
 bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
+// The same for ide_bus_early (`early_answers`), whose samples are requests and
+// read reports.
+bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
 
 // True while setDataReadDelay() is on.
 bool dataReadDelayed();

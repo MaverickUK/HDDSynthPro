@@ -2,6 +2,15 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.1] - 2026-10-30
+
+On the Pentium, 0.23.0 got the BIOS as far as IDENTIFY, but data reads took 1.3-2 µs and 28 words were wrong: core 1 answered each request only after a pass of its main loop.
+
+### Changed
+- **`early_answers` gets a fast lane** (`ide_bus::serveDataInEarly`): during a data block, core 1 answers data requests from the sector buffer in a tight loop. A data read's report moves it on by one; anything else catches the device up and is served normally.
+- **After any access, core 1 watches only the bus for `EARLY_BUS_ONLY_US` (50 µs),** skipping its bookkeeping, so the next request finds it free.
+- `Device::dataInRemaining()` is always inlined (`check_core1_ram.py` found an out-of-line copy in flash).
+
 ## [0.23.0] - 2026-10-30
 
 Early answers, for hosts that don't wait for IORDY (docs/no-iordy.md). A Pentium 200's PIIX runs in compatible timing, which ignores IORDY, until its Phoenix BIOS has identified the drive, and the BIOS never got that far. Its register reads ended before core 1 answered: the DEVICE read-back that checks a drive is there got `9004`, and 31 of IDENTIFY's 256 words were wrong. Experimental, and off by default.

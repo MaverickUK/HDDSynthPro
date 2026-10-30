@@ -168,7 +168,8 @@ public:
     // the next n DATA reads from them and then calling consumeDataWords(n) is
     // the same as n read(Reg::Data) calls. Any other access in between must
     // come after consumeDataWords().
-    bool dataInRemaining(const uint16_t*& next, uint16_t& left) const {
+    // Always inlined: core 1's fast lanes call it, and an out-of-line copy would sit in flash.
+    __attribute__((always_inline)) bool dataInRemaining(const uint16_t*& next, uint16_t& left) const {
         if (device1Selected() || !(status_ & ST_DRQ) || !data_ || dma_) return false;
         next = data_ + data_index_;
         left = uint16_t(data_count_ - data_index_);
