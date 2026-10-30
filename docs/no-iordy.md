@@ -1,6 +1,6 @@
 # Hosts that don't wait for IORDY: a design
 
-**Status: a design, not built; a first step (early answers) under way on branch `no-iordy`.** Build it if a retro PC shows `iordy_ignored` above 0 ([retro-test.md](retro-test.md)). It's the firmware half of [pcb-bom.md](pcb-bom.md)'s "register reads answered from a table" (section 4, and open question 3).
+**Status: a design, not built. A first step, early answers (`early_answers`, 0.23.x on branch `no-iordy`), didn't get a Pentium's PIIX through detection; next, measure its timing, then build the table.** Build it if a retro PC shows `iordy_ignored` above 0 ([retro-test.md](retro-test.md)). It's the firmware half of [pcb-bom.md](pcb-bom.md)'s "register reads answered from a table" (section 4, and open question 3).
 
 ## The problem
 
@@ -31,6 +31,14 @@ Before the full table design below, a smaller change, which may be enough for ho
 - **Reads still report themselves to core 1,** in a sample taken during the strobe, for their side effects (STATUS clears the interrupt; data words advance the block).
 - **Data words come ahead for free:** after each access the program re-arms and asks again, so the next data word is usually in the FIFO before the host's next strobe.
 - **IORDY works as now** for hosts that wait, which just see shorter holds. About 30 instructions, so no room for `iordy_watchdog`: a separate variant chosen by a setting, until it has been through the USB adapter's tests.
+
+### What early answers did on the Pentium (0.23.0-0.23.1)
+
+Not enough. With 0.23.0 the BIOS got as far as a NOP and IDENTIFY, but data reads took 1.3-2 µs and 28 words were wrong: core 1 answered each request only after a pass of its main loop. 0.23.1 added a fast lane and 50 µs of bus-only after each access. Then the BIOS stopped at the status and DEVICE read-back checks again, because the chip select gives no warning:
+- **`iordy_early=4`:** on 4 of the 5 failed reads, IORDY wasn't yet low when DIOR# fell. The PIIX's compatible timing asserts the chip select and the strobe almost together (t1 of a cycle or two, against ATA's 70 ns), so an answer asked for at the chip select is no earlier than one asked for at the strobe.
+- **The slowest failed read was answered 540 ns after DIOR# fell;** the host had ended its strobe long before. Two of the five failed reads were answered within 400 ns.
+
+**So for this host the answer must be on DD within the strobe, with no warning,** in well under 300 ns: the table design below, not core 1. **Before building it, measure the PIIX's compatible timing** (t1, the strobe width, the cycle) with a PIO probe on the drive. `early_answers` stays as an experiment (off by default); it may still help hosts with a real t1.
 
 ## The idea: answers ready before the host asks
 
