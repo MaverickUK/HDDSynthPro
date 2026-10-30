@@ -286,9 +286,12 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
                 continue;
             }
         }
-        dev.consumeDataWords(served);  // anything else: catch the device up first
+        // Anything else (a status poll, say): catch the device up, serve it here
+        // and carry on, rather than leave the lane for the main loop's overhead.
+        dev.consumeDataWords(served);
+        served = 0;
         serve(dev, sample);
-        return true;
+        if (dev.commandQueued() || !dev.dataInRemaining(next, left)) return true;
     }
     dev.consumeDataWords(served);  // the block may be done: BSY for the next fetch
     updateIntrq(dev);
@@ -310,9 +313,11 @@ CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mai
     for (;;) {
         if (rxWaiting(pio, sm)) {
             serve(dev, pio_sm_get(pio, sm));
+            if (dev.commandQueued()) return;
             const uint16_t* next;
             uint16_t left;
-            if (dev.commandQueued() || dev.dataInRemaining(next, left)) return;
+            if (dev.dataInRemaining(next, left) && !serveDataInEarly(dev, reset_low, mailbox, posted_fetch)) return;
+            if (dev.commandQueued()) return;
             last = m33_hw->dwt_cyccnt;
             continue;
         }
@@ -332,7 +337,8 @@ CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mai
             updateIntrq(dev);
             const uint16_t* next;
             uint16_t left;
-            if (dev.dataInRemaining(next, left)) return;
+            if (dev.dataInRemaining(next, left) && !serveDataInEarly(dev, reset_low, mailbox, posted_fetch)) return;
+            last = m33_hw->dwt_cyccnt;
         }
     }
 }

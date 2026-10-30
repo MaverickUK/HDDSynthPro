@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.6] - 2026-10-30
+
+With 0.23.5 eight data reads failed, all among IDENTIFY's first words, answered 1.3-3 µs late: core 1 left its tight loops for the main loop around the command (its bookkeeping, a timer read) and whenever the lane met a status poll.
+
+### Changed
+- `early_answers`: after starting a command, core 1 goes straight back to the tight bus loop; the command's bookkeeping waits until the bus is quiet. The bus loop runs the data lane itself when a block starts. The lane serves other accesses (status polls) inline and carries on, leaving only for a new command or the block's end. Some commands' `CMD` trace lines may be lost in this mode.
+
 ## [0.23.5] - 2026-10-30
 
 With 0.23.4 only the first status read after the reset failed, but 12 of IDENTIFY's 256 data words were late. The PIIX drops the chip select between data words and gives each t1 80 ns and a strobe of 175-195 ns (`RDTIME`), so core 1 has about 200 ns.

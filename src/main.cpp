@@ -387,6 +387,10 @@ CORE1_RAM void loop1() {
             dev.setWriteBehind(g_write_behind.load());
             dev.runQueuedCommand();
             ide_bus::updateIntrq(dev);
+            // early_answers: straight back to the tight bus loop (status polls, the
+            // data block); the bookkeeping below can wait until the bus is quiet.
+            if (early && !g_trace_bus.load())
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles);
             // The host may already be polling (the adapter reads STATUS at
             // once after IDENTIFY): answer it before the bookkeeping below.
             while (ide_bus::serviceOnce(dev, sample)) {
