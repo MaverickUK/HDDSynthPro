@@ -2,6 +2,21 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.18.1] - 2026-10-30
+
+The bus observer no longer holds multiword DMA back: spot checks by default, full checks on request.
+
+### Changed
+- **Spot checks** (`bus_observer.*`, the default). Checking a sector costs core 0 more than serving it, so at DMA's rate the observer slowed the drive to about 2.2 MB/s on the test disk. Now the drive comes first: core 0 serves fetches every 32 words checked, and when the checks fall more than half the ring (2,048 samples) behind, the waiting samples are dropped, counted in `bus_dropped`. Checking resumes at the next sector start, found from its header (the LBA, then the LBA inverted) even in the middle of a DMA command, or at the next status read. Every sector of PIO and of short DMA commands is still checked; on long DMA transfers a few percent. On the test disk, MDMA 2: sequential reads 7.70 MB/s (5.14 on 0.16.2, before the observer checked DMA; 2.0 with full checks), random 4 KB reads 1,100 a second (969), writes 13.9 MB/s (9.76).
+- **Full checks** (console `O`, until a restart): every sector, as before, slowing DMA reads to about 2 MB/s. `s` shows `bus_checks=spot|full`. The soak switches to full checks itself (`HDDPRO_SOAK_SPOT_CHECKS=1` keeps spot checks).
+
+### Fixed
+- **Overruns the observer couldn't see.** Its samples are numbered in 11 bits (2,048), and since 0.17.1 its ring holds 4,096, so core 0 falling a whole ring behind left no jump in the numbers. Spot checks now treat any spell of more than 400 µs between looks at the ring as a possible overrun (DMA could fill it in 490 µs), drop what's waiting, and count it in `bus_lost`. Full checks slow the drive instead, so the ring isn't overrun (the 10-hour soak's high-water mark was 2,570); the soak's 0 bad sectors show it wasn't.
+- After dropped samples or a gap the checker waits for a sector boundary, rather than taking the next 256 words for a sector: in a DMA command those could be two sectors' halves.
+
+### On the rig
+- Test disk, MDMA 2 (`host/runs/tools/observer_load.py`, 48 MB in 64 KB reads): spot checks 8.77 MB/s, 767 sectors checked, 0 bad; full checks 2.00 MB/s, all 98,320 checked, 0 bad, 0 dropped. LBA 65535 5,000 times: 0 flagged. Slices 3-4 pass; a 3-minute DMA soak (full checks): 304 MB, 522,221 sectors checked, 0 bad. PIO mode 3 on the test disk: reads 1.38 MB/s, writes 1.87, as 0.18.0.
+
 ## [0.18.0] - 2026-10-29
 
 A welcome disk with a README, instead of the test disk, when there's no card or no image to serve.

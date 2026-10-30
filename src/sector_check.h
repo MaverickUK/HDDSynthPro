@@ -54,6 +54,22 @@ public:
     bool observe(uint32_t word, bool data = true);
 
     const Mismatch& mismatch() const { return mismatch_; }
+    // False after resync() until a read that isn't data, or alignAt(): until
+    // then a caller may skip data reads without observing them.
+    bool aligned() const { return aligned_; }
+
+    // Whether four data words are the start of a generated sector (its LBA,
+    // then the LBA inverted): how a caller that skipped reads finds a sector
+    // start in the middle of a DMA command. Then call alignAt() and observe
+    // from the first of them.
+    bool isSectorStart(uint16_t w0, uint16_t w1, uint16_t w2, uint16_t w3) const {
+        return w2 == uint16_t(~w0) && w3 == uint16_t(~w1) && (uint32_t(w0) | (uint32_t(w1) << 16)) < disk_sectors_;
+    }
+    void alignAt() {
+        have_seq_ = false;
+        count_ = 0;
+        aligned_ = true;
+    }
     uint32_t sectorsChecked() const { return checked_; }
     uint32_t sectorsBad() const { return bad_; }
     uint32_t sectorsSkipped() const { return skipped_; }
@@ -63,9 +79,13 @@ public:
     uint64_t dmaWords() const { return dma_words_; }  // DMA read words seen (data checked as any other)
 
     // After reads were discarded on purpose: start afresh, without a gap.
+    // Within a DMA command only the word count says where sectors start,
+    // so checking resumes after the next read that isn't data (the status
+    // poll that ends the command).
     void resync() {
         have_seq_ = false;
         count_ = 0;
+        aligned_ = false;
     }
 
     void resetCounts() { checked_ = bad_ = skipped_ = gaps_ = identify_checked_ = identify_bad_ = dma_words_ = 0; }
@@ -80,6 +100,7 @@ private:
     uint32_t identify_checked_ = 0, identify_bad_ = 0;
     uint16_t words_[256];
     unsigned count_ = 0;
+    bool aligned_ = true;  // count_ is known to start at a sector (see resync)
     uint64_t dma_words_ = 0;  // 64-bit: DMA's rate wraps 32 bits in a few hours
     bool have_seq_ = false;
     uint32_t last_seq_ = 0;

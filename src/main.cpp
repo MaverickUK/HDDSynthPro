@@ -969,8 +969,10 @@ static void printStats() {
                   (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
                   (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps(),
                   (unsigned long long)bus_observer::dmaWords());
-    Serial.printf(" bus_ring_max=%lu/%lu", (unsigned long)bus_observer::ringMax(),
-                  (unsigned long)bus_observer::ringSize());
+    Serial.printf(" bus_ring_max=%lu/%lu bus_dropped=%llu bus_lost=%lu bus_checks=%s",
+                  (unsigned long)bus_observer::ringMax(), (unsigned long)bus_observer::ringSize(),
+                  (unsigned long long)bus_observer::dropped(), (unsigned long)bus_observer::lost(),
+                  bus_observer::full() ? "full" : "spot");
     Serial.printf(" bus_identify=%lu bus_identify_bad=%lu", (unsigned long)bus_observer::identifyChecked(),
                   (unsigned long)bus_observer::identifyBad());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
@@ -1083,7 +1085,7 @@ static void handleConsole() {
                                "m mark, S SD card and settings, C create HDDSYNTH.INI, E set a setting, ! restart, "
                                "I create SD image, K create bench image, "
                                "J serve the bench image or back (restarts), T serve the test disk or back (restarts), "
-                               "L activity link, U link loopback test, V drive gone/back, W write-behind, "
+                               "L activity link, U link loopback test, V drive gone/back, W write-behind, O observer full/spot checks, "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -1128,6 +1130,12 @@ static void handleConsole() {
                 bool on = !g_write_behind.load();
                 g_write_behind.store(on);
                 Serial.printf("WRITEBEHIND %s\n", on ? "on" : "off");
+                break;
+            }
+            case 'O': {  // the bus observer's full checks on or off (spot checks)
+                bool full = !bus_observer::full();
+                bus_observer::setFull(full);
+                Serial.printf("OBSERVER %s\n", full ? "full" : "spot");
                 break;
             }
             case 'A': {  // debug: read-ahead on or off, to compare
@@ -1236,7 +1244,7 @@ void loop() {
     printSlowReads();
     printIgnoredIordy();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.
-    bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0);
+    bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0, serveFetches);
     updateLed();
     serviceLoopback();
     serviceAbsence();

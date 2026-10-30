@@ -26,7 +26,18 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity);
 // cheap; checking every word costs core 0 enough to slow reads (1.23 to
 // 1.16 MB/s), so on an image IDENTIFY is checked only around detection.
 // Prints a BUSERR line for each block that was wrong on the bus.
-void poll(Print& out, bool check, bool check_identify);
+//
+// Spot checks (the default): the drive comes first. `serve` (core 0's fetch
+// handler) is called every few words, so a fetch never waits behind a batch
+// of checks, and when the checks fall behind (multiword DMA outruns them:
+// a check costs more of core 0 than serving the sector) the waiting samples
+// are dropped on purpose, counted in dropped(), and checking resumes at the
+// next sector start. Every sector of PIO and of short DMA commands is
+// checked, a few percent of long DMA transfers. Full checks (setFull):
+// checks come first, as before 0.18.1, and slow multiword DMA reads to
+// about 2.2 MB/s. Either way, samples core 0 may have let DMA overwrite
+// are dropped, counted in lost().
+void poll(Print& out, bool check, bool check_identify, void (*serve)() = nullptr);
 
 uint32_t sectorsChecked();
 uint32_t sectorsBad();
@@ -39,6 +50,13 @@ uint64_t dmaWords();  // multiword DMA read words seen (checked like PIO data)
 // the size, samples were overwritten before they were checked (gaps).
 uint32_t ringMax();
 uint32_t ringSize();
+uint64_t dropped();  // samples dropped unchecked because the checks were behind
+// Times the ring may have been overrun: core 0 away longer than DMA takes to
+// fill it. The sequence numbers can't show that: they repeat every 2,048
+// reads, and the ring holds 4,096.
+uint32_t lost();
+void setFull(bool full);
+bool full();
 void resetCounts();
 
 }  // namespace bus_observer

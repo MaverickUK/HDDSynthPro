@@ -268,6 +268,65 @@ TEST(test_sector_check_identify_without_data_check) {
     CHECK_EQ(image.identifyBad(), 1u);
 }
 
+TEST(test_sector_check_resync_waits_for_a_boundary) {
+    // Samples dropped in the middle of a DMA command: the words that follow
+    // may start anywhere in a sector, so nothing is checked until a status
+    // read, or until alignAt() at a sector start.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.observe(o.status());
+    auto a = sectorWords(500), b = sectorWords(501);
+    for (unsigned i = 0; i < 100; ++i) c.observe(o.dma(a[i]));
+    c.resync();
+    CHECK(!c.aligned());
+    int bad = 0;
+    for (unsigned i = 100; i < 256; ++i) bad += c.observe(o.dma(a[i]));
+    for (unsigned i = 0; i < 100; ++i) bad += c.observe(o.dma(b[i]));  // 256 words, two sectors' halves
+    CHECK_EQ(bad, 0);
+    CHECK_EQ(c.sectorsChecked(), 0u);
+    CHECK_EQ(c.sectorsSkipped(), 0u);
+    c.observe(o.status());
+    CHECK(c.aligned());
+    CHECK_EQ(feed(c, o, sectorWords(502)), 0);
+    CHECK_EQ(c.sectorsChecked(), 1u);
+}
+
+TEST(test_sector_check_align_at_a_sector_start) {
+    // A caller that dropped samples finds a sector start from its header
+    // (the LBA, then the LBA inverted) and aligns there, mid-command.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.resync();
+    auto w = sectorWords(65535);
+    CHECK(c.isSectorStart(w[0], w[1], w[2], w[3]));
+    CHECK(!c.isSectorStart(w[1], w[2], w[3], w[4]));
+    CHECK(!c.isSectorStart(0x1234, 0x0000, 0x1234, 0xFFFF));  // not inverted
+    CHECK(!c.isSectorStart(0x0000, 0x0010, 0xFFFF, 0xFFEF));  // past the disk's end
+    c.alignAt();
+    int bad = 0;
+    for (uint16_t v : w) bad += c.observe(o.dma(v));
+    for (uint16_t v : sectorWords(65536)) bad += c.observe(o.dma(v));
+    CHECK_EQ(bad, 0);
+    CHECK_EQ(c.sectorsChecked(), 2u);
+    CHECK_EQ(c.gaps(), 0u);
+}
+
+TEST(test_sector_check_gap_mid_command_loses_alignment) {
+    // Reads missed mid-command: where the next sector starts is unknown too.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.observe(o.status());
+    auto a = sectorWords(10), b = sectorWords(11);
+    for (unsigned i = 0; i < 256; ++i) {
+        if (i == 200) o.seq = (o.seq - 5) & SEQ_MASK;
+        c.observe(o.dma(a[i]));
+    }
+    for (uint16_t v : b) c.observe(o.dma(v));
+    CHECK_EQ(c.gaps(), 1u);
+    CHECK_EQ(c.sectorsChecked(), 0u);
+    CHECK_EQ(c.sectorsBad(), 0u);
+}
+
 void runSectorCheckTests() {
     RUN(test_sector_check_identify_good);
     RUN(test_sector_check_identify_garbled);
@@ -282,4 +341,7 @@ void runSectorCheckTests() {
     RUN(test_sector_check_sectors_split_by_status_reads);
     RUN(test_sector_check_gap_drops_the_sector);
     RUN(test_sector_check_sequence_wraps);
+    RUN(test_sector_check_resync_waits_for_a_boundary);
+    RUN(test_sector_check_align_at_a_sector_start);
+    RUN(test_sector_check_gap_mid_command_loses_alignment);
 }

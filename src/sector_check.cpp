@@ -65,19 +65,22 @@ bool Checker::observe(uint32_t word, bool data) {
     last_seq_ = seq;
     if (gap) {
         ++gaps_;
-        count_ = 0;  // part of this sector is missing
+        count_ = 0;  // part of this sector is missing,
+        aligned_ = false;  // and where the next one starts
     }
     uint32_t sample = word & ((1u << SEQ_SHIFT) - 1);
     bus::Block block = bus::block(sample);
     bool dma = block == bus::Block::None;  // DIOR# with no chip select: a DMA word
     if (!dma && (block != bus::Block::Command || bus::address(sample) != 0)) {
         count_ = 0;  // not the data register: the next data read starts a sector
+        aligned_ = true;
         return false;
     }
     if (dma) ++dma_words_;
     words_[count_++] = bus::data(sample);
     if (count_ < 256) return false;
     count_ = 0;
+    if (!aligned_) return false;  // perhaps two sectors' halves: not checked
     return finishSector(data);
 }
 

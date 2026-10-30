@@ -22,6 +22,9 @@ the re-detection, the disk reopened, the write window re-checked. At most 3.
 A mismatch is diagnosed in the log (whose data came back, shifted or not,
 whether a re-read is right). HDDPRO_SOAK_MAX_ERRORS (default 1) lets a
 diagnostic run carry on and collect several.
+The bus observer checks every sector on the cable (console `O`, full
+checks), even though that slows multiword DMA reads to about 2 MB/s;
+HDDPRO_SOAK_SPOT_CHECKS=1 leaves it on spot checks, for a soak at full speed.
 Exit criterion: an overnight soak with zero mismatches and zero hangs.
 """
 from __future__ import annotations
@@ -72,6 +75,7 @@ DMA_COMMANDS = (0xC8, 0xC9, 0xCA, 0xCB)       # READ DMA, WRITE DMA
 # data any other way, so a quiet fallback to PIO can't pass as a DMA soak.
 REQUIRE_DMA = os.environ.get("HDDPRO_SOAK_REQUIRE_DMA", "") not in ("", "0")
 WAKE_COMMANDS = (0xE1, 0x95)                 # IDLE IMMEDIATE
+FULL_CHECKS = os.environ.get("HDDPRO_SOAK_SPOT_CHECKS", "") in ("", "0")
 
 
 def read(fd: int, lba: int, count: int) -> bytes:
@@ -134,7 +138,7 @@ def check_drive(drive, start_mark: int) -> str:
             f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']}), "
             f"early {fields.get('iordy_early', '?')} ({fields.get('iordy_early_reg', '-')}); "
             f"bus observer: {fields.get('bus_sectors', '?')} sectors checked, {fields.get('bus_bad', '?')} bad, "
-            f"{fields.get('bus_gaps', '?')} gaps, {fields.get('bus_dma_words', '?')} DMA words, ring max {fields.get('bus_ring_max', '?')}")
+            f"{fields.get('bus_gaps', '?')} gaps, {fields.get('bus_dma_words', '?')} DMA words, ring max {fields.get('bus_ring_max', '?')}, dropped {fields.get('bus_dropped', '?')}")
 
 
 def on_the_bus(drive, start_mark: int, lba: int) -> str:
@@ -192,6 +196,10 @@ def test_soak(raw_disk_rw, drive, run_dir):
         log.flush()
 
     note(f"soak for {minutes:g} min, seed {seed} (rerun with HDDPRO_SEED={seed})")
+    want = "full" if FULL_CHECKS else "spot"
+    if f"bus_checks={want}" not in drive.command("s", "STATS").split():
+        assert drive.command("O", "OBSERVER").endswith(want), "console O didn't switch the observer"
+    note(f"bus observer: {want} checks")
     drive.send("r")  # read timings and bus counters from here
     start_mark = drive.mark()
     shadow = bytearray(read(fd, WINDOW_START, WINDOW))
