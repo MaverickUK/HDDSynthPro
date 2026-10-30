@@ -102,11 +102,13 @@ public not_read:
 .side_set 1 opt pindirs
 
 public write:
-    pull block                      ; this address's answer: not needed
     wait 1 gpio 27          side 0  ; release IORDY; wait for DIOW# to rise
     in pins, 23                     ; DD, DA, CS#, LED, DIOR#: the data 5 ns after
     in null, 9              side 1  ; DIOW# (and up) as 0: a write; autopush. IORDY low,
                                     ; held while the RX FIFO is full
+    pull block                      ; this address's answer: not needed. Only now: a host
+                                    ; that doesn't wait would be gone, and its data with
+                                    ; it, if the write waited for a late answer first
     jmp idle                [7]     ; arm only once a chip select is there: the host may
                                     ; have dropped it, and asking about no address costs
                                     ; the next access a request it must throw away. The

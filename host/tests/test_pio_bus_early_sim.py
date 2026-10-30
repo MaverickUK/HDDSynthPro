@@ -175,3 +175,17 @@ def test_chip_select_without_strobe(program):
     run = run_host(sim, core1, [Access(False, "CMD", 7)], timing=NO_IORDY, start_ns=2100)
     assert not run.errors, run.errors
     assert read_values(run) == [0x50]
+
+
+def test_no_iordy_write_with_a_late_answer(program):
+    """A host that doesn't wait writes registers while core 1 answers each
+    request 300 ns after it, after the write strobe has ended. The writes must
+    still be sampled as DIOW# rises, not after the late answer (0.23.8). (Much
+    later, about 600 ns, and the program would miss the next write while it
+    waits to throw the answer away: core 1 answers from its tight loop.)"""
+    core1 = EarlyCore1(300, {("CMD", 7): 0x50})
+    values = [(3, 0x12), (4, 0x34), (5, 0x56), (6, 0xE0)]
+    accesses = [Access(True, "CMD", addr, v) for addr, v in values]
+    run = run_host(make_sim(program), core1, accesses, timing=NO_IORDY, tail_ns=5000)
+    assert not run.errors, run.errors
+    assert core1.writes == [("CMD", addr, v) for addr, v in values]

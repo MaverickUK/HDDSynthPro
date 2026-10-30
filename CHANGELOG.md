@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.8] - 2026-10-30
+
+With 0.23.7 and a fresh copy of the CF card, Windows got as far as its desktop stage, then MSGSRV32 failed: corrupt data still, though only a few data reads were counted late (after Windows' own IDENTIFY). Two ways to deliver bad data without `iordy_ignored` counting it, both when core 1 is in its 660 ns main loop after a quiet spell of over 50 µs, between Windows' commands:
+
+### Changed
+- **`ide_bus_early` samples a write before throwing its answer away.** It waited for core 1's answer first, so with a late answer a host that doesn't wait had ended its strobe, and taken its data with it, before the program sampled: a register write (an LBA byte, say) captured wrong, and the wrong sector read cleanly. Still 32 instructions.
+- **In early mode core 1 goes back into the tight bus loop after every main-loop pass,** not only after an access, so a quiet spell's first access finds it polling.
+- **The tight loop runs the device's BSY timers** (`busyTimers()`: the data-out hold and waking, which were loop1's step 3). The host may poll status throughout the hold, and the loop never went quiet to return to the main loop.
+- Sim: `test_no_iordy_write_with_a_late_answer` (core 1 answering 300 ns after the request, after the strobe).
+
 ## [0.23.7] - 2026-10-30
 
 **With 0.23.6 the Pentium 200 got through its BIOS's detection** (IDENTIFY, INIT_PARAMS, SET FEATURES for PIO mode 3) **and started Windows from `P200.IMG`:** 1,047 reads and 92 writes, all completing cleanly. Then a fatal exception 0D. Seven data reads had been late, all in the second after Windows' own disk driver identified the drive again; it evidently reads in the PIIX's compatible timing for a moment (data words get t1 80 ns and strobes of 185 ns).

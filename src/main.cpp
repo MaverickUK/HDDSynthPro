@@ -290,6 +290,30 @@ CORE1_RAM static void postFetch(ata::Device& dev, uint32_t& posted_fetch) {
     if (dev.pendingFetch(fetch) && g_mailbox.post(fetch)) posted_fetch = fetch.id;
 }
 
+// BSY for a while: waking from standby, or after a data-out block. Step 3 of
+// loop1, and early_answers' tight bus loop runs it too, since the host may
+// poll status throughout the hold and the loop never goes quiet to return.
+CORE1_RAM static void busyTimers(ata::Device& dev) {
+    static uint32_t wake_start_us = 0;  // 0: not timing a wake
+    static uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
+    if (!dev.dataOutHeld()) {
+        hold_start_us = 0;
+    } else if (hold_start_us == 0) {
+        hold_start_us = time_us_32() | 1;
+    } else if (time_us_32() - hold_start_us >= cfg::DATA_OUT_BSY_US) {
+        dev.releaseDataOut();
+        ide_bus::updateIntrq(dev);
+    }
+    if (!dev.waking()) {
+        wake_start_us = 0;
+    } else if (wake_start_us == 0) {
+        wake_start_us = time_us_32() | 1;  // never 0 while timing
+    } else if (time_us_32() - wake_start_us >= cfg::WAKE_BUSY_US) {
+        dev.finishWake();
+        ide_bus::updateIntrq(dev);
+    }
+}
+
 CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
     record(commandStartEvent(t_us, c.command, c.lba, c.count));
 }
@@ -327,8 +351,6 @@ CORE1_RAM void loop1() {
     bool start_unrecorded = false;
     bool quiet = false;  // a command just started: bookkeeping waits (COMMAND_QUIET_US)
     uint32_t posted_fetch = 0;
-    uint32_t wake_start_us = 0;  // 0: not timing a wake
-    uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
     const bool early = g_early.load();  // ide_bus_early's samples (early_answers)
@@ -357,7 +379,7 @@ CORE1_RAM void loop1() {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
             if (early) {
                 last_access_cycles = m33_hw->dwt_cyccnt;
-                if (!g_trace_bus.load()) ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles);
+                if (!g_trace_bus.load()) ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers);
             }
             continue;
         }
@@ -390,7 +412,7 @@ CORE1_RAM void loop1() {
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
             if (early && !g_trace_bus.load())
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles);
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers);
             // The host may already be polling (the adapter reads STATUS at
             // once after IDENTIFY): answer it before the bookkeeping below.
             while (ide_bus::serviceOnce(dev, sample)) {
@@ -455,22 +477,7 @@ CORE1_RAM void loop1() {
                 break;
             }
             case 3:  // BSY for a while: waking from standby, or after a data-out block
-                if (!dev.dataOutHeld()) {
-                    hold_start_us = 0;
-                } else if (hold_start_us == 0) {
-                    hold_start_us = time_us_32() | 1;
-                } else if (time_us_32() - hold_start_us >= cfg::DATA_OUT_BSY_US) {
-                    dev.releaseDataOut();
-                    ide_bus::updateIntrq(dev);
-                }
-                if (!dev.waking()) {
-                    wake_start_us = 0;
-                } else if (wake_start_us == 0) {
-                    wake_start_us = time_us_32() | 1;  // never 0 while timing
-                } else if (time_us_32() - wake_start_us >= cfg::WAKE_BUSY_US) {
-                    dev.finishWake();
-                    ide_bus::updateIntrq(dev);
-                }
+                busyTimers(dev);
                 break;
             default: {  // RESET#, and console `V`
                 if (g_absent.load()) {
@@ -497,6 +504,10 @@ CORE1_RAM void loop1() {
             }
         }
         step = step == 4 ? 0 : step + 1;
+        // early_answers: back to the tight bus loop after every pass, so a quiet
+        // spell's first access finds core 1 polling, not mid-pass (660 ns).
+        if (early && !g_trace_bus.load())
+            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers);
     }
 }
 
