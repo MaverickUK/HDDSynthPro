@@ -34,6 +34,11 @@
 #include "activity.h"
 #include "activity_link.h"
 #include "drive_config.h"
+#include "drive_params.h"
+#include "drive_timing.h"
+#include "identify.h"
+#include "seek_timing.h"
+#include "sentence.h"
 #include "ata_device.h"
 #include "block_source.h"
 #include "bus_observer.h"
@@ -41,6 +46,7 @@
 #include "fetch_mailbox.h"
 #include "ide_bus.h"
 #include "ide_dma.h"
+#include "iocs16.h"
 #include "iordy_timer.h"
 #include "sd_card.h"
 #include "welcome_disk.h"
@@ -137,6 +143,7 @@ CORE1_RAM void loop1() {
 static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
+static SharedFlag g_isa{false};         // HDDSYNTH.INI isa: IORDY from the strobe (ide_bus::begin)
 static SharedFlag g_read_ahead{true};  // HDDSYNTH.INI read_ahead; console `A` (debug)
 // Off by default: with it on, writes hold some status reads 1.5-2 us (ATA
 // allows 1.25), not yet understood. Console `W` turns it on to work on that.
@@ -184,7 +191,7 @@ void setup1() {
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
-    ide_bus::begin();
+    ide_bus::begin(g_isa.load());
     busSwitchesOn();
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
@@ -193,7 +200,16 @@ void setup1() {
                       std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
     bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity());
-    ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
+    // The third PIO block: multiword DMA if it's offered, otherwise IOCS16#
+    // for ISA cards (which never use DMA). Neither fits beside the others.
+    if (g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA)
+        ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
+    else {
+        iocs16::begin();
+        // DMACK#, as ide_dma::begin() leaves it: an input for console `p`.
+        gpio_init(cfg::PIN_DMACK_N);
+        gpio_disable_pulls(cfg::PIN_DMACK_N);
+    }
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
     // delay its PIO accesses while the host waits on a read.
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
@@ -210,7 +226,7 @@ CORE1_RAM static void serviceDma(ata::Device& dev) {
             return;
         }
         dev.dmaBurstDone();
-        ide_bus::updateIntrq(dev.intrq());
+        ide_bus::updateIntrq(dev);
     }
     if (!dev.dmaCommand()) {
         ide_dma::endCommand();  // nothing to do unless one ran
@@ -248,7 +264,7 @@ __attribute__((noinline)) static void stayAbsent(ata::Device& dev) {
     dev.hardReset(false);
     ide_bus::restart();
     iordy_timer::requestReset();
-    ide_bus::updateIntrq(dev.intrq());
+    ide_bus::updateIntrq(dev);
     g_command_active.store(false);
 }
 
@@ -269,6 +285,7 @@ CORE1_RAM void loop1() {
     uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
+    ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
     unsigned step = 0;
 
     for (;;) {
@@ -298,7 +315,7 @@ CORE1_RAM void loop1() {
             dev.setReadAhead(g_read_ahead.load());
             dev.setWriteBehind(g_write_behind.load());
             dev.runQueuedCommand();
-            ide_bus::updateIntrq(dev.intrq());
+            ide_bus::updateIntrq(dev);
             // The host may already be polling (the adapter reads STATUS at
             // once after IDENTIFY): answer it before the bookkeeping below.
             while (ide_bus::serviceOnce(dev, sample)) {
@@ -353,7 +370,7 @@ CORE1_RAM void loop1() {
                 FetchResult result;
                 if (g_mailbox.takeResult(result)) {
                     dev.fetchDone(result.id, result.ok);
-                    ide_bus::updateIntrq(dev.intrq());
+                    ide_bus::updateIntrq(dev);
                 }
                 break;
             }
@@ -364,7 +381,7 @@ CORE1_RAM void loop1() {
                     hold_start_us = time_us_32() | 1;
                 } else if (time_us_32() - hold_start_us >= cfg::DATA_OUT_BSY_US) {
                     dev.releaseDataOut();
-                    ide_bus::updateIntrq(dev.intrq());
+                    ide_bus::updateIntrq(dev);
                 }
                 if (!dev.waking()) {
                     wake_start_us = 0;
@@ -372,7 +389,7 @@ CORE1_RAM void loop1() {
                     wake_start_us = time_us_32() | 1;  // never 0 while timing
                 } else if (time_us_32() - wake_start_us >= cfg::WAKE_BUSY_US) {
                     dev.finishWake();
-                    ide_bus::updateIntrq(dev.intrq());
+                    ide_bus::updateIntrq(dev);
                 }
                 break;
             default: {  // RESET#, and console `V`
@@ -393,7 +410,7 @@ CORE1_RAM void loop1() {
                         // strobes float low, which looks like one long read.
                         iordy_timer::requestReset();
                     }
-                    ide_bus::updateIntrq(dev.intrq());
+                    ide_bus::updateIntrq(dev);
                     record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
                 }
                 break;
@@ -518,6 +535,7 @@ static void chooseDisk() {
     g_write_behind.store(g_config.write_behind);
     g_read_ahead.store(g_config.read_ahead);
     g_link_on = g_config.activity_link;
+    g_isa.store(g_config.isa);  // core 1 sets up the bus program from it
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
@@ -550,7 +568,7 @@ static void editConfig(const char* line) {
     }
     size_t n = drive_config::setKey(text, len, key, value, edited, sizeof edited);
     if (n == 0) {
-        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link), "
+        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa), "
                       "or the file would be too long\n", key);
         return;
     }
@@ -561,6 +579,8 @@ static void editConfig(const char* line) {
     size_t shown = check.warning_count < drive_config::MAX_WARNINGS ? check.warning_count : drive_config::MAX_WARNINGS;
     for (size_t i = 0; i < shown; ++i) Serial.printf("CONFIG warning: %s\n", check.warnings[i]);
 }
+
+static void printSeekConfig();
 
 // Console `S`: the settings and what came of them, after the card's own line.
 static void printConfig() {
@@ -573,10 +593,11 @@ static void printConfig() {
                   g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name);
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
-    Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s\n",
+    Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s\n",
                   g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
-                  drive_config::onOff(g_config.activity_link));
+                  drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa));
+    printSeekConfig();
     if (drive_config::dmaRefusedForWiring(g_config.mode, g_dmarq_wired.load()))
         Serial.printf("CONFIG warning: mode = %s needs DMARQ wired (IDE pin 21 to GPIO 31); offering PIO only\n",
                       drive_config::modeName(g_config.mode));
@@ -594,54 +615,152 @@ static activity::Classifier g_activity;
 static uint32_t g_activity_checked_us = 0;
 static bool g_activity_unprinted = false;
 
-// The activity link to an HDD Synth (activity_link.h), on UART0, transmit
-// only. Core 0 must never wait on it, so a sentence (at most 20 bytes) is
-// written only when the 32-byte TX FIFO is empty; otherwise it stays due
-// and goes a millisecond later, with whatever is current then.
+// The activity link to an HDD Synth (activity_link.h), on UART0. Core 0
+// must never wait on it, so a sentence (at most 23 bytes) is written only
+// when the 32-byte TX FIFO is empty; otherwise it stays due and goes a
+// millisecond later, with whatever is current then. $HDA goes first; $HDE,
+// where each media command takes the head, fills the gaps (at most one every
+// cfg::LINK_HEAD_GAP_US, the newest).
+//
+// The other direction (GPIO 1, protocol version 2) brings the synth's $HDM:
+// the modelled drive it's playing, for seek_timing = synth. GPIO 1 is pulled
+// up (a UART line idles high), so unconnected it reads idle, not noise.
 static activity_link::Sender g_link(cfg::LINK_HEARTBEAT_MS);
+static activity_link::HeadPacer g_head(cfg::LINK_HEAD_GAP_US);
 static activity_link::Op g_link_op = activity_link::Op::None;  // the last media command's
+static LineAssembler g_link_rx;
+static seek_timing::SynthModel g_synth;
+static uint32_t g_link_rx_errors = 0;  // framing, parity, break or overrun
 
 static void beginLink() {
     uart_init(uart0, cfg::LINK_BAUD);  // 8N1
-    gpio_set_function(cfg::PIN_LINK_TX, GPIO_FUNC_UART);  // GPIO 1 (RX) stays untouched
+    gpio_set_function(cfg::PIN_LINK_TX, GPIO_FUNC_UART);
+    gpio_set_pulls(cfg::PIN_LINK_RX, true, false);  // a pull-up only (erratum E9)
+    gpio_set_function(cfg::PIN_LINK_RX, GPIO_FUNC_UART);
 }
 
+// A head target for $HDE: the command's first sector, from `at_us` (when its
+// seek starts).
+static void postHeadTarget(uint32_t lba, uint32_t sectors, activity_link::Op op, uint64_t at_us) {
+    activity_link::HeadTarget t;
+    t.pos = activity_link::headPosition(lba, g_disk->sectors());
+    t.op = op;
+    t.sectors = sectors;
+    g_head.post(t, at_us);
+}
+
+static bool loopbackSending();
+
 static void serviceLink() {
-    if (!g_link_on) return;
+    if (!g_link_on || loopbackSending()) return;
     activity_link::Fields f;
     f.busy = g_busy;
     f.state = g_activity.state();
     f.op = g_link_op;
     uint32_t now = millis();
-    if (!g_link.due(f, now)) return;
+    uint64_t now_us = time_us_64();
+    activity_link::Next next = activity_link::nextSentence(g_link, f, now, g_head, now_us);
+    if (next == activity_link::Next::Nothing) return;
     if (!(uart_get_hw(uart0)->fr & UART_UARTFR_TXFE_BITS)) return;  // not empty yet
-    char line[activity_link::SENTENCE_MAX];
-    size_t n = activity_link::formatSentence(f, line, sizeof line);
+    char line[activity_link::HEAD_SENTENCE_MAX];
+    size_t n = next == activity_link::Next::Activity ? activity_link::formatSentence(f, line, sizeof line)
+                                                     : activity_link::formatHeadSentence(g_head.target(), line, sizeof line);
     if (n == 0) return;
     uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(line), n);  // fits: never waits
-    g_link.sent(f, now);
+    if (next == activity_link::Next::Activity)
+        g_link.sent(f, now);
+    else
+        g_head.sent(now_us);
+}
+
+// Authentic seek timing (seek_timing.h): HDDSYNTH.INI's seek_timing, which
+// console `H` turns off and on until a restart. The model is a preset, or
+// the synth's from $HDM; serveFetches() holds each result until its time.
+static seek_timing::Scheduler g_seek;
+static SeekModel g_seek_preset;
+static bool g_seek_on = true;
+
+static void beginSeekTiming() {
+    uint32_t sectors = g_disk->sectors();
+    g_seek.setGeometry(sectors, defaultGeometry(sectors).sectors_per_track);
+    if (g_config.seek_timing.source == seek_timing::Source::Preset) {
+        DriveParams p;
+        drivePreset(g_config.seek_timing.preset, p);
+        g_seek_preset = seekModelOf(p);
+    }
+}
+
+// The model to follow now, or null.
+static const SeekModel* seekModel(uint32_t now_ms) {
+    if (!g_seek_on) return nullptr;
+    switch (g_config.seek_timing.source) {
+        case seek_timing::Source::Synth: return g_synth.model(now_ms);
+        case seek_timing::Source::Preset: return &g_seek_preset;
+        default: return nullptr;
+    }
+}
+
+// A model as "voice 5400rpm 6000cyl stroke=19.0ms track=2.0ms", for S and s.
+static void describeModel(const SeekModel* m, char* out, size_t size) {
+    if (!m) {
+        std::snprintf(out, size, "none");
+        return;
+    }
+    if (m->actuator == Actuator::Stepper)
+        std::snprintf(out, size, "stepper %ldrpm %ldcyl step=%ld.%ldms zoned=%d", lroundf(m->rpm), lroundf(m->cylinders),
+                      lroundf(m->stepMs * 10) / 10, lroundf(m->stepMs * 10) % 10, int(m->zoned));
+    else
+        std::snprintf(out, size, "voice %ldrpm %ldcyl stroke=%ld.%ldms track=%ld.%ldms zoned=%d", lroundf(m->rpm),
+                      lroundf(m->cylinders), lroundf(m->fullStrokeMs * 10) / 10, lroundf(m->fullStrokeMs * 10) % 10,
+                      lroundf(m->trackMs * 10) / 10, lroundf(m->trackMs * 10) % 10, int(m->zoned));
+}
+
+// Console `S`'s line for seek timing.
+static void printSeekConfig() {
+    uint32_t now = millis();
+    char model[80];
+    const SeekModel* m = g_config.seek_timing.source == seek_timing::Source::Synth ? g_synth.model(now)
+                         : g_config.seek_timing.source == seek_timing::Source::Preset ? &g_seek_preset
+                                                                                     : nullptr;
+    describeModel(m, model, sizeof model);
+    Serial.printf("CONFIG seek_timing=%s%s model=%s\n", seek_timing::settingName(g_config.seek_timing),
+                  g_seek_on ? "" : " (off: console H)", model);
+    if (g_config.seek_timing.source == seek_timing::Source::Synth || g_synth.valid()) {
+        if (g_synth.heard(now))
+            Serial.printf("CONFIG synth $HDM %lu ms ago: %s\n", (unsigned long)(now - g_synth.lastMs()),
+                          g_synth.model(now) ? "a modelled drive" : "a recorded pack (no model)");
+        else
+            Serial.printf("CONFIG synth: no $HDM in the last %lu s (GPIO 1 wired to the synth's J6 pin 4?)\n",
+                          (unsigned long)(seek_timing::MODEL_TIMEOUT_MS / 1000));
+    }
 }
 
 // The loopback test (console `U`): with a jumper from GPIO 0 (TX) to GPIO 1
-// (RX), read back what the link sends for a second and check it. GPIO 1 is
-// a UART input only while the test runs, with a pull-up so that without the
-// jumper it reads idle instead of noise; afterwards it goes back as it was.
-// Polled on every loop pass, so core 0 never waits on it and the 32-byte RX
-// FIFO (2.8 ms at 115200 baud) can't overflow.
+// (RX), read back for a second what the link sends ($HDA and $HDE), plus one
+// $HDM the test sends itself, as the synth would, so both directions'
+// parsers are checked. Polled on every loop pass, so core 0 never waits on
+// it and the 32-byte RX FIFO (2.8 ms at 115200 baud) can't overflow.
 constexpr uint32_t LOOPBACK_MS = 1000;  // five heartbeats
 static struct {
     enum class Phase : uint8_t { Off, Starting, Listening, Finishing } phase = Phase::Off;
     uint32_t until_ms = 0;
     uint32_t sent_before = 0;
+    uint32_t head_sent_before = 0;
     uint32_t bytes = 0;
     uint32_t errors = 0;  // framing, parity, break or overrun
-    activity_link::Receiver receiver;
+    uint32_t valid = 0, head_valid = 0, rejected = 0;
     activity_link::Fields last;
-    // GPIO 1 as it was before the test.
-    gpio_function_t function = GPIO_FUNC_NULL;
-    bool pulled_up = false;
-    bool pulled_down = false;
+    LineAssembler rx;
+    // The $HDM the test sends (longer than the TX FIFO, so a piece at a time),
+    // and whether it came back.
+    char model_line[SENTENCE_MAX_LINE + 4];
+    size_t model_len = 0, model_sent = 0;
+    bool model_back = false, model_wrong = false;
 } g_loopback;
+
+static bool loopbackSending() {
+    return g_loopback.phase != decltype(g_loopback)::Phase::Off && g_loopback.model_sent < g_loopback.model_len;
+}
 
 static void startLoopback() {
     if (g_loopback.phase != decltype(g_loopback)::Phase::Off) return;
@@ -649,14 +768,42 @@ static void startLoopback() {
         Serial.println("# loopback: the link is off (L turns it on)");
         return;
     }
-    g_loopback.function = gpio_get_function(cfg::PIN_LINK_RX);
-    g_loopback.pulled_up = gpio_is_pulled_up(cfg::PIN_LINK_RX);
-    g_loopback.pulled_down = gpio_is_pulled_down(cfg::PIN_LINK_RX);
-    gpio_set_pulls(cfg::PIN_LINK_RX, true, false);
-    gpio_set_function(cfg::PIN_LINK_RX, GPIO_FUNC_UART);
     g_loopback.phase = decltype(g_loopback)::Phase::Starting;
     Serial.printf("# loopback: reading GPIO %u for %lu ms (needs a jumper from GPIO %u)\n",
                   unsigned(cfg::PIN_LINK_RX), (unsigned long)LOOPBACK_MS, unsigned(cfg::PIN_LINK_TX));
+}
+
+// The voice97 preset, as the synth would send it.
+static size_t loopbackModelLine(char* out, size_t size) {
+    DriveParams p;
+    drivePreset("voice97", p);
+    SeekModel m = seekModelOf(p);
+    char body[SENTENCE_MAX_LINE];
+    if (!formatModelBody(&m, body, sizeof body)) return 0;
+    return formatSentence(out, size, body);
+}
+
+static void loopbackLine(const char* line, size_t len) {
+    activity_link::Fields f;
+    activity_link::HeadTarget t;
+    SeekModel m;
+    bool present = false;
+    if (activity_link::parseLine(line, len, f)) {
+        ++g_loopback.valid;
+        g_loopback.last = f;
+    } else if (activity_link::parseHeadLine(line, len, t)) {
+        ++g_loopback.head_valid;
+    } else if (parseModelSentence(line, len, m, present)) {
+        // Back as it went: the same sentence, formatted again from what was read.
+        char body[SENTENCE_MAX_LINE], again[SENTENCE_MAX_LINE + 4];
+        size_t n = formatModelBody(present ? &m : nullptr, body, sizeof body);
+        size_t k = n ? formatSentence(again, sizeof again, body) : 0;
+        bool same = k == g_loopback.model_len && memcmp(again, g_loopback.model_line, k) == 0;
+        if (same && !g_loopback.model_back) g_loopback.model_back = true;
+        else g_loopback.model_wrong = true;
+    } else {
+        ++g_loopback.rejected;
+    }
 }
 
 // Reads what has arrived, without waiting.
@@ -669,9 +816,19 @@ static void drainLoopback() {
             ++g_loopback.errors;
             continue;
         }
-        activity_link::Fields f;
-        if (g_loopback.receiver.feed(char(dr & 0xFF), f)) g_loopback.last = f;
+        switch (g_loopback.rx.feed(char(dr & 0xFF))) {
+            case LineAssembler::Result::Line: loopbackLine(g_loopback.rx.line(), g_loopback.rx.length()); break;
+            case LineAssembler::Result::Dropped: ++g_loopback.rejected; break;
+            default: break;
+        }
     }
+}
+
+// Sends what fits of the test's $HDM, without waiting.
+static void feedLoopbackModel() {
+    uart_hw_t* hw = uart_get_hw(uart0);
+    while (g_loopback.model_sent < g_loopback.model_len && !(hw->fr & UART_UARTFR_TXFF_BITS))
+        hw->dr = uint8_t(g_loopback.model_line[g_loopback.model_sent++]);
 }
 
 static void serviceLoopback() {
@@ -683,19 +840,24 @@ static void serviceLoopback() {
         case Phase::Off: return;
         case Phase::Starting:
             // Between sentences, so listening starts at the beginning of one.
-            // Resetting the UART then (nothing is being sent) clears what it
-            // received before GPIO 1 was its input: breaks from an unconnected
-            // input fill the FIFO, and the overrun that follows marks the next
-            // character even after the FIFO is drained and the errors cleared.
+            // Resetting the UART then (nothing is being sent) clears anything
+            // half received and any error left from before.
             if (sending) return;
             uart_init(uart0, cfg::LINK_BAUD);
-            g_loopback.receiver.reset();
+            g_loopback.rx = LineAssembler();
             g_loopback.bytes = g_loopback.errors = 0;
+            g_loopback.valid = g_loopback.head_valid = g_loopback.rejected = 0;
+            g_loopback.model_back = g_loopback.model_wrong = false;
+            g_loopback.model_len = loopbackModelLine(g_loopback.model_line, sizeof g_loopback.model_line);
+            g_loopback.model_sent = 0;
             g_loopback.sent_before = g_link.count();
+            g_loopback.head_sent_before = g_head.count();
             g_loopback.until_ms = now + LOOPBACK_MS;
             g_loopback.phase = Phase::Listening;
+            feedLoopbackModel();  // first, before the link's next sentence
             return;
         case Phase::Listening:
+            feedLoopbackModel();
             drainLoopback();
             if (int32_t(now - g_loopback.until_ms) >= 0) g_loopback.phase = Phase::Finishing;
             return;
@@ -706,27 +868,48 @@ static void serviceLoopback() {
     }
 
     uint32_t sent = g_link.count() - g_loopback.sent_before;
-    uint32_t valid = g_loopback.receiver.valid();
-    uint32_t rejected = g_loopback.receiver.rejected();
-    bool last_matches = valid && g_loopback.last == g_link.last();
-    const char* result = g_loopback.bytes == 0                                         ? "no-data"
-                         : (valid == sent && !rejected && !g_loopback.errors && last_matches) ? "pass"
-                                                                                       : "fail";
+    uint32_t head_sent = g_head.count() - g_loopback.head_sent_before;
+    bool last_matches = g_loopback.valid && g_loopback.last == g_link.last();
+    const char* model = g_loopback.model_wrong ? "bad" : g_loopback.model_back ? "ok" : "missing";
+    bool pass = g_loopback.valid == sent && g_loopback.head_valid == head_sent && !g_loopback.rejected &&
+                !g_loopback.errors && last_matches && g_loopback.model_back && !g_loopback.model_wrong;
+    const char* result = g_loopback.bytes == 0 ? "no-data" : pass ? "pass" : "fail";
     char last[activity_link::SENTENCE_MAX] = "-";
-    if (valid) {
+    if (g_loopback.valid) {
         size_t n = activity_link::formatSentence(g_loopback.last, last, sizeof last);
         if (n >= 2) last[n - 2] = '\0';  // without the \r\n
     }
-    Serial.printf("LOOPBACK %s sent=%lu valid=%lu rejected=%lu errors=%lu bytes=%lu last=%s\n", result,
-                  (unsigned long)sent, (unsigned long)valid, (unsigned long)rejected,
-                  (unsigned long)g_loopback.errors, (unsigned long)g_loopback.bytes, last);
+    Serial.printf("LOOPBACK %s sent=%lu valid=%lu rejected=%lu errors=%lu bytes=%lu last=%s head_sent=%lu "
+                  "head_valid=%lu model=%s\n",
+                  result, (unsigned long)sent, (unsigned long)g_loopback.valid, (unsigned long)g_loopback.rejected,
+                  (unsigned long)g_loopback.errors, (unsigned long)g_loopback.bytes, last, (unsigned long)head_sent,
+                  (unsigned long)g_loopback.head_valid, model);
     if (g_loopback.bytes == 0)
         Serial.printf("# loopback: nothing arrived; is GPIO %u jumpered to GPIO %u?\n", unsigned(cfg::PIN_LINK_TX),
                       unsigned(cfg::PIN_LINK_RX));
-
-    gpio_set_function(cfg::PIN_LINK_RX, g_loopback.function);
-    gpio_set_pulls(cfg::PIN_LINK_RX, g_loopback.pulled_up, g_loopback.pulled_down);
     g_loopback.phase = Phase::Off;
+}
+
+// The synth's side of the link: $HDM lines, read on every loop pass (an $HDM
+// is about 45 bytes, more than the RX FIFO holds; one lost now and then
+// doesn't matter, the next comes 2 s later). The loopback test reads the
+// FIFO itself while it runs.
+static void serviceLinkRx() {
+    if (g_loopback.phase != decltype(g_loopback)::Phase::Off) return;
+    uart_hw_t* hw = uart_get_hw(uart0);
+    uint32_t now = millis();
+    while (!(hw->fr & UART_UARTFR_RXFE_BITS)) {
+        uint32_t dr = hw->dr;
+        if (dr & (UART_UARTDR_FE_BITS | UART_UARTDR_PE_BITS | UART_UARTDR_BE_BITS | UART_UARTDR_OE_BITS)) {
+            ++g_link_rx_errors;
+            continue;
+        }
+        switch (g_link_rx.feed(char(dr & 0xFF))) {
+            case LineAssembler::Result::Line: g_synth.onLine(g_link_rx.line(), g_link_rx.length(), now); break;
+            case LineAssembler::Result::Dropped: g_synth.onDropped(); break;
+            default: break;
+        }
+    }
 }
 
 // Console `V`: the drive goes silent (core 1's stayAbsent) until the adapter,
@@ -791,8 +974,11 @@ static void noteActivity(const TraceEvent& e) {
         g_last_command.lba = e.pins;
         g_last_command.count = e.extra >> 8;
         activity_link::Op op = activity_link::opOf(command);
-        if (op != activity_link::Op::None) g_link_op = op;
         bool seek_only = (command >= 0x10 && command <= 0x1F) || (command >= 0x70 && command <= 0x7F);
+        if (op != activity_link::Op::None)
+            g_link_op = op;  // its head target goes from serveFetches(), with its first sector
+        else
+            postHeadTarget(e.pins, seek_only ? 0 : (e.extra >> 8), op, time_us_64());  // verify or seek
         g_activity.onCommand(e.time_us, e.pins, seek_only ? 0 : (e.extra >> 8));
     } else if (e.kind == TraceKind::CommandEnd) {
         g_activity.onCommandEnd(e.time_us);
@@ -805,14 +991,47 @@ static struct {
     bool store = false, ok = false;
 } g_last_fetch;
 
+// Results waiting for their time (seek timing), oldest first. Core 1 has
+// one fetch out at a time, so a few are plenty; with timing off each goes at
+// once.
+struct HeldResult {
+    FetchResult result;
+    uint64_t ready_us;
+};
+constexpr size_t HELD_MAX = 4;
+static HeldResult g_held[HELD_MAX];
+static size_t g_held_first = 0, g_held_count = 0;
+
+static void releaseHeld() {
+    if (!g_held_count) return;
+    uint64_t now = time_us_64();
+    while (g_held_count && g_held[g_held_first].ready_us <= now) {
+        while (!g_mailbox.postResult(g_held[g_held_first].result)) {}
+        g_held_first = (g_held_first + 1) % HELD_MAX;
+        --g_held_count;
+    }
+}
+
 static void serveFetches() {
+    releaseHeld();
     ata::Fetch fetch;
-    while (g_mailbox.takeRequest(fetch)) {
+    while (g_held_count < HELD_MAX && g_mailbox.takeRequest(fetch)) {
+        uint64_t now = time_us_64();  // the command's time starts before the card's
         bool ok = fetch.store ? g_disk->write(fetch.lba, fetch.buffer)
                   : fetch.flush ? true  // FLUSH CACHE: nothing to move
                                 : g_disk->read(fetch.lba, fetch.buffer);
         if (ok && fetch.flush) ok = g_disk->flush();
-        while (!g_mailbox.postResult(FetchResult{fetch.id, ok})) {}
+        uint64_t ready = now;
+        if (fetch.store || !fetch.flush) {  // a sector read or written
+            seek_timing::Release r = g_seek.onSector(now, fetch.command_lba, fetch.lba);
+            ready = r.ready_us;
+            if (r.first)
+                postHeadTarget(fetch.command_lba, fetch.command_sectors,
+                               fetch.store ? activity_link::Op::Write : activity_link::Op::Read, r.seek_start_us);
+        }
+        g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok}, ready};
+        ++g_held_count;
+        releaseHeld();
         g_last_fetch.count++;
         g_last_fetch.id = fetch.id;
         g_last_fetch.lba = fetch.lba;
@@ -995,6 +1214,23 @@ static void printStats() {
         if (n >= 2) last[n - 2] = '\0';  // without the \r\n
     }
     Serial.printf(" link=%d link_sent=%lu link_last=%s", (int)g_link_on, (unsigned long)g_link.count(), last);
+    char head[activity_link::HEAD_SENTENCE_MAX] = "-";
+    if (g_head.count()) {
+        size_t n = activity_link::formatHeadSentence(g_head.last(), head, sizeof head);
+        if (n >= 2) head[n - 2] = '\0';
+    }
+    Serial.printf(" head_sent=%lu head_replaced=%lu head_last=%s", (unsigned long)g_head.count(),
+                  (unsigned long)g_head.replaced(), head);
+    Serial.printf(" hdm_valid=%lu hdm_rejected=%lu link_rx_errors=%lu", (unsigned long)g_synth.valid(),
+                  (unsigned long)g_synth.rejected(), (unsigned long)g_link_rx_errors);
+    const SeekModel* model = g_seek.active() ? &g_seek.model() : nullptr;
+    uint32_t commands = g_seek.commands();
+    Serial.printf(" seek_timing=%s seek_active=%d seek_rpm=%ld seek_actuator=%s", seek_timing::settingName(g_config.seek_timing),
+                  int(model != nullptr), model ? lroundf(model->rpm) : 0L, model ? seek_timing::actuatorName(*model) : "-");
+    Serial.printf(" seek_commands=%lu seek_held=%lu seek_avg_us=%lu seek_max_us=%lu seek_total_us=%llu seek_capped=%lu",
+                  (unsigned long)commands, (unsigned long)g_seek.held(),
+                  (unsigned long)(commands ? g_seek.totalUs() / commands : 0), (unsigned long)g_seek.maxUs(),
+                  (unsigned long long)g_seek.totalUs(), (unsigned long)g_seek.capped());
 #endif
     Serial.print("\n");
 }
@@ -1086,6 +1322,7 @@ static void handleConsole() {
                                "I create SD image, K create bench image, "
                                "J serve the bench image or back (restarts), T serve the test disk or back (restarts), "
                                "L activity link, U link loopback test, V drive gone/back, W write-behind, O observer full/spot checks, "
+                               "H seek timing on/off, "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -1122,6 +1359,11 @@ static void handleConsole() {
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 'U': startLoopback(); break;  // the link's loopback test
             case 'V': setAbsent(!g_absent.load(), ""); break;  // the drive gone from the bus, or back
+            case 'H':  // seek timing off or on, until a restart (to benchmark)
+                g_seek_on = !g_seek_on;
+                Serial.printf("SEEKTIMING %s seek_timing=%s\n", g_seek_on ? "on" : "off",
+                              seek_timing::settingName(g_config.seek_timing));
+                break;
             case 'L':  // the activity link on or off
                 g_link_on = !g_link_on;
                 Serial.printf("LINK %s\n", g_link_on ? "on" : "off");
@@ -1172,7 +1414,7 @@ static void handleConsole() {
             case 'E':  // set one setting in HDDSYNTH.INI: key = value, then Enter
                 edit_line = true;
                 edit_len = 0;
-                Serial.println("# type key = value (image or mode), then Enter");
+                Serial.println("# type key = value (e.g. image = GAMES.IMG or seek_timing = voice97), then Enter");
                 break;
             case '!':  // restart, to apply HDDSYNTH.INI (keeps a `J` or `T` choice)
                 Serial.println("# restarting");
@@ -1233,6 +1475,7 @@ void setup() {
     gpio_set_dir(cfg::PIN_BOARD_LED, true);
     beginLink();
     chooseDisk();
+    beginSeekTiming();
 #endif
     printReady();
 }
@@ -1247,6 +1490,7 @@ void loop() {
     bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0, serveFetches);
     updateLed();
     serviceLoopback();
+    serviceLinkRx();
     serviceAbsence();
     checkStuck();
     sd_card::serviceMedia();
@@ -1258,6 +1502,7 @@ void loop() {
     if (now_us - g_activity_checked_us >= 1000) {
         g_activity_checked_us = now_us;
         if (g_activity.update(now_us)) g_activity_unprinted = true;
+        g_seek.setModel(seekModel(millis()));
         serviceLink();
     }
     if (g_activity_unprinted) {

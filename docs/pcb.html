@@ -542,7 +542,7 @@ ul { margin: 0; padding-left: 1.2em; display: grid; gap: 4px; }
       ["pwr", "5V_LINK", "J3 pin 1", "", "D5 anode, into VB", "5 V from the synth (Power). The Mk5's J6 pin 1 is 3.3 V: leave it unconnected until the synth supplies 5 V there"],
       ["gnd", "GND", "J3 pin 2", "", "GND", ""],
       ["link", "LINK_TX", "U1 pin 77 (GP0, UART0 TX)", "R3 1 kΩ", "J3 pin 3", "To the synth's GP25 (UART1 RX)"],
-      ["link", "LINK_RX", "U1 pin 78 (GP1, UART0 RX)", "R4 1 kΩ", "J3 pin 4", "From the synth's GP24; reserved, unused by firmware"],
+      ["link", "LINK_RX", "U1 pin 78 (GP1, UART0 RX)", "R4 1 kΩ", "J3 pin 4", "From the synth's GP24: its $HDM (firmware 0.19.0)"],
     ]},
     { id: "b-led", title: "LEDs", g: "led", intro: "GP25 is the drive's activity light (core 0's updateLed()).", rows: [
       ["led", "LED", "U1 pin 26 (GP25)", "R5 470 Ω", "D3 anode → cathode to GND", "Lit while a command runs, at least 25 ms"],

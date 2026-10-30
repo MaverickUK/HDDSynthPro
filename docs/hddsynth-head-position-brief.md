@@ -1,5 +1,7 @@
 # Brief: head positions for modelled drives, and authentic seek timing
 
+> **Built in HDDSynthPro 0.19.0** ([activity-link.md](activity-link.md#protocol-version-2-head-positions-and-the-synths-model)). Where it differs from this brief: a command that carries straight on from the last one's next sector doesn't seek or wait for the platter (a drive's read-ahead), and `SEEK` doesn't move the modelled head yet. Not yet run on the rig or with the synth.
+
 For Claude Code working in **HDDSynthPro**. Read this repo's CLAUDE.md first; everything below keeps its rules (core 1 never touches the UART or SD; core 0 never waits; pure, host-tested modules; SemVer and CHANGELOG with every change).
 
 ## Background

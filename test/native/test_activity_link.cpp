@@ -201,7 +201,128 @@ TEST(test_link_receiver_line_length_limit) {
     CHECK_EQ(r.rejected(), 1u);
 }
 
+// ---- Version 2: $HDE --------------------------------------------------------
+
+using activity_link::HeadPacer;
+using activity_link::HeadTarget;
+
+static std::string head(uint16_t pos, Op op, uint32_t sectors) {
+    char buf[activity_link::HEAD_SENTENCE_MAX];
+    HeadTarget t;
+    t.pos = pos;
+    t.op = op;
+    t.sectors = sectors;
+    size_t n = activity_link::formatHeadSentence(t, buf, sizeof buf);
+    return std::string(buf, n);
+}
+
+TEST(test_head_known_answers) {
+    // docs/activity-link.md, and HDD Synth's receiver.
+    CHECK_STR(head(0, Op::Read, 8), "$HDE,2,0,R,8*21\r\n");
+    CHECK_STR(head(32768, Op::Write, 128), "$HDE,2,32768,W,128*2F\r\n");
+    CHECK_STR(head(65535, Op::Read, 1), "$HDE,2,65535,R,1*28\r\n");
+    CHECK(head(65535, Op::Write, 256).size() < activity_link::HEAD_SENTENCE_MAX);
+    char small[10];
+    CHECK_EQ(activity_link::formatHeadSentence(HeadTarget{}, small, sizeof small), size_t(0));
+}
+
+TEST(test_head_position) {
+    const uint32_t total = 131072;  // the generated disk
+    CHECK_EQ(activity_link::headPosition(0, total), 0);
+    CHECK_EQ(activity_link::headPosition(total - 1, total), 65535);
+    CHECK_EQ(activity_link::headPosition((total - 1) / 2, total), 32767);
+    CHECK_EQ(activity_link::headPosition(total, total), 65535);  // past the end: clamped
+    // A large disk: the maths is 64-bit.
+    CHECK_EQ(activity_link::headPosition(0x0FFFFFFE, 0x0FFFFFFF), 65535);
+    CHECK_EQ(activity_link::headPosition(0x07FFFFFF, 0x0FFFFFFF), 32767);
+    CHECK_EQ(activity_link::headPosition(5, 1), 0);
+}
+
+TEST(test_head_parse) {
+    HeadTarget t;
+    std::string line = head(32768, Op::Write, 128);
+    CHECK(activity_link::parseHeadLine(line.data(), line.size() - 2, t));
+    CHECK(t.pos == 32768 && t.op == Op::Write && t.sectors == 128);
+    const char* lower = "$HDE,2,0,R,8*21";
+    CHECK(activity_link::parseHeadLine(lower, std::strlen(lower), t));
+    std::string later = withChecksum("HDE,3,10,-,0,extra");
+    CHECK(activity_link::parseHeadLine(later.data(), later.size(), t));
+    CHECK(t.pos == 10 && t.op == Op::None);
+    for (const char* body : {"HDE,1,0,R,8", "HDE,2,65536,R,8", "HDE,2,0,X,8", "HDE,2,0,R", "HDE,2,,R,8",
+                             "HDA,2,0,R,8"}) {
+        std::string bad = withChecksum(body);
+        CHECK(!activity_link::parseHeadLine(bad.data(), bad.size(), t));
+    }
+    const char* bad_sum = "$HDE,2,0,R,8*22";
+    CHECK(!activity_link::parseHeadLine(bad_sum, std::strlen(bad_sum), t));
+    Fields f;
+    CHECK(!activity_link::parseLine(lower, std::strlen(lower), f));  // not an $HDA
+}
+
+static HeadTarget target(uint16_t pos) {
+    HeadTarget t;
+    t.pos = pos;
+    t.op = Op::Read;
+    t.sectors = 8;
+    return t;
+}
+
+TEST(test_head_pacer_keeps_the_latest) {
+    HeadPacer p(2000);
+    CHECK(!p.due(0));
+    p.post(target(1), 1000);
+    CHECK(p.due(1000));
+    p.sent(1000);
+    CHECK_EQ(p.count(), 1u);
+    // Three more within 2 ms: only the last goes, 2 ms after the first.
+    p.post(target(2), 1200);
+    p.post(target(3), 1500);
+    p.post(target(4), 1800);
+    CHECK(!p.due(2999));
+    CHECK(p.due(3000));
+    CHECK_EQ(p.target().pos, 4);
+    p.sent(3000);
+    CHECK_EQ(p.replaced(), 2u);
+    CHECK_EQ(p.last().pos, 4);
+    CHECK(!p.due(10000));  // nothing new
+}
+
+TEST(test_head_pacer_waits_for_the_seek) {
+    HeadPacer p(2000);
+    p.post(target(7), 50000);  // the head starts moving at 50 ms
+    CHECK(!p.due(49999));
+    CHECK(p.due(50000));
+}
+
+TEST(test_head_waits_for_a_due_activity_sentence) {
+    activity_link::Sender a(200);
+    HeadPacer h(2000);
+    Fields idle;
+    // Nothing sent yet: $HDA is due, and goes first.
+    h.post(target(9), 0);
+    CHECK(activity_link::nextSentence(a, idle, 0, h, 0) == activity_link::Next::Activity);
+    a.sent(idle, 0);
+    CHECK(activity_link::nextSentence(a, idle, 1, h, 1000) == activity_link::Next::Head);
+    h.sent(1000);
+    CHECK(activity_link::nextSentence(a, idle, 2, h, 2000) == activity_link::Next::Nothing);
+    // A change and a target together: the change first, the target in the gap after.
+    Fields busy = idle;
+    busy.busy = true;
+    h.post(target(10), 3000);
+    CHECK(activity_link::nextSentence(a, busy, 5, h, 5000) == activity_link::Next::Activity);
+    a.sent(busy, 5);
+    CHECK(activity_link::nextSentence(a, busy, 7, h, 7000) == activity_link::Next::Head);
+    // The heartbeat still goes on time during a stream of targets.
+    CHECK(activity_link::nextSentence(a, busy, 205, h, 205000) == activity_link::Next::Activity);
+}
+
 void runActivityLinkTests() {
+    RUN(test_head_known_answers);
+    RUN(test_head_position);
+    RUN(test_head_parse);
+    RUN(test_head_pacer_keeps_the_latest);
+    RUN(test_head_pacer_waits_for_the_seek);
+    RUN(test_head_waits_for_a_due_activity_sentence);
     RUN(test_link_parse_known_answers);
     RUN(test_link_parse_rejects);
     RUN(test_link_parse_accepts_later_versions);

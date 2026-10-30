@@ -307,6 +307,26 @@ TEST(test_intrq_masked_by_nien_and_device1) {
     CHECK(d.intrq());
 }
 
+// ISA cards have no pull-down on INTRQ: the drive drives it low between
+// interrupts while it owns the line (selected, nIEN clear), or the line floats
+// high and the BIOS's edge-triggered IRQ 14 never fires (an ICL 386, 0.19.1).
+TEST(test_intrq_driven_low_while_selected) {
+    Device d(INFO);
+    VirtualHost h{d};
+    CHECK(d.intrqDriven());  // from power-on: device 0, nIEN clear
+    CHECK(!d.intrq());       // so driven low
+    d.write(Reg::StatusCommand, CMD_EXECUTE_DEVICE_DIAGNOSTIC);
+    CHECK(d.intrqDriven());
+    CHECK(d.intrq());        // the rising edge the BIOS waits for
+    d.write(Reg::AltStatusDevCtrl, DC_NIEN);
+    CHECK(!d.intrqDriven()); // masked: released
+    d.write(Reg::AltStatusDevCtrl, 0);
+    h.select(1);
+    CHECK(!d.intrqDriven()); // device 1's line, not ours
+    h.select(0);
+    CHECK(d.intrqDriven());
+}
+
 TEST(test_intrq_cleared_by_new_command) {
     Device d(INFO);
     d.write(Reg::StatusCommand, 0xFF);
@@ -1852,6 +1872,7 @@ void runAtaDeviceTests() {
     RUN(test_command_ignored_while_busy);
     RUN(test_intrq_cleared_by_status_not_alt_status);
     RUN(test_intrq_masked_by_nien_and_device1);
+    RUN(test_intrq_driven_low_while_selected);
     RUN(test_intrq_cleared_by_new_command);
     RUN(test_virtual_host_probe);
     RUN(test_ns1081_detection);

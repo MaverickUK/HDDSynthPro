@@ -2,7 +2,7 @@
 
 HDDSynthPro knows exactly what the emulated drive is doing; the HDD Synth only sees an activity LED. This link sends the drive's activity to an HDD Synth over a one-way UART, so the synth can play a different sound for sustained sequential transfers than for random access.
 
-> **Next: protocol version 2.** Head positions (`$HDE`) for the HDD Synth's modelled drives, and authentic seek timing (`seek_timing`, with the model from the synth's `$HDM` on the reply wire): see [hddsynth-head-position-brief.md](hddsynth-head-position-brief.md). The HDD Synth side is in its firmware v0.21.0.
+> **Protocol version 2 (0.19.0):** head positions (`$HDE`) for the HDD Synth's modelled drives, and authentic seek timing (`seek_timing`, with the model from the synth's `$HDM` on the reply wire): [below](#protocol-version-2-head-positions-and-the-synths-model), from [hddsynth-head-position-brief.md](hddsynth-head-position-brief.md). The HDD Synth side is in its firmware v0.21.0. Host-tested; not yet run on the rig or with the synth.
 
 Status: **the HDDSynthPro side is built (0.9.0)** and sends on the rig, with a loopback test (0.10.1): fit a jumper from GPIO 0 to GPIO 1 (EXT1 pins 4 and 5), then console `U`, or `pytest -m link`. Not yet run with the jumper; with the UART's internal loopback it passes. Still to do: the HDD Synth side, briefed in [hddsynth-activity-link-brief.md](hddsynth-activity-link-brief.md); its receiver can copy `activity_link::Receiver`.
 
@@ -44,7 +44,7 @@ Ground and one data wire. **Never connect the two boards' 3.3 V pins:** each is 
 |---|---|---|
 | GPIO 0 (UART0 TX), EXT1 pin 4 | 1 kΩ in series | pin 3, GP25 (UART1 RX; the OLED's SCL) |
 | GND, EXT1 pin 2 | | pin 2, GND |
-| GPIO 1 (UART0 RX), EXT1 pin 5 | reserved, not connected | pin 4, GP24 (UART1 TX; the OLED's SDA) |
+| GPIO 1 (UART0 RX), EXT1 pin 5 | 1 kΩ in series; only for `seek_timing = synth` | pin 4, GP24 (UART1 TX; the OLED's SDA) |
 | (not connected) | | pin 1, 3.3 V |
 
 - **Power over the link (HDDSynthPro PCB, rev 0.3 on):** the board's J3 pin 1 takes **5 V** through a Schottky diode into its supply, so a future HDD Synth can power both boards from one supply. The Mk5's J6 pin 1 carries 3.3 V, so with the Mk5 leave pin 1 unconnected (the BB48 has no such input at all).
@@ -87,7 +87,64 @@ Rules:
 - A receiver treats the link as **present** after one valid sentence, and **lost** after 1 s without one. When lost it falls back to its own activity input.
 - Bandwidth: a sentence is 20 bytes (about 1.7 ms on the wire). Even random 4 KB reads at ~76 commands a second change busy far less often than that, because busy holds for 25 ms; the link stays well under its 11.5 KB/s.
 
-## HDDSynthPro side: the plan
+## Protocol, version 2: head positions and the synth's model
+
+Added in 0.19.0 for the HDD Synth's modelled drives (its v0.20.0 on), which synthesise the drive with a virtual head. `$HDA` stays version 1, unchanged, and a synth older than v0.21.0 ignores the new sentences.
+
+### `$HDE`: where the head goes (HDDSynthPro → synth)
+
+```
+$HDE,2,<pos>,<op>,<sectors>*<checksum>\r\n
+```
+
+| Field | Value |
+|---|---|
+| `2` | Protocol version |
+| `pos` | The command's first LBA as a fraction of the disk: `lba * 65535 / (total_sectors - 1)`, 0-65535. The synth places it on the stroke itself (zoned recording puts LBA 0 at the outer edge) |
+| `op` | `R`, `W` or `-` (a verify or seek), as `$HDA`'s |
+| `sectors` | The command's sector count |
+| checksum | As `$HDA`'s |
+
+Known answers: `$HDE,2,0,R,8*21`, `$HDE,2,32768,W,128*2F`, `$HDE,2,65535,R,1*28`.
+
+- One for each media command as it starts: a read or write when core 0 gets its first sector (`Fetch` carries the command's first LBA and count), a verify or seek from its trace event. Always on with the link.
+- At most one every 2 ms (`cfg::LINK_HEAD_GAP_US`, about its time on the wire): faster commands keep only the newest target (`s`: `head_replaced`). A due `$HDA` (a change, or the 200 ms heartbeat) goes first, and `$HDE` takes the gaps (`activity_link::nextSentence`).
+- With seek timing on, each target goes out when the modelled seek starts, not when the command arrives, so the synth's head moves when HDDSynthPro's does.
+- `s` shows `head_sent`, `head_replaced` and `head_last`.
+
+### `$HDM`: the synth's model (synth → HDDSynthPro)
+
+On the link's other wire (the synth's J6 pin 4, GP24, into GPIO 1), every 2 s and at once when its pack changes:
+
+```
+$HDM,2,<V|S>,<rpm>,<cylinders>,<fullStroke ms x10>,<track ms x10>,<settleDamp x100>,<step ms x10>,<stepRamp x100>,<zoned 0|1>*hh
+$HDM,2,-*hh          a recorded pack: no model
+```
+
+- GPIO 1 is UART0 RX from start-up, pulled up inside (a UART line idles high, and only pull-downs are forbidden), so unconnected it reads idle. Core 0 reads the RX FIFO on every loop pass into a `LineAssembler` (from HDD Synth's `sentence.*`) and parses with HDD Synth's own `parseModelSentence()` (`drive_timing.*`). A lost sentence doesn't matter: the next comes 2 s later.
+- Bad lines are counted (`s`: `hdm_valid`, `hdm_rejected`, `link_rx_errors`), never acted on. After 5 s without a valid `$HDM` the model is forgotten.
+- Only `seek_timing = synth` needs it; `$HDE` and the presets work with TX and GND alone.
+
+### Authentic seek timing
+
+`seek_timing` in `HDDSYNTH.INI` ([settings.md](settings.md)): `off` (default), `synth`, or a preset (`stepper85`, `voice91`, `voice97`, `fdb05`, the synth's own). Console `H` switches it off and on until a restart.
+
+For each sector core 0 reads or writes, `seek_timing::Scheduler` says when its result may go to core 1; until then the drive shows BSY, as a real drive does during a seek (IORDY is never held for it). Read-ahead and write-behind work underneath as before: the timing only decides when each sector is released. The same holds for writes, and for DMA, whose bursts wait for each sector's result.
+
+```
+x       = lbaToStroke(lba / total_sectors, zoned)              where the head must go
+start   = max(now, head_free_at)                                the head must be free
+arrive  = start + seekTimeUs(head_x, x)                         0 on the same track
+wait    = rotationalWaitUs(arrive, lba, 63)                     the sector coming round
+ready_k = arrive + wait + transferUs(k + 1, 63)                 sector k under the head
+```
+
+- One free-running microsecond clock; the platter's angle is that clock modulo a revolution. 63 sectors a track (identify's default geometry) set the rotational and transfer times.
+- **Reading straight on:** a command that starts at the sector after the last one's doesn't seek or wait for the platter: it carries on from where the last ended, with up to a revolution read ahead if the host was slow to ask, as a drive's read-ahead or write cache allows. Without this a host whose next command comes a fraction of a millisecond after the last ended (DMA through the adapter) would wait nearly a whole turn every command, and sequential transfers would run at half the media rate.
+- No command is held more than 1 s (`seek_capped` in `s`). The slowest preset, `stepper85`, takes 528 ms for a full stroke.
+- Not modelled yet: `SEEK` commands don't move the modelled head (no fetch reaches core 0 for them), and a write's first sector is timed from when it arrives, after the host has sent it.
+
+## HDDSynthPro side: the plan (version 1)
 
 All on core 0. Core 1 and the bus timing are untouched.
 

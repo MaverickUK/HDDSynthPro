@@ -12,6 +12,7 @@
 #include "core1_ram.h"
 #include "fetch_mailbox.h"
 #include "ide_bus.pio.h"
+#include "iordy_watchdog.pio.h"
 
 namespace ide_bus {
 
@@ -27,6 +28,10 @@ static_assert(cfg::PIN_CS0_N == cfg::PIN_DA0 + 3 && cfg::PIN_CS1_N == cfg::PIN_D
               "DA2-0, CS0#, CS1# must be consecutive");
 static constexpr unsigned REG_INDEX_SHIFT = bus::bitOf(cfg::PIN_DA0);
 static ata::Reg s_reg_for[32];
+// The upper half of each read's answer: which DD lines the bus program drives
+// (ide_bus.pio). All for the drive's own registers, none for anything else.
+static constexpr uint32_t DRIVE_DD = 0xFFFF0000u;
+static uint32_t s_drive_for[32];
 static std::atomic<uint32_t> s_data_delay_cycles{0};  // setDataReadDelay
 
 static unsigned regIndex(uint32_t sample) { return (sample >> REG_INDEX_SHIFT) & 31u; }
@@ -37,19 +42,20 @@ static constexpr uint32_t ACCESS_BITS = (31u << REG_INDEX_SHIFT) | bus::maskOf(c
                                         bus::maskOf(cfg::PIN_DIOW_N);
 static constexpr uint32_t DATA_READ = bus::maskOf(cfg::PIN_CS1_N) | bus::maskOf(cfg::PIN_DIOW_N);
 
-void begin() {
+void begin(bool isa) {
     for (unsigned i = 0; i < 32; ++i) {
         uint32_t sample = i << REG_INDEX_SHIFT;
         bus::Block block = bus::block(sample);
         s_reg_for[i] = ata::regFor(block == bus::Block::Command, block == bus::Block::Control,
                                    bus::address(sample));
+        s_drive_for[i] = s_reg_for[i] == ata::Reg::None ? 0 : DRIVE_DD;
     }
     for (unsigned pin = cfg::BUS_FIRST_PIN; pin <= cfg::BUS_LAST_PIN; ++pin) {
         if (pin == cfg::PIN_BOARD_LED) continue;
         gpio_init(pin);           // input until claimed below
         gpio_disable_pulls(pin);  // never internal pull-downs (RP2350 erratum E9)
     }
-    // INTRQ: SIO, output value high but released until asserted.
+    // INTRQ: SIO, released until the device drives it (updateIntrq).
     gpio_put(cfg::PIN_INTRQ, 1);
     gpio_set_dir(cfg::PIN_INTRQ, false);
 
@@ -71,8 +77,9 @@ void begin() {
     sm_config_set_sideset_pins(&c, cfg::PIN_IORDY);
     sm_config_set_jmp_pin(&c, cfg::PIN_DIOR_N);
     sm_config_set_out_shift(&c, true, false, 32);  // `out` takes the low bits first
+    sm_config_set_in_shift(&c, true, true, 32);    // autopush: a read's `in pins, 32` is its sample
     sm_config_set_mov_status(&c, STATUS_RX_LESSTHAN, 4);  // STATUS: room in the 4-deep RX FIFO
-    pio_sm_init(s_pio, s_sm, s_offset, &c);
+    pio_sm_init(s_pio, s_sm, s_offset + ide_bus_offset_idle, &c);  // `idle`, not the first instruction
 
     // DIOR# skips the 2-cycle input synchroniser, so DD is released sooner
     // after DIOR# rises: about 10 ns instead of 24 (ATA allows 30, t6z), which
@@ -81,6 +88,21 @@ void begin() {
     s_pio->input_sync_bypass |= 1u << (cfg::PIN_DIOR_N - pio_get_gpio_base(s_pio));
 
     pio_sm_set_enabled(s_pio, s_sm, true);
+
+    // The IORDY watchdog (iordy_watchdog.pio), in this block because it
+    // writes IORDY's direction too. Loaded whatever `isa` says, so nothing
+    // else lands in this block: the diagnostics' iordy_check would see DIOR#
+    // through the synchroniser bypass above and misjudge the host.
+    hard_assert(pio_can_add_program(s_pio, &iordy_watchdog_program));
+    uint watchdog_offset = pio_add_program(s_pio, &iordy_watchdog_program);
+    if (isa) {
+        uint sm = uint(pio_claim_unused_sm(s_pio, true));
+        pio_sm_config w = iordy_watchdog_program_get_default_config(watchdog_offset);
+        sm_config_set_jmp_pin(&w, cfg::PIN_IORDY);
+        sm_config_set_set_pins(&w, cfg::PIN_IORDY, 1);
+        pio_sm_init(s_pio, sm, watchdog_offset, &w);
+        pio_sm_set_enabled(s_pio, sm, true);
+    }
 }
 
 // Inlined into both callers: a call here costs every access its register
@@ -98,10 +120,10 @@ __attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32
         // The host waits until it is, so answer first and catch up after.
         uint32_t delay = s_data_delay_cycles.load(std::memory_order_relaxed);
         if (delay && reg == ata::Reg::Data) busy_wait_at_least_cycles(delay);
-        pio_sm_put(s_pio, s_sm, dev.peek(reg));
+        pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
         dev.consumeRead(reg);
     }
-    updateIntrq(dev.intrq());
+    updateIntrq(dev);
 }
 
 CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
@@ -120,10 +142,10 @@ __attribute__((noinline)) CORE1_RAM static void serveOther(ata::Device& dev, uin
         // first. Catching the device up can't change it: the block isn't
         // finished, so it's still DRQ.
         ata::Reg reg = s_reg_for[regIndex(sample)];
-        pio_sm_put(s_pio, s_sm, dev.peek(reg));
+        pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
         dev.consumeDataWords(served);
         dev.consumeRead(reg);
-        updateIntrq(dev.intrq());
+        updateIntrq(dev);
         return;
     }
     dev.consumeDataWords(served);  // a write: catch the device up first
@@ -161,11 +183,11 @@ CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailb
             serveOther(dev, sample, served);
             return true;
         }
-        pio_sm_put(s_pio, s_sm, next[served]);  // answer first, as serve() does
+        pio_sm_put(s_pio, s_sm, DRIVE_DD | next[served]);  // answer first, as serve() does
         if (served++ == 0) to_post = dev.pendingFetch(fetch) && fetch.id != posted_fetch;
     }
     dev.consumeDataWords(served);  // the block may be done: BSY for the next fetch
-    updateIntrq(dev.intrq());
+    updateIntrq(dev);
     return !reset_changed;
 }
 
@@ -176,7 +198,7 @@ void restart() {
     pio_sm_clear_fifos(s_pio, s_sm);
     pio_sm_restart(s_pio, s_sm);
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);  // release DD and IORDY
-    pio_sm_exec(s_pio, s_sm, pio_encode_jmp(s_offset));
+    pio_sm_exec(s_pio, s_sm, pio_encode_jmp(s_offset + ide_bus_offset_idle));
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
@@ -184,7 +206,7 @@ void stop() {
     pio_sm_set_enabled(s_pio, s_sm, false);
     pio_sm_clear_fifos(s_pio, s_sm);
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);  // release DD and IORDY
-    updateIntrq(false);
+    gpio_set_dir(cfg::PIN_INTRQ, false);                        // and INTRQ
 }
 
 void setDataReadDelay(uint32_t ns) {
@@ -192,6 +214,9 @@ void setDataReadDelay(uint32_t ns) {
                               std::memory_order_relaxed);
 }
 
-CORE1_RAM void updateIntrq(bool asserted) { gpio_set_dir(cfg::PIN_INTRQ, asserted); }
+CORE1_RAM void updateIntrq(const ata::Device& dev) {
+    gpio_put(cfg::PIN_INTRQ, dev.intrq());
+    gpio_set_dir(cfg::PIN_INTRQ, dev.intrqDriven());
+}
 
 }  // namespace ide_bus

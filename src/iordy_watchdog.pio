@@ -1,0 +1,38 @@
+; Drive build, HDDSYNTH.INI `isa = on`: releases IORDY when ide_bus has held
+; it low for about 23 us. ISA IDE cards select the drive from the address
+; alone, so a memory cycle or DRAM refresh whose address aliases 1F0h-1F7h
+; selects it too, and pass IORDY to IOCHRDY: ide_bus pulls IORDY low at the
+; chip select (as ATA's timing needs) and, with no strobe to end the access,
+; the cycle would stall for good (an ICL 386 froze, 0.21.0). A real access
+; never holds IORDY that long (core 1 answers within about 1 us), and the
+; longest gap the ICL's BIOS left between a status read and its data, with the
+; drive still selected, was 11 us. Once released, IORDY stays released until
+; ide_bus pulls it low again (its next `arm` or `read`): a stalled cycle ends
+; however slowly the host's pull-up raises the line, which a 60 ns release
+; (0.21.2) didn't allow.
+;
+; Runs in ide_bus's PIO block (iordy_watchdog.cpp), so both write the same pin
+; direction register: this program only ever writes 0 (release).
+;
+; Pin mapping:
+;   JMP_PIN  = GPIO28 (IORDY): high once released, by either program
+;   SET      = GPIO28, as a pin direction
+;   wait 0 gpio 28: ide_bus has pulled it low
+;
+; Timing: 16 x 32 passes of 9 cycles, 4,608 cycles: 23 us at 200 MHz
+; (host/tests/test_iordy_watchdog_sim.py).
+
+.pio_version 1
+.program iordy_watchdog
+.wrap_target
+top:
+    wait 0 gpio 28                  ; ide_bus has pulled IORDY low
+    set x, 15
+outer:
+    set y, 31
+hold:
+    jmp pin top                     ; released meanwhile: start over
+    jmp y-- hold            [7]
+    jmp x-- outer
+    set pindirs, 0                  ; held too long: release it
+.wrap

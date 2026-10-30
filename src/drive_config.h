@@ -9,6 +9,8 @@
 //   write_behind = on      # acknowledge a write while it's stored (faster)
 //   read_ahead = on        # fetch the next sector while the host reads this one
 //   activity_link = on     # tell an HDD Synth what the drive is doing
+//   seek_timing = off      # hold commands for as long as a modelled drive would
+//   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -19,6 +21,8 @@
 
 #include <cstddef>
 #include <cstdint>
+
+#include "seek_timing.h"
 
 namespace drive_config {
 
@@ -70,6 +74,12 @@ constexpr bool DEFAULT_DMA = false;
 constexpr bool DEFAULT_WRITE_BEHIND = true;
 constexpr bool DEFAULT_READ_AHEAD = true;
 constexpr bool DEFAULT_ACTIVITY_LINK = true;
+// `isa = on`: release IORDY when it has been held for about 23 us
+// (iordy_watchdog.pio). For ISA IDE cards that pass IORDY to the ISA bus's
+// IOCHRDY and select the drive from the address alone, so a memory cycle
+// whose address aliases 1F0h-1F7h would otherwise stall for good (an ICL 386,
+// 0.21.0). Off by default: ATA hosts never need it.
+constexpr bool DEFAULT_ISA = false;
 
 struct Config {
     char image[MAX_NAME + 1];
@@ -78,6 +88,8 @@ struct Config {
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
     bool read_ahead = DEFAULT_READ_AHEAD;      // see Device::setReadAhead
     bool activity_link = DEFAULT_ACTIVITY_LINK;
+    bool isa = DEFAULT_ISA;
+    ::seek_timing::Setting seek_timing;  // off by default
     char warnings[MAX_WARNINGS][MAX_WARNING];
     size_t warning_count = 0;  // may exceed MAX_WARNINGS: only the first ones are kept
 };

@@ -51,6 +51,7 @@ class Program:
     sideset_bits: int = 0      # including the enable bit when optional
     sideset_optional: bool = False
     sideset_pindirs: bool = False
+    offsets: dict[str, int] = field(default_factory=dict)  # public labels
 
 
 def assemble(pio_file: Path, pioasm: str, program: str | None = None) -> Program:
@@ -70,6 +71,7 @@ def assemble(pio_file: Path, pioasm: str, program: str | None = None) -> Program
     wrap_target = int(re.search(r"_wrap_target (\d+)", out).group(1))
     wrap = int(re.search(r"_wrap (\d+)", out).group(1))
     program = Program(instructions, wrap_target, wrap)
+    program.offsets = {name: int(n) for name, n in re.findall(r"#define \w+?_offset_(\w+) (\d+)u", out)}
     m = re.search(r"sm_config_set_sideset\(&c, (\d+), (true|false), (true|false)\)", out)
     if m:
         program.sideset_bits = int(m.group(1))
@@ -88,12 +90,16 @@ class PioSim:
     fifo_depth: int = 8          # 8 = RX (or TX) joined; the slice 1 program uses 4 each way
     tx_depth: int = 4
     bypass_mask: int = 0         # pins that skip the input synchroniser
+    autopush: bool = False       # push when 32 bits have been shifted in (threshold 32 only)
+    set_base: int = 0            # SET pins/pindirs mapping
+    set_count: int = 1
     # STATUS (for MOV): all ones while the RX FIFO holds fewer than this many
     # words, else 0. None: the program isn't expected to read STATUS.
     status_rx_below: int | None = None
     x: int = 0
     y: int = 0
     isr: int = 0
+    isr_count: int = 0           # bits shifted into ISR since it was last emptied
     osr: int = 0
     pc: int = 0
     pindirs: int = 0             # 1 = output
@@ -198,7 +204,15 @@ class PioSim:
             if value is None:
                 raise NotImplementedError(f"in source {src}")
             value &= (1 << count) - 1
+            full = self.autopush and self.isr_count + count >= 32
+            if full and len(self.rx_fifo) >= self.fifo_depth:
+                self.rx_stall = True
+                return False  # stalls, as `push block` does, until there's room
             self.isr = ((self.isr >> count) | (value << (32 - count))) & MASK32 if count < 32 else value
+            self.isr_count = min(32, self.isr_count + count)
+            if full:
+                self.rx_fifo.append(self.isr)
+                self.isr, self.isr_count = 0, 0
             self._advance()
             return True
 
@@ -242,7 +256,7 @@ class PioSim:
             elif dest == 3:  # PINDIRS (PIO v1), through the OUT mapping
                 self.pindirs = self._set_bits(self.pindirs, self.out_base, self.out_count, value)
             elif dest == 6:
-                self.isr = value
+                self.isr, self.isr_count = value, 0
             elif dest == 7:
                 self.osr = value
             else:
@@ -269,7 +283,7 @@ class PioSim:
                         return False
                 else:
                     self.rx_fifo.append(self.isr)
-                self.isr = 0
+                self.isr, self.isr_count = 0, 0
             self._advance()
             return True
 
@@ -281,6 +295,19 @@ class PioSim:
                 self.irq_flags &= ~(1 << index)
             else:
                 self.irq_flags |= 1 << index
+            self._advance()
+            return True
+
+        if opcode == 0b111:  # SET (X, Y, pindirs)
+            dest, data = (instr >> 5) & 7, instr & 0x1F
+            if dest == 1:
+                self.x = data
+            elif dest == 2:
+                self.y = data
+            elif dest == 4:
+                self.pindirs = self._set_bits(self.pindirs, self.set_base, self.set_count, data)
+            else:
+                raise NotImplementedError(f"set destination {dest}")
             self._advance()
             return True
 

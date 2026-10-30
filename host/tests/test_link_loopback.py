@@ -1,10 +1,11 @@
 """The activity link's loopback test: with a jumper from GPIO 0 (the link's
 TX) to GPIO 1 (RX), console `U` reads back what the link sends for a second
-and checks it with the same rules as a receiver (activity_link::Receiver).
-No HDD Synth needed.
+($HDA and $HDE) and checks it with the same rules as a receiver. It also
+sends one $HDM itself, as the synth would, and checks the receive side reads
+it back as it went. No HDD Synth needed.
 
 Exit criterion: every sentence sent while listening arrives valid, with no
-UART errors, idle and during traffic.
+UART errors, idle and during traffic, and the $HDM comes back.
 
 Needs the drive build and the jumper; run with -m link. Reads only.
 """
@@ -23,7 +24,8 @@ from hddproto.host import pread
 
 pytestmark = pytest.mark.link
 
-LOOPBACK = re.compile(r"LOOPBACK (\S+) sent=(\d+) valid=(\d+) rejected=(\d+) errors=(\d+) bytes=(\d+) last=(\S+)")
+LOOPBACK = re.compile(r"LOOPBACK (\S+) sent=(\d+) valid=(\d+) rejected=(\d+) errors=(\d+) bytes=(\d+) last=(\S+)"
+                      r" head_sent=(\d+) head_valid=(\d+) model=(\S+)")
 
 
 @pytest.fixture(autouse=True)
@@ -35,17 +37,20 @@ def loopback(drive) -> dict:
     line = drive.command("U", "LOOPBACK", timeout=5)
     m = LOOPBACK.match(line)
     assert m, line
-    result, sent, valid, rejected, errors, nbytes, last = m.groups()
+    result, sent, valid, rejected, errors, nbytes, last, head_sent, head_valid, model = m.groups()
     if result == "no-data":
         pytest.fail("nothing arrived on GPIO 1: fit a jumper from GPIO 0 to GPIO 1 (EXT1 pins 4 and 5)")
     return dict(line=line, result=result, sent=int(sent), valid=int(valid), rejected=int(rejected),
-                errors=int(errors), bytes=int(nbytes), last=last)
+                errors=int(errors), bytes=int(nbytes), last=last, head_sent=int(head_sent),
+                head_valid=int(head_valid), model=model)
 
 
 def check(r: dict):
     assert r["result"] == "pass", r["line"]
     assert r["sent"] >= 5, f"fewer sentences than the heartbeat alone sends: {r['line']}"
     assert activity_link.parse(r["last"]) is not None, r["line"]
+    assert r["head_valid"] == r["head_sent"], r["line"]
+    assert r["model"] == "ok", f"the $HDM sent didn't come back as it went: {r['line']}"
 
 
 def test_loopback_idle(drive):
@@ -79,3 +84,4 @@ def test_loopback_during_reads(drive, raw_disk):
         print(r["line"])
         check(r)
     assert any(activity_link.parse(r["last"]).busy for r in results), "the link never said busy during reads"
+    assert sum(r["head_sent"] for r in results) > 0, "no head targets ($HDE) went out during reads"

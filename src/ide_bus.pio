@@ -16,59 +16,65 @@
 ; only samples it during a strobe.
 ;
 ; Each access produces one RX FIFO word: the pin sample (bus_sample.h).
-;   Read:  sample with DIOR# low. Core 1 must answer with one TX FIFO word,
-;          the value to drive on DD0-15. IORDY stays low until it arrives.
-;   Write: the last sample taken with DIOW# low (data valid). No reply.
+;   Read:  sample with DIOR# low. Core 1 must answer with one TX FIFO word:
+;          bits 0-15 the value for DD0-15, bits 16-31 which of them to drive
+;          (all, or none for a read that isn't the drive's: an ISA card's CS1#
+;          covers 3F0-3F7, where the floppy controller answers 3F2-3F5).
+;          IORDY stays low until it arrives.
+;   Write: a sample taken as DIOW# rises, about 5 ns after (ATA holds the
+;          data 10-30 ns, t4), with the DIOW# bit forced to 0 (asserted) and
+;          bits 24-31 to 0, so core 1 reads it as the write it was. No reply.
 ;          A write doesn't wait for core 1, so a burst (256 data words for
-;          WRITE SECTORS) can outrun it. If the RX FIFO is full, IORDY stays
-;          low until it has room: the host waits instead of words being lost.
-
+;          WRITE SECTORS) can outrun it. If the RX FIFO is full, the program
+;          stalls on its autopush with IORDY low, so the host's next access
+;          waits instead of words being lost.
+;
+; IORDY goes low at a chip select and stays low until a strobe comes or the
+; chip select goes; the armed loop doesn't touch it. ISA cards select the
+; drive from the address alone, so memory and DRAM refresh cycles can select
+; it too, and pass IORDY to IOCHRDY, which stalls such a cycle for good (an
+; ICL 386 froze, 0.21.0). With HDDSYNTH.INI's `isa = on`, iordy_watchdog.pio
+; runs beside this program and releases IORDY when it has been held for
+; about 23 us; the program pulls it low again at its next `arm` or `read`.
+;
 .pio_version 1
 .program ide_bus
 .side_set 1 opt pindirs
 
+public write:
+    wait 1 gpio 27          side 0  ; release IORDY; wait for DIOW# to rise
+    in pins, 23                     ; DD, DA, CS#, LED, DIOR#: the data 5 ns after
+    in null, 9              side 1  ; DIOW# (and up) as 0; autopush. IORDY low again,
+                                    ; and held while the RX FIFO is full
+public arm:
+    nop                     side 1  ; a chip select is asserted: IORDY low
+public armed:
+    mov osr, ~pins                  ; sample, inverted (asserted = 1)
+    out null, 19                    ; drop DD0-15, DA0-2
+    out x, 2                        ; x = CS0#/CS1# asserted
+    jmp !x idle                     ; chip select gone without a strobe
+    jmp pin not_read                ; DIOR# high (read from the pin, unsynchronised)
+public read:
+    in pins, 32             side 1  ; which register (autopush: core 1 looks it up);
+                                    ; IORDY low, if the watchdog had released it
+    pull block                      ; its value
+    out pins, 16                    ; onto DD0-15 (still inputs)
+    out pindirs, 16         [7]     ; drive DD0-15 (bits 16-31: all ones, or none for a
+                                    ; register that isn't the drive's), then let them settle: IORDY rises
+                                    ; 8 cycles (40 ns at 200 MHz) later. ATA asks only
+                                    ; that data be valid when IORDY rises (tRD = 0), and
+                                    ; the host's pull-up adds its rise time on top.
+    wait 1 jmppin           side 0  ; release IORDY; hold the data until DIOR# rises
+    mov pindirs, null               ; release DD0-15
 .wrap_target
-idle:
+public idle:
     mov osr, ~pins          side 0  ; release IORDY; sample, inverted (asserted = 1)
     out null, 19                    ; drop DD0-15, DA0-2
     out x, 2                        ; x = CS0#/CS1# asserted
-    jmp !x idle
-armed:
-    mov osr, ~pins          side 1  ; a chip select is asserted: IORDY low
-    out null, 19
-    out x, 2
-    jmp !x idle                     ; chip select gone without a strobe
-    out null, 1                     ; LED
-    out x, 1                        ; DIOR# asserted?
-    jmp x-- read
-    out x, 1                        ; DIOW# asserted?
-    jmp !x armed
-write:
-    mov x, status                   ; room in the RX FIFO for this write?
-    jmp !x write                    ; not yet: IORDY stays low and the host waits
-    mov isr, pins           side 0  ; room: release IORDY
-write_low:
-    mov y, pins                     ; keep sampling while DIOW# is low
-    mov osr, ~y
-    out null, 23
-    out x, 1
-    jmp !x write_done
-    mov isr, y                      ; still low: keep this sample
-    jmp write_low
-write_done:
-    push block                      ; the last sample with DIOW# low
-    jmp armed
-read:
-    mov isr, pins
-    push block                      ; which register: core 1 looks it up
-    pull block                      ; its value
-    out pins, 16                    ; onto DD0-15 (still inputs)
-    mov pindirs, ~null      [7]     ; drive DD0-15, then let them settle: IORDY rises
-                                    ; 8 cycles (40 ns at 200 MHz) later. ATA asks only
-                                    ; that data be valid when IORDY rises (tRD = 0), and
-                                    ; the host's pull-up adds its rise time on top. (At
-                                    ; 150 MHz this was 53 ns, beyond t5's 50 ns; the
-                                    ; delay is at its maximum.)
-    wait 1 jmppin           side 0  ; release IORDY; hold the data until DIOR# rises
-    mov pindirs, null               ; release DD0-15
+    jmp x-- arm
 .wrap
+public not_read:
+    out null, 2                     ; LED, DIOR#
+    out x, 1                        ; DIOW# asserted?
+    jmp x-- write
+    jmp armed

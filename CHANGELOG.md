@@ -2,6 +2,86 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.22.0] - 2026-10-30
+
+`isa = on` done with a watchdog. 0.21.2's 60 ns releases didn't free the ICL 386: it froze again after F1. A released IORDY rises through the host's pull-up and the cable's capacitance, which takes far longer than 60 ns. And the old trace showed the BIOS waits up to 11 µs between a status read and its first data read, with the drive still selected, more than the bus program's countdown (31 passes at most) can hold.
+
+### Changed
+- **`ide_bus.pio` is one program for every host again,** with no countdown. IORDY goes low at the chip select (`arm`) and stays low until a strobe or the chip select ends, as up to 0.20.0. Down from 32 instructions to 23:
+  - **Writes are sampled as DIOW# rises.** `wait 1 gpio 27` and then `in pins, 23` take DD, DA and the chip selects about 5 ns after the edge (ATA holds the data 10-30 ns, t4). `in null, 9` forces DIOW# and the bits above it to 0, so core 1 still reads the sample as a write. Before, the program kept the last sample taken while DIOW# was low, in a loop.
+  - **Flow control moved to the push:** the autopush stalls with IORDY low while the RX FIFO is full, so the host's next access waits.
+  - **A read's sample** comes from `in pins, 32` with autopush, and DIOR# is tested with `jmp pin`. The state machine starts at `idle`.
+
+### Added
+- **`iordy_watchdog.pio`** (7 instructions, in `ide_bus`'s PIO block, started with `isa = on`): when IORDY has been held low for 4,608 cycles (23 µs) without being released, it writes the pin's direction to released. `ide_bus` pulls it low again at its next `arm` or `read`, so a stalled cycle gets as long as the pull-up needs. Real accesses hold IORDY about 1 µs at most. The block always holds the watchdog, so the diagnostics' `iordy_check` can't land beside `ide_bus`'s DIOR# synchroniser bypass.
+- Sim: `pio_sim` counts the bits shifted into ISR (partial `in` with autopush) and does `set pindirs`. `test_pio_bus_sim.py` passes in PIO modes 0-3 on the new program (writes included), and on the ISA host. `test_iordy_watchdog_sim.py` covers: a stuck hold released at 23.2 µs; reads, and a 15 µs hold, left alone; and holds that don't add up.
+- **Not yet run on the USB adapter:** the write path changed for every host. Run slices 1-4 (writes) and `-m speed` there before trusting it.
+
+### Removed
+- 0.21.x's countdown and `isaProgram()` patching.
+
+## [0.21.2] - 2026-10-30
+
+On 0.21.1 the ICL 386 got through detection and the BIOS ran on, with no freeze. But its MBR read lost one word (`NOIORDY reads=1`), and the boot code stopped with part of a message ("ion"). The card keeps the drive selected while an address stays on the bus. After the status read, the BIOS took longer than the 2.6 µs timeout to start reading data, and the timeout had released IORDY until the chip select went.
+
+### Changed
+- **The ISA timeout repeats:** after 2.6 µs without a strobe, `timeout` releases IORDY for 60 ns (`jmp idle side 0 [7]`, then `idle` and `arm`) and pulls it low again, for as long as the chip select lasts. A stalled memory or refresh cycle ends at the first IOCHRDY sample (every 125 ns) that falls in a release, and a read is held whenever it comes. The ATA program never gets there.
+- Tried and dropped: an 11.5 µs timeout made by delaying all nine steps of the armed loop. The loop then acted on a chip select sampled 120 ns earlier. The 386 deselects the drive briefly between a status read and the first data read, and the sim caught the data read losing IORDY (`test_isa_program_meets_ata_timing[0]`).
+- Sim: the timeout's periodic release (held 2-3.2 µs, released 50-80 ns), and a read whose strobe lands anywhere in that cycle after a long chip select, which must have IORDY low within 80 ns.
+
+## [0.21.1] - 2026-10-30
+
+`isa = on` reworked: 0.21.0's IORDY from the strobe was too late for the ICL 386's 16-bit ISA cycles. IORDY went low about 76 ns after DIOR#; 12 data reads ended first (`iordy_ignored=12`), IDENTIFY reached the BIOS with 28 wrong words (`BUSERR`), and it then verified a nonexistent sector 64 times (IDNF). IORDY from the chip select (0.20.0) had read IDENTIFY cleanly.
+
+### Changed
+- **`ide_bus.pio` rearranged, with a countdown on a chip select that brings no strobe.** `arm` pulls IORDY low at the chip select, as ever, and loads Y. As assembled, Y = 2^32 - 1, which never times out (ATA hosts). With `isa = on`, `ide_bus.cpp` patches it to `set y, 31` and gives the `timeout` step 7 cycles' delay: about 2.6 µs without a strobe, then `timeout` releases IORDY until the chip select goes, ending a stalled memory or refresh cycle. That's longer than an ISA host's gaps between data reads, about 1.5 µs. A read after a timeout pulls IORDY low as it starts (late, as in 0.21.0).
+- To fit the countdown's three instructions into 32: DIOR# is tested with `jmp pin` (from the pin, which skips the synchroniser) instead of from the sample; a read's sample is `in pins, 32` with autopush instead of `mov isr` and `push`; the write path falls into `arm` and the read path into `idle`. The state machine starts at `idle` (`pio_sm_init`, `restart()`).
+- Sim: the PIO simulator gained autopush and `set`. All of `test_pio_bus_sim.py`'s PIO mode 0-3 timing tests pass on the rearranged program, and the ISA program passes them too. New tests: the ISA timeout (released 2.6 µs after a chip select with no strobe, and stays released), the ATA program holding IORDY throughout, and IDENTIFY bursts and flow-controlled writes on the ISA host.
+- **Not yet run on the USB adapter:** the bus program every host uses has changed shape. Run slices 1-2 and `-m speed` there before trusting it.
+
+## [0.21.0] - 2026-10-30
+
+`isa = on`, for ISA IDE cards that pass IORDY to the ISA bus. On 0.20.0 the ICL 386 detected the drive, then froze for good while printing "Hard disk 0 auto initialization", with the keyboard dead. The pins showed CS0# low with DA2-0 = 0, IORDY low and no strobe, for minutes. Console `V` (the drive off the bus) released IORDY: it read high, so the card does wire it, and the address lines moved again. The card decodes CS0# from the address alone, so a memory cycle (or a DRAM refresh) whose address aliased 1F0h selected the drive. The bus program pulls IORDY low at a chip select, to meet ATA's 35 ns, and holds it until a strobe that a memory cycle never brings, while the card passes IORDY to IOCHRDY, which stalled that very cycle.
+
+### Added
+- **`isa` in `HDDSYNTH.INI`** (off by default; `CONFIG ... isa=`). On, `ide_bus::begin()` loads the bus program with three side-sets moved (`isaProgram()`, from the public labels `armed`, `read` and `write`): IORDY stays released in `armed` and goes low at `read` and while `write` waits for room. So a chip select with no strobe never touches IORDY. IORDY goes low at most 76 ns after DIOR# falls, against an ISA bus's first IOCHRDY sample about 125 ns in (`IsaBus` in `ide_host_model.py`). Too slow for ATA hosts, hence the setting. A write with room in the FIFO pulls IORDY low for one PIO cycle (5 ns): at most one extra ISA wait state.
+- `test_pio_bus_sim.py`: the patched program against the ISA host (reads, IDENTIFY's 256 words, flow control on writes, and a chip select held for 10 µs with no strobe, which must leave IORDY alone), and checks that the default program still pulls IORDY low at the chip select. `pio_sim.assemble()` reads a program's public labels.
+
+## [0.20.0] - 2026-10-30
+
+IOCS16#, for 16-bit ISA IDE cards that pass it to the ISA bus. On 0.19.1 the ICL 386's BIOS got through detection, but every 16-bit data read reached the drive as two 8-bit reads, of the data register (1F0h) and then the error register (1F1h): 513 pairs for one sector and IDENTIFY. So each word's high byte came from the error register, and the BIOS took 15 heads and 17 sectors from the garbled IDENTIFY. Needs one wire on the rig: IDE pin 32 to GPIO 2 (EXT1-6).
+
+### Added
+- **`iocs16.pio`** (6 instructions): pulls IOCS16# (GPIO 2, open drain) low while CS0# is low and DA2-0 = 0, and only then, since an 8-bit register addressed as 16-bit would come back on the wrong byte lane. Two loops that set the pin on every pass, so it doesn't glitch. In simulation it follows the address within 40 ns, both ways (`test_iocs16_sim.py`; ATA-1 allows 90 ns).
+- It needs a PIO block, and the diagnostics' has 3 instructions spare, so it takes `ide_dma`'s: `setup1()` starts `ide_dma` when multiword DMA is offered and `iocs16` otherwise. ISA hosts never use DMA. Every `ide_dma` entry point already did nothing until `begin()`.
+
+### Changed
+- `docs/wiring.md`, `docs/wiring.html` and CLAUDE.md: IDE pin 32 is IOCS16# on GPIO 2. GPIO 2 used to be kept off the bus for the BB48's 2.2k pull-up (R17), which is harmless for an open-drain line the host also pulls up. PCB rev 0.4 already plans it there.
+
+## [0.19.1] - 2026-10-30
+
+Two fixes for real ISA IDE controllers, found on the first retro PC (an ICL 386): its BIOS sent EXECUTE DIAGNOSTIC, never got the interrupt and reported "Hard disk controller error".
+
+### Fixed
+- **INTRQ is driven low between interrupts** while the drive is selected with nIEN clear, and released otherwise (`Device::intrqDriven()`, `ide_bus::updateIntrq(dev)`). It used to be driven high only, and released otherwise, relying on the host's pull-down (the USB adapters have one). The ICL's ISA card has none: the undriven line floated high (`p` showed `INTRQ=1` throughout), so the BIOS's edge-triggered IRQ 14 never saw the diagnostic's interrupt.
+- **Reads of the control block other than Alternate Status aren't driven.** An ISA card's CS1# covers 3F0-3F7, where the floppy controller answers 3F2-3F5 and bit 7 of 3F7; the trace showed the BIOS setting up the floppy there, and the drive answered those reads too, against the floppy controller. Core 1's answer now carries which DD lines to drive in its upper half (all, or none for `Reg::None`), and `ide_bus.pio` drives them with `out pindirs, 16` in place of `mov pindirs, ~null`, so the program keeps its 32 instructions. `test_pio_bus_sim.py` checks CTL 2-5 and 7 reads leave DD alone, in PIO modes 0-3.
+
+## [0.19.0] - 2026-10-30
+
+Activity link protocol version 2, for the HDD Synth's modelled drives: where the head goes, and authentic seek timing. From docs/hddsynth-head-position-brief.md; the synth's side is HDDSynth_Native v0.21.0. Host-tested; not yet run on the rig or with the synth.
+
+### Added
+- **`$HDE`, head targets** (`activity_link.*`): `$HDE,2,<pos>,<op>,<sectors>*hh` for each media command, `pos` being its first LBA as a fraction of the disk (0-65535), so the synth's head goes where the host's commands really go. Reads and writes are sent when core 0 gets their first sector, verifies and seeks from their trace events. At most one every 2 ms, the newest (`HeadPacer`); a due `$HDA` goes first (`nextSentence()`). `s` shows `head_sent`, `head_replaced`, `head_last`.
+- **Authentic seek timing** (`seek_timing` in `HDDSYNTH.INI`: `off` by default, `synth`, or the synth's presets `stepper85`, `voice91`, `voice97`, `fdb05`). `seek_timing::Scheduler` (pure, host-tested) works out when the modelled drive would have each sector (seek, rotation, transfer, on one microsecond clock), and core 0 keeps each fetch's result until then, so the drive shows BSY as a real one does; IORDY is never held for it. Reads, writes (with write-behind too) and DMA alike. A command carrying straight on from the last one's next sector doesn't seek or wait a turn (a drive's read-ahead), so sequential transfers run at the media rate. Capped at 1 s a command. With timing on, `$HDE` goes out when the modelled seek starts. Console `H` switches it off and on until a restart; `S` shows the setting and model, `s` shows `seek_timing`, `seek_active`, `seek_rpm`, `seek_actuator` and the counts (`seek_commands`, `seek_held`, `seek_avg_us`, `seek_max_us`, `seek_total_us`, `seek_capped`).
+- **`$HDM`, the synth's model**, on the link's other wire: GPIO 1 is now UART0 RX, with the internal pull-up. Core 0 assembles lines on each loop pass; `seek_timing = synth` follows the model it names, and forgets it after 5 s without one. `s` shows `hdm_valid`, `hdm_rejected`, `link_rx_errors`.
+- **`drive_params.*`, `drive_timing.*`, `sentence.*`**, copied unchanged from HDDSynth_Native (6a68a71, v0.21.0), with their host tests (less the one against the synth's engine).
+- **`-m seek`** (`host/tests/test_seek_timing.py`): with `seek_timing` set to a preset, random 4 KB reads run within 20% of the modelled time, sequential reads at about the media rate, and with `H` off as before.
+
+### Changed
+- **`ata::Fetch`** carries the command's first LBA and sector count (core 1 sets them from the command it already decoded), so core 0 can tell where each command starts. It grows from 16 to 20 bytes.
+- **The loopback test (`U`)** checks both directions: `$HDA` and `$HDE` read back, plus one `$HDM` it sends itself and reads back. `LOOPBACK` adds `head_sent`, `head_valid` and `model=ok|missing|bad`; GPIO 1 no longer changes function for it.
+- `HDDSYNTH.INI`'s defaults (and the welcome disk's copy) list `seek_timing = off`; the README lists it.
+
 ## [0.18.1] - 2026-10-30
 
 The bus observer no longer holds multiword DMA back: spot checks by default, full checks on request.

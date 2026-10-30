@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from hddproto.ide_host_model import FAST_PIO_MODES, PIO_MODES, Access, Core1, Mode0, run_host
+from hddproto.ide_host_model import FAST_PIO_MODES, PIO_MODES, Access, Core1, IsaBus, Mode0, run_host
 from hddproto.pio_sim import CYCLE_PS, PioSim
 
 pytestmark = pytest.mark.sim
@@ -38,10 +38,13 @@ def program(assemble):
 
 
 def make_sim(program, bypass_dior=True) -> PioSim:
-    """Configured as src/ide_bus.cpp configures the state machine."""
-    return PioSim(program, out_base=0, out_count=16, sideset_base=24, jmp_pin=DIOR_BIT,
-                  fifo_depth=4, tx_depth=4, bypass_mask=(1 << DIOR_BIT) if bypass_dior else 0,
-                  status_rx_below=4)
+    """Configured as src/ide_bus.cpp configures the state machine: autopush,
+    and starting at `idle`."""
+    sim = PioSim(program, out_base=0, out_count=16, sideset_base=24, jmp_pin=DIOR_BIT,
+                 fifo_depth=4, tx_depth=4, bypass_mask=(1 << DIOR_BIT) if bypass_dior else 0,
+                 status_rx_below=4, autopush=True)
+    sim.pc = program.offsets["idle"]
+    return sim
 
 
 def registers(values: dict):
@@ -74,6 +77,22 @@ def test_status_read(program, phase_ns, mode):
                    start_ns=100 + phase_ns)
     check_clean(run)
     check_read(run.results[0], 0x50, timing)
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("addr", [2, 3, 4, 5, 7])
+def test_foreign_control_reads_not_driven(program, addr, mode):
+    """An ISA card's CS1# covers 3F0-3F7, where the floppy controller answers
+    3F2-3F5 (and bit 7 of 3F7): the drive must leave DD alone for those reads,
+    only answering Alternate Status (CTL 6), and still release IORDY."""
+    timing = PIO_MODES[mode]
+    core1 = Core1(200, registers({("CTL", addr): 0x1234, ("CTL", 6): 0x50}))
+    run = run_host(make_sim(program), core1, [Access(False, "CTL", addr), Access(False, "CTL", 6)],
+                   timing=timing)
+    foreign, alt = run.results
+    assert foreign.read_value is None, f"DD driven for CTL {addr}: {foreign.read_value:#06x}"
+    assert foreign.wait_ns is not None and foreign.wait_ns < timing.iordy_max
+    check_read(alt, 0x50, timing)
 
 
 @pytest.mark.parametrize("mode", MODES)
@@ -219,3 +238,72 @@ def test_chip_select_without_strobe(program, mode):
     assert low and min(low) < 100 + t.t1 + t.tA - IORDY_MARGIN_NS
     assert max(low) < 400 + 100                # released soon after it goes
     assert not sim.rx_fifo
+
+
+# ---- ISA hosts ----------------------------------------------------------------
+#
+# The same program serves ISA cards (iordy_watchdog.pio, test_iordy_watchdog_sim.py,
+# deals with a chip select that brings no strobe).
+
+ISA = IsaBus()
+IDLE_PINS = (1 << 19) | (1 << 20) | (1 << 22) | (1 << 23) | (1 << 24) | (1 << 26)
+ALIASED = IDLE_PINS & ~(1 << 19) & ~(7 << 16)  # CS0# low, DA2-0 = 0 (1F0h), no strobe
+
+
+@pytest.mark.parametrize("phase_ns", PHASES_NS)
+def test_isa_status_read(program, phase_ns):
+    core1 = Core1(200, registers({("CMD", 7): 0x50}))
+    run = run_host(make_sim(program), core1, [Access(False, "CMD", 7)], timing=ISA, start_ns=100 + phase_ns)
+    check_clean(run)
+    check_read(run.results[0], 0x50, ISA)
+
+
+def test_isa_identify_burst(program):
+    data = iter(range(0x1000, 0x1100))
+    core1 = Core1(250, lambda b, a: next(data) if (b, a) == ("CMD", 0) else 0x58)
+    accesses = [Access(True, "CMD", 6, 0xA0), Access(True, "CMD", 7, 0xEC), Access(False, "CMD", 7)]
+    accesses += [Access(False, "CMD", 0, hold_cs=i < 255) for i in range(256)]
+    run = run_host(make_sim(program), core1, accesses, timing=ISA)
+    check_clean(run)
+    assert core1.writes == [("CMD", 6, 0xA0), ("CMD", 7, 0xEC)]
+    reads = [r for r in run.results if not r.access.write]
+    check_read(reads[0], 0x58, ISA)
+    for i, r in enumerate(reads[1:]):
+        check_read(r, 0x1000 + i, ISA)
+
+
+def test_isa_sector_write_with_a_slow_core1(program):
+    """Flow control holds the host when the RX FIFO is full."""
+    words = [(i * 7919) & 0xFFFF for i in range(256)]
+    core1 = Core1(200, registers({}), service_ns=1000)
+    accesses = [Access(True, "CMD", 0, w, hold_cs=True) for w in words]
+    run = run_host(make_sim(program), core1, accesses, timing=ISA, tail_ns=10000)
+    check_clean(run)
+    assert [v for (_, _, v) in core1.writes] == words
+    waits = [r.wait_ns for r in run.results if r.wait_ns is not None]
+    assert waits and max(waits) < ISA.iordy_max
+
+
+def test_chip_select_without_strobe_holds_iordy(program):
+    """The program on its own holds IORDY for as long as a chip select lasts
+    (the watchdog, with `isa = on`, is what lets go), and nothing reaches core 1."""
+    from hddproto.pio_sim import synced
+    sim = make_sim(program)
+    history, low = [], []
+    for k in range(int(10000 * 1000 / CYCLE_PS)):
+        t = k * CYCLE_PS / 1000
+        history.append(ALIASED if t >= 100 else IDLE_PINS)
+        sim.step(synced(history, k, sim.bypass_mask))
+        low.append(bool((sim.pindirs >> 24) & 1))
+    assert low.index(True) * CYCLE_PS / 1000 <= 100 + 45
+    assert all(low[int(200 * 1000 / CYCLE_PS):])
+    assert not sim.rx_fifo
+
+
+def test_write_sample_reads_as_a_write(program):
+    """A write's sample is taken as DIOW# rises, with DIOW# forced to 0, so
+    core 1 (bus::op) sees the write it was, with its register and data."""
+    core1 = Core1(200, registers({}))
+    run = run_host(make_sim(program), core1, [Access(True, "CMD", 3, 0x1234)], timing=MODE0)
+    check_clean(run)
+    assert core1.writes == [("CMD", 3, 0x1234)]

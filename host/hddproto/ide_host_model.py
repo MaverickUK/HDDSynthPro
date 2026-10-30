@@ -88,6 +88,19 @@ class Mode4(Mode0):
 
 
 PIO_MODES = {0: Mode0(), 1: Mode1(), 2: Mode2()}
+
+
+@dataclass(frozen=True)
+class IsaBus(Mode0):
+    """A 16-bit I/O cycle on an 8 MHz ISA bus (BCLK 125 ns), through a simple
+    IDE card that passes the strobes straight on and IORDY to IOCHRDY: the
+    command (IOR#/IOW#) lasts at least 3 BCLKs less the address setup, and the
+    bus controller first samples IOCHRDY a BCLK after it starts. Approximate:
+    the margins the drive needs, not one chipset's timing."""
+    t0: float = 500
+    t1: float = 90
+    t2: float = 290
+    tA: float = 125
 FAST_PIO_MODES = {3: Mode3(), 4: Mode4()}  # 3 is offered; 4 fails the bus program (writes)
 
 
@@ -138,7 +151,11 @@ class Core1:
             (((sample >> B_CS0) & 1) ^ 1, ((sample >> B_CS1) & 1) ^ 1), "NONE")
         addr = (sample >> B_DA0) & 7
         if not (sample >> B_DIOR) & 1:  # read
-            self._pending.append((t_ps + self.latency_ps, self.read_value(block, addr) & 0xFFFF))
+            # As ide_bus.cpp answers: the value, and in bits 16-31 which DD
+            # lines to drive (none for a register that isn't the drive's).
+            ours = block == "CMD" or (block == "CTL" and addr == 6)
+            drive = 0xFFFF0000 if ours else 0
+            self._pending.append((t_ps + self.latency_ps, drive | (self.read_value(block, addr) & 0xFFFF)))
         else:
             self.writes.append((block, addr, sample & DD_MASK))
 

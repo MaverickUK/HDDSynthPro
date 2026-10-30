@@ -29,6 +29,13 @@ constexpr unsigned PIN_RESET_N = 30;
 constexpr unsigned PIN_DMARQ = 31;
 constexpr unsigned PIN_DMACK_N = 3;
 
+// IOCS16# (IDE pin 32), for 16-bit ISA cards that pass it to the ISA bus
+// (iocs16.pio). Open drain: pulled low while the data register is addressed,
+// otherwise released. GPIO 2 is the only free pin in the PIO window (as PCB
+// rev 0.4 plans); the BB48's 2.2k pull-up on it (R17) is harmless for an open
+// drain signal the host also pulls up. Wired on the rig since 30 Oct 2026.
+constexpr unsigned PIN_IOCS16_N = 2;
+
 // PCB only (rev 0.3; on the BB48 rig these GPIOs are unconnected, so driving
 // and reading them there is harmless). The IDE bus goes through bus switches
 // that start off: BUS_EN# held high by a pull-up until the firmware drives it
@@ -42,11 +49,13 @@ constexpr unsigned PIN_BUS_EN_N = 41;
 // had a soak). Never offered without DMARQ, whatever it says.
 
 // The activity link to an HDD Synth (docs/activity-link.md): UART0 TX on
-// GPIO 0, one way. GPIO 1 (UART0 RX) is reserved for a reply and unused.
+// GPIO 0 ($HDA, $HDE); UART0 RX on GPIO 1, pulled up, for the synth's $HDM
+// (protocol version 2, seek_timing = synth).
 constexpr unsigned PIN_LINK_TX = 0;
 constexpr unsigned PIN_LINK_RX = 1;
 constexpr uint32_t LINK_BAUD = 115200;
 constexpr uint32_t LINK_HEARTBEAT_MS = 200;  // a sentence at least this often
+constexpr uint32_t LINK_HEAD_GAP_US = 2000;  // $HDE at most this often (about its time on the wire)
 
 constexpr unsigned BUS_FIRST_PIN = PIN_DD0;
 constexpr unsigned BUS_LAST_PIN = PIN_RESET_N;

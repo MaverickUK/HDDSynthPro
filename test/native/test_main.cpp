@@ -349,6 +349,7 @@ void runDriveConfigTests();
 void runSectorCheckTests();
 void runMediaWatchTests();
 void runWelcomeDiskTests();
+void runSeekTimingTests();
 
 int main() {
     RUN(test_pin_layout);
@@ -379,6 +380,7 @@ int main() {
     runSectorCheckTests();
     runMediaWatchTests();
     runWelcomeDiskTests();
+    runSeekTimingTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

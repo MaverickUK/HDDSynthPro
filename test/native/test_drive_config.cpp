@@ -209,7 +209,41 @@ TEST(test_config_image_none) {
     CHECK_STR(edited("image = HDDSYNTH.IMG\r\n", "image", "none"), "image = none\r\n");  // what console E writes
 }
 
+// isa = on: IORDY from the strobe, for ISA cards (an ICL 386, 0.21.0).
+TEST(test_config_isa) {
+    CHECK(!parsed("").isa);  // off: ATA hosts need IORDY from the chip select
+    CHECK(parsed("isa = on\n").isa);
+    CHECK(!parsed("isa = off\n").isa);
+    CHECK(drive_config::isKey("isa"));
+    Config def = parsed(drive_config::defaultFile());
+    CHECK(!def.isa);
+    CHECK_EQ(def.warning_count, size_t(0));
+}
+
+TEST(test_config_seek_timing) {
+    using seek_timing::Source;
+    Config d = parsed("");
+    CHECK(d.seek_timing.source == Source::Off);
+    Config s = parsed("seek_timing = synth\n");
+    CHECK(s.seek_timing.source == Source::Synth);
+    Config p = parsed("seek_timing = Voice97   # a 1997 drive\n");
+    CHECK(p.seek_timing.source == Source::Preset);
+    CHECK_STR(std::string(p.seek_timing.preset), "voice97");
+    CHECK_EQ(p.warning_count, size_t(0));
+    Config w = parsed("seek_timing = fast\n");
+    CHECK(w.seek_timing.source == Source::Off);
+    CHECK_EQ(w.warning_count, size_t(1));
+    CHECK(drive_config::isKey("seek_timing"));
+    std::string e = edited(drive_config::defaultFile(), "seek_timing", "stepper85");
+    Config c = parsed(e);
+    CHECK(c.seek_timing.source == Source::Preset);
+    CHECK_STR(std::string(c.seek_timing.preset), "stepper85");
+    CHECK_EQ(c.warning_count, size_t(0));
+}
+
 void runDriveConfigTests() {
+    RUN(test_config_isa);
+    RUN(test_config_seek_timing);
     RUN(test_config_image_none);
     RUN(test_config_defaults);
     RUN(test_config_default_file_is_the_defaults);

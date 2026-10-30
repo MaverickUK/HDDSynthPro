@@ -13,6 +13,7 @@ SANITIZE="${SANITIZE:-address,undefined}"
     test/native/test_activity.cpp src/activity.cpp \
     test/native/test_activity_link.cpp src/activity_link.cpp \
     test/native/test_drive_config.cpp src/drive_config.cpp \
+    test/native/test_seek_timing.cpp src/seek_timing.cpp src/drive_params.cpp src/drive_timing.cpp src/sentence.cpp \
     test/native/test_sector_check.cpp src/sector_check.cpp \
     test/native/test_media_watch.cpp src/media_watch.cpp \
     test/native/test_welcome_disk.cpp src/welcome_disk.cpp \
@@ -21,5 +22,6 @@ SANITIZE="${SANITIZE:-address,undefined}"
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/classify_trace.cpp src/activity.cpp \
     -o .pio/native-tests/classify_trace
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/make_welcome_img.cpp src/welcome_disk.cpp src/drive_config.cpp \
+    src/seek_timing.cpp src/drive_params.cpp src/drive_timing.cpp src/sentence.cpp \
     -o .pio/native-tests/make_welcome_img
 .pio/native-tests/run_tests "$@"

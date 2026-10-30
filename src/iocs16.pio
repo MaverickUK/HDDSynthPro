@@ -1,0 +1,33 @@
+; Drive build: IOCS16# (IDE pin 32), for 16-bit ISA IDE cards that pass it
+; straight to the ISA bus. The drive pulls it low while the host addresses
+; the data register (CS0# low, DA2-0 = 0), so the motherboard does one 16-bit
+; read or write there; without it, it splits each word into two 8-bit cycles
+; (1F0h, then 1F1h, the error register) and gets the high bytes wrong (an
+; ICL 386, 0.20.0). Only the data register: an 8-bit register addressed as
+; 16-bit would come back on the wrong byte lane.
+;
+; ISA samples IOCS16# from the address, before the strobe, so this follows
+; the chip select and address lines alone. Open drain, like IORDY: the host
+; pulls it up; the pin's output value is 0 and only its direction changes.
+;
+; Pin mapping (see iocs16.cpp):
+;   IN_BASE  = GPIO20 (DA0): `mov osr, pins` then `out x, 4` = DA0-2, CS0#
+;   SIDE-SET = GPIO2 (IOCS16#), as a pin direction: 1 = pull low, 0 = release
+;
+; Two loops, each setting the pin on every pass, so it never glitches while
+; the address holds still. A change reaches the pin within about 8 cycles
+; (40 ns at 200 MHz) with the input synchroniser (host/tests/test_iocs16_sim.py).
+
+.pio_version 1
+.program iocs16
+.side_set 1 opt pindirs
+.wrap_target
+released:
+    mov osr, pins       side 0  ; release IOCS16#; sample DA0-2, CS0#
+    out x, 4
+    jmp x-- released            ; not all zero: not the data register
+asserted:
+    mov osr, pins       side 1  ; the data register: pull IOCS16# low
+    out x, 4
+    jmp !x asserted             ; still addressed
+.wrap

@@ -165,6 +165,8 @@ void defaults(Config& out) {
     out.write_behind = DEFAULT_WRITE_BEHIND;
     out.read_ahead = DEFAULT_READ_AHEAD;
     out.activity_link = DEFAULT_ACTIVITY_LINK;
+    out.isa = DEFAULT_ISA;
+    out.seek_timing = seek_timing::Setting{};
     out.warning_count = 0;
 }
 
@@ -180,6 +182,7 @@ const Switch SWITCHES[] = {
     {"write_behind", &Config::write_behind},
     {"read_ahead", &Config::read_ahead},
     {"activity_link", &Config::activity_link},
+    {"isa", &Config::isa},
 };
 constexpr size_t SWITCH_COUNT = sizeof SWITCHES / sizeof SWITCHES[0];
 
@@ -198,7 +201,7 @@ bool parseOnOff(Span v, bool& on) {
 
 bool isKey(const char* key) {
     Span k{key, key + std::strlen(key)};
-    if (equalsNoCase(k, "image") || equalsNoCase(k, "mode")) return true;
+    if (equalsNoCase(k, "image") || equalsNoCase(k, "mode") || equalsNoCase(k, "seek_timing")) return true;
     for (const Switch& s : SWITCHES)
         if (equalsNoCase(k, s.key)) return true;
     return false;
@@ -206,7 +209,7 @@ bool isKey(const char* key) {
 
 void parse(const char* text, size_t len, Config& out) {
     defaults(out);
-    bool seen_image = false, seen_mode = false;
+    bool seen_image = false, seen_mode = false, seen_seek_timing = false;
     bool seen_switch[SWITCH_COUNT] = {};
     forEachLine(text, len, [&](int n, const Line& l) {
         if (l.blank) return;
@@ -236,6 +239,11 @@ void parse(const char* text, size_t len, Config& out) {
             out.mode = m;
             if (!modeSupported(m))
                 warn(out, "line %d: mode %.*s isn't supported yet%s", n, l.value, "; using auto (PIO 0)");
+        } else if (equalsNoCase(l.key, "seek_timing")) {
+            if (seen_seek_timing) warn(out, "line %d: '%.*s' is set again; this one counts%s", n, l.key);
+            seen_seek_timing = true;
+            if (!seek_timing::parseSetting(l.value.begin, l.value.size(), out.seek_timing))
+                warn(out, "line %d: seek_timing '%.*s' isn't off, synth or a preset; ignored%s", n, l.value);
         } else {
             for (size_t i = 0; i < SWITCH_COUNT; ++i) {
                 if (!equalsNoCase(l.key, SWITCHES[i].key)) continue;
@@ -325,7 +333,18 @@ const char* defaultFile() {
            "read_ahead = on\r\n"
            "\r\n"
            "# Tell an HDD Synth what the drive is doing (GPIO 0, docs/activity-link.md).\r\n"
-           "activity_link = on\r\n";
+           "activity_link = on\r\n"
+           "\r\n"
+           "# Hold each command for as long as a modelled drive would take (the seek,\r\n"
+           "# the platter coming round, the transfer), so the computer runs at that\r\n"
+           "# drive's pace: off; synth (the drive the HDD Synth is playing); or a\r\n"
+           "# preset: stepper85, voice91, voice97 or fdb05.\r\n"
+           "seek_timing = off\r\n"
+           "\r\n"
+           "# on for a 16-bit ISA IDE card (286, 386, many 486s): the drive lets go\r\n"
+           "# of IORDY if it has held it for 23 us, as these cards pass it to the\r\n"
+           "# whole ISA bus. Leave off for USB adapters and later controllers.\r\n"
+           "isa = off\r\n";
 }
 
 }  // namespace drive_config

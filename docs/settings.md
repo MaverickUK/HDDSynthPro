@@ -10,6 +10,8 @@ dma = off
 write_behind = on
 read_ahead = on
 activity_link = on
+seek_timing = off
+isa = off
 ```
 
 - One setting per line, as `key = value`. Spaces around `=` and the case of the key don't matter.
@@ -27,8 +29,10 @@ activity_link = on
 | `write_behind` | `on` or `off`: the drive acknowledges each written sector while storing it on the card, so the host sends the next one meanwhile. About 50% faster writes to the card; if power is cut in the millisecond a sector is being stored, that sector is lost | `on` |
 | `read_ahead` | `on` or `off`: the drive fetches the next sector while the host reads this one | `on` |
 | `activity_link` | `on` or `off`: tell an HDD Synth what the drive is doing ([activity-link.md](activity-link.md)) | `on` |
+| `seek_timing` | Hold each command for as long as a modelled drive would take: the seek, the wait for the sector to come round, the transfer. So the computer runs at that drive's pace, and an HDD Synth playing the same drive sounds as the computer feels. `off`: as fast as the card allows. `synth`: the drive the HDD Synth is playing (from its `$HDM`, which needs the link's second wire, GPIO 1; until one arrives, while it plays a recorded pack, or 5 s after it stops, nothing is held). A preset, whatever the synth plays: `stepper85` (a 1985 stepper), `voice91` and `voice97` (1991 and 1997 voice coils), `fdb05` (a 2005 7,200 rpm drive). No command is held over a second | `off` |
+| `isa` | `on` for a 16-bit ISA IDE card (286, 386 and many 486 machines). These cards select the drive from the address alone, so memory and DRAM refresh cycles can select it too, and they pass IORDY to the whole ISA bus. The drive pulls IORDY low as soon as it's selected (as ATA's timing needs), so such a cycle would stall for good: that froze an ICL 386. With `on`, the drive lets go of IORDY once it has held it for about 23 µs, which a real access never needs, and such a cycle ends. Leave it `off` for USB adapters and later controllers, which never need it. IOCS16#, which these cards also need, is always on unless DMA is offered (GPIO 2, [wiring.md](wiring.md)) | `off` |
 
-The on/off settings also take `yes`/`no`, `true`/`false` and `1`/`0`. The console's `W`, `A` and `L` switch write-behind, read-ahead and the activity link until the next restart, without changing the file.
+The on/off settings also take `yes`/`no`, `true`/`false` and `1`/`0`. The console's `W`, `A` and `L` switch write-behind, read-ahead and the activity link until the next restart, without changing the file, and `H` switches seek timing off and on (to compare speeds).
 
 **Which disk the drive serves**, in order:
 1. The built-in test disk if console `T` asked for it, or `HDDBENCH.IMG` if console `J` did (both for tests; a power cycle undoes them).
@@ -58,6 +62,6 @@ Eject the disk on the computer first, as you would before unplugging any disk. I
 | `!` | Restarts the drive, so the settings take effect (keeps a `J` or `T` choice) |
 | `T` | Restarts the drive serving the built-in test disk, card or no card, or back (a power cycle undoes it too); replug the adapter afterwards |
 
-`S` shows the settings in use (`CONFIG dmarq=wired dma=off write_behind=on read_ahead=on activity_link=on`, with `dmarq` saying whether DMA can be offered at all). `s` also shows `image_name=` (the image being served) and `config=` (`none`, `present` or `truncated`, as read at start-up).
+`S` shows the settings in use (`CONFIG dmarq=wired dma=off write_behind=on read_ahead=on activity_link=on isa=off`, with `dmarq` saying whether DMA can be offered at all), and `CONFIG seek_timing=voice97 model=voice 5400rpm 6000cyl stroke=19.0ms track=2.0ms zoned=1` (for `synth`, also when its last `$HDM` came). `s` shows `seek_timing=`, `seek_active=` (holding commands now), `seek_rpm=`, `seek_actuator=`, and `seek_commands=`, `seek_held=`, `seek_avg_us=`, `seek_max_us=`, `seek_total_us=`, `seek_capped=` (commands timed, how many waited, their modelled time, and any that hit the 1 s limit). `s` also shows `image_name=` (the image being served) and `config=` (`none`, `present` or `truncated`, as read at start-up).
 
 The drive never formats the card, and the only files it writes are the image it serves, images created with `I` or `K`, and `HDDSYNTH.INI` (only with `C` or `E`).

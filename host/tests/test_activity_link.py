@@ -40,3 +40,36 @@ def test_accepts_extra_fields_and_lower_case_checksum():
     got = link.parse(f"${body}*{link.checksum(body)}")
     assert got == link.Activity(2, True, "sequential", "write")
     assert link.parse("$HDA,1,1,S,R*4c") == link.Activity(1, True, "sequential", "read")
+
+
+# Version 2: $HDE (test/native/test_activity_link.cpp has the same answers).
+HEAD_KNOWN = [
+    ("$HDE,2,0,R,8*21", 0, "read", 8),
+    ("$HDE,2,32768,W,128*2F", 32768, "write", 128),
+    ("$HDE,2,65535,R,1*28", 65535, "read", 1),
+]
+
+
+@pytest.mark.parametrize("sentence, pos, op, sectors", HEAD_KNOWN)
+def test_head_known_answers(sentence, pos, op, sectors):
+    assert link.format_head(pos, op, sectors) == sentence + "\r\n"
+    assert link.parse_head(sentence + "\r\n") == link.HeadTarget(2, pos, op, sectors)
+    assert link.parse(sentence) is None  # not an $HDA
+
+
+def test_head_position():
+    total = 131072
+    assert link.head_position(0, total) == 0
+    assert link.head_position((total - 1) // 2, total) == 32767
+    assert link.head_position(total - 1, total) == 65535
+
+
+def test_head_ignores_what_a_receiver_must_ignore():
+    def line(body):
+        return f"${body}*{link.checksum(body)}"
+    assert link.parse_head("$HDE,2,0,R,8*22") is None              # wrong checksum
+    assert link.parse_head(line("HDE,1,0,R,8")) is None             # version 1 had no $HDE
+    assert link.parse_head(line("HDE,2,65536,R,8")) is None         # past the end
+    assert link.parse_head(line("HDE,2,0,X,8")) is None             # unknown op
+    assert link.parse_head(line("HDE,2,0,R")) is None               # too few fields
+    assert link.parse_head(line("HDE,3,5,-,0,more")) == link.HeadTarget(3, 5, None, 0)  # later versions

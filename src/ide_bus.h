@@ -14,7 +14,9 @@ namespace ide_bus {
 
 // Sets up the bus pins (DD and IORDY as PIO outputs that start released,
 // INTRQ released, everything else an input) and starts the PIO program.
-void begin();
+// `isa` (HDDSYNTH.INI): also start iordy_watchdog.pio, which releases IORDY
+// when it has been held for about 23 us, for ISA cards (see that file).
+void begin(bool isa);
 
 // Serves at most one register access. Call in a tight loop on core 1.
 // Returns true if there was one; `sample` gets the pin sample for the trace.
@@ -48,9 +50,9 @@ void restart();
 // from the bus, as if unplugged, until restart(). Console `V`.
 void stop();
 
-// Drives INTRQ to match the device: asserted = driven high, otherwise
-// released (the host pulls it down).
-void updateIntrq(bool asserted);
+// Drives INTRQ to match the device: high when asserted, low when not, and
+// released when the device doesn't drive it (ata::Device::intrqDriven).
+void updateIntrq(const ata::Device& dev);
 
 // Debug (console `D`): answer every data register read at least `ns` later,
 // to find how long the host really waits on IORDY. 0 turns it off.

@@ -45,7 +45,7 @@ The same applies to SRST (a write to DEVICE CONTROL with bit 2 set): BSY within 
 
 ## IOCS16#: a hardware limit of the BB48
 
-Separate from IORDY, and found the same evening: a 16-bit ISA IDE card may need the drive to assert **IOCS16#** (IDE pin 32) when the data register is addressed, or the ISA bus splits every data read into two 8-bit reads. The BB48 doesn't have it wired; the PCB rev 0.3 doesn't either (rev 0.4 adds it, [pcb-rev04.md](pcb-rev04.md)). Most later cards decode it themselves. The symptom: `bus_identify_bad=0` on the console (IDENTIFY was right on the cable), but the BIOS shows the name with every other character missing or garbled. That card needs rev 0.4; no firmware can fix it.
+Separate from IORDY, and found the same evening: a 16-bit ISA IDE card may need the drive to assert **IOCS16#** (IDE pin 32) when the data register is addressed, or the ISA bus splits every data read into two 8-bit reads. Most later cards decode it themselves. The symptom: on the raw trace (`t`), every data read is followed by a read of the error register (1F1h), and the BIOS gets a garbled IDENTIFY. Seen on an ICL 386's ISA card (30 Oct 2026). Since 0.20.0 the BB48 drives it from `iocs16.pio` on GPIO 2 (one wire from IDE pin 32 to EXT1-6; only when DMA isn't offered); the PCB rev 0.3 doesn't have it (rev 0.4 adds it, [pcb-rev04.md](pcb-rev04.md)).
 
 ## Testing it
 

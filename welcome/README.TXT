@@ -48,6 +48,12 @@ Plain text, one setting per line as key = value. # starts a comment.
   read_ahead = on        Fetch the next sector while the computer reads
                          this one.
   activity_link = on     Tell an HDD Synth what the drive is doing.
+  seek_timing = off      Hold each command as long as a modelled drive
+                         would (seek, rotation, transfer): off; synth (the
+                         drive the HDD Synth plays); or stepper85, voice91,
+                         voice97 or fdb05.
+  isa = off              on for a 16-bit ISA IDE card (286, 386, many
+                         486s); off for anything later.
 
 The on/off settings also take yes/no, true/false and 1/0.
 

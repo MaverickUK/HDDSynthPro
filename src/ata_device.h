@@ -124,6 +124,8 @@ struct Fetch {
     bool store;        // true: write `buffer` to `lba`; false: fill it from `lba`
     bool flush;        // true: then make everything stored so far permanent. Alone: FLUSH
                        // CACHE; with store: a write with the write cache off
+    uint16_t command_sectors;  // the command's sector count and first sector, for core 0's
+    uint32_t command_lba;      // seek timing and the activity link (seek_timing.h)
 };
 
 // A DMA burst for core 1 to run (READ DMA or WRITE DMA): the rest of a
@@ -206,6 +208,11 @@ public:
 
     // Level the INTRQ line should have: true = assert.
     bool intrq() const;
+    // Whether the drive drives INTRQ at all: while it's selected and nIEN is
+    // clear, it drives the line both ways (intrq()); otherwise it releases it.
+    // ATA has the host pull INTRQ down, but older ISA cards don't, and an
+    // undriven line floats high, so their edge-triggered IRQ never fires.
+    bool intrqDriven() const { return !device1Selected() && !(device_control_ & DC_NIEN); }
 
     // ---- Sector fetches (handed to core 0) ---------------------------------
 

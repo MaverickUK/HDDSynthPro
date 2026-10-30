@@ -221,7 +221,7 @@ pre {
       <h2>On the Perma-Proto</h2>
       <ul>
         <li>Solder female headers for the BB48 rather than the board itself, so it can be swapped for your spare.</li>
-        <li>Seat it across the centre channel at one end, with the EXT1 row (GPIO 0–23) facing the IDC helper at the other end. 20 of the 26 signals are on EXT1.</li>
+        <li>Seat it across the centre channel at one end, with the EXT1 row (GPIO 0–23) facing the IDC helper at the other end. 21 of the 27 signals are on EXT1.</li>
         <li>Put the two 33 Ω resistors in DIOR# and DIOW#, close to the BB48.</li>
         <li>Run the IDE grounds and the BB48's GND to the same ground rail. Wire all seven IDE grounds if you can, and at least three spread along the header.</li>
         <li>Keep signal wires short, under 15 cm.</li>
@@ -254,13 +254,14 @@ pre {
     17: ["DD0", "data", 4], 18: ["DD15", "data", 19], 19: ["GND", "gnd"], 20: ["key", "nc"],
     21: ["DMARQ", "ctl", 31], 22: ["GND", "gnd"], 23: ["DIOW#", "strobe", 27], 24: ["GND", "gnd"],
     25: ["DIOR#", "strobe", 26], 26: ["GND", "gnd"], 27: ["IORDY", "ctl", 28], 28: ["CSEL", "nc"],
-    29: ["DMACK#", "ctl", 3], 30: ["GND", "gnd"], 31: ["INTRQ", "ctl", 29], 32: ["IOCS16#", "nc"],
+    29: ["DMACK#", "ctl", 3], 30: ["GND", "gnd"], 31: ["INTRQ", "ctl", 29], 32: ["IOCS16#", "ctl", 2],
     33: ["DA1", "addr", 21], 34: ["PDIAG#", "nc"], 35: ["DA0", "addr", 20], 36: ["DA2", "addr", 22],
     37: ["CS0#", "cs", 23], 38: ["CS1#", "cs", 24], 39: ["DASP#", "nc"], 40: ["GND", "gnd"],
   };
   const NOTES = {
     "DIOR#": "33 Ω in series, near the BB48", "DIOW#": "33 Ω in series, near the BB48",
-    "IORDY": "Open drain; host pulls up to 5 V", "INTRQ": "Host pulls down",
+    "IORDY": "Open drain; host pulls up to 5 V", "INTRQ": "Driven both ways while selected",
+    "IOCS16#": "Open drain; 16-bit ISA cards; the BB48 also pulls GPIO 2 up (R17)",
     "DD7": "Host pulls down", "RESET#": "From the host", "CS0#": "ATA “CS1FX-”, command block",
     "CS1#": "ATA “CS3FX-”, control block", "GND": "To the ground rail",
     "DMARQ": "Multiword DMA; driven only during a DMA command", "DMACK#": "Multiword DMA; from the host",

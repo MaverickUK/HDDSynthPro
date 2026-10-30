@@ -500,7 +500,8 @@ CORE1_RAM void Device::deliverSector(bool ok) {
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
-    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_, flushing_ || (writing_ && !write_cache_)};
+    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_, flushing_ || (writing_ && !write_cache_),
+                  last_.count, last_.lba};
     return true;
 }
 
