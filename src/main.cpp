@@ -196,12 +196,43 @@ static bool dmarqWired() {
 enum : uint8_t { GAP_ACCESS = 1, GAP_LANE, GAP_COMMAND, GAP_BUS_ONLY, GAP_STEP0 };  // steps 0-4 follow
 constexpr unsigned GAP_KINDS = GAP_STEP0 + 5;
 static volatile uint32_t g_c1_gap[GAP_KINDS];
+static volatile uint32_t g_c1_fifo_cycles, g_c1_fifo_max;  // the FIFO check alone (diagnostic)
+static volatile uint32_t g_c1_passes;
+static uint32_t g_bench_pio, g_bench_ram, g_bench_sio, g_bench_nop;  // cycles per 1000, measured in setup1
+static volatile uint32_t g_bench_var;
+static uint32_t g_bench_pio_ram, g_bench_nop_ram;  // the same loops, from core 1's RAM code
+CORE1_RAM __attribute__((noinline)) static void benchFromRam() {
+    uint32_t t = m33_hw->dwt_cyccnt;
+    for (int i = 0; i < 1000; ++i) __asm volatile("nop");
+    g_bench_nop_ram = m33_hw->dwt_cyccnt - t;
+    t = m33_hw->dwt_cyccnt;
+    for (int i = 0; i < 1000; ++i) (void)pio0_hw->fstat;
+    g_bench_pio_ram = m33_hw->dwt_cyccnt - t;
+}
+  // core 1's loop passes, for the average (`c1_pass_ns`)
+static uint32_t g_bus_only_cycles;  // cfg::EARLY_BUS_ONLY_US in core 1's cycles, set in setup1
 static const char* const GAP_NAMES[GAP_KINDS] = {"-", "access", "lane", "command", "busonly",
                                                   "step0", "step1", "step2", "step3", "step4"};
 
 void setup1() {
     m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 1's own cycle counter, for g_c1_gap
     m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
+    g_bus_only_cycles = cfg::EARLY_BUS_ONLY_US * (clock_get_hz(clk_sys) / 1000000);
+    {  // micro-benchmark (diagnostic): cycles per 1000 reads, on core 1, from flash code here
+        uint32_t t = m33_hw->dwt_cyccnt;
+        for (int i = 0; i < 1000; ++i) __asm volatile("nop");
+        g_bench_nop = m33_hw->dwt_cyccnt - t;
+        t = m33_hw->dwt_cyccnt;
+        for (int i = 0; i < 1000; ++i) (void)pio0_hw->fstat;
+        g_bench_pio = m33_hw->dwt_cyccnt - t;
+        t = m33_hw->dwt_cyccnt;
+        for (int i = 0; i < 1000; ++i) (void)g_bench_var;
+        g_bench_ram = m33_hw->dwt_cyccnt - t;
+        t = m33_hw->dwt_cyccnt;
+        for (int i = 0; i < 1000; ++i) (void)sio_hw->gpio_in;
+        g_bench_sio = m33_hw->dwt_cyccnt - t;
+        benchFromRam();
+    }
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
@@ -301,7 +332,8 @@ CORE1_RAM void loop1() {
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
     const bool early = g_early.load();  // ide_bus_early's samples (early_answers)
-    uint32_t last_access_us = 0;
+    uint32_t last_access_cycles = 0;  // core 1's cycle counter: core-local, unlike the timer behind the APB bridge
+    const uint32_t bus_only_cycles = g_bus_only_cycles;
     ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
     unsigned step = 0;
 
@@ -311,11 +343,22 @@ CORE1_RAM void loop1() {
         uint32_t now = m33_hw->dwt_cyccnt;
         if (now - last_pass > g_c1_gap[pass_kind]) g_c1_gap[pass_kind] = now - last_pass;
         last_pass = now;
+        g_c1_passes = g_c1_passes + 1;
         pass_kind = GAP_ACCESS;
         uint32_t sample;
-        if (ide_bus::serviceOnce(dev, sample)) {
+        uint32_t f0 = m33_hw->dwt_cyccnt;
+        bool got = ide_bus::serviceOnce(dev, sample);
+        uint32_t f = m33_hw->dwt_cyccnt - f0;
+        if (!got) {
+            g_c1_fifo_cycles = g_c1_fifo_cycles + f;
+            if (f > g_c1_fifo_max) g_c1_fifo_max = f;
+        }
+        if (got) {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
-            if (early) last_access_us = time_us_32();
+            if (early) {
+                last_access_cycles = m33_hw->dwt_cyccnt;
+                if (!g_trace_bus.load()) ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles);
+            }
             continue;
         }
         pass_kind = GAP_LANE;
@@ -363,7 +406,7 @@ CORE1_RAM void loop1() {
         // early_answers: for a while after any access, only the bus, so a host
         // that doesn't wait finds core 1 free to answer its next request.
         pass_kind = GAP_BUS_ONLY;
-        if (early && time_us_32() - last_access_us < cfg::EARLY_BUS_ONLY_US) continue;
+        if (early && m33_hw->dwt_cyccnt - last_access_cycles < bus_only_cycles) continue;
         // For a moment after a command starts, only the bus: the host's first
         // status poll comes within a few microseconds and must find core 1
         // free, not in the middle of a step (CMD line, fetch post).
@@ -1219,6 +1262,20 @@ static void printStats() {
                   iordy_timer::earlyRegister());
     Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
                   iordy_timer::ignoredRegister());
+    static uint32_t s_passes_then, s_ms_then;
+    uint32_t passes = g_c1_passes, ms = millis();
+    if (passes != s_passes_then && ms != s_ms_then)
+        Serial.printf(" c1_pass_ns=%lu", (unsigned long)(uint64_t(ms - s_ms_then) * 1000000ull / (passes - s_passes_then)));
+    static uint32_t s_fifo_then;
+    uint32_t fifo = g_c1_fifo_cycles;
+    if (passes != s_passes_then)
+        Serial.printf(" c1_fifo_cyc=%lu/%lu", (unsigned long)((fifo - s_fifo_then) / (passes - s_passes_then)),
+                      (unsigned long)g_c1_fifo_max);
+    s_fifo_then = fifo;
+    Serial.printf(" c1_bench_per1000=nop:%lu,pio:%lu,ram:%lu,sio:%lu", (unsigned long)g_bench_nop,
+                  (unsigned long)g_bench_pio, (unsigned long)g_bench_ram, (unsigned long)g_bench_sio);
+    Serial.printf(" c1_bench_ram_per1000=nop:%lu,pio:%lu", (unsigned long)g_bench_nop_ram, (unsigned long)g_bench_pio_ram);
+    s_passes_then = passes, s_ms_then = ms;
     Serial.print(" c1_gap_ns=");
     for (unsigned k = 1; k < GAP_KINDS; ++k)
         if (g_c1_gap[k])

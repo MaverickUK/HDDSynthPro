@@ -41,6 +41,12 @@ bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32
 // The same for ide_bus_early (`early_answers`), whose samples are requests and
 // read reports.
 bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
+// early_answers' tight bus loop, after an access: serves accesses inline and
+// keeps fetches moving until the bus is quiet for `quiet_cycles` (core 1's
+// cycle counter), a command or data block needs the main loop, or RESET#
+// leaves `reset_low`.
+void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
+                   uint32_t quiet_cycles);
 
 // True while setDataReadDelay() is on.
 bool dataReadDelayed();

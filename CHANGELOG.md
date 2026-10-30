@@ -2,6 +2,17 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.4] - 2026-10-30
+
+`c1_gap_ns` showed core 1's main loop taking about 660 ns a pass on average, and up to 880, even idle. That's about 150 cycles of calls and checks, not slow memory: a micro-benchmark (`c1_bench_*`, in `s`) puts PIO, RAM and SIO reads at about a cycle each from RAM code. A request could wait most of the PIIX's 400 ns before core 1 looked at it.
+
+### Changed
+- **`early_answers`: after an access, core 1 stays in a tight bus loop** (`ide_bus::serveBusEarly`). It serves each access inline, posts fetches and takes their results (so BSY ends while the host polls), and leaves when the bus has been quiet for `EARLY_BUS_ONLY_US`, a command is queued, a data-in block starts, or RESET# changes. Not while the raw trace is on.
+- Console `D`'s delay waits on core 1's cycle counter, always inlined: the SDK's `busy_wait_at_least_cycles()` had ended up out of line in flash.
+
+### Added
+- `s`: `c1_pass_ns` (core 1's average loop pass), `c1_fifo_cyc` (its FIFO check, average/longest) and the micro-benchmark (diagnostics on this branch).
+
 ## [0.23.3] - 2026-10-30
 
 On the Pentium the timing probe measured t1 = 110 ns and strobes of 335-345 ns in the PIIX's compatible timing. That's more relaxed than PIO mode 0's minimum, yet the drive answered as late as 490 ns into the strobe. So it's core 1's response time, not the host's speed.

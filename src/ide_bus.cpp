@@ -5,6 +5,7 @@
 #include <hardware/clocks.h>
 #include <hardware/gpio.h>
 #include <hardware/pio.h>
+#include <hardware/structs/m33.h>
 
 #include "ata_device.h"
 #include "bus_sample.h"
@@ -117,6 +118,14 @@ void begin(bool isa, bool early) {
     }
 }
 
+// Console `D`'s delay, always inlined: the SDK's busy_wait_at_least_cycles()
+// can end up out of line, in flash.
+__attribute__((always_inline)) static inline void waitCycles(uint32_t cycles) {
+    uint32_t start = m33_hw->dwt_cyccnt;
+    while (m33_hw->dwt_cyccnt - start < cycles) {
+    }
+}
+
 // Inlined into both callers: a call here costs every access its register
 // saves and restores, about 100 ns (0.8.1's worst read).
 __attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32_t sample) {
@@ -142,7 +151,7 @@ __attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32
         // Every read must be answered, or the PIO holds IORDY low forever.
         // The host waits until it is, so answer first and catch up after.
         uint32_t delay = s_data_delay_cycles.load(std::memory_order_relaxed);
-        if (delay && reg == ata::Reg::Data) busy_wait_at_least_cycles(delay);
+        if (delay && reg == ata::Reg::Data) waitCycles(delay);
         pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
         dev.consumeRead(reg);
     }
@@ -263,6 +272,45 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
     dev.consumeDataWords(served);  // the block may be done: BSY for the next fetch
     updateIntrq(dev);
     return !reset_changed;
+}
+
+// early_answers: core 1's tight bus loop. The main loop takes about 150
+// cycles a pass, so a request could wait 600-900 ns for it (c1_gap_ns, 0.23.3),
+// far past the 400 ns a host that doesn't wait leaves. This serves each access
+// inline, a few cycles a poll, and keeps the fetch handshake going (so BSY
+// ends while the host polls), until the bus has been quiet for `quiet_cycles`,
+// a command is queued, a data-in block starts (the fast lane's job), or
+// RESET# changes: the main loop's work. Not while the raw trace is on.
+CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
+                             uint32_t quiet_cycles) {
+    PIO pio = s_pio;
+    uint sm = s_sm;
+    uint32_t last = m33_hw->dwt_cyccnt;
+    for (;;) {
+        if (!pio_sm_is_rx_fifo_empty(pio, sm)) {
+            serve(dev, pio_sm_get(pio, sm));
+            const uint16_t* next;
+            uint16_t left;
+            if (dev.commandQueued() || dev.dataInRemaining(next, left)) return;
+            last = m33_hw->dwt_cyccnt;
+            continue;
+        }
+        if (m33_hw->dwt_cyccnt - last > quiet_cycles) return;
+        if (gpio_get(cfg::PIN_RESET_N) == reset_low) return;  // high when it was low, or low when high
+        uint32_t id = dev.pendingFetchId();
+        if (id != 0 && id != posted_fetch) {
+            ata::Fetch fetch;
+            if (dev.pendingFetch(fetch) && mailbox.post(fetch)) posted_fetch = fetch.id;
+        }
+        FetchResult result;
+        if (mailbox.takeResult(result)) {
+            dev.fetchDone(result.id, result.ok);
+            updateIntrq(dev);
+            const uint16_t* next;
+            uint16_t left;
+            if (dev.dataInRemaining(next, left)) return;
+        }
+    }
 }
 
 CORE1_RAM bool dataReadDelayed() { return s_data_delay_cycles.load(std::memory_order_relaxed) != 0; }
