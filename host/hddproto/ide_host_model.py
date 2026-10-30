@@ -27,6 +27,7 @@ class Mode0:
     t6z: float = 30    # read data tri-state after strobe rising (maximum)
     t9: float = 20     # address/CS hold
     tA: float = 35     # IORDY setup: the host samples IORDY this long after the strobe falls
+    waits_for_iordy: bool = True  # False: a host that ends every strobe after t2 (no IORDY)
     iordy_max: float = 1250  # longest the device may hold IORDY low (tB)
     host_iordy_delay: float = 10  # host's own delay from IORDY high to strobe rising
     # Strobe recovery (t2i) between accesses with CS held. Mode 0 only sets
@@ -173,7 +174,8 @@ class Run:
 
 def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = Mode0(),
              start_ns: float = 100.0, tail_ns: float = 1000.0, timeout_ns: float = 5000.0) -> Run:
-    T = {k: int(v * 1000) for k, v in timing.__dict__.items()}
+    T = {k: int(v * 1000) for k, v in timing.__dict__.items() if not isinstance(v, bool)}
+    waits = timing.waits_for_iordy
     results: list[Result] = []
     errors: list[str] = []
     history: list[int] = []
@@ -254,7 +256,7 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
                 tA_checked = True
             end = None
             if tA_checked:
-                if not cur.iordy_low_at_tA:
+                if not cur.iordy_low_at_tA or not waits:
                     end = fall + T["t2"]
                 else:
                     if iordy_seen_high_at is None and not iordy_low:
@@ -286,7 +288,8 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             i += 1
             state = "gap"
             t_next = max(t, int(cur.fall_ns * 1000) + T["t0"] - T["t1"])
-            if cur.access.hold_cs and T["t2i"] and i < len(accesses):
+            same_address = i < len(accesses) and (accesses[i].block, accesses[i].addr) == (cur.access.block, cur.access.addr)
+            if cur.access.hold_cs and T["t2i"] and same_address:
                 # CS and DA stay valid, so no t1: only recovery and cycle time
                 cur = Result(accesses[i])
                 state = "setup"

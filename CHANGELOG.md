@@ -2,6 +2,24 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.0] - 2026-10-30
+
+Early answers, for hosts that don't wait for IORDY (docs/no-iordy.md). A Pentium 200's PIIX runs in compatible timing, which ignores IORDY, until its Phoenix BIOS has identified the drive, and the BIOS never got that far. Its register reads ended before core 1 answered: the DEVICE read-back that checks a drive is there got `9004`, and 31 of IDENTIFY's 256 words were wrong. Experimental, and off by default.
+
+### Added
+- **`early_answers` in `HDDSYNTH.INI`:** runs `ide_bus_early` (in `ide_bus.pio`) in place of `ide_bus`. At the chip select it asks core 1 for the register's value, an answer request with bits 21-31 zero, so the value is in the TX FIFO when DIOR# falls, t1 (70 ns or more) sooner than now.
+  - A write throws its answer away. So does an address or chip select that changes while armed; Y holds the address asked about, and the program asks again.
+  - A read still reports itself, in a sample taken during the strobe, so core 1 applies its side effects.
+  - After each access the program arms again, so the next data word is asked for before the host's next strobe.
+  - IORDY is low from the chip select as before, released only when nothing is selected, so hosts that wait still can.
+  - 32 instructions, so no `iordy_watchdog` (not with `isa`), and core 1's fast data path is off in this mode.
+- Core 1 (`ide_bus::serve`): an answer request gets `peek()`, with no side effects. A read's sample gets `consumeRead()`. Writes are unchanged.
+- Sim: `ide_host_model` can be a host that never waits for IORDY (`waits_for_iordy=False`), and keeps DA's t1 when the address changes with CS held. `test_pio_bus_early_sim.py`:
+  - a never-waiting host gets register reads, IDENTIFY's 256 words and a written register's read-back right, as long as core 1 answers within 160 ns of the chip select;
+  - hosts that wait still get their data in PIO modes 0-3;
+  - an address change with CS held; flow-controlled writes; a chip select with no strobe.
+- **Not yet run on any host.**
+
 ## [0.22.0] - 2026-10-30
 
 `isa = on` done with a watchdog. 0.21.2's 60 ns releases didn't free the ICL 386: it froze again after F1. A released IORDY rises through the host's pull-up and the cable's capacitance, which takes far longer than 60 ns. And the old trace showed the BIOS waits up to 11 µs between a status read and its first data read, with the drive still selected, more than the bus program's countdown (31 passes at most) can hold.

@@ -143,6 +143,7 @@ CORE1_RAM void loop1() {
 static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
+static SharedFlag g_early{false};       // HDDSYNTH.INI early_answers: ide_bus_early (ide_bus::begin)
 static SharedFlag g_isa{false};         // HDDSYNTH.INI isa: IORDY from the strobe (ide_bus::begin)
 static SharedFlag g_read_ahead{true};  // HDDSYNTH.INI read_ahead; console `A` (debug)
 // Off by default: with it on, writes hold some status reads 1.5-2 us (ATA
@@ -191,7 +192,7 @@ void setup1() {
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
-    ide_bus::begin(g_isa.load());
+    ide_bus::begin(g_isa.load(), g_early.load());
     busSwitchesOn();
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
@@ -299,7 +300,8 @@ CORE1_RAM void loop1() {
         const uint16_t* next;
         uint16_t left;
         if (dev.dataInRemaining(next, left)) {
-            if (g_fast_lane.load() && !g_trace_bus.load() && !ide_bus::dataReadDelayed()) {
+            // ide_bus_early asks for each word ahead itself; the lane expects ide_bus's samples.
+            if (g_fast_lane.load() && !g_trace_bus.load() && !ide_bus::dataReadDelayed() && !g_early.load()) {
                 if (ide_bus::serveDataIn(dev, reset_low, g_mailbox, posted_fetch)) continue;
             } else {
                 postFetch(dev, posted_fetch);  // the read-ahead, without the lane
@@ -536,6 +538,7 @@ static void chooseDisk() {
     g_read_ahead.store(g_config.read_ahead);
     g_link_on = g_config.activity_link;
     g_isa.store(g_config.isa);  // core 1 sets up the bus program from it
+    g_early.store(g_config.early_answers);
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
@@ -568,7 +571,7 @@ static void editConfig(const char* line) {
     }
     size_t n = drive_config::setKey(text, len, key, value, edited, sizeof edited);
     if (n == 0) {
-        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa), "
+        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers), "
                       "or the file would be too long\n", key);
         return;
     }
@@ -593,10 +596,11 @@ static void printConfig() {
                   g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name);
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
-    Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s\n",
+    Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s early_answers=%s\n",
                   g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
-                  drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa));
+                  drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa),
+                  drive_config::onOff(g_config.early_answers));
     printSeekConfig();
     if (drive_config::dmaRefusedForWiring(g_config.mode, g_dmarq_wired.load()))
         Serial.printf("CONFIG warning: mode = %s needs DMARQ wired (IDE pin 21 to GPIO 31); offering PIO only\n",

@@ -78,3 +78,73 @@ public not_read:
     out x, 1                        ; DIOW# asserted?
     jmp x-- write
     jmp armed
+
+; ---- Early answers (HDDSYNTH.INI `early_answers = on`, docs/no-iordy.md) -------
+;
+; As ide_bus, but core 1 is asked for a register's value at the chip select,
+; not at the strobe, so the answer is waiting in the TX FIFO when DIOR# falls:
+; t1 (70 ns or more) sooner, for hosts that don't wait for IORDY (a PIIX in
+; its compatible timing, during the BIOS's detection). Each access produces:
+;   an answer request, at `arm`: DD, DA, CS# with bits 21-31 zero, so both
+;     strobe bits read as asserted, which no real access shows. Core 1 answers
+;     it with one TX word, as it answers a read in ide_bus.
+;   then, for a read, a sample taken during the strobe (DIOW# high), so core 1
+;     applies its side effects; for a write, the write's sample as in ide_bus.
+; A write throws its answer away, and so does an address or chip select that
+; changes while armed (Y holds the one asked about), which then asks again.
+; After every access the program arms again and asks again: for a run of data
+; reads, the next word is in the FIFO before the host's next strobe.
+; IORDY is pulled low at the chip select as in ide_bus, and released once the
+; data is driven, so hosts that wait for it still can.
+; 32 instructions: no room for iordy_watchdog beside it.
+
+.program ide_bus_early
+.side_set 1 opt pindirs
+
+public write:
+    pull block                      ; this address's answer: not needed
+    wait 1 gpio 27          side 0  ; release IORDY; wait for DIOW# to rise
+    in pins, 23                     ; DD, DA, CS#, LED, DIOR#: the data 5 ns after
+    in null, 9              side 1  ; DIOW# (and up) as 0: a write; autopush. IORDY low,
+                                    ; held while the RX FIFO is full
+    jmp idle                [7]     ; arm only once a chip select is there: the host may
+                                    ; have dropped it, and asking about no address costs
+                                    ; the next access a request it must throw away. The
+                                    ; delay lets the chip select's hold (t9) pass first
+public arm:
+    in pins, 21             side 1  ; IORDY low; ask core 1 for this address's value:
+    in null, 11                     ; bits 21-31 zero mark an answer request; autopush
+    mov osr, pins
+    out null, 16
+    out y, 5                        ; Y = DA2-0, CS0#, CS1#: the address asked about
+public armed:
+    mov osr, pins
+    out null, 16
+    out x, 5
+    jmp x!=y rearm                  ; the address or chip select changed, or went
+    jmp pin not_read                ; DIOR# high (read from the pin, unsynchronised)
+public read:
+    pull block              side 1  ; the answer (IORDY held low until it's here)
+    out pins, 16                    ; onto DD0-15 (still inputs)
+    out pindirs, 16         [7]     ; drive them (bits 16-31: all, or none), and settle
+    in pins, 32                     ; the read, for its side effects; autopush
+    wait 1 jmppin           side 0  ; release IORDY; hold the data until DIOR# rises
+    mov pindirs, null       [7]     ; release DD0-15; let the chip select's hold (t9) pass
+.wrap_target
+public idle:
+    mov osr, ~pins                  ; sample, inverted (asserted = 1)
+    out null, 19                    ; drop DD0-15, DA0-2
+    out x, 2                        ; x = CS0#/CS1# asserted
+    jmp x-- arm                     ; selected: arm, with IORDY still low if it was
+    nop                     side 0  ; nothing selected: release IORDY. Only here, so a new
+                                    ; address asked about after a discard never sees it
+                                    ; released mid-strobe
+.wrap
+public not_read:
+    out null, 2                     ; LED, DIOR#
+    out x, 1                        ; DIOW#, as it is (0 = asserted)
+    jmp !x write
+    jmp armed
+rearm:
+    pull block                      ; the answer for the old address: not needed
+    jmp idle

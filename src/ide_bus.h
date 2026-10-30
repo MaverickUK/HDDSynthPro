@@ -16,7 +16,10 @@ namespace ide_bus {
 // INTRQ released, everything else an input) and starts the PIO program.
 // `isa` (HDDSYNTH.INI): also start iordy_watchdog.pio, which releases IORDY
 // when it has been held for about 23 us, for ISA cards (see that file).
-void begin(bool isa);
+// `early` (HDDSYNTH.INI `early_answers`): run ide_bus_early instead, which asks
+// core 1 for each register's value at the chip select, for hosts that don't
+// wait for IORDY (docs/no-iordy.md). No watchdog then: there's no room.
+void begin(bool isa, bool early);
 
 // Serves at most one register access. Call in a tight loop on core 1.
 // Returns true if there was one; `sample` gets the pin sample for the trace.

@@ -166,6 +166,7 @@ void defaults(Config& out) {
     out.read_ahead = DEFAULT_READ_AHEAD;
     out.activity_link = DEFAULT_ACTIVITY_LINK;
     out.isa = DEFAULT_ISA;
+    out.early_answers = DEFAULT_EARLY_ANSWERS;
     out.seek_timing = seek_timing::Setting{};
     out.warning_count = 0;
 }
@@ -183,6 +184,7 @@ const Switch SWITCHES[] = {
     {"read_ahead", &Config::read_ahead},
     {"activity_link", &Config::activity_link},
     {"isa", &Config::isa},
+    {"early_answers", &Config::early_answers},
 };
 constexpr size_t SWITCH_COUNT = sizeof SWITCHES / sizeof SWITCHES[0];
 
@@ -344,7 +346,12 @@ const char* defaultFile() {
            "# on for a 16-bit ISA IDE card (286, 386, many 486s): the drive lets go\r\n"
            "# of IORDY if it has held it for 23 us, as these cards pass it to the\r\n"
            "# whole ISA bus. Leave off for USB adapters and later controllers.\r\n"
-           "isa = off\r\n";
+           "isa = off\r\n"
+           "\r\n"
+           "# on for a controller that doesn't wait for IORDY (some PCI ones while\r\n"
+           "# the BIOS detects the drive): the drive has each register's value ready\r\n"
+           "# as soon as it's addressed. Experimental; off for everything else.\r\n"
+           "early_answers = off\r\n";
 }
 
 }  // namespace drive_config

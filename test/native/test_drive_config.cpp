@@ -215,6 +215,10 @@ TEST(test_config_isa) {
     CHECK(parsed("isa = on\n").isa);
     CHECK(!parsed("isa = off\n").isa);
     CHECK(drive_config::isKey("isa"));
+    CHECK(!parsed("").early_answers);  // off: today's bus program for everyone
+    CHECK(parsed("early_answers = on\n").early_answers);
+    CHECK(drive_config::isKey("early_answers"));
+    CHECK(!parsed(drive_config::defaultFile()).early_answers);
     Config def = parsed(drive_config::defaultFile());
     CHECK(!def.isa);
     CHECK_EQ(def.warning_count, size_t(0));

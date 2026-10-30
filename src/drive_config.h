@@ -11,6 +11,7 @@
 //   activity_link = on     # tell an HDD Synth what the drive is doing
 //   seek_timing = off      # hold commands for as long as a modelled drive would
 //   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
+//   early_answers = off    # answers ready at the chip select, for hosts that don't wait for IORDY
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -80,6 +81,11 @@ constexpr bool DEFAULT_ACTIVITY_LINK = true;
 // whose address aliases 1F0h-1F7h would otherwise stall for good (an ICL 386,
 // 0.21.0). Off by default: ATA hosts never need it.
 constexpr bool DEFAULT_ISA = false;
+// `early_answers = on`: ide_bus_early, which asks core 1 for a register's
+// value at the chip select, so hosts that don't wait for IORDY get it in time
+// (docs/no-iordy.md: a Pentium's PIIX during the BIOS's detection). Off
+// until it has been through the USB adapter's tests.
+constexpr bool DEFAULT_EARLY_ANSWERS = false;
 
 struct Config {
     char image[MAX_NAME + 1];
@@ -89,6 +95,7 @@ struct Config {
     bool read_ahead = DEFAULT_READ_AHEAD;      // see Device::setReadAhead
     bool activity_link = DEFAULT_ACTIVITY_LINK;
     bool isa = DEFAULT_ISA;
+    bool early_answers = DEFAULT_EARLY_ANSWERS;
     ::seek_timing::Setting seek_timing;  // off by default
     char warnings[MAX_WARNINGS][MAX_WARNING];
     size_t warning_count = 0;  // may exceed MAX_WARNINGS: only the first ones are kept

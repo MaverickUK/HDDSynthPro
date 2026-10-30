@@ -33,6 +33,12 @@ static ata::Reg s_reg_for[32];
 static constexpr uint32_t DRIVE_DD = 0xFFFF0000u;
 static uint32_t s_drive_for[32];
 static std::atomic<uint32_t> s_data_delay_cycles{0};  // setDataReadDelay
+static bool s_early = false;    // ide_bus_early: answers asked for at the chip select (begin)
+static uint s_idle_offset = 0;  // where the program's `idle` is, for restart()
+
+// ide_bus_early's answer requests have bits 21-31 zero, so both strobe bits
+// read as asserted, which no real access shows.
+static constexpr uint32_t STROBE_BITS = bus::maskOf(cfg::PIN_DIOR_N) | bus::maskOf(cfg::PIN_DIOW_N);
 
 static unsigned regIndex(uint32_t sample) { return (sample >> REG_INDEX_SHIFT) & 31u; }
 
@@ -42,7 +48,8 @@ static constexpr uint32_t ACCESS_BITS = (31u << REG_INDEX_SHIFT) | bus::maskOf(c
                                         bus::maskOf(cfg::PIN_DIOW_N);
 static constexpr uint32_t DATA_READ = bus::maskOf(cfg::PIN_CS1_N) | bus::maskOf(cfg::PIN_DIOW_N);
 
-void begin(bool isa) {
+void begin(bool isa, bool early) {
+    s_early = early;
     for (unsigned i = 0; i < 32; ++i) {
         uint32_t sample = i << REG_INDEX_SHIFT;
         bus::Block block = bus::block(sample);
@@ -59,8 +66,10 @@ void begin(bool isa) {
     gpio_put(cfg::PIN_INTRQ, 1);
     gpio_set_dir(cfg::PIN_INTRQ, false);
 
+    const pio_program* program = early ? &ide_bus_early_program : &ide_bus_program;
+    s_idle_offset = early ? ide_bus_early_offset_idle : ide_bus_offset_idle;
     bool ok = pio_claim_free_sm_and_add_program_for_gpio_range(
-        &ide_bus_program, &s_pio, &s_sm, &s_offset, cfg::BUS_FIRST_PIN,
+        program, &s_pio, &s_sm, &s_offset, cfg::BUS_FIRST_PIN,
         cfg::BUS_LAST_PIN - cfg::BUS_FIRST_PIN + 1, true);
     hard_assert(ok);
 
@@ -71,7 +80,8 @@ void begin(bool isa) {
     pio_sm_set_pins_with_mask(s_pio, s_sm, 0, 1u << cfg::PIN_IORDY);
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);
 
-    pio_sm_config c = ide_bus_program_get_default_config(s_offset);
+    pio_sm_config c = early ? ide_bus_early_program_get_default_config(s_offset)
+                            : ide_bus_program_get_default_config(s_offset);
     sm_config_set_in_pins(&c, cfg::PIN_DD0);
     sm_config_set_out_pins(&c, cfg::PIN_DD0, 16);
     sm_config_set_sideset_pins(&c, cfg::PIN_IORDY);
@@ -79,7 +89,7 @@ void begin(bool isa) {
     sm_config_set_out_shift(&c, true, false, 32);  // `out` takes the low bits first
     sm_config_set_in_shift(&c, true, true, 32);    // autopush: a read's `in pins, 32` is its sample
     sm_config_set_mov_status(&c, STATUS_RX_LESSTHAN, 4);  // STATUS: room in the 4-deep RX FIFO
-    pio_sm_init(s_pio, s_sm, s_offset + ide_bus_offset_idle, &c);  // `idle`, not the first instruction
+    pio_sm_init(s_pio, s_sm, s_offset + s_idle_offset, &c);  // `idle`, not the first instruction
 
     // DIOR# skips the 2-cycle input synchroniser, so DD is released sooner
     // after DIOR# rises: about 10 ns instead of 24 (ATA allows 30, t6z), which
@@ -93,6 +103,8 @@ void begin(bool isa) {
     // writes IORDY's direction too. Loaded whatever `isa` says, so nothing
     // else lands in this block: the diagnostics' iordy_check would see DIOR#
     // through the synchroniser bypass above and misjudge the host.
+    // ide_bus_early fills the block itself, so there's no watchdog beside it.
+    if (early) return;
     hard_assert(pio_can_add_program(s_pio, &iordy_watchdog_program));
     uint watchdog_offset = pio_add_program(s_pio, &iordy_watchdog_program);
     if (isa) {
@@ -109,6 +121,17 @@ void begin(bool isa) {
 // saves and restores, about 100 ns (0.8.1's worst read).
 __attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32_t sample) {
     ata::Reg reg = s_reg_for[regIndex(sample)];
+    if (s_early) {
+        if ((sample & STROBE_BITS) == 0) {  // an answer request: the value, no side effects yet
+            pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
+            return;
+        }
+        if (sample & bus::maskOf(cfg::PIN_DIOW_N)) {  // a read happened: its side effects
+            dev.consumeRead(reg);
+            updateIntrq(dev);
+            return;
+        }
+    }
     if (bus::op(sample) == bus::Op::Write) {
         // A command only sets BSY here; core 1 runs it next (Device::queueCommand).
         if (reg == ata::Reg::StatusCommand)
@@ -198,7 +221,7 @@ void restart() {
     pio_sm_clear_fifos(s_pio, s_sm);
     pio_sm_restart(s_pio, s_sm);
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);  // release DD and IORDY
-    pio_sm_exec(s_pio, s_sm, pio_encode_jmp(s_offset + ide_bus_offset_idle));
+    pio_sm_exec(s_pio, s_sm, pio_encode_jmp(s_offset + s_idle_offset));
     pio_sm_set_enabled(s_pio, s_sm, true);
 }
 
