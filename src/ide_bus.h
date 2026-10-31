@@ -49,8 +49,11 @@ bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, u
 // would otherwise wait for the main loop while the host polls status.
 // `command` runs a queued command (and records it), so the loop needn't
 // return for one.
+// `bus`, if not null, records each access served (the raw trace), not the
+// answer requests.
 void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
-                   uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&));
+                   uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&),
+                   void (*bus)(uint32_t) = nullptr);
 
 // True while setDataReadDelay() is on.
 bool dataReadDelayed();
@@ -69,6 +72,8 @@ void stop();
 // Drives INTRQ to match the device: high when asserted, low when not, and
 // released when the device doesn't drive it (ata::Device::intrqDriven).
 void updateIntrq(const ata::Device& dev);
+// Interrupts raised since start-up (INTRQ driven high from low).
+uint32_t intrqRises();
 
 // Debug (console `D`): answer every data register read at least `ns` later,
 // to find how long the host really waits on IORDY. 0 turns it off.

@@ -314,6 +314,8 @@ CORE1_RAM static void busyTimers(ata::Device& dev) {
     }
 }
 
+CORE1_RAM static void recordBus(uint32_t sample) { record(TraceKind::Bus, sample); }
+
 CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
     record(commandStartEvent(t_us, c.command, c.lba, c.count));
 }
@@ -401,7 +403,8 @@ CORE1_RAM void loop1() {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
             if (early) {
                 last_access_cycles = m33_hw->dwt_cyccnt;
-                if (!g_trace_bus.load()) ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers, runCommandEarly);
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers,
+                                       runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
             }
             continue;
         }
@@ -433,8 +436,9 @@ CORE1_RAM void loop1() {
             ide_bus::updateIntrq(dev);
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
-            if (early && !g_trace_bus.load())
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers, runCommandEarly);
+            if (early)
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers,
+                                       runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
             // The host may already be polling (the adapter reads STATUS at
             // once after IDENTIFY): answer it before the bookkeeping below.
             while (ide_bus::serviceOnce(dev, sample)) {
@@ -532,8 +536,9 @@ CORE1_RAM void loop1() {
         step = step == 4 ? 0 : step + 1;
         // early_answers: back to the tight bus loop after every pass, so a quiet
         // spell's first access finds core 1 polling, not mid-pass (660 ns).
-        if (early && !g_trace_bus.load())
-            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers, runCommandEarly);
+        if (early)
+            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers,
+                                   runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
     }
 }
 
@@ -1318,6 +1323,8 @@ static void printStats() {
                   (unsigned long)g_bench_pio, (unsigned long)g_bench_ram, (unsigned long)g_bench_sio);
     Serial.printf(" c1_bench_ram_per1000=nop:%lu,pio:%lu", (unsigned long)g_bench_nop_ram, (unsigned long)g_bench_pio_ram);
     s_passes_then = passes, s_ms_then = ms;
+    Serial.printf(" intrq_rises=%lu commands=%lu", (unsigned long)ide_bus::intrqRises(),
+                  (unsigned long)g_command_starts.load());
     Serial.print(" c1_gap_ns=");
     for (unsigned k = 1; k < GAP_KINDS; ++k)
         if (g_c1_gap[k])

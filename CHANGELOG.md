@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.12] - 2026-10-31
+
+With 0.23.11 the Pentium still crashed with Windows' driver loaded (fatal exception 0E), with no late reads and no failed commands. The one anomaly: Windows' driver issues each of its first reads twice, about 1.2 ms apart, the first abandoned while still BSY. That's typical of a driver that gave up waiting, perhaps for an interrupt.
+
+### Added
+- **The raw trace (`t`) works in early mode:** the tight bus loop records each access it serves (not the answer requests). It used to turn the tight loops off, which changed the timing being traced.
+- **`s` shows `intrq_rises` and `commands`:** interrupts raised (INTRQ driven high from low) beside commands started, to see whether interrupts go missing.
+
 ## [0.23.11] - 2026-10-31
 
 **With Windows 95's 32-bit disk driver (`ESDI_506.PDR`) loaded, the Pentium reached its desktop** (0.23.10, 3,758 reads and 158 writes). Then ScanDisk found the two FAT copies differing, which they still did after its repair and a proper shutdown. Windows writes both copies from one buffer, so the drive had stored writes wrongly. Reads were sound: `gm15.bnk`, which WaveSynth failed to load, was identical to the clean backup's, and FC had compared 187 files cleanly.

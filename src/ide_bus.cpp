@@ -305,13 +305,16 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
 // a command is queued, a data-in block starts (the fast lane's job), or
 // RESET# changes: the main loop's work. Not while the raw trace is on.
 CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
-                             uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&)) {
+                             uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&),
+                             void (*bus)(uint32_t)) {
     PIO pio = s_pio;
     uint sm = s_sm;
     uint32_t last = m33_hw->dwt_cyccnt;
     for (;;) {
         if (rxWaiting(pio, sm)) {
-            serve(dev, pio_sm_get(pio, sm));
+            uint32_t sample = pio_sm_get(pio, sm);
+            serve(dev, sample);
+            if (bus && (sample & STROBE_BITS) != 0) bus(sample);  // the trace, after the answer
             if (dev.commandQueued()) command(dev);  // run it here, not in the main loop
             const uint16_t* next;
             uint16_t left;
@@ -367,9 +370,17 @@ void setDataReadDelay(uint32_t ns) {
                               std::memory_order_relaxed);
 }
 
+static volatile uint32_t s_intrq_rises = 0;  // interrupts raised (driven high from low), for `s`
+static bool s_intrq_high = false;
+
 CORE1_RAM void updateIntrq(const ata::Device& dev) {
+    bool high = dev.intrq() && dev.intrqDriven();
+    if (high && !s_intrq_high) s_intrq_rises = s_intrq_rises + 1;
+    s_intrq_high = high;
     gpio_put(cfg::PIN_INTRQ, dev.intrq());
     gpio_set_dir(cfg::PIN_INTRQ, dev.intrqDriven());
 }
+
+uint32_t intrqRises() { return s_intrq_rises; }
 
 }  // namespace ide_bus
