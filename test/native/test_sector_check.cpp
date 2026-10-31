@@ -327,6 +327,85 @@ TEST(test_sector_check_gap_mid_command_loses_alignment) {
     CHECK_EQ(c.sectorsBad(), 0u);
 }
 
+// Image data: words that don't name their sector, like an SD image's.
+std::vector<uint16_t> imageWords(uint32_t seed) {
+    std::vector<uint16_t> w(256);
+    for (unsigned i = 0; i < 256; ++i) w[i] = uint16_t((seed * 2654435761u) >> 7) ^ uint16_t(i * 0x9e37);
+    return w;
+}
+
+TEST(test_sector_check_image_good_in_order) {
+    Checker d(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    for (uint32_t lba : {500u, 501u, 9000u}) {
+        d.expect(lba, imageWords(lba).data());
+        d.observe(o.status(), false);
+        for (uint16_t v : imageWords(lba)) CHECK(!d.observe(o.data(v), false));
+    }
+    CHECK_EQ(d.sectorsChecked(), 3u);
+    CHECK_EQ(d.sectorsBad(), 0u);
+    CHECK_EQ(d.expectMissed(), 0u);
+}
+
+TEST(test_sector_check_image_served_ahead_and_skipped) {
+    // Two served before the host reads; one the host never read.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.expect(1, imageWords(1).data());
+    c.expect(2, imageWords(2).data());
+    c.expect(3, imageWords(3).data());
+    for (uint32_t lba : {1u, 3u}) {
+        c.observe(o.status(), false);
+        for (uint16_t v : imageWords(lba)) CHECK(!c.observe(o.data(v), false));
+    }
+    CHECK_EQ(c.sectorsChecked(), 2u);
+    CHECK_EQ(c.sectorsBad(), 0u);
+    CHECK_EQ(c.expectMissed(), 1u);
+}
+
+TEST(test_sector_check_image_bad_word) {
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.expect(77, imageWords(77).data());
+    c.expect(78, imageWords(78).data());
+    auto w = imageWords(77);
+    uint16_t want = w[100];
+    w[100] = uint16_t(want ^ 0x1000);
+    int reports = c.observe(o.status(), false) ? 1 : 0;
+    for (uint16_t v : w) reports += c.observe(o.data(v), false) ? 1 : 0;
+    CHECK_EQ(reports, 1);
+    const Mismatch& m = c.mismatch();
+    CHECK_EQ(m.lba, 77u);
+    CHECK_EQ(m.first_word, 100u);
+    CHECK_EQ(m.want, want);
+    CHECK_EQ(m.bad_words, 1u);
+    CHECK_EQ(c.sectorsBad(), 1u);
+    // The next sector still matches its copy.
+    c.observe(o.status(), false);
+    for (uint16_t v : imageWords(78)) CHECK(!c.observe(o.data(v), false));
+    CHECK_EQ(c.sectorsChecked(), 2u);
+}
+
+TEST(test_sector_check_image_nothing_expected) {
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    c.observe(o.status(), false);
+    for (uint16_t v : imageWords(5)) CHECK(!c.observe(o.data(v), false));
+    CHECK_EQ(c.sectorsChecked(), 0u);
+    CHECK_EQ(c.sectorsSkipped(), 1u);
+}
+
+TEST(test_sector_check_image_ring_overflow) {
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    for (uint32_t lba = 0; lba < EXPECT_SLOTS + 3; ++lba) c.expect(lba, imageWords(lba).data());
+    CHECK_EQ(c.expectMissed(), 3u);
+    c.observe(o.status(), false);
+    for (uint16_t v : imageWords(EXPECT_SLOTS + 2)) CHECK(!c.observe(o.data(v), false));
+    CHECK_EQ(c.sectorsChecked(), 1u);
+    CHECK_EQ(c.expectMissed(), uint32_t(EXPECT_SLOTS + 2));
+}
+
 void runSectorCheckTests() {
     RUN(test_sector_check_identify_good);
     RUN(test_sector_check_identify_garbled);
@@ -344,4 +423,9 @@ void runSectorCheckTests() {
     RUN(test_sector_check_resync_waits_for_a_boundary);
     RUN(test_sector_check_align_at_a_sector_start);
     RUN(test_sector_check_gap_mid_command_loses_alignment);
+    RUN(test_sector_check_image_good_in_order);
+    RUN(test_sector_check_image_served_ahead_and_skipped);
+    RUN(test_sector_check_image_bad_word);
+    RUN(test_sector_check_image_nothing_expected);
+    RUN(test_sector_check_image_ring_overflow);
 }

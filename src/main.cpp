@@ -659,6 +659,8 @@ static void chooseDisk() {
     g_link_on = g_config.activity_link;
     g_isa.store(g_config.isa);  // core 1 sets up the bus program from it
     g_early.store(g_config.early_answers);
+    // A host that ignores IORDY reads whatever is on the bus: check image data on the cable too.
+    bus_observer::setImageChecks(g_config.early_answers && !g_test_disk);
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
 }
 
@@ -1146,6 +1148,7 @@ static void serveFetches() {
                   : fetch.flush ? true  // FLUSH CACHE: nothing to move
                                 : g_disk->read(fetch.lba, fetch.buffer);
         if (ok && fetch.flush) ok = g_disk->flush();
+        if (ok && !fetch.store && !fetch.flush) bus_observer::expect(fetch.lba, fetch.buffer);  // before core 1 can send it
         uint64_t ready = now;
         if (fetch.store || !fetch.flush) {  // a sector read or written
             seek_timing::Release r = g_seek.onSector(now, fetch.command_lba, fetch.lba);
@@ -1344,6 +1347,8 @@ static void printStats() {
                   bus_observer::full() ? "full" : "spot");
     Serial.printf(" bus_identify=%lu bus_identify_bad=%lu", (unsigned long)bus_observer::identifyChecked(),
                   (unsigned long)bus_observer::identifyBad());
+    Serial.printf(" bus_image=%s bus_expect_missed=%lu", bus_observer::imageChecks() ? "on" : "off",
+                  (unsigned long)bus_observer::expectMissed());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
     Serial.printf(" clk_sys_mhz=%lu clk_peri_mhz=%lu", (unsigned long)(clock_get_hz(clk_sys) / 1000000),

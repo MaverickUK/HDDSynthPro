@@ -31,6 +31,7 @@ static uint64_t s_dropped = 0;   // samples skipped on purpose (dropped)
 
 static uint32_t s_lost = 0;      // possible overruns (lost)
 static bool s_full = false;      // full checks rather than spot checks (setFull)
+static bool s_image = false;     // image data checks (setImageChecks)
 static uint32_t s_looked_us = 0;  // when core 0 last read the ring's write position
 
 // Fall this far behind and the waiting samples are dropped, all but the
@@ -108,7 +109,7 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity) {
 void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
     if (!s_started.load(std::memory_order_acquire)) return;
     static bool checking = false;
-    if (!check && !check_identify) {
+    if (!check && !check_identify && !s_image) {
         // Nothing to check: discard, which costs core 0 next to nothing.
         s_read = (dma_hw->ch[s_dma].write_addr - uint32_t(uintptr_t(s_ring))) / 4;
         s_looked_us = time_us_32();
@@ -158,6 +159,14 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
                    unsigned(m.bits_gained));
     }
 }
+
+void setImageChecks(bool on) { s_image = on; }
+bool imageChecks() { return s_image; }
+
+void expect(uint32_t lba, const uint16_t words[256]) {
+    if (s_image && s_checker) s_checker->expect(lba, words);
+}
+uint32_t expectMissed() { return s_checker ? s_checker->expectMissed() : 0; }
 
 uint32_t sectorsChecked() { return s_checker ? s_checker->sectorsChecked() : 0; }
 uint32_t sectorsBad() { return s_checker ? s_checker->sectorsBad() : 0; }

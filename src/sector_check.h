@@ -14,8 +14,13 @@
 // the words that never change after start-up: serial, firmware, model and
 // capacity, which is what a host names the disk from. A block is taken for
 // IDENTIFY when at least IDENTIFY_MIN_MATCHES of those words match, so one
-// with most of them wrong is still caught. Other blocks (data from an SD
-// image, data the host wrote) are skipped.
+// with most of them wrong is still caught.
+//
+// Data from an SD image can't name itself, so it's checked against copies
+// of the sectors served (expect()): the last EXPECT_SLOTS of them. A block
+// matching one is good, and older copies the host never read (a command
+// it abandoned, samples dropped) are let go; a block matching none is
+// reported against the closest. With no copies waiting, blocks are skipped.
 #pragma once
 
 #include <cstdint>
@@ -30,6 +35,11 @@ constexpr uint32_t SEQ_MASK = 0x7FFu;
 // Mismatch::lba for an IDENTIFY block.
 constexpr uint32_t IDENTIFY_LBA = 0xFFFFFFFFu;
 constexpr unsigned IDENTIFY_MIN_MATCHES = 4;
+
+// Copies of served sectors kept for checking image data (expect()). Core 1
+// presents one sector at a time, so the host is never more than a couple
+// behind core 0.
+constexpr unsigned EXPECT_SLOTS = 16;
 
 struct Mismatch {
     uint32_t lba;          // or IDENTIFY_LBA
@@ -48,9 +58,14 @@ public:
     // The drive's IDENTIFY block, to check IDENTIFY reads against. Copied.
     void setIdentify(const uint16_t words[256]);
 
+    // A sector just served from an image, in bus order: the next data block
+    // on the bus should be it (or a later one). Copied.
+    void expect(uint32_t lba, const uint16_t words[256]);
+
     // Returns true if this read completed a sector (or IDENTIFY block) with
     // wrong words; the details are then in mismatch(). With `data` false
-    // (the disk isn't the generated one) only IDENTIFY blocks are checked.
+    // (the disk isn't the generated one) data is checked against expect()'s
+    // copies, if there are any.
     bool observe(uint32_t word, bool data = true);
 
     const Mismatch& mismatch() const { return mismatch_; }
@@ -88,11 +103,18 @@ public:
         aligned_ = false;
     }
 
-    void resetCounts() { checked_ = bad_ = skipped_ = gaps_ = identify_checked_ = identify_bad_ = dma_words_ = 0; }
+    uint32_t expectMissed() const { return expect_missed_; }  // served copies never seen on the bus
+
+    void resetCounts() {
+        checked_ = bad_ = skipped_ = gaps_ = identify_checked_ = identify_bad_ = expect_missed_ = 0;
+        dma_words_ = 0;
+    }
 
 private:
     bool finishSector(bool data);
     bool checkIdentify(bool& is_identify);
+    bool checkExpected();
+    Mismatch compare(uint32_t lba, const uint16_t* want) const;
 
     uint32_t disk_sectors_;
     uint16_t identify_[256];
@@ -105,6 +127,14 @@ private:
     bool have_seq_ = false;
     uint32_t last_seq_ = 0;
     Mismatch mismatch_{};
+    // expect()'s copies, a ring: expect_first_ the oldest of expect_count_.
+    struct Expected {
+        uint32_t lba;
+        uint16_t words[256];
+    };
+    Expected expected_[EXPECT_SLOTS];
+    unsigned expect_first_ = 0, expect_count_ = 0;
+    uint32_t expect_missed_ = 0;
     uint32_t checked_ = 0, bad_ = 0, skipped_ = 0, gaps_ = 0;
 };
 

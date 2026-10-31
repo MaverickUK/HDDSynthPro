@@ -58,6 +58,64 @@ bool Checker::checkIdentify(bool& is_identify) {
     return true;
 }
 
+void Checker::expect(uint32_t lba, const uint16_t words[256]) {
+    if (expect_count_ == EXPECT_SLOTS) {  // the oldest was never seen: let it go
+        expect_first_ = (expect_first_ + 1) % EXPECT_SLOTS;
+        --expect_count_;
+        ++expect_missed_;
+    }
+    Expected& e = expected_[(expect_first_ + expect_count_) % EXPECT_SLOTS];
+    e.lba = lba;
+    for (unsigned i = 0; i < 256; ++i) e.words[i] = words[i];
+    ++expect_count_;
+}
+
+Mismatch Checker::compare(uint32_t lba, const uint16_t* want) const {
+    Mismatch m{lba, 0, 0, 0, 0, 0, 0};
+    for (unsigned i = 0; i < 256; ++i) {
+        uint16_t seen = words_[i];
+        if (seen == want[i]) continue;
+        if (m.bad_words == 0) {
+            m.first_word = uint16_t(i);
+            m.seen = seen;
+            m.want = want[i];
+        }
+        ++m.bad_words;
+        m.bits_lost = uint16_t(m.bits_lost + popcount16(want[i] & ~seen));
+        m.bits_gained = uint16_t(m.bits_gained + popcount16(seen & ~want[i]));
+    }
+    return m;
+}
+
+// The block against expect()'s copies, oldest first: the first that matches
+// is good; failing that, it's reported against the closest. Either way that
+// copy and the older ones are done with.
+bool Checker::checkExpected() {
+    if (expect_count_ == 0) {
+        ++skipped_;
+        return false;
+    }
+    unsigned best = 0;
+    Mismatch best_m{};
+    for (unsigned k = 0; k < expect_count_; ++k) {
+        const Expected& e = expected_[(expect_first_ + k) % EXPECT_SLOTS];
+        Mismatch m = compare(e.lba, e.words);
+        if (k == 0 || m.bad_words < best_m.bad_words) {
+            best = k;
+            best_m = m;
+        }
+        if (m.bad_words == 0) break;
+    }
+    expect_missed_ += best;
+    expect_first_ = (expect_first_ + best + 1) % EXPECT_SLOTS;
+    expect_count_ -= best + 1;
+    ++checked_;
+    if (best_m.bad_words == 0) return false;
+    ++bad_;
+    mismatch_ = best_m;
+    return true;
+}
+
 bool Checker::observe(uint32_t word, bool data) {
     uint32_t seq = (word >> SEQ_SHIFT) & SEQ_MASK;
     bool gap = have_seq_ && seq != ((last_seq_ - 1) & SEQ_MASK);
@@ -88,10 +146,7 @@ bool Checker::finishSector(bool data) {
     bool is_identify;
     bool bad = checkIdentify(is_identify);
     if (is_identify) return bad;
-    if (!data) {
-        ++skipped_;
-        return false;
-    }
+    if (!data) return checkExpected();
     // The LBA from words 0-1, or failing that from ~words 2-3.
     uint32_t candidates[2] = {
         uint32_t(words_[0]) | (uint32_t(words_[1]) << 16),

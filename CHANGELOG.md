@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.13] - 2026-10-31
+
+With 0.23.12 the Pentium's FAT copies matched after two boots (0.23.11's write fixes hold), but with Windows' driver loaded it showed its registry error screen. `SYSTEM.DAT` and `USER.DAT` on the image were sound, so Windows read them wrongly.
+
+### Added
+- **The bus observer checks image data on the cable** (with `early_answers = on`): core 0 keeps a copy of each of the last 16 sectors it serves (`sector_check::Checker::expect`), and each 256-word data block the host takes off the bus is matched against them. A block that matches none prints `BUSERR ... lba=` against the closest copy, with the first wrong word and the bits lost and gained; `bus_sectors`/`bus_bad` count them, and `s` shows `bus_image` and `bus_expect_missed` (copies the host never read).
+
 ## [0.23.12] - 2026-10-31
 
 With 0.23.11 the Pentium still crashed with Windows' driver loaded (fatal exception 0E), with no late reads and no failed commands. The one anomaly: Windows' driver issues each of its first reads twice, about 1.2 ms apart, the first abandoned while still BSY. That's typical of a driver that gave up waiting, perhaps for an interrupt.

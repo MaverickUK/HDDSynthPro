@@ -39,6 +39,16 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity);
 // are dropped, counted in lost().
 void poll(Print& out, bool check, bool check_identify, void (*serve)() = nullptr);
 
+// Image data checks (early_answers turns them on): core 0 hands over a copy
+// of each sector it serves from an image, and poll() checks data blocks on
+// the bus against those copies (sector_check::Checker::expect), printing a
+// BUSERR for a block that matches none. Costs core 0 about what checking
+// the generated disk does.
+void setImageChecks(bool on);
+bool imageChecks();
+void expect(uint32_t lba, const uint16_t words[256]);  // core 0 only, before the result is posted
+uint32_t expectMissed();  // copies the host never read (abandoned, or samples dropped)
+
 uint32_t sectorsChecked();
 uint32_t sectorsBad();
 uint32_t sectorsSkipped();
