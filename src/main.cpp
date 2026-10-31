@@ -173,6 +173,7 @@ static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: aut
 // sectors), or 0 for auto; stored with the disk's size (geometryFor).
 static std::atomic<uint32_t> g_geometry{0};
 static bool g_geometry_trimmed = false;  // the cylinders were cut to fit the disk (CONFIG says so)
+static const char* g_geometry_from = "auto";  // "set", "partition table" or "auto" (the default), for CONFIG
 
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
 __attribute__((always_inline)) static inline IdentifyInfo driveIdentity() {
@@ -341,7 +342,29 @@ CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& 
 // from g_early_started and g_early_command_start_us.
 static uint32_t g_early_started = 0;
 static uint32_t g_early_command_start_us = 0;
+// Commands whose DONE line has been recorded (step 0 and the tight loop share
+// it). In early mode the tight loop records DONE itself, between accesses,
+// as a command completes: left to step 0, which runs only once the bus is
+// quiet, a command followed straight by another never got one (the USB
+// adapter's back-to-back reads, 0.27.0).
+static uint32_t g_done_recorded = 0;
+
+CORE1_RAM static void recordDone(ata::Device& dev) {
+    if (dev.commandsCompleted() == g_done_recorded) return;
+    g_done_recorded = dev.commandsCompleted();
+    if (g_done_recorded == dev.commandsStarted()) g_command_active.store(false);
+    uint32_t t = time_us_32();
+    record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(), t - g_early_command_start_us));
+}
+
+// The tight loop's idle work: the BSY timers, and DONE for a command just completed.
+CORE1_RAM static void earlyIdle(ata::Device& dev) {
+    busyTimers(dev);
+    recordDone(dev);
+}
+
 CORE1_RAM static void runCommandEarly(ata::Device& dev) {
+    recordDone(dev);  // the last command's DONE before this one's CMD
     dev.setReadAhead(g_read_ahead.load());
     dev.setWriteBehind(g_write_behind.load());
     uint32_t before = dev.commandsStarted();
@@ -383,7 +406,7 @@ CORE1_RAM void loop1() {
     // most; iordy_timer.pio measures how long the host actually waits.
     static ata::Device dev(driveIdentity());
     uint32_t started = dev.commandsStarted();
-    uint32_t completed = dev.commandsCompleted();
+    g_done_recorded = dev.commandsCompleted();
     uint32_t command_start_us = 0;
     ata::CommandInfo start_info{};  // the command whose CMD line is still to record
     bool start_unrecorded = false;
@@ -422,11 +445,12 @@ CORE1_RAM void loop1() {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
             if (early) {
                 last_access_cycles = m33_hw->dwt_cyccnt;
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers,
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
                                        runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
             }
             continue;
         }
+        if (early) ide_bus::checkIordyStall();  // IORDY held with no strobe: let it go
         pass_kind = GAP_LANE;
         // Mid-block, the fast lane answers data reads with nothing else in
         // between. Not while the raw trace or the debug delay is on.
@@ -456,7 +480,7 @@ CORE1_RAM void loop1() {
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
             if (early)
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers,
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
                                        runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
             // The host may already be polling (the adapter reads STATUS at
             // once after IDENTIFY): answer it before the bookkeeping below.
@@ -505,9 +529,9 @@ CORE1_RAM void loop1() {
                 if (start_unrecorded) {
                     recordCommandStart(command_start_us, start_info);
                     start_unrecorded = false;
-                } else if (dev.commandsCompleted() != completed) {
-                    completed = dev.commandsCompleted();
-                    if (completed == started) g_command_active.store(false);
+                } else if (dev.commandsCompleted() != g_done_recorded) {
+                    g_done_recorded = dev.commandsCompleted();
+                    if (g_done_recorded == started) g_command_active.store(false);
                     uint32_t t = time_us_32();
                     record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(),
                                            t - command_start_us));
@@ -556,7 +580,7 @@ CORE1_RAM void loop1() {
         // early_answers: back to the tight bus loop after every pass, so a quiet
         // spell's first access finds core 1 polling, not mid-pass (660 ns).
         if (early)
-            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers,
+            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
                                    runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
     }
 }
@@ -677,11 +701,22 @@ static void chooseDisk() {
     g_read_ahead.store(g_config.read_ahead);
     g_link_on = g_config.activity_link;
     g_isa.store(g_config.isa);  // core 1 sets up the bus program from it
-    g_early.store(g_config.early_answers);
+    // isa = on keeps its own program (no early answers, iordy_watchdog.pio):
+    // the one the ICL 386 was proven on
+    g_early.store(g_config.early_answers && !g_config.isa);
     g_iordy.store(g_config.iordy);
     // The geometry setting, for the image only (the welcome and generated disks
     // lay theirs out for the default), its cylinders cut to fit if it's bigger
-    Geometry geo = strcmp(g_disk_name, "image") == 0 ? g_config.geometry : Geometry{};
+    const bool image = strcmp(g_disk_name, "image") == 0;
+    Geometry geo = image ? g_config.geometry : Geometry{};
+    g_geometry_from = geo.cylinders ? "set" : "auto";
+    if (image && !geo.cylinders) {  // auto: the geometry the image's partition table was made with
+        static uint16_t sector0[256];  // bus order: as bytes, as on disk
+        if (g_disk->read(0, sector0)) {
+            geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), g_disk->sectors());
+            if (geo.cylinders) g_geometry_from = "partition table";
+        }
+    }
     g_geometry_trimmed = false;
     if (geo.cylinders && geo.sectors() > g_disk->sectors()) {
         geo.cylinders = uint16_t(g_disk->sectors() / (uint32_t(geo.heads) * geo.sectors_per_track));
@@ -761,7 +796,7 @@ static void printConfig() {
     {
         Geometry g = startGeometry(driveIdentity());
         Serial.printf("CONFIG geometry=%u/%u/%u (%s)%s\n", unsigned(g.cylinders), unsigned(g.heads),
-                      unsigned(g.sectors_per_track), g_config.geometry.cylinders ? "set" : "auto",
+                      unsigned(g.sectors_per_track), g_geometry_from,
                       g_geometry_trimmed ? ", cylinders cut to fit the disk" : "");
     }
     printSeekConfig();
@@ -1366,6 +1401,7 @@ static void printStats() {
                   (unsigned long)g_bench_pio, (unsigned long)g_bench_ram, (unsigned long)g_bench_sio);
     Serial.printf(" c1_bench_ram_per1000=nop:%lu,pio:%lu", (unsigned long)g_bench_nop_ram, (unsigned long)g_bench_pio_ram);
     s_passes_then = passes, s_ms_then = ms;
+    Serial.printf(" iordy_stall_released=%lu", (unsigned long)ide_bus::iordyStallReleases());
     Serial.printf(" intrq_rises=%lu commands=%lu", (unsigned long)ide_bus::intrqRises(),
                   (unsigned long)g_command_starts.load());
     if (C1_PROFILE) Serial.print(" c1_gap_ns=");

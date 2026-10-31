@@ -2,6 +2,20 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.27.0] - 2026-10-31
+
+Toward working with no settings file: the geometry from the image's own partition table, and early answers for everyone, made safe for ISA cards.
+
+### Added
+- **`geometry = auto` uses the geometry the image's partition table was made with** (`geometryFromPartitions`): a partition ends on a cylinder boundary, so an entry whose start and end CHS agree with its LBA fields gives the heads and sectors per track (the ICL 386's image: 13 x 51). Only what IDENTIFY can report (16 heads at most); a table for a translated geometry (255 heads), or none, leaves 16 x 63. `CONFIG geometry=... (partition table)`.
+- **Early answers let IORDY go after 23 us with no strobe** (`cfg::IORDY_STALL_US`, `ide_bus::checkIordyStall`): core 1 runs one instruction in the bus program that releases IORDY's side-set, the same rule as `iordy_watchdog.pio` with `isa = on`, for ISA cards that assert the chip selects for memory and refresh cycles. PCs look at IORDY only during a strobe, so it's harmless to them (the Evesham holds a chip select up to 75 us before a read). `s` shows `iordy_stall_released`.
+
+### Fixed
+- **Early mode records each command's DONE as it completes** (`recordDone`, from the tight loop's idle work and before the next command runs): it used to wait for the bus to go quiet, so a command followed straight by another had none, and the rig's checks failed although the data was right.
+
+### Changed
+- **`early_answers` is on by default.** It answers at the chip select and still holds IORDY for hosts that wait for it. `isa = on` overrides it with the program the ICL 386 was proven on (no early answers, `iordy_watchdog.pio`). On the USB adapter (Mac rig) slices 3-4 and `-m speed` pass in early mode (8 of 8), at a cost to a host that waits for IORDY, since every access takes core 1 two round trips and a write holds IORDY until core 1 has answered (that wait is also its flow control: releasing IORDY first lost every other word of a burst in simulation): reads 1.17 MB/s (1.40 in normal mode), writes 1.08 (1.74), random reads 75/s (77). The retro PCs are held to about 1.8 MB/s by the SD card anyway; `early_answers = off` gives the adapter its full speed.
+
 ## [0.26.2] - 2026-10-31
 
 The USB adapter's regression run (slices 1-4, the first since 0.22.0) hung the drive at its first re-detection: after `ABSENT off` and the adapter's RESET#, core 0 printed nothing more and answered no console command, and the adapter never found the drive again.

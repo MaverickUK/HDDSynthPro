@@ -258,6 +258,54 @@ TEST(test_identify_fields) {
 }
 
 // geometry = C/H/S: an old drive's image, whose boot code uses its geometry
+// A partition entry as fdisk writes it for geometry h x s: from `start` for
+// `count` sectors, ending on a cylinder boundary.
+static void putPartition(uint8_t* sec, unsigned slot, uint32_t start, uint32_t count, unsigned h, unsigned spt,
+                         uint8_t type = 0x06) {
+    uint8_t* e = sec + 446 + 16 * slot;
+    auto chs = [&](uint32_t lba, uint8_t* out) {
+        uint32_t c = lba / (h * spt), r = lba % (h * spt);
+        if (c > 1023) c = 1023;
+        out[0] = uint8_t(r / spt);
+        out[1] = uint8_t((r % spt + 1) | ((c >> 2) & 0xC0));
+        out[2] = uint8_t(c & 0xFF);
+    };
+    e[0] = 0x80;
+    chs(start, e + 1);
+    e[4] = type;
+    chs(start + count - 1, e + 5);
+    for (unsigned k = 0; k < 4; ++k) e[8 + k] = uint8_t(start >> (8 * k)), e[12 + k] = uint8_t(count >> (8 * k));
+    sec[510] = 0x55;
+    sec[511] = 0xAA;
+}
+
+// geometry = auto: the geometry the image's partition table was made with
+TEST(test_geometry_from_partitions) {
+    uint8_t sec[512] = {};
+    CHECK_EQ(geometryFromPartitions(sec, 501760).cylinders, 0);  // no table
+    // The ICL 386's CF card: 13 heads x 51 sectors, the partition from cylinder 0 head 1
+    putPartition(sec, 0, 51, 756u * 13u * 51u - 51u, 13, 51);
+    Geometry g = geometryFromPartitions(sec, 501760);
+    CHECK_EQ(g.heads, 13);
+    CHECK_EQ(g.sectors_per_track, 51);
+    CHECK_EQ(g.cylinders, 756);
+    // The benchmark image: 16 x 63, the default
+    uint8_t b[512] = {};
+    putPartition(b, 0, 63, 130u * 1008u - 63u, 16, 63);
+    g = geometryFromPartitions(b, 262080);
+    CHECK_EQ(g.heads, 16);
+    CHECK_EQ(g.cylinders, 260);
+    // A table for a translated geometry (255 heads): left to the default
+    uint8_t t[512] = {};
+    putPartition(t, 0, 63, 7800000, 255, 63, 0x0C);
+    CHECK_EQ(geometryFromPartitions(t, 7831152).cylinders, 0);
+    // An entry whose CHS don't agree with its LBA fields is ignored
+    uint8_t x[512] = {};
+    putPartition(x, 0, 51, 400000, 13, 51);
+    x[446 + 8] = 63;  // LBA start no longer matches the CHS start
+    CHECK_EQ(geometryFromPartitions(x, 501760).cylinders, 0);
+}
+
 TEST(test_identify_set_geometry) {
     IdentifyInfo info{"HDDSYNTH PROTO", "HSP-000001", "0.1.0", 501760};
     info.geometry = Geometry{756, 13, 51};
@@ -383,6 +431,7 @@ int main() {
     RUN(test_ata_string_byte_order);
     RUN(test_default_geometry);
     RUN(test_identify_set_geometry);
+    RUN(test_geometry_from_partitions);
     RUN(test_identify_fields);
     RUN(test_identify_pio_modes);
     RUN(test_identify_checksum);

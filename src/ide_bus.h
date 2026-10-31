@@ -75,6 +75,12 @@ void stop();
 // Drives INTRQ to match the device: high when asserted, low when not, and
 // released when the device doesn't drive it (ata::Device::intrqDriven).
 void updateIntrq(const ata::Device& dev);
+
+// early_answers: lets IORDY go if the drive has held it cfg::IORDY_STALL_US
+// since a chip select with no strobe (the tight loops call it themselves;
+// core 1's main loop calls it on each pass). iordyStallReleases() counts them.
+void checkIordyStall();
+uint32_t iordyStallReleases();
 // Interrupts raised since start-up (INTRQ driven high from low).
 uint32_t intrqRises();
 

@@ -41,6 +41,13 @@ constexpr unsigned PIN_IOCS16_N = 2;
 // mid-pass (up to about 1 us): a write's answer that late can cost the next
 // write (0.23.11, a word lost in a FAT sector on the Pentium).
 constexpr uint32_t EARLY_BUS_ONLY_US = 10000;
+// early_answers: if the drive has held IORDY this long since a chip select
+// with no strobe, core 1 lets it go (ide_bus::checkIordyStall), as
+// iordy_watchdog.pio does with `isa = on`: an ISA card that asserts the chip
+// selects for memory and refresh cycles would otherwise stall the whole bus
+// (an ICL 386). PCs look at IORDY only during a strobe, so it's harmless to
+// them (the Evesham holds a chip select up to 75 us before a read).
+constexpr uint32_t IORDY_STALL_US = 23;
 
 // PCB only (rev 0.3; on the BB48 rig these GPIOs are unconnected, so driving
 // and reading them there is harmless). The IDE bus goes through bus switches

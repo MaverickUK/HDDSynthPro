@@ -52,6 +52,15 @@ static unsigned regIndex(uint32_t sample) { return (sample >> REG_INDEX_SHIFT) &
 static constexpr uint32_t ADDRESS_BITS = 31u << REG_INDEX_SHIFT;
 static uint32_t s_asked = 0;
 
+// ide_bus_early's IORDY held with no strobe (cfg::IORDY_STALL_US): when core 1
+// answered the last request, whether a report or write has come since, and
+// the limit in cycles. Not for ide_bus_noiordy, which never drives IORDY.
+static uint32_t s_armed_at = 0;
+static bool s_armed = false;
+static bool s_stall_release = false;  // ide_bus_early (begin)
+static uint32_t s_stall_cycles = 0;
+static volatile uint32_t s_stall_releases = 0;
+
 // A sample from ide_bus_early with the address it belongs to: requests set
 // s_asked, everything else takes it. A request with neither chip select
 // asserted can't be an access (ide_bus_noiordy asks again after Gayle's lines
@@ -60,10 +69,29 @@ static constexpr uint32_t CS_BITS = bus::maskOf(cfg::PIN_CS0_N) | bus::maskOf(cf
 __attribute__((always_inline)) static inline uint32_t earlyAddress(uint32_t sample) {
     if ((sample & STROBE_BITS) == 0) {
         if ((sample & CS_BITS) != CS_BITS) s_asked = sample & ADDRESS_BITS;
+        s_armed_at = m33_hw->dwt_cyccnt;
+        s_armed = true;
         return sample;
     }
+    s_armed = false;
     return (sample & ~ADDRESS_BITS) | s_asked;
 }
+
+// IORDY held too long with no strobe: one instruction run in the program
+// sets its side-set (IORDY's direction) to released, without moving it on.
+// A strobe after it pulls IORDY low again for the moment the answer takes.
+__attribute__((always_inline)) static inline void stallCheck() {
+    if (s_armed && m33_hw->dwt_cyccnt - s_armed_at > s_stall_cycles) {
+        s_armed = false;
+        if (s_stall_release) {
+            pio_sm_exec(s_pio, s_sm, pio_encode_nop() | pio_encode_sideset_opt(1, 0));
+            s_stall_releases = s_stall_releases + 1;
+        }
+    }
+}
+
+CORE1_RAM void checkIordyStall() { stallCheck(); }
+uint32_t iordyStallReleases() { return s_stall_releases; }
 
 // A read of the data register, as the PIO samples it: DIOR# low, DIOW# high,
 // CS0# low, CS1# high, DA2-0 = 0.
@@ -92,6 +120,9 @@ void begin(bool isa, bool early, bool iordy) {
     // early_answers with iordy = off: ide_bus_noiordy, for hosts whose address
     // lines change as the strobe starts (an Amiga 1200), and that never use IORDY
     const bool noiordy = early && !iordy;
+    s_stall_release = early && iordy;
+    s_armed = false;
+    s_stall_cycles = cfg::IORDY_STALL_US * (clock_get_hz(clk_sys) / 1000000);
     const pio_program* program = noiordy ? &ide_bus_noiordy_program
                                  : early ? &ide_bus_early_program
                                          : &ide_bus_program;
@@ -302,6 +333,7 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
                 reset_changed = true;
                 break;
             }
+            stallCheck();
         }
         if (reset_changed) break;
         uint32_t sample = earlyAddress(pio_sm_get(s_pio, s_sm));  // a report's address from its request
@@ -361,6 +393,7 @@ CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mai
             last = m33_hw->dwt_cyccnt;
             continue;
         }
+        stallCheck();
         if (m33_hw->dwt_cyccnt - last > quiet_cycles) return;
         if (rxWaiting(pio, sm)) continue;
         if (gpio_get(cfg::PIN_RESET_N) == reset_low) return;  // high when it was low, or low when high

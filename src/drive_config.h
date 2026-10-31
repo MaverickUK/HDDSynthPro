@@ -11,9 +11,9 @@
 //   activity_link = on     # tell an HDD Synth what the drive is doing
 //   seek_timing = off      # hold commands for as long as a modelled drive would
 //   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
-//   early_answers = off    # answers ready at the chip select, for hosts that don't wait for IORDY
+//   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
-//   geometry = auto        # or C/H/S, e.g. 756/13/51: the CHS geometry IDENTIFY reports
+//   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -86,9 +86,11 @@ constexpr bool DEFAULT_ACTIVITY_LINK = true;
 constexpr bool DEFAULT_ISA = false;
 // `early_answers = on`: ide_bus_early, which asks core 1 for a register's
 // value at the chip select, so hosts that don't wait for IORDY get it in time
-// (docs/no-iordy.md: a Pentium's PIIX during the BIOS's detection). Off
-// until it has been through the USB adapter's tests.
-constexpr bool DEFAULT_EARLY_ANSWERS = false;
+// (docs/no-iordy.md: a Pentium's PIIX during the BIOS's detection). On by
+// default since 0.27.0: it still holds IORDY for hosts that wait for it, and
+// core 1 lets IORDY go after cfg::IORDY_STALL_US with no strobe, which keeps
+// ISA cards safe too. `isa = on` overrides it with the older program.
+constexpr bool DEFAULT_EARLY_ANSWERS = true;
 // `iordy = off`: the drive never touches IORDY (the pin stays an input). For
 // hosts that check IORDY before they start a strobe, which the drive's IORDY
 // held from the chip select deadlocks (an Amiga 1200's Gayle, 2026-10-31);

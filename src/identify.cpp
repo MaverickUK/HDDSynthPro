@@ -20,6 +20,30 @@ CORE1_RAM Geometry startGeometry(const IdentifyInfo& info) {
     return info.geometry.cylinders ? info.geometry : defaultGeometry(info.total_sectors);
 }
 
+Geometry geometryFromPartitions(const uint8_t s[512], uint32_t total_sectors) {
+    if (s[510] != 0x55 || s[511] != 0xAA) return Geometry{};
+    for (unsigned i = 0; i < 4; ++i) {
+        const uint8_t* e = s + 446 + 16 * i;
+        if (e[4] == 0) continue;  // unused entry
+        auto lba32 = [](const uint8_t* p) { return uint32_t(p[0] | p[1] << 8 | p[2] << 16 | uint32_t(p[3]) << 24); };
+        uint32_t start = lba32(e + 8), count = lba32(e + 12);
+        if (count == 0) continue;
+        unsigned sh = e[1], ss = e[2] & 63, sc = e[3] | (e[2] & 0xC0) << 2;
+        unsigned eh = e[5], es = e[6] & 63, ec = e[7] | (e[6] & 0xC0) << 2;
+        unsigned heads = eh + 1, spt = es;
+        if (heads > 16 || spt == 0 || ss == 0) continue;
+        auto chs = [&](unsigned c, unsigned h, unsigned sec) { return (uint32_t(c) * heads + h) * spt + sec - 1; };
+        // Both ends must agree with the LBA fields (cylinders past 1023 can't be checked)
+        if (sc < 1023 && chs(sc, sh, ss) != start) continue;
+        if (ec < 1023 && chs(ec, eh, es) != start + count - 1) continue;
+        uint32_t cyl = total_sectors / (heads * spt);
+        if (cyl > 16383) cyl = 16383;
+        if (cyl == 0) continue;
+        return Geometry{uint16_t(cyl), uint16_t(heads), uint16_t(spt)};
+    }
+    return Geometry{};
+}
+
 void putAtaString(uint16_t* words, unsigned len_words, const char* text) {
     size_t len = std::strlen(text);
     for (unsigned i = 0; i < len_words; ++i) {

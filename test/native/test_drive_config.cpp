@@ -215,10 +215,11 @@ TEST(test_config_isa) {
     CHECK(parsed("isa = on\n").isa);
     CHECK(!parsed("isa = off\n").isa);
     CHECK(drive_config::isKey("isa"));
-    CHECK(!parsed("").early_answers);  // off: today's bus program for everyone
+    CHECK(parsed("").early_answers);  // on by default since 0.27.0
     CHECK(parsed("early_answers = on\n").early_answers);
     CHECK(drive_config::isKey("early_answers"));
-    CHECK(!parsed(drive_config::defaultFile()).early_answers);
+    CHECK(parsed(drive_config::defaultFile()).early_answers);
+    CHECK(!parsed("early_answers = off\n").early_answers);
     CHECK(parsed("").iordy);  // on: the drive holds IORDY while it answers
     CHECK(!parsed("iordy = off\n").iordy);
     CHECK(drive_config::isKey("iordy"));

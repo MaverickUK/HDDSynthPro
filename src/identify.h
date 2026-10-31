@@ -38,6 +38,14 @@ struct IdentifyInfo {
 // defaultGeometry().
 Geometry startGeometry(const IdentifyInfo& info);
 
+// The geometry a disk's partition table was made with, from its sector 0
+// (bytes, as on disk): a partition ends on a cylinder boundary, so an entry
+// whose start and end CHS agree with its LBA fields gives heads (end head + 1)
+// and sectors per track (end sector). Only what IDENTIFY can report (1-16
+// heads, 1-63 sectors); otherwise, or with no table, 0 cylinders: use the
+// default. A table made for a BIOS's translated geometry (255 heads) gives 0.
+Geometry geometryFromPartitions(const uint8_t sector0[512], uint32_t total_sectors);
+
 // No DMA offered (IdentifyInfo::mdma_mode), and the fastest multiword DMA mode
 // there is (ide_dma.pio meets modes 0-2: host/tests/test_dma_sim.py).
 constexpr uint8_t NO_DMA = 0xFF;
