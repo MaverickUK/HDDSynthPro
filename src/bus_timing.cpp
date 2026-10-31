@@ -41,9 +41,16 @@ bool begin() {
 
 bool running() { return s_running; }
 
+// A bounded batch: a host that probes an absent drive (the USB adapter, about
+// one read a microsecond during a re-detection) fills the FIFO faster than
+// core 0 converts the reports, and an unbounded loop never ended (0.26.1:
+// core 0 hung, console and all). Reports past the batch are simply left; the
+// program drops what the full FIFO can't take.
+constexpr unsigned POLL_BATCH = 16;
+
 void poll() {
     if (!s_running) return;
-    while (!pio_sm_is_rx_fifo_empty(s_pio, s_sm)) {
+    for (unsigned n = 0; n < POLL_BATCH && !pio_sm_is_rx_fifo_empty(s_pio, s_sm); ++n) {
         uint32_t w = pio_sm_get(s_pio, s_sm);
         // Plus what the loops take to notice the edges, on average (t1 reads
         // 10-30 ns short, the strobe 20-50 ns: test_bus_timing_sim.py).

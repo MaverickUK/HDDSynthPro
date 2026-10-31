@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.26.2] - 2026-10-31
+
+The USB adapter's regression run (slices 1-4, the first since 0.22.0) hung the drive at its first re-detection: after `ABSENT off` and the adapter's RESET#, core 0 printed nothing more and answered no console command, and the adapter never found the drive again.
+
+After the fixes, on the Mac rig (NS1081): slices 3-4 pass (7 tests: the whole 64 MB disk, random reads, 1,000 write-and-read-back cycles, the long write), and `-m speed` matches the reference: 1.40 MB/s reads, 1.74 MB/s writes, 77 IOPS (1.36/1.79 in 0.15.0). Slices 1-2's re-detections work on the drive's side (each cycle: ABSENT, the adapter's RESET# after about 62 s, IDENTIFY twice, all 6 checked on the cable, 0 bad, worst read 1,320 ns), but afterwards the NS1081 gives macOS an empty vendor and product name, so the harness, which finds the drive by name, doesn't see it ("Media"; once "P"). A physical replug restores "PROTO".
+
+### Fixed
+- **Core 1's per-pass profiling is compiled out** (`C1_PROFILE`, off): the cycle counts, gap statistics and pass counter added for the Pentium (0.23.x) ran on every pass of the main loop, and in the normal (non-early) mode reads then ran past ATA's 1,250 ns IORDY limit through the adapter (up to 3,570 ns; nearly all over 400 ns). The adapter never saw DRQ after IDENTIFY and polled status for good, though the drive ran both IDENTIFYs. Early mode answers from its own tight loop, so the retro PCs never showed it. `c1_gap_ns`, `c1_pass_ns` and `c1_fifo_cyc` print only when it's built in.
+- **`bus_timing::poll()` takes at most 16 reports a call.** It drained its FIFO in an unbounded loop, and while the drive is off the bus the adapter probes it about once a microsecond: the reports came faster than core 0 converted them, so the loop never ended and core 0 hung. The retro PCs never read that fast.
+
 ## [0.26.1] - 2026-10-31
 
 After the card was pulled and put back while the drive ran, console `E` wrote `HDDSYNTH.INI` after restarting the card (0.23.16's retry, seen working: "the first try failed: code 12"), but reading the file had failed too, and `E` took it for missing: it rewrote the file from the defaults plus the one setting, losing `early_answers` and `geometry`.

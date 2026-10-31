@@ -198,6 +198,12 @@ static bool dmarqWired() {
     return wired;
 }
 
+// Core 1's per-pass profiling (c1_gap_ns, c1_pass_ns, c1_fifo_cyc), built in
+// only when this is true. On every pass it costs enough that, in the normal
+// (non-early) mode, reads ran past ATA's 1,250 ns IORDY limit through the USB
+// adapter (0.23.x-0.26.2: up to 3,570 ns, and the adapter never saw DRQ).
+constexpr bool C1_PROFILE = false;
+
 // Core 1's longest loop passes, in cycles (DWT CYCCNT), by what the pass did,
 // for console `s` (`c1_gap_ns`): a pass that takes long is a register read
 // left waiting. Racy across cores, as diagnostics may be; `r` clears it.
@@ -394,18 +400,23 @@ CORE1_RAM void loop1() {
     uint32_t last_pass = m33_hw->dwt_cyccnt;
     uint8_t pass_kind = 0;
     for (;;) {
-        uint32_t now = m33_hw->dwt_cyccnt;
-        if (now - last_pass > g_c1_gap[pass_kind]) g_c1_gap[pass_kind] = now - last_pass;
-        last_pass = now;
-        g_c1_passes = g_c1_passes + 1;
-        pass_kind = GAP_ACCESS;
         uint32_t sample;
-        uint32_t f0 = m33_hw->dwt_cyccnt;
-        bool got = ide_bus::serviceOnce(dev, sample);
-        uint32_t f = m33_hw->dwt_cyccnt - f0;
-        if (!got) {
-            g_c1_fifo_cycles = g_c1_fifo_cycles + f;
-            if (f > g_c1_fifo_max) g_c1_fifo_max = f;
+        bool got;
+        if constexpr (C1_PROFILE) {
+            uint32_t now = m33_hw->dwt_cyccnt;
+            if (now - last_pass > g_c1_gap[pass_kind]) g_c1_gap[pass_kind] = now - last_pass;
+            last_pass = now;
+            g_c1_passes = g_c1_passes + 1;
+            pass_kind = GAP_ACCESS;
+            uint32_t f0 = m33_hw->dwt_cyccnt;
+            got = ide_bus::serviceOnce(dev, sample);
+            uint32_t f = m33_hw->dwt_cyccnt - f0;
+            if (!got) {
+                g_c1_fifo_cycles = g_c1_fifo_cycles + f;
+                if (f > g_c1_fifo_max) g_c1_fifo_max = f;
+            }
+        } else {
+            got = ide_bus::serviceOnce(dev, sample);
         }
         if (got) {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
@@ -1342,7 +1353,7 @@ static void printStats() {
     Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
                   iordy_timer::ignoredRegister());
     static uint32_t s_passes_then, s_ms_then;
-    uint32_t passes = g_c1_passes, ms = millis();
+    uint32_t passes = g_c1_passes, ms = millis();  // stays 0 without C1_PROFILE: nothing printed
     if (passes != s_passes_then && ms != s_ms_then)
         Serial.printf(" c1_pass_ns=%lu", (unsigned long)(uint64_t(ms - s_ms_then) * 1000000ull / (passes - s_passes_then)));
     static uint32_t s_fifo_then;
@@ -1357,7 +1368,7 @@ static void printStats() {
     s_passes_then = passes, s_ms_then = ms;
     Serial.printf(" intrq_rises=%lu commands=%lu", (unsigned long)ide_bus::intrqRises(),
                   (unsigned long)g_command_starts.load());
-    Serial.print(" c1_gap_ns=");
+    if (C1_PROFILE) Serial.print(" c1_gap_ns=");
     for (unsigned k = 1; k < GAP_KINDS; ++k)
         if (g_c1_gap[k])
             Serial.printf("%s:%lu,", GAP_NAMES[k],
