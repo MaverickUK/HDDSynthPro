@@ -102,14 +102,17 @@ public not_read:
 .side_set 1 opt pindirs
 
 public write:
+    in pins, 23                     ; DD, DA, CS#, LED, DIOR#, while DIOW# is still low
+                                    ; (not_read's delay let the data settle). After it
+                                    ; rises a PIIX in compatible timing lets DD go at
+                                    ; once: sampled then, lines floated high (0.23.11)
+    in null, 9                      ; DIOW# (and up) as 0: a write; autopush. IORDY still
+                                    ; low from `arm`: a waiting host is held meanwhile
+    pull block                      ; this address's answer: not needed, and only now
     wait 1 gpio 27          side 0  ; release IORDY; wait for DIOW# to rise
-    in pins, 23                     ; DD, DA, CS#, LED, DIOR#: the data 5 ns after
-    in null, 9              side 1  ; DIOW# (and up) as 0: a write; autopush. IORDY low,
-                                    ; held while the RX FIFO is full
-    pull block                      ; this address's answer: not needed. Only now: a host
-                                    ; that doesn't wait would be gone, and its data with
-                                    ; it, if the write waited for a late answer first
-    jmp idle                [7]     ; arm only once a chip select is there: the host may
+    jmp idle                side 1 [7]  ; IORDY low again at once, for a next write with CS
+                                    ; held (`idle` lets it go if nothing is selected).
+                                    ; Arm only once a chip select is there: the host may
                                     ; have dropped it, and asking about no address costs
                                     ; the next access a request it must throw away. The
                                     ; delay lets the chip select's hold (t9) pass first
@@ -145,7 +148,9 @@ public idle:
 public not_read:
     out null, 2                     ; LED, DIOR#
     out x, 1                        ; DIOW#, as it is (0 = asserted)
-    jmp !x write
+    jmp !x write            [7]     ; a write: after 35 ns, so its data is valid when
+                                    ; `write` samples it (also when not taken: the armed
+                                    ; loop is 35 ns slower to see a strobe)
     jmp armed
 rearm:
     pull block                      ; the answer for the old address: not needed

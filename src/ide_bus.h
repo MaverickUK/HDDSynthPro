@@ -47,8 +47,10 @@ bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, u
 // leaves `reset_low`.
 // `timers` runs the device's BSY timers (the data-out hold, waking), which
 // would otherwise wait for the main loop while the host polls status.
+// `command` runs a queued command (and records it), so the loop needn't
+// return for one.
 void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
-                   uint32_t quiet_cycles, void (*timers)(ata::Device&));
+                   uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&));
 
 // True while setDataReadDelay() is on.
 bool dataReadDelayed();

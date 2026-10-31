@@ -189,3 +189,18 @@ def test_no_iordy_write_with_a_late_answer(program):
     run = run_host(make_sim(program), core1, accesses, timing=NO_IORDY, tail_ns=5000)
     assert not run.errors, run.errors
     assert core1.writes == [("CMD", addr, v) for addr, v in values]
+
+
+@pytest.mark.parametrize("waits", [False, True])
+def test_write_data_gone_as_diow_rises(program, waits):
+    """A PIIX in compatible timing lets DD go the moment DIOW# rises (t4 = 0):
+    the write must be sampled while DIOW# is still low. Sampled after the
+    rise (0.22.0-0.23.10), lines had floated high: FAT entries with bit 12
+    set in one copy on the Pentium (0.23.11)."""
+    timing = replace(Mode0(), t4=0, waits_for_iordy=waits)
+    core1 = EarlyCore1(150, {("CMD", 7): 0x50})
+    words = [0x0000, 0xEF01, 0xAA81, 0x1234, 0x0F0F]
+    accesses = [Access(True, "CMD", 0, w, hold_cs=i < len(words) - 1) for i, w in enumerate(words)]
+    run = run_host(make_sim(program), core1, accesses, timing=timing, tail_ns=3000)
+    assert not run.errors, run.errors
+    assert [v for (_, _, v) in core1.writes] == words

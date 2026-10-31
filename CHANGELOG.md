@@ -2,6 +2,17 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.11] - 2026-10-31
+
+**With Windows 95's 32-bit disk driver (`ESDI_506.PDR`) loaded, the Pentium reached its desktop** (0.23.10, 3,758 reads and 158 writes). Then ScanDisk found the two FAT copies differing, which they still did after its repair and a proper shutdown. Windows writes both copies from one buffer, so the drive had stored writes wrongly. Reads were sound: `gm15.bnk`, which WaveSynth failed to load, was identical to the clean backup's, and FC had compared 187 files cleanly.
+- Two entries differed by bit 12 alone, set where it should have been clear: DD12 floating high. `ide_bus_early` sampled writes about 5 ns after DIOW# rose (since 0.22.0), and a PIIX in compatible timing lets DD go at once.
+- 24 entries in one copy were the other's shifted by a 16-bit word: a whole write missed. A write waits for its request's answer before the program arms again, and core 1 could be up to about 1 µs into a main-loop pass (after 50 µs of quiet, or returning to start each command), so the next write went by unseen.
+
+### Fixed
+- **`ide_bus_early` samples a write while DIOW# is still low.** `not_read` waits 35 ns before jumping to `write`, so the data has settled. IORDY stays low until the sample is taken and the answer thrown away, then is released for the strobe's end and pulled low again for a next write with CS held. Still 32 instructions; the armed loop is 35 ns slower to see a strobe.
+- **Core 1 stays in the tight bus loop through commands:** `serveBusEarly` runs a queued command itself (`runCommandEarly()`, which records its `CMD` line), and returns to the main loop only after 10 ms of quiet (`EARLY_BUS_ONLY_US`, was 50 µs). `DONE` lines and core 0's view of a running command now update only when the bus goes quiet, so a long busy spell may print a spurious `STUCK`.
+- Sim: `test_write_data_gone_as_diow_rises` (t4 = 0, waiting and non-waiting hosts).
+
 ## [0.23.10] - 2026-10-31
 
 0.23.9's `contiguous=` showed the Pentium's image fragmented. It was fragmented by restoring it with macOS `cp`, which frees the file's clusters and allocates new ones, and still fragmented after rewriting it, as macOS reused the holes.

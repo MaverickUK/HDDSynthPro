@@ -305,18 +305,18 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
 // a command is queued, a data-in block starts (the fast lane's job), or
 // RESET# changes: the main loop's work. Not while the raw trace is on.
 CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
-                             uint32_t quiet_cycles, void (*timers)(ata::Device&)) {
+                             uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&)) {
     PIO pio = s_pio;
     uint sm = s_sm;
     uint32_t last = m33_hw->dwt_cyccnt;
     for (;;) {
         if (rxWaiting(pio, sm)) {
             serve(dev, pio_sm_get(pio, sm));
-            if (dev.commandQueued()) return;
+            if (dev.commandQueued()) command(dev);  // run it here, not in the main loop
             const uint16_t* next;
             uint16_t left;
             if (dev.dataInRemaining(next, left) && !serveDataInEarly(dev, reset_low, mailbox, posted_fetch)) return;
-            if (dev.commandQueued()) return;
+            if (dev.commandQueued()) command(dev);
             last = m33_hw->dwt_cyccnt;
             continue;
         }

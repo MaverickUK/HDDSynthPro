@@ -318,6 +318,28 @@ CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& 
     record(commandStartEvent(t_us, c.command, c.lba, c.count));
 }
 
+// early_answers: a queued command, run from the tight bus loop (ide_bus::
+// serveBusEarly) so core 1 doesn't leave it for one: going back to the main
+// loop for each command left the host's next accesses waiting up to a pass
+// (0.23.11). Its CMD line is recorded at once; loop1's step 0 records DONE
+// from g_early_started and g_early_command_start_us.
+static uint32_t g_early_started = 0;
+static uint32_t g_early_command_start_us = 0;
+CORE1_RAM static void runCommandEarly(ata::Device& dev) {
+    dev.setReadAhead(g_read_ahead.load());
+    dev.setWriteBehind(g_write_behind.load());
+    uint32_t before = dev.commandsStarted();
+    dev.runQueuedCommand();
+    ide_bus::updateIntrq(dev);
+    if (dev.commandsStarted() != before) {
+        g_early_started = dev.commandsStarted();
+        g_early_command_start_us = time_us_32();
+        recordCommandStart(g_early_command_start_us, dev.lastCommand());
+        g_command_starts.fetch_add(1, std::memory_order_relaxed);
+        g_command_active.store(true);
+    }
+}
+
 // Console `V`: the drive goes silent, as if unplugged, while core 0 holds
 // g_absent. The adapter's next command fails, it resets and probes, and the
 // drive is detected again once it's back: a replug without hands on the rig.
@@ -379,7 +401,7 @@ CORE1_RAM void loop1() {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
             if (early) {
                 last_access_cycles = m33_hw->dwt_cyccnt;
-                if (!g_trace_bus.load()) ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers);
+                if (!g_trace_bus.load()) ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers, runCommandEarly);
             }
             continue;
         }
@@ -412,7 +434,7 @@ CORE1_RAM void loop1() {
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
             if (early && !g_trace_bus.load())
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers);
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers, runCommandEarly);
             // The host may already be polling (the adapter reads STATUS at
             // once after IDENTIFY): answer it before the bookkeeping below.
             while (ide_bus::serviceOnce(dev, sample)) {
@@ -453,6 +475,10 @@ CORE1_RAM void loop1() {
         pass_kind = uint8_t(GAP_STEP0 + step);
         switch (step) {
             case 0:  // the trace's CMD and DONE lines, in that order, at most one per pass
+                if (early && g_early_started != 0 && g_early_started != started) {
+                    started = g_early_started;  // commands the tight loop ran, CMD already recorded
+                    command_start_us = g_early_command_start_us;
+                }
                 if (start_unrecorded) {
                     recordCommandStart(command_start_us, start_info);
                     start_unrecorded = false;
@@ -507,7 +533,7 @@ CORE1_RAM void loop1() {
         // early_answers: back to the tight bus loop after every pass, so a quiet
         // spell's first access finds core 1 polling, not mid-pass (660 ns).
         if (early && !g_trace_bus.load())
-            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers);
+            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, busyTimers, runCommandEarly);
     }
 }
 
