@@ -4,7 +4,7 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [0.28.0] - 2026-10-31
 
-**Not yet tried on hardware** (built while the rig was out of reach); host-tested only.
+**Not yet tried on hardware** (built while the rig was out of reach); host-tested only. On the same firmware, 0.27.0's automatic geometry booted the ICL 386's MS-DOS 5 image on the Evesham with its BIOS on auto and only `image =` set (7,476 sectors checked on the cable, 0 bad; core 1 released IORDY 43,490 times, harmlessly).
 
 ### Added
 - **Images split across files**, for disks over FAT32's 4 GB file limit (the Amiga 1200's 8 GB CF card): `image = NAME.IMG` continues in `NAME.I01`, `NAME.I02`... (up to 8 parts, `image_parts.h`), served as one disk. Every part's clusters go into the one extent map, each part checked against the file layer at its runs' starts, middle and end; a split image is served only through the map, so one that can't be mapped (more than 256 runs in all, a part before the last that isn't whole sectors) is refused with the reason in `CONFIG`. `CONFIG ... parts=`. The card's identity (media_watch) takes the size of all the parts.
