@@ -19,7 +19,10 @@ namespace ide_bus {
 // `early` (HDDSYNTH.INI `early_answers`): run ide_bus_early instead, which asks
 // core 1 for each register's value at the chip select, for hosts that don't
 // wait for IORDY (docs/no-iordy.md). No watchdog then: there's no room.
-void begin(bool isa, bool early);
+// `iordy` false (HDDSYNTH.INI `iordy = off`): IORDY stays an SIO input, so
+// the programs' side-set on it does nothing, for hosts that check IORDY
+// before starting a strobe (an Amiga 1200).
+void begin(bool isa, bool early, bool iordy = true);
 
 // Serves at most one register access. Call in a tight loop on core 1.
 // Returns true if there was one; `sample` gets the pin sample for the trace.

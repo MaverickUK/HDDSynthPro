@@ -155,3 +155,70 @@ public not_read:
 rearm:
     pull block                      ; the answer for the old address: not needed
     jmp idle
+
+; Drive build, `iordy = off` with `early_answers = on`: ide_bus_early for a
+; host that never uses IORDY and whose address lines aren't valid during the
+; strobe. An Amiga 1200's Gayle shows DA2-0 and the chip selects 110-200 ns
+; before each strobe, then changes them as the strobe starts (2026-10-31: read
+; reports 50 ns into the strobe showed other registers or none, and reads
+; whose address changed just before DIOR# fell were missed altogether).
+;
+; As ide_bus_early, it asks core 1 for the value at the chip select (bits
+; 21-31 zero mark the request) and reports each read and write afterwards,
+; and core 1 takes their address from the request (earlyAddress). Unlike it:
+; - IORDY is never touched (no side-set; the pin stays an SIO input);
+; - once armed, a strobe belongs to the armed address whatever the lines show;
+; - an address that changes with no strobe yet is given 60 ns: a strobe
+;   starting meanwhile is the armed address's, otherwise it was a real change
+;   and the program asks again. 60 ns is under Gayle's shortest chip select
+;   to strobe (110 ns), but a host whose t1 is shorter (PIO modes 3 and 4)
+;   could have its next access taken for the last: use it only for hosts
+;   like the Amiga's.
+;
+; Pin mapping as ide_bus_early (IN_BASE GPIO4 = DD0, OUT_BASE DD0, 16 pins,
+; JMP_PIN DIOR#); autopush at 32.
+
+.program ide_bus_noiordy
+
+public write:
+    in pins, 32                     ; while DIOW# is still low (not_read waited 35 ns)
+    pull block                      ; this address's answer: not needed
+    wait 1 gpio 27                  ; DIOW# rises; then idle
+.wrap_target
+public idle:
+    mov osr, ~pins                  ; sample, inverted (asserted = 1)
+    out null, 19                    ; drop DD0-15, DA0-2
+    out x, 2                        ; x = CS0#/CS1# asserted
+    jmp !x idle                     ; nothing selected
+public arm:
+    in pins, 21                     ; ask core 1 for this address's value: bits
+    in null, 11                     ; 21-31 zero mark a request; autopush
+    mov osr, pins
+    out null, 16
+    out y, 5                        ; Y = DA2-0, CS0#, CS1#: the armed address
+public not_read:
+    mov osr, pins
+    out null, 23                    ; to DIOW#
+    out x, 1
+    jmp !x write            [7]     ; a write (35 ns on, so its data has settled)
+    mov osr, pins
+    out null, 16
+    out x, 5
+    jmp x!=y moved                  ; the address changed with no strobe yet
+public watch:
+    jmp pin not_read                ; DIOR# high: keep watching
+public read:
+    pull block                      ; the armed address's answer
+    out pins, 16                    ; onto DD0-15 (still inputs)
+    out pindirs, 16         [7]     ; drive them (bits 16-31: all, or none), and settle
+    in pins, 32                     ; the read, for its side effects; autopush
+    wait 1 jmppin                   ; hold the data until DIOR# rises
+    mov pindirs, null       [7]     ; release DD0-15
+.wrap
+moved:
+    nop                     [11]    ; 60 ns: is a strobe starting?
+    jmp pin rearm                   ; no: a real change
+    jmp read                        ; yes: the armed address's read
+rearm:
+    pull block                      ; the old address's answer: not needed
+    jmp arm                         ; ask about the address there now

@@ -12,6 +12,7 @@
 //   seek_timing = off      # hold commands for as long as a modelled drive would
 //   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
 //   early_answers = off    # answers ready at the chip select, for hosts that don't wait for IORDY
+//   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -86,6 +87,11 @@ constexpr bool DEFAULT_ISA = false;
 // (docs/no-iordy.md: a Pentium's PIIX during the BIOS's detection). Off
 // until it has been through the USB adapter's tests.
 constexpr bool DEFAULT_EARLY_ANSWERS = false;
+// `iordy = off`: the drive never touches IORDY (the pin stays an input). For
+// hosts that check IORDY before they start a strobe, which the drive's IORDY
+// held from the chip select deadlocks (an Amiga 1200's Gayle, 2026-10-31);
+// with early_answers the value is ready by the strobe anyway.
+constexpr bool DEFAULT_IORDY = true;
 
 struct Config {
     char image[MAX_NAME + 1];
@@ -96,6 +102,7 @@ struct Config {
     bool activity_link = DEFAULT_ACTIVITY_LINK;
     bool isa = DEFAULT_ISA;
     bool early_answers = DEFAULT_EARLY_ANSWERS;
+    bool iordy = DEFAULT_IORDY;
     ::seek_timing::Setting seek_timing;  // off by default
     char warnings[MAX_WARNINGS][MAX_WARNING];
     size_t warning_count = 0;  // may exceed MAX_WARNINGS: only the first ones are kept

@@ -110,7 +110,7 @@ Console:
 - `A`: read-ahead off or on until a restart (`read_ahead` in `HDDSYNTH.INI`);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it, then `CONFIG` lines: the settings from `HDDSYNTH.INI`, the image served, why a configured image wasn't used, warnings (drive build; only reads);
-- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`image`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`, `seek_timing`, `isa`), keeping the rest of the file; `!`: restart, to apply them (keeps `J` or `T`);
+- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`image`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`, `seek_timing`, `isa`, `early_answers`, `iordy`), keeping the rest of the file; `!`: restart, to apply them (keeps `J` or `T`);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
 - `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`); `T`: restart serving the test disk, card or no card, or back (the same register, so `T` and `J` undo each other);
 - `L`: the activity link on or off until a restart (`activity_link` in `HDDSYNTH.INI`; `s` shows `link`, `link_sent` and `link_last`, `head_sent`/`head_replaced`/`head_last` for `$HDE`, and `hdm_valid`/`hdm_rejected`/`link_rx_errors` for the synth's `$HDM`);
@@ -127,7 +127,11 @@ Console:
 
 SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it with any firmware change, add a `CHANGELOG.md` entry (Keep a Changelog), and tag `vX.Y.Z`.
 
-## Status (30 Oct 2026, 0.22.0)
+## Status (31 Oct 2026, 0.25.0)
+
+- **Retro PCs on the benchmark image** (`tools/bench-image`, `DOSBENCH.IMG`; results in the README's Testing section): the ICL 386 (PIO 0, `isa = on`) 1.51 MB/s reads, 0.72 writes, 14-minute soak clean; an Evesham Athlon XP 2000+ (PIO 3, `early_answers = on`, first boot) 1.81 MB/s reads (the SD card's SPI limit), 1.28 writes, 43,799 sectors checked on the cable, 0 bad. The Pentium 200's run stopped when its power supply failed (unrelated), and a Dell Dimension (Pentium III) shows no picture even without the drive.
+- **Pentium 200, Windows 95 with its own driver (31 Oct, 0.23.15):** early answers plus DD at 8 mA; 163,847 sectors checked on the cable, 0 bad.
+- **Amiga 1200 (31 Oct, 0.24.0-0.25.0), not booting yet:** Gayle checks IORDY before each strobe (the drive's IORDY froze it: `iordy = off`), its address and chip selects are only valid before the strobe (110-200 ns), and they change as it starts. With 0.24.1 IDENTIFY reached it intact but the drive missed reads; `ide_bus_noiordy` (0.25.0, simulated) stopped after RECALIBRATE on the real machine. Next: a shorter IDE cable (30 cm plus 10-15 cm of breadboard wiring may be crosstalk), the listen-only build to see whether the lines are still garbage during strobes, then the program. The SD card holds `A1200DH0.IMG` (DH0 only, its RDB edited) and a backup; the 8 GB full image needs images split across files on FAT32.
 
 - **First retro PC (30 Oct, 0.22.0):** an ICL HRA 386 (ISA IDE card, BIOS 1.20) boots MS-DOS 5 from `ICL386MB.IMG` on the SD card, with `isa = on` and the IOCS16# wire (IDE pin 32 to GPIO 2). It needed INTRQ driven low too (0.19.1), no answers on the floppy ports, IOCS16# (0.20.0) and the IORDY watchdog (0.22.0); see `CHANGELOG.md` for the dead ends. **0.22.0's write path (sampled at DIOW# rising) hasn't run on the USB adapter yet:** run slices 1-4 and `-m speed` there before tagging.
 

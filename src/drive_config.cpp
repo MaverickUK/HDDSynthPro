@@ -167,6 +167,7 @@ void defaults(Config& out) {
     out.activity_link = DEFAULT_ACTIVITY_LINK;
     out.isa = DEFAULT_ISA;
     out.early_answers = DEFAULT_EARLY_ANSWERS;
+    out.iordy = DEFAULT_IORDY;
     out.seek_timing = seek_timing::Setting{};
     out.warning_count = 0;
 }
@@ -185,6 +186,7 @@ const Switch SWITCHES[] = {
     {"activity_link", &Config::activity_link},
     {"isa", &Config::isa},
     {"early_answers", &Config::early_answers},
+    {"iordy", &Config::iordy},
 };
 constexpr size_t SWITCH_COUNT = sizeof SWITCHES / sizeof SWITCHES[0];
 
@@ -351,7 +353,11 @@ const char* defaultFile() {
            "# on for a controller that doesn't wait for IORDY (some PCI ones while\r\n"
            "# the BIOS detects the drive): the drive has each register's value ready\r\n"
            "# as soon as it's addressed. Experimental; off for everything else.\r\n"
-           "early_answers = off\r\n";
+           "early_answers = off\r\n"
+           "\r\n"
+           "# off for a controller that checks IORDY before it starts each access (an\r\n"
+           "# Amiga 1200's): the drive never touches IORDY. Use with early_answers = on.\r\n"
+           "iordy = on\r\n";
 }
 
 }  // namespace drive_config

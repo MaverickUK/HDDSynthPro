@@ -2,6 +2,36 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.25.0] - 2026-10-31
+
+On the real Amiga 1200, 0.25.0 stopped after RECALIBRATE, before IDENTIFY, so it doesn't boot yet (see CLAUDE.md's status for what's next). On the same firmware, with `early_answers = on` and `iordy = on`, an Evesham Athlon XP 2000+ booted the benchmark image first time in PIO mode 3: 1.81 MB/s reads, 0.98 ms a random read, 1.28 MB/s writes, 0 bad sectors, and 43,799 sectors checked on the cable with 0 bad.
+
+The raw trace (0.24.2) showed the Amiga 1200 reading IDENTIFY correctly word by word, but the drive missed most of the reads: the second IDENTIFY's command was still waiting for data when the Amiga, which had read all 256 words, gave up 4.5 s later and rebooted. Gayle's DA2-0 and chip selects are valid only before the strobe (110-200 ns from the chip select to DIOR#) and change as it starts, or just before. `ide_bus_early` took a change of address with no strobe yet as a new access and asked again; when the strobe followed at once, it either served it as another register or, with nothing selected, never saw it.
+
+### Added
+- **`ide_bus_noiordy`**, the bus program for `early_answers = on` with `iordy = off`: no side-set, so IORDY is never driven; once armed, a strobe is the armed address's whatever the lines show; and an address that changes with no strobe yet gets 60 ns, in which a strobe starting is the armed address's read. It fills its PIO block's 32 instructions. 60 ns is under Gayle's shortest t1 (110 ns), but a PC host's PIO mode 3 or 4 (t1 30 ns) could be misread, so it's for Amiga-like hosts only.
+- **Core 1 ignores answer requests with neither chip select asserted** as the address of what follows (`earlyAddress`), so a write that starts as Gayle's lines change still lands on the armed register.
+- Sim: `test_pio_bus_noiordy_sim.py`, a Gayle host model (address valid 110-200 ns before the strobe, garbage from it or 20 ns before it, 300 ns strobes): IDENTIFY's 256 words all right and all counted, Kickstart's register test, writes on the armed address.
+
+## [0.24.2] - 2026-10-31
+
+### Changed
+- **With the raw trace on (`t`), early mode's tight loop serves data reads one access at a time** instead of in its fast data loop, so every access is recorded: the Amiga 1200's accesses after IDENTIFY were missing from the trace.
+
+## [0.24.1] - 2026-10-31
+
+With `iordy = off` the Amiga 1200 ran Kickstart's detection at Gayle's own pace (110-200 ns from chip select to strobe, strobes of 305-335 ns): the register test, RECALIBRATE, IDENTIFY. Then, 4.5 s after each IDENTIFY, it reset and started again. Some reads' reports showed no chip select (`NONE NONE` in the raw trace): Gayle drops the chip select early in the strobe, and the listen-only build saw none on any strobe. Early mode chose each answer from the address at the chip select, but took a read's side effects from its report, sampled 50 ns into the strobe, so a data read with no chip select there was never counted, and IDENTIFY would have come back as its first word over and over.
+
+### Fixed
+- **Early mode takes every access's address from its answer request** (`earlyAddress`, core 1): a read's report and a write's sample get the address of the request before them, made when the chip select appeared. The program only starts a strobe for the address it asked about (it asks again if the address changes first), so that's right by construction, whatever the host does with the chip select during the strobe.
+
+## [0.24.0] - 2026-10-31
+
+An Amiga 1200 (Gayle) stayed on a black screen with the drive on its IDE port, though it reached Kickstart's "insert disk" screen with nothing there, booted from its own CF card on the same adapter, and with the listen-only build attached. Gayle checks IORDY before it starts a strobe and waits while it's low, and the drive pulls IORDY low at the chip select and lets go only once the strobe has come: a deadlock. Early answers froze at once (CS0# held low, IORDY low, no strobe); `isa = on`'s watchdog broke each one after 23 us (a read 24.7 us after its chip select), and it still stalled after 4 reads.
+
+### Added
+- **`iordy = off` in `HDDSYNTH.INI`:** the drive never touches IORDY (it stays an SIO input, so the bus programs' side-set can't reach it). With `early_answers = on` each register's value is ready by the strobe anyway: Gayle leaves about 200 ns from the chip select to the strobe, and its strobes last 0.9-1.6 us. `CONFIG` shows `iordy=`.
+
 ## [0.23.16] - 2026-10-31
 
 The benchmark image (`tools/bench-image`) ran on the ICL 386: 1.51 MB/s reads, 0.72 MB/s writes, 1.09 ms a random read, and 0 bad sectors over a 14-minute soak. That morning console `E` failed twice with `SD error: can't write HDDSYNTH.INI`, though reads of the card worked and a restart cleared it. The first time the card had been pulled and put back while the drive was idle, which nothing noticed (`card_lost=0`), so SdFat still held the old card's state; the second time had no clear cause.

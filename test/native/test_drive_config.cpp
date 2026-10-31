@@ -219,6 +219,10 @@ TEST(test_config_isa) {
     CHECK(parsed("early_answers = on\n").early_answers);
     CHECK(drive_config::isKey("early_answers"));
     CHECK(!parsed(drive_config::defaultFile()).early_answers);
+    CHECK(parsed("").iordy);  // on: the drive holds IORDY while it answers
+    CHECK(!parsed("iordy = off\n").iordy);
+    CHECK(drive_config::isKey("iordy"));
+    CHECK(parsed(drive_config::defaultFile()).iordy);
     Config def = parsed(drive_config::defaultFile());
     CHECK(!def.isa);
     CHECK_EQ(def.warning_count, size_t(0));

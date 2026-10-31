@@ -43,13 +43,35 @@ static constexpr uint32_t STROBE_BITS = bus::maskOf(cfg::PIN_DIOR_N) | bus::mask
 
 static unsigned regIndex(uint32_t sample) { return (sample >> REG_INDEX_SHIFT) & 31u; }
 
+// ide_bus_early: the address (DA2-0, CS0#, CS1#) of the last answer request.
+// A strobe only starts for the address the program asked about (it asks
+// again if the address changes first), so a read's report or a write's
+// sample is that address's, whatever its own sample shows: an Amiga 1200's
+// Gayle drops the chip select early in the strobe, so a report taken 50 ns in
+// showed none, and data reads went uncounted (2026-10-31).
+static constexpr uint32_t ADDRESS_BITS = 31u << REG_INDEX_SHIFT;
+static uint32_t s_asked = 0;
+
+// A sample from ide_bus_early with the address it belongs to: requests set
+// s_asked, everything else takes it. A request with neither chip select
+// asserted can't be an access (ide_bus_noiordy asks again after Gayle's lines
+// change, and a write starting then finds them garbage), so it leaves s_asked.
+static constexpr uint32_t CS_BITS = bus::maskOf(cfg::PIN_CS0_N) | bus::maskOf(cfg::PIN_CS1_N);
+__attribute__((always_inline)) static inline uint32_t earlyAddress(uint32_t sample) {
+    if ((sample & STROBE_BITS) == 0) {
+        if ((sample & CS_BITS) != CS_BITS) s_asked = sample & ADDRESS_BITS;
+        return sample;
+    }
+    return (sample & ~ADDRESS_BITS) | s_asked;
+}
+
 // A read of the data register, as the PIO samples it: DIOR# low, DIOW# high,
 // CS0# low, CS1# high, DA2-0 = 0.
 static constexpr uint32_t ACCESS_BITS = (31u << REG_INDEX_SHIFT) | bus::maskOf(cfg::PIN_DIOR_N) |
                                         bus::maskOf(cfg::PIN_DIOW_N);
 static constexpr uint32_t DATA_READ = bus::maskOf(cfg::PIN_CS1_N) | bus::maskOf(cfg::PIN_DIOW_N);
 
-void begin(bool isa, bool early) {
+void begin(bool isa, bool early, bool iordy) {
     s_early = early;
     for (unsigned i = 0; i < 32; ++i) {
         uint32_t sample = i << REG_INDEX_SHIFT;
@@ -67,8 +89,15 @@ void begin(bool isa, bool early) {
     gpio_put(cfg::PIN_INTRQ, 1);
     gpio_set_dir(cfg::PIN_INTRQ, false);
 
-    const pio_program* program = early ? &ide_bus_early_program : &ide_bus_program;
-    s_idle_offset = early ? ide_bus_early_offset_idle : ide_bus_offset_idle;
+    // early_answers with iordy = off: ide_bus_noiordy, for hosts whose address
+    // lines change as the strobe starts (an Amiga 1200), and that never use IORDY
+    const bool noiordy = early && !iordy;
+    const pio_program* program = noiordy ? &ide_bus_noiordy_program
+                                 : early ? &ide_bus_early_program
+                                         : &ide_bus_program;
+    s_idle_offset = noiordy ? ide_bus_noiordy_offset_idle
+                    : early ? ide_bus_early_offset_idle
+                            : ide_bus_offset_idle;
     bool ok = pio_claim_free_sm_and_add_program_for_gpio_range(
         program, &s_pio, &s_sm, &s_offset, cfg::BUS_FIRST_PIN,
         cfg::BUS_LAST_PIN - cfg::BUS_FIRST_PIN + 1, true);
@@ -77,7 +106,7 @@ void begin(bool isa, bool early) {
     // DD0-15 and IORDY are driven by PIO. Both start as inputs (released);
     // IORDY's output value is 0, so making it an output pulls it low.
     for (unsigned i = 0; i < 16; ++i) pio_gpio_init(s_pio, cfg::PIN_DD0 + i);
-    pio_gpio_init(s_pio, cfg::PIN_IORDY);
+    if (iordy) pio_gpio_init(s_pio, cfg::PIN_IORDY);  // else an SIO input: the side-set can't reach it
     // early_answers: DD at 8 mA. A host that ignores IORDY latches the first
     // word of a sector from lines it left floating high, and on the Pentium
     // DD12 sometimes hadn't fallen at 4 mA (0.23.13: word 0, bit 12 set).
@@ -88,8 +117,9 @@ void begin(bool isa, bool early) {
     pio_sm_set_pins_with_mask(s_pio, s_sm, 0, 1u << cfg::PIN_IORDY);
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);
 
-    pio_sm_config c = early ? ide_bus_early_program_get_default_config(s_offset)
-                            : ide_bus_program_get_default_config(s_offset);
+    pio_sm_config c = noiordy ? ide_bus_noiordy_program_get_default_config(s_offset)
+                      : early ? ide_bus_early_program_get_default_config(s_offset)
+                              : ide_bus_program_get_default_config(s_offset);
     sm_config_set_in_pins(&c, cfg::PIN_DD0);
     sm_config_set_out_pins(&c, cfg::PIN_DD0, 16);
     sm_config_set_sideset_pins(&c, cfg::PIN_IORDY);
@@ -142,6 +172,7 @@ __attribute__((always_inline)) static inline void waitCycles(uint32_t cycles) {
 // Inlined into both callers: a call here costs every access its register
 // saves and restores, about 100 ns (0.8.1's worst read).
 __attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32_t sample) {
+    if (s_early) sample = earlyAddress(sample);
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (s_early) {
         if ((sample & STROBE_BITS) == 0) {  // an answer request: the value, no side effects yet
@@ -251,7 +282,6 @@ __attribute__((always_inline)) static inline bool rxWaiting(PIO pio, uint sm) {
 // read afterwards, so a request for the data register gets the word after the
 // ones read so far, and a data read's report moves on by one. Anything else
 // catches the device up and is served as serviceOnce would.
-static constexpr uint32_t ADDRESS_BITS = 31u << REG_INDEX_SHIFT;
 static constexpr uint32_t DATA_ADDRESS = bus::maskOf(cfg::PIN_CS1_N);  // CS0# low, CS1# high, DA2-0 = 0
 
 CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
@@ -274,7 +304,7 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
             }
         }
         if (reset_changed) break;
-        uint32_t sample = pio_sm_get(s_pio, s_sm);
+        uint32_t sample = earlyAddress(pio_sm_get(s_pio, s_sm));  // a report's address from its request
         if ((sample & ADDRESS_BITS) == DATA_ADDRESS) {
             if ((sample & STROBE_BITS) == 0) {  // the next word, asked for ahead
                 pio_sm_put(s_pio, s_sm, DRIVE_DD | next[served]);
@@ -325,7 +355,8 @@ CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mai
             if (dev.commandQueued()) command(dev);  // run it here, not in the main loop
             const uint16_t* next;
             uint16_t left;
-            if (dev.dataInRemaining(next, left) && !serveDataInEarly(dev, reset_low, mailbox, posted_fetch)) return;
+            // With the raw trace on, data reads stay here, one access at a time, so each is recorded
+            if (!bus && dev.dataInRemaining(next, left) && !serveDataInEarly(dev, reset_low, mailbox, posted_fetch)) return;
             if (dev.commandQueued()) command(dev);
             last = m33_hw->dwt_cyccnt;
             continue;
@@ -346,7 +377,7 @@ CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mai
             updateIntrq(dev);
             const uint16_t* next;
             uint16_t left;
-            if (dev.dataInRemaining(next, left) && !serveDataInEarly(dev, reset_low, mailbox, posted_fetch)) return;
+            if (!bus && dev.dataInRemaining(next, left) && !serveDataInEarly(dev, reset_low, mailbox, posted_fetch)) return;
             last = m33_hw->dwt_cyccnt;
         }
         if (rxWaiting(pio, sm)) continue;
