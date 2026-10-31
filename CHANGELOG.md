@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.26.0] - 2026-10-31
+
+The Evesham's BIOS (auto-detect) gave `ICL386MB.IMG` 16 heads x 63 sectors, from the drive's IDENTIFY, and stopped at "Missing operating system": the image comes from the 386's CF card, laid out for 13 heads x 51 sectors, so its boot code read sector 63 where the DOS boot sector is at 51.
+
+### Added
+- **`geometry` in `HDDSYNTH.INI`:** `auto` (16 x 63, as before) or `C/H/S`, e.g. `756/13/51`: the default geometry IDENTIFY reports (words 1, 3, 6) and the one the drive translates CHS by at power-up and after a hardware reset, so a BIOS's auto-detect matches an old drive's image. For an image on the card only (the welcome and generated disks keep the default); cylinders 1-16383, heads 1-16, sectors 1-63, and the cylinders are cut to fit an image that's smaller. `CONFIG geometry=` shows the one in use. `IdentifyInfo::geometry` and `startGeometry()` carry it.
+
 ## [0.25.0] - 2026-10-31
 
 On the real Amiga 1200, 0.25.0 stopped after RECALIBRATE, before IDENTIFY, so it doesn't boot yet (see CLAUDE.md's status for what's next). On the same firmware, with `early_answers = on` and `iordy = on`, an Evesham Athlon XP 2000+ booted the benchmark image first time in PIO mode 3: 1.81 MB/s reads, 0.98 ms a random read, 1.28 MB/s writes, 0 bad sectors, and 43,799 sectors checked on the cable with 0 bad.

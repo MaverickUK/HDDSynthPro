@@ -223,6 +223,22 @@ TEST(test_config_isa) {
     CHECK(!parsed("iordy = off\n").iordy);
     CHECK(drive_config::isKey("iordy"));
     CHECK(parsed(drive_config::defaultFile()).iordy);
+    // geometry = C/H/S for an old drive's image; auto by default
+    CHECK_EQ(parsed("").geometry.cylinders, uint16_t(0));
+    Config g = parsed("geometry = 756/13/51\n");
+    CHECK_EQ(g.geometry.cylinders, uint16_t(756));
+    CHECK_EQ(g.geometry.heads, uint16_t(13));
+    CHECK_EQ(g.geometry.sectors_per_track, uint16_t(51));
+    CHECK_EQ(g.warning_count, size_t(0));
+    CHECK_EQ(parsed("geometry = auto\n").geometry.cylinders, uint16_t(0));
+    for (const char* bad : {"geometry = 756/17/51\n", "geometry = 756/13/64\n", "geometry = 0/13/51\n",
+                            "geometry = 16384/16/63\n", "geometry = 756/13\n", "geometry = 756x13x51\n"}) {
+        Config b = parsed(bad);
+        CHECK_EQ(b.geometry.cylinders, uint16_t(0));
+        CHECK_EQ(b.warning_count, size_t(1));
+    }
+    CHECK(drive_config::isKey("geometry"));
+    CHECK_EQ(parsed(drive_config::defaultFile()).geometry.cylinders, uint16_t(0));
     Config def = parsed(drive_config::defaultFile());
     CHECK(!def.isa);
     CHECK_EQ(def.warning_count, size_t(0));

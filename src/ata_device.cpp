@@ -11,7 +11,7 @@ CORE1_RAM Reg regFor(bool command_block, bool control_block, unsigned address) {
 }
 
 Device::Device(const IdentifyInfo& info)
-    : info_(info), geometry_(defaultGeometry(info.total_sectors)) {
+    : info_(info), geometry_(startGeometry(info)) {
     buildIdentify(info_, identify_);
     resetToSignature();
 }
@@ -140,7 +140,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         ++fetch_id_;
         // A hardware reset (not a soft one) restores the power-on CHS
         // translation and write cache setting.
-        setGeometry(defaultGeometry(info_.total_sectors));
+        setGeometry(startGeometry(info_));
         write_cache_ = true;
         setWriteCacheEnabled(identify_, true);
         standby_ = false;

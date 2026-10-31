@@ -169,12 +169,19 @@ static std::atomic<uint8_t> g_mode_asked{0};            // HDDSYNTH.INI's mode, 
 static SharedFlag g_dmarq_wired{false};                 // found by core 1 at start-up
 static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: auto may offer DMA
 
+// HDDSYNTH.INI's geometry for core 1, packed (cylinders << 16 | heads << 8 |
+// sectors), or 0 for auto; stored with the disk's size (geometryFor).
+static std::atomic<uint32_t> g_geometry{0};
+static bool g_geometry_trimmed = false;  // the cylinders were cut to fit the disk (CONFIG says so)
+
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
-static IdentifyInfo driveIdentity() {
+__attribute__((always_inline)) static inline IdentifyInfo driveIdentity() {
+    uint32_t g = g_geometry.load(std::memory_order_relaxed);
     return IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
                         g_disk_sectors.load(std::memory_order_acquire),
                         g_pio_mode.load(std::memory_order_relaxed),
-                        g_mdma_mode.load(std::memory_order_relaxed)};
+                        g_mdma_mode.load(std::memory_order_relaxed),
+                        Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}};
 }
 
 // DMARQ wired? The host pulls DMARQ down (ATA asks for 5.6 kΩ), so with the
@@ -661,6 +668,16 @@ static void chooseDisk() {
     g_isa.store(g_config.isa);  // core 1 sets up the bus program from it
     g_early.store(g_config.early_answers);
     g_iordy.store(g_config.iordy);
+    // The geometry setting, for the image only (the welcome and generated disks
+    // lay theirs out for the default), its cylinders cut to fit if it's bigger
+    Geometry geo = strcmp(g_disk_name, "image") == 0 ? g_config.geometry : Geometry{};
+    g_geometry_trimmed = false;
+    if (geo.cylinders && geo.sectors() > g_disk->sectors()) {
+        geo.cylinders = uint16_t(g_disk->sectors() / (uint32_t(geo.heads) * geo.sectors_per_track));
+        g_geometry_trimmed = true;
+    }
+    g_geometry.store(geo.cylinders ? uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track : 0,
+                     std::memory_order_relaxed);
     // A host that ignores IORDY reads whatever is on the bus: check image data on the cable too.
     bus_observer::setImageChecks(g_config.early_answers && !g_test_disk);
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
@@ -695,7 +712,7 @@ static void editConfig(const char* line) {
     }
     size_t n = drive_config::setKey(text, len, key, value, edited, sizeof edited);
     if (n == 0) {
-        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy), "
+        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy, geometry), "
                       "or the file would be too long\n", key);
         return;
     }
@@ -726,6 +743,12 @@ static void printConfig() {
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
                   drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa),
                   drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy));
+    {
+        Geometry g = startGeometry(driveIdentity());
+        Serial.printf("CONFIG geometry=%u/%u/%u (%s)%s\n", unsigned(g.cylinders), unsigned(g.heads),
+                      unsigned(g.sectors_per_track), g_config.geometry.cylinders ? "set" : "auto",
+                      g_geometry_trimmed ? ", cylinders cut to fit the disk" : "");
+    }
     printSeekConfig();
     if (drive_config::dmaRefusedForWiring(g_config.mode, g_dmarq_wired.load()))
         Serial.printf("CONFIG warning: mode = %s needs DMARQ wired (IDE pin 21 to GPIO 31); offering PIO only\n",
@@ -811,7 +834,7 @@ static bool g_seek_on = true;
 
 static void beginSeekTiming() {
     uint32_t sectors = g_disk->sectors();
-    g_seek.setGeometry(sectors, defaultGeometry(sectors).sectors_per_track);
+    g_seek.setGeometry(sectors, startGeometry(driveIdentity()).sectors_per_track);
     if (g_config.seek_timing.source == seek_timing::Source::Preset) {
         DriveParams p;
         drivePreset(g_config.seek_timing.preset, p);

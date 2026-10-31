@@ -168,6 +168,7 @@ void defaults(Config& out) {
     out.isa = DEFAULT_ISA;
     out.early_answers = DEFAULT_EARLY_ANSWERS;
     out.iordy = DEFAULT_IORDY;
+    out.geometry = Geometry{};
     out.seek_timing = seek_timing::Setting{};
     out.warning_count = 0;
 }
@@ -201,11 +202,37 @@ bool parseOnOff(Span v, bool& on) {
     return false;
 }
 
+// auto, or C/H/S: cylinders 1-16383, heads 1-16, sectors 1-63 (IDENTIFY's limits).
+bool parseGeometry(Span v, Geometry& g) {
+    if (equalsNoCase(v, "auto")) return g = Geometry{}, true;
+    uint32_t n[3] = {0, 0, 0};
+    unsigned field = 0;
+    bool digits = false;
+    for (const char* p = v.begin; p != v.end; ++p) {
+        if (*p >= '0' && *p <= '9') {
+            n[field] = n[field] * 10 + unsigned(*p - '0');
+            if (n[field] > 99999) return false;
+            digits = true;
+        } else if (*p == '/' && digits && field < 2) {
+            ++field;
+            digits = false;
+        } else {
+            return false;
+        }
+    }
+    if (field != 2 || !digits) return false;
+    if (n[0] < 1 || n[0] > 16383 || n[1] < 1 || n[1] > 16 || n[2] < 1 || n[2] > 63) return false;
+    g = Geometry{uint16_t(n[0]), uint16_t(n[1]), uint16_t(n[2])};
+    return true;
+}
+
 }  // namespace
 
 bool isKey(const char* key) {
     Span k{key, key + std::strlen(key)};
-    if (equalsNoCase(k, "image") || equalsNoCase(k, "mode") || equalsNoCase(k, "seek_timing")) return true;
+    if (equalsNoCase(k, "image") || equalsNoCase(k, "mode") || equalsNoCase(k, "seek_timing") ||
+        equalsNoCase(k, "geometry"))
+        return true;
     for (const Switch& s : SWITCHES)
         if (equalsNoCase(k, s.key)) return true;
     return false;
@@ -213,7 +240,7 @@ bool isKey(const char* key) {
 
 void parse(const char* text, size_t len, Config& out) {
     defaults(out);
-    bool seen_image = false, seen_mode = false, seen_seek_timing = false;
+    bool seen_image = false, seen_mode = false, seen_seek_timing = false, seen_geometry = false;
     bool seen_switch[SWITCH_COUNT] = {};
     forEachLine(text, len, [&](int n, const Line& l) {
         if (l.blank) return;
@@ -248,6 +275,14 @@ void parse(const char* text, size_t len, Config& out) {
             seen_seek_timing = true;
             if (!seek_timing::parseSetting(l.value.begin, l.value.size(), out.seek_timing))
                 warn(out, "line %d: seek_timing '%.*s' isn't off, synth or a preset; ignored%s", n, l.value);
+        } else if (equalsNoCase(l.key, "geometry")) {
+            if (seen_geometry) warn(out, "line %d: '%.*s' is set again; this one counts%s", n, l.key);
+            seen_geometry = true;
+            if (!parseGeometry(l.value, out.geometry)) {
+                warn(out, "line %d: geometry '%.*s' isn't auto or C/H/S (1-16383/1-16/1-63); using auto%s", n,
+                     l.value);
+                out.geometry = Geometry{};
+            }
         } else {
             for (size_t i = 0; i < SWITCH_COUNT; ++i) {
                 if (!equalsNoCase(l.key, SWITCHES[i].key)) continue;
@@ -357,7 +392,13 @@ const char* defaultFile() {
            "\r\n"
            "# off for a controller that checks IORDY before it starts each access (an\r\n"
            "# Amiga 1200's): the drive never touches IORDY. Use with early_answers = on.\r\n"
-           "iordy = on\r\n";
+           "iordy = on\r\n"
+           "\r\n"
+           "# The CHS geometry the drive reports: auto (16 heads, 63 sectors), or\r\n"
+           "# cylinders/heads/sectors to match an image taken from an old drive, whose\r\n"
+           "# partition table and boot code use that drive's (the BIOS's auto-detect\r\n"
+           "# then picks it up), e.g. geometry = 756/13/51.\r\n"
+           "geometry = auto\r\n";
 }
 
 }  // namespace drive_config

@@ -29,7 +29,14 @@ struct IdentifyInfo {
     uint32_t total_sectors;  // LBA28 capacity
     uint8_t pio_mode = 0;    // the fastest PIO mode offered, 0-3 (MAX_PIO_MODE)
     uint8_t mdma_mode = 0xFF;  // the fastest multiword DMA mode offered, 0-2, or NO_DMA
+    Geometry geometry{};     // the default CHS geometry IDENTIFY reports; 0 cylinders: defaultGeometry()
 };
+
+// The geometry IDENTIFY reports as the default, and the device translates CHS
+// by at power-up and after a hardware reset: `info.geometry` if set (an
+// image from an old drive with its own, HDDSYNTH.INI's `geometry`), else
+// defaultGeometry().
+Geometry startGeometry(const IdentifyInfo& info);
 
 // No DMA offered (IdentifyInfo::mdma_mode), and the fastest multiword DMA mode
 // there is (ide_dma.pio meets modes 0-2: host/tests/test_dma_sim.py).

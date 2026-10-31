@@ -257,6 +257,22 @@ TEST(test_identify_fields) {
     CHECK(w[86] & (1u << 12));     // ...and enabled
 }
 
+// geometry = C/H/S: an old drive's image, whose boot code uses its geometry
+TEST(test_identify_set_geometry) {
+    IdentifyInfo info{"HDDSYNTH PROTO", "HSP-000001", "0.1.0", 501760};
+    info.geometry = Geometry{756, 13, 51};
+    uint16_t w[256];
+    buildIdentify(info, w);
+    CHECK_EQ(w[1], 756);
+    CHECK_EQ(w[3], 13);
+    CHECK_EQ(w[6], 51);
+    CHECK_EQ(uint32_t(w[57]) | (uint32_t(w[58]) << 16), 756u * 13u * 51u);
+    CHECK_EQ(uint32_t(w[60]) | (uint32_t(w[61]) << 16), 501760u);  // LBA still reaches it all
+    CHECK_EQ(startGeometry(info).heads, 13);
+    info.geometry = Geometry{};
+    CHECK_EQ(startGeometry(info).heads, 16);  // auto
+}
+
 TEST(test_identify_pio_modes) {
     uint16_t w[256];
     const uint16_t cycle_ns[] = {600, 383, 240, 180, 120};
@@ -366,6 +382,7 @@ int main() {
     RUN(test_ring_two_threads);
     RUN(test_ata_string_byte_order);
     RUN(test_default_geometry);
+    RUN(test_identify_set_geometry);
     RUN(test_identify_fields);
     RUN(test_identify_pio_modes);
     RUN(test_identify_checksum);

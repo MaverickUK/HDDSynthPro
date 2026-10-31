@@ -16,6 +16,10 @@ CORE1_RAM Geometry defaultGeometry(uint32_t total_sectors) {
     return Geometry{uint16_t(cyl), 2, 16};
 }
 
+CORE1_RAM Geometry startGeometry(const IdentifyInfo& info) {
+    return info.geometry.cylinders ? info.geometry : defaultGeometry(info.total_sectors);
+}
+
 void putAtaString(uint16_t* words, unsigned len_words, const char* text) {
     size_t len = std::strlen(text);
     for (unsigned i = 0; i < len_words; ++i) {
@@ -68,7 +72,7 @@ CORE1_RAM void setWriteCacheEnabled(uint16_t w[256], bool on) {
 
 void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     std::memset(w, 0, 256 * sizeof(uint16_t));
-    Geometry g = defaultGeometry(info.total_sectors);
+    Geometry g = startGeometry(info);
     uint32_t chs_sectors = g.sectors();
 
     w[0] = 0x0040;  // fixed device, not removable

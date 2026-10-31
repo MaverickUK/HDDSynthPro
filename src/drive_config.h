@@ -13,6 +13,7 @@
 //   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
 //   early_answers = off    # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
+//   geometry = auto        # or C/H/S, e.g. 756/13/51: the CHS geometry IDENTIFY reports
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -24,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "identify.h"
 #include "seek_timing.h"
 
 namespace drive_config {
@@ -103,6 +105,10 @@ struct Config {
     bool isa = DEFAULT_ISA;
     bool early_answers = DEFAULT_EARLY_ANSWERS;
     bool iordy = DEFAULT_IORDY;
+    // `geometry = C/H/S`: the default geometry IDENTIFY reports, for an image
+    // from an old drive whose partition table and boot code use its own (a
+    // BIOS's auto-detect then picks it up); 0 cylinders: auto (16 x 63).
+    Geometry geometry{};
     ::seek_timing::Setting seek_timing;  // off by default
     char warnings[MAX_WARNINGS][MAX_WARNING];
     size_t warning_count = 0;  // may exceed MAX_WARNINGS: only the first ones are kept

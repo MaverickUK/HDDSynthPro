@@ -1406,6 +1406,23 @@ TEST(test_initialize_device_parameters_survives_soft_reset_not_hard) {
     CHECK_EQ(d.geometry().sectors_per_track, 63);
 }
 
+// A set geometry is the power-on one: CHS addresses translate by it, and a
+// hardware reset goes back to it.
+TEST(test_set_geometry_is_the_power_on_one) {
+    IdentifyInfo info = INFO;
+    info.geometry = Geometry{100, 13, 51};
+    Device d(info);
+    CHECK_EQ(d.geometry().heads, 13);
+    CHECK_EQ(d.geometry().sectors_per_track, 51);
+    d.write(Reg::Device, 0xA0 | 3);
+    command(d, CMD_INITIALIZE_DEVICE_PARAMETERS, 0, 17);
+    CHECK_EQ(d.geometry().heads, 4);
+    d.hardReset(true);
+    d.hardReset(false);
+    CHECK_EQ(d.geometry().heads, 13);
+    CHECK_EQ(d.geometry().sectors_per_track, 51);
+}
+
 TEST(test_initialize_device_parameters_rejects_zero_sectors) {
     Device d(INFO);
     d.write(Reg::Device, 0xA0 | 15);
@@ -1915,6 +1932,7 @@ void runAtaDeviceTests() {
     RUN(test_set_features_other_subcommands_abort);
     RUN(test_initialize_device_parameters);
     RUN(test_initialize_device_parameters_survives_soft_reset_not_hard);
+    RUN(test_set_geometry_is_the_power_on_one);
     RUN(test_initialize_device_parameters_rejects_zero_sectors);
     RUN(test_read_verify);
     RUN(test_seek_and_recalibrate);
