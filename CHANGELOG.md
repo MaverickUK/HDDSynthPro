@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.15] - 2026-10-31
+
+0.23.13's on-cable check then caught three bad sectors with Windows' driver loaded: each time word 0 alone, with bit 12 set where it should be clear (959c for 859c). The DD lines idle high (`p`: DD=ffff), so the first word of a sector has to pull its zeros down from high, and DD12, the line that floated high on writes too (0.23.11), sometimes hadn't got there when DIOR# rose.
+
+### Changed
+- **With `early_answers = on`, DD0-15 are driven at 8 mA** (4 mA otherwise, as before: on the USB adapter's DMA, 8 mA with fast slew made the lines noisier, 0.17.1).
+
 ## [0.23.14] - 2026-10-31
 
 With 0.23.13 the Pentium booted Windows 95 with its driver loaded, cleanly, and ran about 11,000 commands: 21,360 sectors checked on the cable, none wrong (spot checks: about three in four served sectors went unchecked).

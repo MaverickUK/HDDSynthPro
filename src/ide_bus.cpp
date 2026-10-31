@@ -78,6 +78,13 @@ void begin(bool isa, bool early) {
     // IORDY's output value is 0, so making it an output pulls it low.
     for (unsigned i = 0; i < 16; ++i) pio_gpio_init(s_pio, cfg::PIN_DD0 + i);
     pio_gpio_init(s_pio, cfg::PIN_IORDY);
+    // early_answers: DD at 8 mA. A host that ignores IORDY latches the first
+    // word of a sector from lines it left floating high, and on the Pentium
+    // DD12 sometimes hadn't fallen at 4 mA (0.23.13: word 0, bit 12 set).
+    // Not otherwise: on the USB adapter's DMA, 8 mA with fast slew made the
+    // lines noisier (0.17.1).
+    if (early)
+        for (unsigned i = 0; i < 16; ++i) gpio_set_drive_strength(cfg::PIN_DD0 + i, GPIO_DRIVE_STRENGTH_8MA);
     pio_sm_set_pins_with_mask(s_pio, s_sm, 0, 1u << cfg::PIN_IORDY);
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);
 
