@@ -1,6 +1,6 @@
 # Hosts that don't wait for IORDY: a design
 
-**Status: a design, not built. A first step, early answers (`early_answers`, 0.23.x on branch `no-iordy`), didn't get a Pentium's PIIX through detection; next, measure its timing, then build the table.** Build it if a retro PC shows `iordy_ignored` above 0 ([retro-test.md](retro-test.md)). It's the firmware half of [pcb-bom.md](pcb-bom.md)'s "register reads answered from a table" (section 4, and open question 3).
+**Status: early answers (`early_answers`, 0.23.x on branch `no-iordy`) get a Pentium 200's PIIX through its BIOS and boot Windows 95 with its 32-bit disk driver off. That driver's compatible-timing reads still go wrong; the table design below is not built.** Build it if a retro PC shows `iordy_ignored` above 0 ([retro-test.md](retro-test.md)). It's the firmware half of [pcb-bom.md](pcb-bom.md)'s "register reads answered from a table" (section 4, and open question 3).
 
 ## The problem
 
@@ -39,6 +39,14 @@ Not enough. With 0.23.0 the BIOS got as far as a NOP and IDENTIFY, but data read
 - **The slowest failed read was answered 540 ns after DIOR# fell;** the host had ended its strobe long before. Two of the five failed reads were answered within 400 ns.
 
 **So for this host the answer must be on DD within the strobe, with no warning,** in well under 300 ns: the table design below, not core 1. **Before building it, measure the PIIX's compatible timing** (t1, the strobe width, the cycle) with a PIO probe on the drive. `early_answers` stays as an experiment (off by default); it may still help hosts with a real t1.
+
+### The Pentium boots Windows 95 (0.23.8-0.23.10, 31 Oct 2026)
+
+With `early_answers = on` and core 1 kept in tight bus loops (0.23.4-0.23.8), the Pentium's BIOS detects the drive, sets PIO mode 3 and boots. **Windows 95 reached its desktop** once its 32-bit disk driver (`C:\WINDOWS\SYSTEM\IOSUBSYS\ESDI_506.PDR`, renamed to `.BAK`) was kept out, so Windows uses the BIOS ("MS-DOS compatibility mode"): 4,919 reads and 897 writes, with no failed commands and no late reads. In safe mode (plain DOS through the BIOS), copying 187 DLLs and comparing them with FC found no differences: 123,855 reads and 2,737 writes. **So PIO mode 3, with IORDY, is sound.**
+
+**Left to fix: Windows' own driver.** When it starts, it identifies the drive again, resets the controller and reads (sectors 0, 6,854,398 and 503, each twice) in the PIIX's compatible timing: data words get t1 80 ns and strobes of 175-195 ns. A few of those reads are late, and every boot with the driver ended with corrupt files (a fatal exception, MSGSRV32, registry errors). Next: find which words miss (per-word diagnostics in the lane), or the table design below for data words.
+
+Also found: `iordy_ignored` over-counts in early mode (the program releases IORDY 40 ns after driving DD, so a strobe ending meanwhile counts with good data). Identical `BUSERR IDENTIFY word=10 ... bad_words=32` reports on several boots look like the observer mistaking another transfer for IDENTIFY. And a fragmented SD image (macOS `cp` restoring one) cost 172 ms a backward seek until 0.23.10's extent map.
 
 ## The idea: answers ready before the host asks
 
