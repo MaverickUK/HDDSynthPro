@@ -45,7 +45,7 @@ The listen-only build (`pio run -e bb48`) records every IDE register access it s
 | Machine | IDE controller | Mode used | Firmware | What ran | Result |
 |---|---|---|---|---|---|
 | USB-IDE adapter (Norelsys NS1081; JMicron ID on Windows), from macOS and Windows | Adapter's own | PIO 0-3, multiword DMA 2 | 0.16-0.18 | Detection and re-detection, partitioning and formatting, the rig tests (slices 0-5), standby and wake, FLUSH CACHE, a card pulled and put back, soaks | 10-hour soaks clean in PIO mode 3 (28.9 GB, 49.5 million sectors checked on the cable, 0 bad) and in DMA (51.9 GB, 89.0 million sectors, 0 bad) |
-| ICL HRA 386 (BIOS 1.20, 1992) | 16-bit ISA IDE card | PIO 0 (the card's ISA timing) | 0.22.0 | Boots MS-DOS 5 from a copy of its own CF card; CHKDSK, copying files | Works. Needs the IOCS16# wire (IDE pin 32 to GPIO 2) and `isa = on` |
+| ICL HRA 386 (BIOS 1.20, 1992) | 16-bit ISA IDE card | PIO 0 (the card's ISA timing) | 0.22.0, 0.23.15 | Boots MS-DOS 5 from a copy of its own CF card; CHKDSK, copying files. The benchmark image: `HDDBENCH` and a 14-minute soak | Works: the benchmark passed, and the soak checked about 400 MB with 0 bad sectors. Needs the IOCS16# wire (IDE pin 32 to GPIO 2) and `isa = on` |
 | Pentium 200 (Intel PIIX, Phoenix BIOS) | PIIX, on the motherboard | PIO 3 (no DMA offered yet) | 0.23.15 | Boots Windows 95 from a copy of its own 4 GB CF card, with Windows' own 32-bit disk driver (`ESDI_506.PDR`) | Works. 163,847 sectors checked on the cable, 0 bad. Needs `early_answers = on`: in its BIOS's timing the PIIX ignores IORDY ([docs/no-iordy.md](docs/no-iordy.md)) |
 
 What each machine needed, and the dead ends, are in [CHANGELOG.md](CHANGELOG.md) (0.19-0.23) and [docs/retro-test.md](docs/retro-test.md).
@@ -61,13 +61,13 @@ Measured from the host, in MB/s:
 | USB-IDE adapter | SD card image (SPI) | PIO 0 | 1.31 | 1.61 (write-behind on), 0.94 (off) |
 | USB-IDE adapter | SD card image (SPI) | PIO 3 | not measured | 1.65 (write-behind on), 1.05 (off) |
 | USB-IDE adapter | SD card image (SPI) | Multiword DMA 2 | not measured | 2.23 (write-behind on) |
-| ICL 386 | SD card image | PIO 0 | not measured yet | not measured yet |
+| ICL 386 (`DOSBENCH.IMG`, through the BIOS) | SD card image | PIO 0 | 1.51 (random: 1.09 ms a read) | 0.72 |
 | Pentium 200 | SD card image | PIO 3 | not measured yet | not measured yet |
 
 **Limits on these figures:**
 - In PIO the adapter paces itself (about 1.1 µs a word, and 10 ms before each READ), so faster PIO modes can't speed it up; DMA avoids both.
 - The SD card over SPI caps image transfers at about 2 MB/s, whatever the mode; SDIO on the PCB should lift that.
-- The retro PCs have only booted and run software so far, with nothing timed. The benchmark image (below) will fill those rows.
+- The retro PCs' figures come from the benchmark image (below), through the BIOS as DOS uses the disk. The Pentium's run was cut short when its power supply failed, which was unrelated to the drive.
 
 Every step is in [docs/speed-log.md](docs/speed-log.md).
 
