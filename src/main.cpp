@@ -703,6 +703,10 @@ static void editConfig(const char* line) {
     bool truncated = false;
     if (!sd_card::readConfig(text, sizeof text, len, truncated, Serial)) {
         if (!sd_card::mounted()) return;  // no card: readConfig said so
+        if (sd_card::configExists()) {  // there, but unreadable: never overwrite it with the defaults
+            Serial.printf("# E: can't read %s; nothing changed\n", drive_config::FILE_NAME);
+            return;
+        }
         len = strlen(drive_config::defaultFile());  // no file yet: start from the defaults
         memcpy(text, drive_config::defaultFile(), len);
     } else if (truncated) {

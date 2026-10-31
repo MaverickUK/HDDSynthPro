@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.26.1] - 2026-10-31
+
+After the card was pulled and put back while the drive ran, console `E` wrote `HDDSYNTH.INI` after restarting the card (0.23.16's retry, seen working: "the first try failed: code 12"), but reading the file had failed too, and `E` took it for missing: it rewrote the file from the defaults plus the one setting, losing `early_answers` and `geometry`.
+
+### Fixed
+- **Reading `HDDSYNTH.INI` is retried once after restarting the card**, as writing it is (unless the card answers and the file simply isn't there).
+- **Console `E` never rewrites an existing settings file it can't read:** it says so and changes nothing. It starts from the defaults only when there's no file.
+
 ## [0.26.0] - 2026-10-31
 
 The Evesham's BIOS (auto-detect) gave `ICL386MB.IMG` 16 heads x 63 sectors, from the drive's IDENTIFY, and stopped at "Missing operating system": the image comes from the 386's CF card, laid out for 13 heads x 51 sectors, so its boot code read sector 63 where the DOS boot sector is at 51.

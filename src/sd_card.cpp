@@ -359,10 +359,9 @@ bool configExists() { return s_sd.fatType() && s_sd.exists(drive_config::FILE_NA
 
 bool mounted() { return s_sd.fatType() != 0; }
 
-bool readConfig(char* buf, size_t size, size_t& len, bool& truncated, Print& log) {
+static bool readConfigOnce(char* buf, size_t size, size_t& len, bool& truncated) {
     len = 0;
     truncated = false;
-    if (!mount(log)) return false;
     FsFile f;
     if (!f.open(drive_config::FILE_NAME, O_RDONLY)) return false;
     int n = f.read(buf, size);
@@ -371,6 +370,17 @@ bool readConfig(char* buf, size_t size, size_t& len, bool& truncated, Print& log
     if (n < 0) return false;
     len = size_t(n);
     return true;
+}
+
+// Retried once after restarting the card, as writeConfig is: after the card
+// was pulled and put back unnoticed, reads failed too, and console E took
+// the file for missing and rewrote it from the defaults (2026-10-31).
+bool readConfig(char* buf, size_t size, size_t& len, bool& truncated, Print& log) {
+    if (!mount(log)) return false;
+    if (readConfigOnce(buf, size, len, truncated)) return true;
+    if (!s_sd.exists(drive_config::FILE_NAME) && s_sd.sdErrorCode() == 0) return false;  // simply not there
+    bool restarted = s_served_name ? reattach(millis()) : startCard();
+    return restarted && readConfigOnce(buf, size, len, truncated);
 }
 
 static bool writeConfigOnce(const char* text, size_t len) {
