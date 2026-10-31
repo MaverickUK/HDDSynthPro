@@ -373,17 +373,32 @@ bool readConfig(char* buf, size_t size, size_t& len, bool& truncated, Print& log
     return true;
 }
 
-bool writeConfig(const char* text, size_t len, Print& out) {
-    if (!mount(out)) return false;
+static bool writeConfigOnce(const char* text, size_t len) {
     FsFile f;
-    if (!f.open(drive_config::FILE_NAME, O_RDWR | O_CREAT | O_TRUNC)) {
-        out.printf("SD error: can't write %s\n", drive_config::FILE_NAME);
-        return false;
-    }
+    if (!f.open(drive_config::FILE_NAME, O_RDWR | O_CREAT | O_TRUNC)) return false;
     bool ok = f.write(text, len) == len && f.sync();
     f.close();
-    if (!ok) out.printf("SD error: writing %s failed (code %u)\n", drive_config::FILE_NAME, unsigned(s_sd.sdErrorCode()));
     return ok;
+}
+
+// Console E's write. One that fails is retried once after restarting the
+// card, as image reads and writes are (attempt): it may have been pulled and
+// put back while the drive was idle, which nothing noticed (2026-10-31: the
+// write failed until a restart), or have stopped answering for a moment.
+bool writeConfig(const char* text, size_t len, Print& out) {
+    if (!mount(out)) return false;
+    if (writeConfigOnce(text, len)) return true;
+    unsigned code = unsigned(s_sd.sdErrorCode()), data = unsigned(s_sd.sdErrorData());
+    bool restarted = s_served_name ? reattach(millis()) : startCard();
+    if (restarted && writeConfigOnce(text, len)) {
+        out.printf("# %s written after restarting the card (the first try failed: code %u, data %u)\n",
+                   drive_config::FILE_NAME, code, data);
+        return true;
+    }
+    out.printf("SD error: can't write %s (code %u, data %u; after restarting the card: %s, code %u, data %u)\n",
+               drive_config::FILE_NAME, code, data, restarted ? "failed again" : "it didn't restart",
+               unsigned(s_sd.sdErrorCode()), unsigned(s_sd.sdErrorData()));
+    return false;
 }
 
 bool createImage(const char* name, uint32_t sectors, Print& out) {

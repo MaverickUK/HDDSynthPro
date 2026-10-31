@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.16] - 2026-10-31
+
+The benchmark image (`tools/bench-image`) ran on the ICL 386: 1.51 MB/s reads, 0.72 MB/s writes, 1.09 ms a random read, and 0 bad sectors over a 14-minute soak. That morning console `E` failed twice with `SD error: can't write HDDSYNTH.INI`, though reads of the card worked and a restart cleared it. The first time the card had been pulled and put back while the drive was idle, which nothing noticed (`card_lost=0`), so SdFat still held the old card's state; the second time had no clear cause.
+
+### Fixed
+- **Console `E` restarts the card and tries again when writing `HDDSYNTH.INI` fails**, as image reads and writes already do: the image is reopened and checked to be on the same card (`reattach`), or with no image served the card is just restarted. A failure now prints SdFat's error code and data from both tries.
+
 ## [0.23.15] - 2026-10-31
 
 0.23.13's on-cable check then caught three bad sectors with Windows' driver loaded: each time word 0 alone, with bit 12 set where it should be clear (959c for 859c). The DD lines idle high (`p`: DD=ffff), so the first word of a sector has to pull its zeros down from high, and DD12, the line that floated high on writes too (0.23.11), sometimes hadn't got there when DIOR# rose.
