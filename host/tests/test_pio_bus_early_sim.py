@@ -204,3 +204,43 @@ def test_write_data_gone_as_diow_rises(program, waits):
     run = run_host(make_sim(program), core1, accesses, timing=timing, tail_ns=3000)
     assert not run.errors, run.errors
     assert [v for (_, _, v) in core1.writes] == words
+
+
+# pio_encode_nop() | pio_encode_sideset_opt(1, 0): `mov y, y` with the optional
+# side-set enabled and 0, IORDY released: what core 1 runs (checkIordyStall).
+RELEASE_IORDY = 0xA042 | 0x1000
+
+
+def test_chip_select_without_strobe_released_after_23_us(program):
+    """An ISA card's memory or refresh cycle: the chip select held with no
+    strobe, the drive holding IORDY, which the card passes to the whole ISA
+    bus. Core 1 lets IORDY go after 23 us (cfg::IORDY_STALL_US), and an
+    ordinary read afterwards is still right (0.27.0)."""
+    from hddproto.pio_sim import synced
+    from hddproto.ide_host_model import B_IORDY
+    core1 = EarlyCore1(150, {("CMD", 7): 0x50})
+    sim = make_sim(program)
+    idle = (1 << 19) | (1 << 20) | (1 << 22) | (1 << 23) | (1 << 24) | (1 << 26)
+    selected = idle & ~(1 << 19)  # CS0# low, DA 0: an aliased address, no strobe
+    history = []
+    iordy_low_at = released_at = None
+    for k in range(int(30_000_000 / CYCLE_PS)):  # 30 us
+        t_ns = k * CYCLE_PS / 1000
+        history.append(selected)
+        sim.step(synced(history, k, sim.bypass_mask))
+        while sim.rx_fifo:
+            core1.on_word(k * CYCLE_PS, sim.rx_fifo.pop(0))
+        core1.deliver(k * CYCLE_PS, sim)
+        low = bool((sim.pindirs >> B_IORDY) & 1)
+        if low and iordy_low_at is None:
+            iordy_low_at = t_ns
+        if t_ns >= 23_000 and released_at is None:
+            sim.exec(RELEASE_IORDY, synced(history, k, sim.bypass_mask))
+            released_at = t_ns
+        if released_at is not None:
+            assert not (sim.pindirs >> B_IORDY) & 1, f"IORDY low again at {t_ns} ns"
+    assert iordy_low_at is not None and iordy_low_at < 100  # held from the chip select, as ever
+    # The cycle ends (the chip select goes); then an ordinary status read
+    run = run_host(sim, core1, [Access(False, "CMD", 7)], timing=NO_IORDY)
+    assert not run.errors, run.errors
+    assert read_values(run) == [0x50]

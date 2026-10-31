@@ -156,6 +156,16 @@ class PioSim:
         if self._execute(instr, pins):  # completed (not stalled)
             self._delay = delay
 
+    def exec(self, instr: int, pins: int):
+        """Runs `instr` once, as pio_sm_exec() does: its side-set applies, and
+        the program counter stays where it was (a jump isn't supported)."""
+        if instr >> 13 == 0b000:
+            raise NotImplementedError("exec of a jump")
+        pc = self.pc
+        self._side_set_and_delay(instr)
+        self._execute(instr, pins)
+        self.pc = pc
+
     def _execute(self, instr: int, pins: int) -> bool:
         opcode = instr >> 13
         if opcode == 0b000:  # JMP
