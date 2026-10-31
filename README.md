@@ -28,10 +28,11 @@ I'm not yet sure if this will exist alongside the original HDD Synth or will sup
 
 ## Status
 
-The BB48 works as a read/write IDE hard disk, serving a disk image from a microSD card. It has booted two real retro PCs and soaked for 10 hours at a time behind a USB-IDE adapter. The work is on branch `no-iordy` (0.23.15) until the adapter tests are re-run on it.
+The BB48 works as a read/write IDE hard disk, serving a disk image from a microSD card. It has booted two real retro PCs and soaked for 10 hours at a time behind a USB-IDE adapter. Releases are tagged on `main` (`v0.26.2`, with the firmware files); newer work is on branch `no-iordy`.
 
 - **The drive build** (`pio run -e bb48_drive`) serves `HDDSYNTH.IMG` from a microSD card, or whichever image `HDDSYNTH.INI` names ([docs/settings.md](docs/settings.md)). Without a card it serves a 64 MB welcome disk, with writes kept in RAM until reboot.
-- **Transfer modes:** PIO modes 0-3 and multiword DMA mode 2. Hosts that ignore IORDY get early answers (`early_answers = on`), and 16-bit ISA cards get IOCS16# and an IORDY watchdog (`isa = on`).
+- **Transfer modes:** PIO modes 0-3 and multiword DMA mode 2. Every register's value is ready as soon as it's addressed (early answers, on by default since 0.27.0), so controllers that ignore IORDY work too, and IORDY is let go after 23 µs with no strobe, which keeps 16-bit ISA cards safe; they also get IOCS16#.
+- **Few settings needed:** the drive takes its CHS geometry from the image's own partition table (an image from an old drive boots with the BIOS on auto), and an image over 4 GB can be split across files on a FAT32 card (`tools/split_image.py`; 0.28.0, not yet tried on hardware). `HDDSYNTH.INI` mostly just names the image.
 - **Checked on the cable:** the drive watches its own bus, and checks every data word the host takes off it against what it meant to send.
 - **The board's LED** lights for drive activity, as a hard disk's would.
 - **Next:** a standard benchmark image to run on every machine, the PCB, and the activity link to the HDD Synth ([docs/activity-link.md](docs/activity-link.md)).
