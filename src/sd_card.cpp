@@ -172,14 +172,143 @@ void serviceMedia() {
 
 // The open image as the drive's ImageFile. Its size is the one the host was
 // given, even while the card is out.
+static bool s_contiguous = false;
+
+// The image's runs of clusters on the card, so reads and writes go straight to
+// card sectors, whatever the fragmentation. Through SdFat's file layer a seek
+// backwards walks the cluster chain from the file's start unless SdFat knows
+// the file is one run: 172 ms a read in a 4 GB image (a Pentium's FC comparing
+// two files, 0.23.9). Built at open; empty when unavailable (a fragmented exFAT
+// image, more than MAX_EXTENTS runs, a FAT read failing), and then the file
+// layer is used as before.
+struct Extent {
+    uint32_t file_sector;  // the image's sector the run starts at
+    uint32_t card_sector;  // where it is on the card
+    uint32_t sectors;
+};
+constexpr size_t MAX_EXTENTS = 256;
+static Extent s_extents[MAX_EXTENTS];
+static size_t s_extent_count = 0;
+
+static uint32_t load32(const uint8_t* p) { return p[0] | p[1] << 8 | p[2] << 16 | uint32_t(p[3]) << 24; }
+
+// A FAT32 chain, from the image's first cluster, into s_extents. False if it
+// can't be (then s_extent_count is 0).
+static bool walkFat32(uint32_t image_sectors) {
+    const uint32_t spc = s_sd.bytesPerCluster() / 512;
+    const Sector_t data = s_sd.dataStartSector(), fat = s_sd.fatStartSector();
+    if (spc == 0 || s_image.firstSector() < data) return false;
+    uint32_t cluster = uint32_t((s_image.firstSector() - data) / spc) + 2;
+    static uint8_t sector[512];
+    Sector_t cached = ~Sector_t(0);
+    uint32_t file_sector = 0;
+    while (file_sector < image_sectors) {
+        uint32_t start = cluster, count = 1, next;
+        for (;;) {  // follow the run
+            Sector_t s = fat + cluster / 128;
+            if (s != cached) {
+                if (!s_sd.card()->readSector(s, sector)) return false;
+                cached = s;
+            }
+            next = load32(sector + (cluster % 128) * 4) & 0x0FFFFFFF;
+            if (next != cluster + 1) break;
+            cluster = next;
+            ++count;
+        }
+        if (s_extent_count == MAX_EXTENTS) return false;
+        s_extents[s_extent_count++] = {file_sector, uint32_t(data + Sector_t(start - 2) * spc), count * spc};
+        file_sector += count * spc;
+        if (next < 2 || next >= 0x0FFFFFF8) break;  // the chain's end
+        cluster = next;
+    }
+    return file_sector >= image_sectors;
+}
+
+static bool mapAgrees(uint32_t image_sectors);  // below
+
+// Maps the open image (s_extents), and tells SdFat if it's one run, so its own
+// seeks are sums too.
+static void checkContiguous() {
+    s_extent_count = 0;
+    s_image.sync();  // nothing of the image left in SdFat's cache: from here on it's written directly
+    uint32_t image_sectors = uint32_t((s_image.fileSize() + 511) / 512);
+    Sector_t first = 0, last = 0;
+    s_contiguous = s_image.contiguousRange(&first, &last);
+    if (s_contiguous) {
+        s_extents[0] = {0, uint32_t(first), uint32_t(last - first + 1)};
+        s_extent_count = 1;
+    } else if (s_sd.fatType() != FAT_TYPE_FAT32 || !walkFat32(image_sectors)) {
+        s_extent_count = 0;
+    }
+    if (s_extent_count && !mapAgrees(image_sectors)) s_extent_count = 0;
+}
+
+// Reads or writes whole sectors through s_extents. False if the map can't
+// serve it (none, or not whole sectors): then the file layer does.
+template <class Io>
+static bool mapped(uint64_t offset, size_t bytes, Io io) {
+    if (s_extent_count == 0 || (offset | bytes) % 512) return false;
+    uint32_t sector = uint32_t(offset / 512), left = uint32_t(bytes / 512), done = 0;
+    size_t lo = 0, hi = s_extent_count;  // the last extent starting at or before `sector`
+    while (hi - lo > 1) {
+        size_t mid = (lo + hi) / 2;
+        (s_extents[mid].file_sector <= sector ? lo : hi) = mid;
+    }
+    for (size_t e = lo; left && e < s_extent_count; ++e) {
+        const Extent& x = s_extents[e];
+        if (sector < x.file_sector || sector >= x.file_sector + x.sectors) return false;
+        uint32_t n = x.file_sector + x.sectors - sector;
+        if (n > left) n = left;
+        if (!io(x.card_sector + (sector - x.file_sector), done, n)) return false;
+        sector += n, done += n, left -= n;
+    }
+    return left == 0;
+}
+
+// A wrong map would serve the wrong sectors without a word, so before using it
+// a few sectors are read both ways (the map, SdFat's file layer) and compared:
+// each of the first runs and the last one at its start, the middle, the end.
+static bool s_map_checked = false;
+static bool mapAgrees(uint32_t image_sectors) {
+    static uint8_t a[512], b[512];
+    uint32_t samples[8];
+    size_t n = 0;
+    for (size_t e = 0; e < s_extent_count && n < 4; ++e) samples[n++] = s_extents[e].file_sector;
+    samples[n++] = s_extents[s_extent_count - 1].file_sector;
+    samples[n++] = image_sectors / 2;
+    samples[n++] = image_sectors - 1;
+    for (size_t i = 0; i < n; ++i) {
+        uint32_t lba = samples[i];
+        bool ok = mapped(uint64_t(lba) * 512, 512, [&](Sector_t at, uint32_t, uint32_t count) {
+            return s_sd.card()->readSectors(at, a, count);
+        });
+        if (!ok || !s_image.seekSet(uint64_t(lba) * 512) || s_image.read(b, 512) != 512 || memcmp(a, b, 512) != 0)
+            return false;
+    }
+    s_map_checked = true;
+    return true;
+}
+
 class SdImageFile : public ImageFile {
 public:
     uint64_t size() const override { return s_served_size; }
     bool readAt(uint64_t offset, void* data, size_t bytes) override {
-        return attempt([&] { return s_image.seekSet(offset) && s_image.read(data, bytes) == int(bytes); });
+        return attempt([&] {
+            if (s_extent_count && (offset | bytes) % 512 == 0)
+                return mapped(offset, bytes, [&](Sector_t at, uint32_t done, uint32_t n) {
+                    return s_sd.card()->readSectors(at, static_cast<uint8_t*>(data) + done * 512, n);
+                });
+            return s_image.seekSet(offset) && s_image.read(data, bytes) == int(bytes);
+        });
     }
     bool writeAt(uint64_t offset, const void* data, size_t bytes) override {
-        return attempt([&] { return s_image.seekSet(offset) && s_image.write(data, bytes) == bytes; });
+        return attempt([&] {
+            if (s_extent_count && (offset | bytes) % 512 == 0)
+                return mapped(offset, bytes, [&](Sector_t at, uint32_t done, uint32_t n) {
+                    return s_sd.card()->writeSectors(at, static_cast<const uint8_t*>(data) + done * 512, n);
+                });
+            return s_image.seekSet(offset) && s_image.write(data, bytes) == bytes;
+        });
     }
     // SdFat's cache to the card, then waits until the card isn't busy.
     bool sync() override {
@@ -187,16 +316,6 @@ public:
     }
 };
 static SdImageFile s_image_file;
-static bool s_contiguous = false;
-
-// Checks the image's cluster chain once, which also tells SdFat the file is one
-// unbroken run if it is (FILE_FLAG_CONTIGUOUS): then every seek is a sum.
-// Otherwise a seek backwards walks the chain from the file's start, which for a
-// 4 GB image took 172 ms a read (a Pentium's FC comparing two files, 0.23.9).
-static void checkContiguous() {
-    Sector_t first = 0, last = 0;
-    s_contiguous = s_image.contiguousRange(&first, &last);
-}
 
 ImageFile* openImage(const char* name, Print& log) {
     if (s_image.isOpen()) s_image.close();
@@ -233,6 +352,8 @@ ImageFile* openImage(const char* name, Print& log) {
 const char* openError() { return s_open_error; }
 
 bool imageContiguous() { return s_contiguous; }
+
+unsigned imageExtents() { return unsigned(s_extent_count); }
 
 bool configExists() { return s_sd.fatType() && s_sd.exists(drive_config::FILE_NAME); }
 

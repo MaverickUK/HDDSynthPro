@@ -680,11 +680,11 @@ static void printConfig() {
     uint8_t mdma = g_mdma_mode.load();
     char mdma_text[8] = "none";
     if (mdma != NO_DMA) std::snprintf(mdma_text, sizeof mdma_text, "%u", unsigned(mdma));
-    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s pio_offered=%u mdma_offered=%s serving=%s contiguous=%s\n",
+    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s pio_offered=%u mdma_offered=%s serving=%s contiguous=%s extents=%u\n",
                   g_config_state,
                   g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name,
-                  sd_card::imageContiguous() ? "yes" : "no");
+                  sd_card::imageContiguous() ? "yes" : "no", sd_card::imageExtents());
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
     Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s early_answers=%s\n",
                   g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),

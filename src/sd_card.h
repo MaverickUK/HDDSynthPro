@@ -28,6 +28,9 @@ const char* openError();
 
 // Whether the open image is one unbroken run of clusters (then seeks are fast).
 bool imageContiguous();
+// How many runs the image is read and written through directly (0: SdFat's
+// file layer, as for a fragmented exFAT image or a map that didn't check out).
+unsigned imageExtents();
 
 // The settings file (drive_config.h). readConfig() reads up to `size` bytes
 // of it into `buf`: false if there is no card or no file; `truncated` if the

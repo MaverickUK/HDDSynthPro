@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.10] - 2026-10-31
+
+0.23.9's `contiguous=` showed the Pentium's image fragmented. It was fragmented by restoring it with macOS `cp`, which frees the file's clusters and allocates new ones, and still fragmented after rewriting it, as macOS reused the holes.
+
+### Changed
+- **Image reads and writes go straight to card sectors through a map of the image's runs** (`sd_card`'s extents, up to 256). The map comes from `contiguousRange()` (one run, FAT32 or exFAT) or a walk of the image's FAT32 chain at open (about 0.3 s for 4 GB). Whatever the fragmentation, a sector costs the same wherever it is, and it's quicker than SdFat's file layer even for one run. Before using the map, a few sectors are read both ways (the map, the file layer) and compared: the first runs' and the last one's starts, the middle, the end. A fragmented exFAT image, more than 256 runs or a map that doesn't check out keeps the file layer. `CONFIG ... extents=` shows the runs in use (0: the file layer).
+
 ## [0.23.9] - 2026-10-30
 
 ### Fixed
