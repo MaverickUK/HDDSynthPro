@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "drive_config.h"
+#include "image_parts.h"
 
 namespace sd_card {
 
@@ -81,6 +82,13 @@ void printInfo(Print& out) {
 
 static media_watch::Watch s_watch;
 static const char* s_served_name = nullptr;  // the image being served, kept while the card is out
+// A split image (image_parts.h): its parts, all of the image's sectors, its
+// size in bytes (media_watch's identity), and why it couldn't be served.
+static unsigned s_parts = 1;
+static uint32_t s_image_sectors = 0;
+static uint64_t s_image_bytes = 0;
+static const char* s_split_error = nullptr;
+
 static uint64_t s_served_size = 0;           // its size, which the drive told the host
 
 // Whether a card answers CMD0 (go idle, and into SPI mode), the first step of
@@ -111,7 +119,7 @@ static bool identify(media_watch::Identity& id) {
     if (!s_sd.card()->readCID(&cid)) return false;
     id.maker = cid.mid;
     id.serial = cid.psn();
-    id.size = s_image.fileSize();
+    id.size = s_image_bytes;  // all of a split image's parts (checkContiguous comes first)
     id.first_sector = uint32_t(s_image.firstSector());
     return s_image.getModifyDateTime(&id.date, &id.time);
 }
@@ -131,11 +139,13 @@ static bool reattach(uint32_t now) {
         s_watch.cameBackWithout(s_sd.exists(s_served_name) ? "can't open" : "image not found", now);
         return false;
     }
+    checkContiguous();  // first: a split image's size is its parts'
     media_watch::Identity id;
-    if (!identify(id)) {
+    if (s_split_error) {
+        s_watch.cameBackWithout(s_split_error, now);
+    } else if (!identify(id)) {
         s_watch.cameBackWithout("can't read the card's ID", now);
     } else if (s_watch.cameBack(id, now) == media_watch::State::Present) {
-        checkContiguous();
         return true;
     }
     s_image.close();
@@ -192,16 +202,18 @@ static size_t s_extent_count = 0;
 
 static uint32_t load32(const uint8_t* p) { return p[0] | p[1] << 8 | p[2] << 16 | uint32_t(p[3]) << 24; }
 
-// A FAT32 chain, from the image's first cluster, into s_extents. False if it
-// can't be (then s_extent_count is 0).
-static bool walkFat32(uint32_t image_sectors) {
+// A file's FAT32 chain, from its first cluster, appended to s_extents as the
+// image's sectors from `base` (a split image's later parts start past the
+// earlier ones). False if it can't be.
+static bool walkFat32(FsFile& f, uint32_t base, uint32_t sectors) {
     const uint32_t spc = s_sd.bytesPerCluster() / 512;
     const Sector_t data = s_sd.dataStartSector(), fat = s_sd.fatStartSector();
-    if (spc == 0 || s_image.firstSector() < data) return false;
-    uint32_t cluster = uint32_t((s_image.firstSector() - data) / spc) + 2;
+    if (spc == 0 || f.firstSector() < data) return false;
+    uint32_t cluster = uint32_t((f.firstSector() - data) / spc) + 2;
     static uint8_t sector[512];
     Sector_t cached = ~Sector_t(0);
-    uint32_t file_sector = 0;
+    uint32_t file_sector = base;
+    const uint32_t image_sectors = base + sectors;
     while (file_sector < image_sectors) {
         uint32_t start = cluster, count = 1, next;
         for (;;) {  // follow the run
@@ -224,23 +236,64 @@ static bool walkFat32(uint32_t image_sectors) {
     return file_sector >= image_sectors;
 }
 
-static bool mapAgrees(uint32_t image_sectors);  // below
+static bool mapAgrees(FsFile& f, uint32_t base, uint32_t sectors, size_t first_extent);  // below
 
-// Maps the open image (s_extents), and tells SdFat if it's one run, so its own
-// seeks are sums too.
+// One file's runs into s_extents, as the image's sectors from `base`, checked
+// against the file layer. False if it can't be mapped.
+static bool mapPart(FsFile& f, uint32_t base, uint32_t sectors, bool& contiguous) {
+    size_t first_extent = s_extent_count;
+    Sector_t first = 0, last = 0;
+    contiguous = f.contiguousRange(&first, &last);
+    if (contiguous) {
+        if (s_extent_count == MAX_EXTENTS) return false;
+        s_extents[s_extent_count++] = {base, uint32_t(first), uint32_t(last - first + 1)};
+    } else if (s_sd.fatType() != FAT_TYPE_FAT32 || !walkFat32(f, base, sectors)) {
+        return false;
+    }
+    return mapAgrees(f, base, sectors, first_extent);
+}
+
+// Maps the open image (s_extents), with any further parts (NAME.I01...), and
+// tells SdFat if it's one run, so its own seeks are sums too. A single file
+// that can't be mapped is served through the file layer; a split image can
+// only be served through the map, so then s_split_error says why not.
 static void checkContiguous() {
     s_extent_count = 0;
+    s_parts = 1;
+    s_split_error = nullptr;
     s_image.sync();  // nothing of the image left in SdFat's cache: from here on it's written directly
-    uint32_t image_sectors = uint32_t((s_image.fileSize() + 511) / 512);
-    Sector_t first = 0, last = 0;
-    s_contiguous = s_image.contiguousRange(&first, &last);
-    if (s_contiguous) {
-        s_extents[0] = {0, uint32_t(first), uint32_t(last - first + 1)};
-        s_extent_count = 1;
-    } else if (s_sd.fatType() != FAT_TYPE_FAT32 || !walkFat32(image_sectors)) {
-        s_extent_count = 0;
+    uint64_t bytes = s_image.fileSize();
+    uint32_t sectors = uint32_t((bytes + 511) / 512);
+    bool mapped_ok = mapPart(s_image, 0, sectors, s_contiguous);
+    s_image_sectors = sectors;
+    s_image_bytes = bytes;
+    for (unsigned n = 1; n < image_parts::MAX_PARTS && s_served_name; ++n) {
+        char name[drive_config::MAX_NAME + 8];
+        if (!image_parts::partName(s_served_name, n, name, sizeof name) || !s_sd.exists(name)) break;
+        if (n == 1) s_contiguous = false;  // SdFat's seeks within one file are no help now
+        if (s_image_bytes % 512) {
+            s_split_error = "a part before the last isn't a whole number of sectors";
+            break;
+        }
+        FsFile part;
+        bool contiguous;
+        if (!part.open(name, O_RDONLY)) {
+            s_split_error = "can't open a part";
+            break;
+        }
+        uint64_t part_bytes = part.fileSize();
+        uint32_t part_sectors = uint32_t((part_bytes + 511) / 512);
+        if (!mapped_ok || !mapPart(part, s_image_sectors, part_sectors, contiguous)) {
+            s_split_error = "can't map its parts (a FAT32 or exFAT card, under 256 runs in all)";
+            part.close();
+            break;
+        }
+        part.close();
+        s_image_sectors += part_sectors;
+        s_image_bytes += part_bytes;
+        s_parts = n + 1;
     }
-    if (s_extent_count && !mapAgrees(image_sectors)) s_extent_count = 0;
+    if (!mapped_ok || s_split_error) s_extent_count = 0;
 }
 
 // Reads or writes whole sectors through s_extents. False if the map can't
@@ -269,20 +322,21 @@ static bool mapped(uint64_t offset, size_t bytes, Io io) {
 // a few sectors are read both ways (the map, SdFat's file layer) and compared:
 // each of the first runs and the last one at its start, the middle, the end.
 static bool s_map_checked = false;
-static bool mapAgrees(uint32_t image_sectors) {
+static bool mapAgrees(FsFile& f, uint32_t base, uint32_t sectors, size_t first_extent) {
     static uint8_t a[512], b[512];
-    uint32_t samples[8];
+    if (sectors == 0) return true;
+    uint32_t samples[8];  // the image's sectors (within this part: from `base`)
     size_t n = 0;
-    for (size_t e = 0; e < s_extent_count && n < 4; ++e) samples[n++] = s_extents[e].file_sector;
+    for (size_t e = first_extent; e < s_extent_count && n < 4; ++e) samples[n++] = s_extents[e].file_sector;
     samples[n++] = s_extents[s_extent_count - 1].file_sector;
-    samples[n++] = image_sectors / 2;
-    samples[n++] = image_sectors - 1;
+    samples[n++] = base + sectors / 2;
+    samples[n++] = base + sectors - 1;
     for (size_t i = 0; i < n; ++i) {
         uint32_t lba = samples[i];
         bool ok = mapped(uint64_t(lba) * 512, 512, [&](Sector_t at, uint32_t, uint32_t count) {
             return s_sd.card()->readSectors(at, a, count);
         });
-        if (!ok || !s_image.seekSet(uint64_t(lba) * 512) || s_image.read(b, 512) != 512 || memcmp(a, b, 512) != 0)
+        if (!ok || !f.seekSet(uint64_t(lba - base) * 512) || f.read(b, 512) != 512 || memcmp(a, b, 512) != 0)
             return false;
     }
     s_map_checked = true;
@@ -334,16 +388,24 @@ ImageFile* openImage(const char* name, Print& log) {
         log.printf("SD error: can't open %s\n", name);
         return nullptr;
     }
+    s_served_name = name;  // checkContiguous looks for the parts of a split image by it
+    checkContiguous();
+    if (s_split_error) {
+        s_image.close();
+        s_served_name = nullptr;
+        s_open_error = s_split_error;
+        log.printf("SD error: %s is split across files, but %s\n", name, s_split_error);
+        return nullptr;
+    }
     media_watch::Identity id;
     if (!identify(id)) {
         s_image.close();
+        s_served_name = nullptr;
         s_open_error = "can't open";
         log.printf("SD error: can't read the card's ID\n");
         return nullptr;
     }
-    checkContiguous();
     s_open_name = name;
-    s_served_name = name;
     s_served_size = id.size;
     s_watch.serve(id);
     return &s_image_file;
@@ -354,6 +416,8 @@ const char* openError() { return s_open_error; }
 bool imageContiguous() { return s_contiguous; }
 
 unsigned imageExtents() { return unsigned(s_extent_count); }
+
+unsigned imageParts() { return s_parts; }
 
 bool configExists() { return s_sd.fatType() && s_sd.exists(drive_config::FILE_NAME); }
 

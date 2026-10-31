@@ -23,7 +23,7 @@ isa = off
 
 | Key | Values | Default |
 |---|---|---|
-| `image` | The disk image to serve: a file in the card's root folder, e.g. `GAMES.IMG` (quotes optional), or `none` for the built-in 64 MB test disk (its writes are lost when the drive restarts; the soak test uses it, since only its data can be checked on the cable) | `HDDSYNTH.IMG` |
+| `image` | The disk image to serve: a file in the card's root folder, e.g. `GAMES.IMG` (quotes optional; an image over 4 GB on a FAT32 card can be split into `GAMES.IMG`, `GAMES.I01`, `GAMES.I02`..., which `tools/split_image.py` makes, and is served as one disk), or `none` for the built-in 64 MB test disk (its writes are lost when the drive restarts; the soak test uses it, since only its data can be checked on the cable) | `HDDSYNTH.IMG` |
 | `mode` | The transfer mode to offer the host: `auto` (the fastest both sides support), or one of `pio0`–`pio4`, `mdma0`–`mdma2`, `udma0`–`udma6` to allow at most that one | `auto` |
 | `dma` | `on` or `off`: whether `auto` may offer multiword DMA, where DMARQ is wired. Much faster with DMA-capable hosts (reads about 4 times, writes 5 times through the USB adapter) | `off` until DMA has had a long test |
 | `write_behind` | `on` or `off`: the drive acknowledges each written sector while storing it on the card, so the host sends the next one meanwhile. About 50% faster writes to the card; if power is cut in the millisecond a sector is being stored, that sector is lost | `on` |

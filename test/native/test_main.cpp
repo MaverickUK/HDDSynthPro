@@ -411,6 +411,7 @@ void runActivityTests();
 void runActivityLinkTests();
 void runDriveConfigTests();
 void runSectorCheckTests();
+void runImagePartsTests();
 void runMediaWatchTests();
 void runWelcomeDiskTests();
 void runSeekTimingTests();
@@ -444,6 +445,7 @@ int main() {
     runActivityLinkTests();
     runDriveConfigTests();
     runSectorCheckTests();
+    runImagePartsTests();
     runMediaWatchTests();
     runWelcomeDiskTests();
     runSeekTimingTests();

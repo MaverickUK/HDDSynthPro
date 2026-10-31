@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.28.0] - 2026-10-31
+
+**Not yet tried on hardware** (built while the rig was out of reach); host-tested only.
+
+### Added
+- **Images split across files**, for disks over FAT32's 4 GB file limit (the Amiga 1200's 8 GB CF card): `image = NAME.IMG` continues in `NAME.I01`, `NAME.I02`... (up to 8 parts, `image_parts.h`), served as one disk. Every part's clusters go into the one extent map, each part checked against the file layer at its runs' starts, middle and end; a split image is served only through the map, so one that can't be mapped (more than 256 runs in all, a part before the last that isn't whole sectors) is refused with the reason in `CONFIG`. `CONFIG ... parts=`. The card's identity (media_watch) takes the size of all the parts.
+- **`tools/split_image.py`** copies a disk or image into such parts on the card (4,095 MiB each), checking each part and the whole against the source.
+
 ## [0.27.0] - 2026-10-31
 
 Toward working with no settings file: the geometry from the image's own partition table, and early answers for everyone, made safe for ISA cards.

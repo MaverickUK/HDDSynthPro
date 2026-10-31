@@ -31,6 +31,9 @@ bool imageContiguous();
 // How many runs the image is read and written through directly (0: SdFat's
 // file layer, as for a fragmented exFAT image or a map that didn't check out).
 unsigned imageExtents();
+// The files the served image is in: 1, or more for a split image (NAME.IMG,
+// NAME.I01...: image_parts.h), which is served through the extent map only.
+unsigned imageParts();
 
 // The settings file (drive_config.h). readConfig() reads up to `size` bytes
 // of it into `buf`: false if there is no card or no file; `truncated` if the
