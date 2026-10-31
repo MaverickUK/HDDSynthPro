@@ -113,6 +113,7 @@ public:
 private:
     bool finishSector(bool data);
     bool checkIdentify(bool& is_identify);
+    bool matchesExpected();
     bool checkExpected();
     Mismatch compare(uint32_t lba, const uint16_t* want) const;
 

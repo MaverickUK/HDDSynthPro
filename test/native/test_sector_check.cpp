@@ -406,6 +406,21 @@ TEST(test_sector_check_image_ring_overflow) {
     CHECK_EQ(c.expectMissed(), uint32_t(EXPECT_SLOTS + 2));
 }
 
+TEST(test_sector_check_image_text_isnt_identify) {
+    // A served sector that happens to hold the drive's IDENTIFY words (here
+    // the whole block: the strongest case) is checked as data.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    uint16_t ident[256];
+    buildIdentify(IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", "0.11.0", gen_disk::DEFAULT_SECTORS}, ident);
+    c.setIdentify(ident);
+    Observer o;
+    c.expect(42, ident);
+    c.observe(o.status(), false);
+    for (uint16_t v : ident) CHECK(!c.observe(o.data(v), false));
+    CHECK_EQ(c.sectorsChecked(), 1u);
+    CHECK_EQ(c.identifyChecked(), 0u);
+}
+
 void runSectorCheckTests() {
     RUN(test_sector_check_identify_good);
     RUN(test_sector_check_identify_garbled);
@@ -428,4 +443,5 @@ void runSectorCheckTests() {
     RUN(test_sector_check_image_bad_word);
     RUN(test_sector_check_image_nothing_expected);
     RUN(test_sector_check_image_ring_overflow);
+    RUN(test_sector_check_image_text_isnt_identify);
 }

@@ -37,7 +37,7 @@ bool Checker::checkIdentify(bool& is_identify) {
         uint16_t want = identify_[i];
         uint16_t seen = words_[i];
         if (seen == want) {
-            if (want != 0) ++matches;  // zeros prove nothing
+            if (want != 0 && want != 0x2020) ++matches;  // zeros and padding prove nothing: text has spaces
             continue;
         }
         if (m.bad_words == 0) {
@@ -85,6 +85,23 @@ Mismatch Checker::compare(uint32_t lba, const uint16_t* want) const {
         m.bits_gained = uint16_t(m.bits_gained + popcount16(seen & ~want[i]));
     }
     return m;
+}
+
+// Whether the block is one of expect()'s copies exactly: then it's good,
+// and that copy and the older ones are done with.
+bool Checker::matchesExpected() {
+    for (unsigned k = 0; k < expect_count_; ++k) {
+        const Expected& e = expected_[(expect_first_ + k) % EXPECT_SLOTS];
+        unsigned i = 0;
+        while (i < 256 && words_[i] == e.words[i]) ++i;
+        if (i < 256) continue;
+        expect_missed_ += k;
+        expect_first_ = (expect_first_ + k + 1) % EXPECT_SLOTS;
+        expect_count_ -= k + 1;
+        ++checked_;
+        return true;
+    }
+    return false;
 }
 
 // The block against expect()'s copies, oldest first: the first that matches
@@ -143,6 +160,7 @@ bool Checker::observe(uint32_t word, bool data) {
 }
 
 bool Checker::finishSector(bool data) {
+    if (!data && matchesExpected()) return false;
     bool is_identify;
     bool bad = checkIdentify(is_identify);
     if (is_identify) return bad;

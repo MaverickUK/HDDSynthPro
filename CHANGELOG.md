@@ -2,6 +2,13 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.23.14] - 2026-10-31
+
+With 0.23.13 the Pentium booted Windows 95 with its driver loaded, cleanly, and ran about 11,000 commands: 21,360 sectors checked on the cable, none wrong (spot checks: about three in four served sectors went unchecked).
+
+### Fixed
+- **Image sectors holding text were taken for IDENTIFY blocks** (338 false `BUSERR ... IDENTIFY` lines in one boot): a block that matches a served sector is now data, checked before IDENTIFY, and the space padding of IDENTIFY's strings no longer counts towards recognising one.
+
 ## [0.23.13] - 2026-10-31
 
 With 0.23.12 the Pentium's FAT copies matched after two boots (0.23.11's write fixes hold), but with Windows' driver loaded it showed its registry error screen. `SYSTEM.DAT` and `USER.DAT` on the image were sound, so Windows read them wrongly.
