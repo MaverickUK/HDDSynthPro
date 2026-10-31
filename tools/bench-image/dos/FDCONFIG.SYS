@@ -1,0 +1,6 @@
+; FreeDOS settings for the HDD Synth Pro benchmark image
+SWITCHES=/F
+FILES=20
+BUFFERS=20
+LASTDRIVE=Z
+SHELL=C:\COMMAND.COM C:\ /E:512 /P=C:\AUTOEXEC.BAT

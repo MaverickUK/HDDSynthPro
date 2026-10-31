@@ -44,6 +44,7 @@ The owner is an experienced software architect (C#/.NET, TypeScript, Python) who
   - After a `git stash`/checkout that rewrites a `.py` within the same second and at the same size, Python can keep running the old one from `__pycache__`: delete the caches if a result looks stale.
 - **On the rig:** `scripts/rig.sh -m sliceN` runs the unit tests, builds, flashes and runs the rig tests.
   - Evidence goes to `host/runs/` (git-ignored); reference traces live in `host/reference/`.
+- **Benchmark image:** `tools/bench-image/build_image.py` builds `DOSBENCH.IMG` (FreeDOS and `HDDBENCH.COM`, from `hddbench.asm`, NASM), the standard disk for retro PCs. `test_qemu.sh` boots it in QEMU in Docker (Homebrew has no QEMU for macOS 14) and prints its `BENCH.LOG`. Layout and pattern: its README.
 - **Rig:**
   - The adapter is a Norelsys NS1081 (USB `2537:1081`, Bulk-Only, two units `1081CS0`/`1081CS1`). It is powered by USB; its brick only powers a drive plugged into it.
   - It splits the ATA model at the first space into SCSI vendor/product, so match disks on diskutil's `IORegistryEntryName`, not `MediaName`.
