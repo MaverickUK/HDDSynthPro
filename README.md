@@ -10,6 +10,17 @@ The logo? The pro part is meant to be an IDE cable, with pin 1 being red :)
 
 <br clear="left">
 
+## Contents
+
+- [Prototyping](#prototyping)
+- [Status](#status)
+- [Testing](#testing)
+  - [Machines](#machines)
+  - [Speeds](#speeds)
+  - [The benchmark image](#the-benchmark-image)
+- [Quick start](#quick-start)
+- [Licence](#licence)
+
 ## Prototyping
 
 <img src="media/prototype1.jpg" >
@@ -101,4 +112,6 @@ Read the power-order rule in [docs/wiring.md](docs/wiring.md) before connecting 
 
 ## Licence
 
-To be decided (HDDSynth_Native is GPL-3.0).
+HDD Synth Pro is free software, under the GNU General Public License, version 3 ([LICENSE](LICENSE)), as is [HDD Synth](https://github.com/MaverickUK/HDDSynth_Native). You can use, study, change and share it; if you share a changed version, it must be under the same licence, with its source.
+
+The benchmark image's build downloads [FreeDOS](https://www.freedos.org/), which is GPL too; FreeDOS isn't stored in this repository.
