@@ -57,12 +57,15 @@ For a 2 GB FAT16 volume the FAT alone is 128 KB, more than the 48 KB the RP2350 
 
 ## Testing without hardware
 
-- `test_ata_device.cpp`: two units' register behaviour (selection, status per unit, the signature after resets, diagnostics, interrupts), and the virtual host playing a BIOS's probe of both devices, then reading and writing each one's disk.
-- `test_folder_disk.cpp`: the volume's layout, its boot record and FATs, directory sectors, file data at cluster boundaries, the entry cap.
-- `make_folder_img` (`test/tools`): builds the volume from a real directory into an image file, so real FAT tools can check it: `fsck.fat` and `mtools` in CI (Linux), Windows mounting it locally.
+All of these pass, locally and in CI (with ASan and UBSan there):
+
+- `test_two_drives.cpp`: two units' register behaviour (selection, status per unit, the signature after resets, diagnostics, interrupts), and the virtual host playing a BIOS's probe of both devices, then reading and writing each one's disk.
+- `test_folder_disk.cpp`: short names, and volumes read back through a small FAT16 reader in the test (the MBR, boot record, both FATs, folders and chains, as DOS follows them): cluster sizes up to 32 KB, the 2 GB budget, the entry cap, the root's 511, a folder spanning clusters.
+- `make_folder_img` (`test/tools`): builds the volume from a real directory into an image file, so real FAT tools can check it. `scripts/check_folder_img.py` reads it through pyfatfs and compares every folder and file with the directory, byte for byte; CI also runs `fsck.fat -n` and `mdir` (mtools) on one with nested folders, long names, an empty file, an empty folder and a 5 MB random file.
+- `test_folder_disk.cpp`'s last test runs the whole path: the folder as device 1 behind `ata::Device`, read through ATA commands, sector for sector the same as the volume, and a write refused with ABRT.
 
 ## On the rig: what to try first
 
 1. **One drive, no `slave`:** `-m speed` and slices 1-4, against 0.28.0's figures: core 1's code moved, so check it didn't slow (CLAUDE.md, core split).
-2. **Two images** (`slave = SECOND.IMG`): the USB adapter only shows device 0, so this needs a retro PC; the console's `CMD` lines show which unit each command is for.
+2. **Two images** (`slave = SECOND.IMG`): on a retro PC (whether a USB adapter shows a slave at all is untested; many bridges only expose device 0). Device 1's `CMD` lines on the console end in `d1`.
 3. **A folder** as the slave, on the retro PC: `DIR D:`, `COPY` a big file and compare it (`FC /B`), then a write (it should fail cleanly).

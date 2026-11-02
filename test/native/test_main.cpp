@@ -107,6 +107,8 @@ TEST(test_format_commands) {
     CHECK_STR(format(TraceRun{commandEndEvent(950, 0x20, 0x50, 0x00, 850), 1, 950}),
               "DONE 950 20 50 00 850\n");
     CHECK_STR(format(TraceRun{commandStartEvent(5, 0x77, 0, 0), 1, 5}), "CMD 5 77 ? 0 0\n");
+    // Device 1's commands (two drives) end in d1; device 0's lines are unchanged.
+    CHECK_STR(format(TraceRun{commandStartEvent(7, 0x20, 4096, 256, 1), 1, 7}), "CMD 7 20 READ_SECTORS 4096 256 d1\n");
     // Commands are never merged, even when identical.
     TraceCoalescer c;
     TraceRun done;

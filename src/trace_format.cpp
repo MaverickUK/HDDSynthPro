@@ -104,9 +104,9 @@ size_t formatRun(const TraceRun& run, char* buf, size_t size) {
             break;
         case TraceKind::CommandStart: {
             uint8_t command = uint8_t(e.extra);
-            n = std::snprintf(buf, size, "CMD %lu %02x %s %lu %lu\n", (unsigned long)e.time_us,
+            n = std::snprintf(buf, size, "CMD %lu %02x %s %lu %lu%s\n", (unsigned long)e.time_us,
                               (unsigned)command, commandName(command), (unsigned long)e.pins,
-                              (unsigned long)(e.extra >> 8));
+                              (unsigned long)commandCount(e), (e.extra & COMMAND_UNIT1) ? " d1" : "");
             break;
         }
         case TraceKind::CommandEnd:

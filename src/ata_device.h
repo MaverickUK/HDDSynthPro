@@ -145,6 +145,7 @@ struct CommandInfo {
     uint8_t command;
     uint32_t lba;    // decoded start address (LBA, or CHS converted); SET FEATURES: the subcommand
     uint16_t count;  // sectors (0 in the register means 256); SET FEATURES: its Sector Count
+    uint8_t unit;    // 0: device 0, 1: device 1 (two drives)
 };
 
 class Device {

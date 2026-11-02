@@ -350,7 +350,7 @@ CORE1_RAM static void busyTimers(ata::Device& dev) {
 CORE1_RAM static void recordBus(uint32_t sample) { record(TraceKind::Bus, sample); }
 
 CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
-    record(commandStartEvent(t_us, c.command, c.lba, c.count));
+    record(commandStartEvent(t_us, c.command, c.lba, c.count, c.unit));
 }
 
 // early_answers: a queued command, run from the tight bus loop (ide_bus::
@@ -1276,14 +1276,14 @@ static void noteActivity(const TraceEvent& e) {
     if (e.kind == TraceKind::CommandStart) {
         g_last_command.command = command;
         g_last_command.lba = e.pins;
-        g_last_command.count = e.extra >> 8;
+        g_last_command.count = commandCount(e);
         activity_link::Op op = activity_link::opOf(command);
         bool seek_only = (command >= 0x10 && command <= 0x1F) || (command >= 0x70 && command <= 0x7F);
         if (op != activity_link::Op::None)
             g_link_op = op;  // its head target goes from serveFetches(), with its first sector
         else
-            postHeadTarget(e.pins, seek_only ? 0 : (e.extra >> 8), op, time_us_64());  // verify or seek
-        g_activity.onCommand(e.time_us, e.pins, seek_only ? 0 : (e.extra >> 8));
+            postHeadTarget(e.pins, seek_only ? 0 : commandCount(e), op, time_us_64());  // verify or seek
+        g_activity.onCommand(e.time_us, e.pins, seek_only ? 0 : commandCount(e));
     } else if (e.kind == TraceKind::CommandEnd) {
         g_activity.onCommandEnd(e.time_us);
     }

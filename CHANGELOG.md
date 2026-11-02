@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.29.0-2d.2] - 2026-11-02 (branch `two-drives`)
+
+### Added
+- Device 1's commands are marked in the trace: their `CMD` lines end in `d1` (`trace_format`, bit 31 of the event; `host/hddproto/trace.py` reads it as `Command.unit`). Device 0's lines are unchanged.
+
+### Changed
+- The folder drive's partition is whole tracks, to the disk's end, as FDISK makes them: mtools refused one that wasn't. CI checks a folder image with `fsck.fat`, `mtools` and pyfatfs on each push to the branch, and reports a failing tool's output as an annotation.
+
 ## [0.29.0-2d.1] - 2026-11-02 (branch `two-drives`)
 
 An experiment: two drives on one cable, and a folder on the card as a drive ([docs/two-drives.md](docs/two-drives.md)). **Not yet tried on hardware**: built and host-tested overnight with the rig unplugged.

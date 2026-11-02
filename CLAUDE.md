@@ -95,7 +95,7 @@ The bus program holds IORDY on a write while its RX FIFO is full, so a write bur
 
 Core 1 records events into an SPSC ring, and core 0 prints them (`src/trace_format.h`).
 - Identical consecutive accesses are merged into one `EV` line with a count.
-- The drive build logs commands as `CMD`/`DONE` lines; raw accesses only after `t`.
+- The drive build logs commands as `CMD`/`DONE` lines (device 1's `CMD` lines end in `d1`); raw accesses only after `t`.
 
 The Python parser is `host/hddproto/trace.py`; change both together.
 
@@ -110,7 +110,7 @@ Console:
 - `A`: read-ahead off or on until a restart (`read_ahead` in `HDDSYNTH.INI`);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it, then `CONFIG` lines: the settings from `HDDSYNTH.INI`, the image served, why a configured image wasn't used, warnings (drive build; only reads);
-- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`image`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`, `seek_timing`, `isa`, `early_answers`, `iordy`, `geometry`), keeping the rest of the file; `!`: restart, to apply them (keeps `J` or `T`);
+- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`image`, `slave`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`, `seek_timing`, `isa`, `early_answers`, `iordy`, `geometry`), keeping the rest of the file; `!`: restart, to apply them (keeps `J` or `T`);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
 - `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`); `T`: restart serving the test disk, card or no card, or back (the same register, so `T` and `J` undo each other);
 - `L`: the activity link on or off until a restart (`activity_link` in `HDDSYNTH.INI`; `s` shows `link`, `link_sent` and `link_last`, `head_sent`/`head_replaced`/`head_last` for `$HDE`, and `hdm_valid`/`hdm_rejected`/`link_rx_errors` for the synth's `$HDM`);
@@ -128,6 +128,8 @@ Console:
 SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it with any firmware change, add a `CHANGELOG.md` entry (Keep a Changelog), and tag `vX.Y.Z`.
 
 ## Status (31 Oct 2026, 0.28.0)
+
+- **Branch `two-drives` (0.29.0-2d.x, 2 Nov), host-tested only:** `slave = NAME` gives the drive a device 1, an image or a folder served read-only as FAT16 ([docs/two-drives.md](docs/two-drives.md)). `ata::Device` keeps each unit's state and swaps the selected one's status, error and interrupt in on a Device register write, so per-access paths are unchanged; each `Fetch` carries its unit. `src/folder_disk.*` lays a folder out with the FAT computed, not stored. `test_two_drives.cpp`, `test_folder_disk.cpp`, `make_folder_img` with `scripts/check_folder_img.py` (pyfatfs), and CI's `fsck.fat`/`mtools` check all pass. **On hardware, first:** one drive, `-m speed` and slices 1-4 against 0.28.0 (core 1's code moved); then two drives on a retro PC.
 
 - **v0.26.2 is released** (`main`, tag, UF2s): the USB adapter's regression run, the first since 0.22.0, found and fixed core 0 hanging in `bus_timing::poll` and reads past ATA's 1,250 ns from core 1's per-pass profiling (`C1_PROFILE`, off). Slices 3-4 and `-m speed` pass; slices 1-2's re-detections work on the drive's side, but on the Mac the NS1081 then gives the disk a blank name and macOS a new root-owned node, so they need `HDDPRO_DISK` and a `sudo chown` per cycle (hands-free would need a sudoers rule).
 - **0.27.0 (branch):** early answers on by default (slices 3-4 and speed pass in early mode; reads 1.17 MB/s and writes 1.08 on the adapter against 1.40/1.74, the cost of a host that waits; `early_answers = off` restores them), IORDY let go by core 1 after 23 us with no strobe (`checkIordyStall`: the ICL 386 boots MS-DOS 5 and runs games on all defaults, `isa = off`, 31 Oct; 44,002 releases in a session. The bus observer's image check is unreliable there: the ISA card strobes DIOR# with no chip select, 19.9 million times, which it counts as DMA words, so it flags sectors falsely), DONE recorded as commands complete, geometry from the partition table (the Evesham booted the 386's MS-DOS 5 image with its BIOS on auto and only `image =` set, 31 Oct: 7,476 sectors checked on the cable, 0 bad; 247 reads didn't wait for IORDY and early answers covered them; core 1 released IORDY 43,490 times, harmlessly).

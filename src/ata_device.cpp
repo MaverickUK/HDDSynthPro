@@ -216,7 +216,7 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
             if (++fetch_id_ == 0) ++fetch_id_;
         }
     }
-    last_ = CommandInfo{command, 0, 0};
+    last_ = CommandInfo{command, 0, 0, unit_};
     ++commands_started_;
     irq_pending_ = false;  // writing Command clears a pending interrupt
     error_ = 0;

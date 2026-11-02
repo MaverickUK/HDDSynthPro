@@ -61,6 +61,14 @@ def test_parse_commands():
     assert "IDENTIFY x1" in trace.summary(t)
 
 
+def test_parse_device_1_commands():
+    # Two drives: device 1's CMD lines end in d1 (docs/two-drives.md).
+    t = trace.parse(["CMD 100 ec IDENTIFY 0 0 d1", "DONE 300 ec 58 00 200",
+                     "CMD 400 20 READ_SECTORS 7 1", "DONE 500 20 50 00 100"])
+    assert [(c.name, c.unit) for c in t.commands] == [("IDENTIFY", 1), ("READ_SECTORS", 0)]
+    assert t.commands[0].ok and t.commands[1].ok
+
+
 def test_activity_lines_and_time_in_states():
     t = trace.parse([
         "MARK 1000",
