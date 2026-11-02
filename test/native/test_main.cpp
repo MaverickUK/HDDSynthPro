@@ -416,6 +416,7 @@ void runMediaWatchTests();
 void runWelcomeDiskTests();
 void runSeekTimingTests();
 void runTwoDrivesTests();
+void runFolderDiskTests();
 
 int main() {
     RUN(test_pin_layout);
@@ -451,6 +452,7 @@ int main() {
     runWelcomeDiskTests();
     runSeekTimingTests();
     runTwoDrivesTests();
+    runFolderDiskTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

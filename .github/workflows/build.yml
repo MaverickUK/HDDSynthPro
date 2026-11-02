@@ -5,7 +5,7 @@ name: Build and test
 
 on:
   push:
-    branches: [main]
+    branches: [main, two-drives]
     tags: ['v*']
   pull_request:
 
@@ -32,6 +32,21 @@ jobs:
         run: python3 scripts/check_core1_ram.py
       - name: C++ unit tests
         run: test/run_native_tests.sh
+      - name: Folder drive image, checked by fsck.fat, mtools and pyfatfs
+        run: |
+          sudo apt-get install -y -q dosfstools mtools
+          pip install -q pyfatfs
+          mkdir -p "/tmp/folder/Sub Folder/Deeper Still" /tmp/folder/Empty
+          cp -r docs /tmp/folder/Docs
+          cp src/*.cpp "/tmp/folder/Sub Folder/"
+          cp src/*.h "/tmp/folder/Sub Folder/Deeper Still/"
+          head -c 5000001 /dev/urandom > /tmp/folder/random.bin
+          : > /tmp/folder/empty.txt
+          .pio/native-tests/make_folder_img /tmp/folder /tmp/folder.img
+          dd if=/tmp/folder.img of=/tmp/partition.img bs=512 skip=63 status=none
+          fsck.fat -n -v /tmp/partition.img
+          mdir -i /tmp/partition.img -/ :: | tail -5
+          python3 scripts/check_folder_img.py /tmp/folder /tmp/folder.img
       - name: Simulator and parser tests
         working-directory: host
         run: pytest -m sim

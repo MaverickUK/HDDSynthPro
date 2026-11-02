@@ -19,10 +19,13 @@ SANITIZE="${SANITIZE:-address,undefined}"
     test/native/test_media_watch.cpp src/media_watch.cpp \
     test/native/test_welcome_disk.cpp src/welcome_disk.cpp \
     test/native/test_two_drives.cpp \
+    test/native/test_folder_disk.cpp src/folder_disk.cpp \
     src/trace_format.cpp src/identify.cpp src/ata_device.cpp src/short_test.cpp \
     -o .pio/native-tests/run_tests
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/classify_trace.cpp src/activity.cpp \
     -o .pio/native-tests/classify_trace
+"$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/make_folder_img.cpp src/folder_disk.cpp \
+    -o .pio/native-tests/make_folder_img
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/make_welcome_img.cpp src/welcome_disk.cpp src/drive_config.cpp \
     src/seek_timing.cpp src/drive_params.cpp src/drive_timing.cpp src/sentence.cpp \
     -o .pio/native-tests/make_welcome_img
