@@ -2,6 +2,22 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.29.0-2d.1] - 2026-11-02 (branch `two-drives`)
+
+An experiment: two drives on one cable, and a folder on the card as a drive ([docs/two-drives.md](docs/two-drives.md)). **Not yet tried on hardware**: built and host-tested overnight with the rig unplugged.
+
+### Added
+- **Device 1 (slave)**: `slave = NAME` in `HDDSYNTH.INI` gives the drive a second unit, so a retro PC sees two hard disks. `ata::Device` keeps each unit's identity, geometry, IDENTIFY block, standby and write cache, and swaps the selected unit's status, error and interrupt into place when the host changes the Device register's DEV bit. One command runs at a time on a cable, so the command engine, sector buffers, read-ahead, write-behind and DMA are shared; each `Fetch` carries its unit, and core 0 serves it from that unit's disk. Every per-access path is the one-drive code: the only new work on core 1 is at a Device register write. Both units reset together (the signature, diagnostics 01h); EXECUTE DEVICE DIAGNOSTIC selects device 0. The slave's IDENTIFY: model `HDDSYNTH PRO S`, serial `HSP-000001-S`, its own size and geometry (from its image's partition table), the master's transfer modes. With no `slave`, device 0 answers for an absent device 1 as before.
+- **A folder as device 1, read-only** (`src/folder_disk.*`, host-tested): `slave = GAMES` serves the card's folder `GAMES` (and its subfolders) as a FAT16 volume laid out at start-up. Each file and folder gets one run of clusters in listing order, so the FAT is computed, not stored, and every sector is made when it's read: the partition table, boot record, FATs and folders from the list, files' sectors from the files on the card through one open file kept between reads. 8.3 names are made from the long names as Windows makes them (`LONGFI~1.TXT`); hidden and system entries and dot-files are left out. 32 bytes of RAM per entry, on the heap, up to `cfg::FOLDER_MAX_ENTRIES` (1,024) while leaving 16 KB of heap; the root holds 511; FAT16 stops at 2 GB (32 KB clusters). A folder that doesn't fit is served cut short, with a `CONFIG` line saying why. Writes fail with ABRT (DOS: a write fault); nothing on the card is written. Files are read-only in their attributes too.
+- **A second image as device 1** (`slave = DATA.IMG`): through SdFat's file layer only (no extent map, no card watch), so the master's proven image path is untouched.
+- Console: `S` prints `CONFIG slave=... kind=folder|image sectors=...`, the folder's entries, cluster size and whether it was cut short, or `CONFIG slave not used: ...`; `s` shows `slave=` and `slave_sectors=`.
+- The bus observer checks IDENTIFY blocks against either unit's.
+- Tests: `test_two_drives.cpp` (13: per-unit status, error, interrupt, geometry, standby, resets, a BIOS probe of both units, read-only refusals, the lone master unchanged); `test_folder_disk.cpp` (9: short names, volumes read back through a small FAT16 reader that follows the MBR, boot record, folders and FAT chains, cluster sizes up to 32 KB, the 2 GB budget, the entry and root caps, and the folder as device 1 through ATA commands); the `slave` setting; IDENTIFY of either unit. `make_folder_img` writes the volume for a real directory, and `scripts/check_folder_img.py` compares it, file by file, through pyfatfs; CI also runs `fsck.fat` and `mtools` on one.
+
+### Not yet known
+- Whether retro BIOSes see the slave without DASP#/PDIAG# (the BB48 has neither; PCB rev 0.4 adds them).
+- Core 1's read timing with this build, one drive or two: `-m speed` and slices 1-4 first.
+
 ## [0.28.0] - 2026-10-31
 
 **Not yet tried on hardware** (built while the rig was out of reach); host-tested only. On the same firmware, 0.27.0's automatic geometry booted the ICL 386's MS-DOS 5 image on the Evesham with its BIOS on auto and only `image =` set (7,476 sectors checked on the cable, 0 bad; core 1 released IORDY 43,490 times, harmlessly). And the ICL 386 booted MS-DOS 5 and ran games on all defaults, early answers with `isa = off`: core 1's IORDY release (0.27.0) took over from `iordy_watchdog.pio`, 44,002 times in the session. There the bus observer flagged 11 of 3,667 sectors falsely: the ISA card strobes DIOR# with no chip select (19.9 million times), which it counts as DMA words, losing its place in the sectors.

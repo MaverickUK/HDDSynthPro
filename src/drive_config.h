@@ -99,6 +99,10 @@ constexpr bool DEFAULT_IORDY = true;
 
 struct Config {
     char image[MAX_NAME + 1];
+    // `slave = NAME`: device 1's disk (docs/two-drives.md), an image file or a
+    // folder in the card's root folder (served read-only); empty (or `none`):
+    // no device 1, as before.
+    char slave[MAX_NAME + 1];
     Mode mode = Mode::Auto;
     bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
@@ -125,6 +129,8 @@ void defaults(Config& out);
 
 // False for `image = none` (any case): serve the built-in disk, not an image.
 bool servesImage(const Config& c);
+// True if `slave` names a disk for device 1.
+bool hasSlave(const Config& c);
 
 // `text` with `key` set to `value`, into `out` (NUL-terminated): the line
 // setting it is replaced in place, keeping its comment, or a new line is

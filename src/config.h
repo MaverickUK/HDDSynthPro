@@ -128,6 +128,12 @@ constexpr uint32_t LED_MIN_MS = 25;
 // sectors can be written, at 512 bytes each.
 constexpr size_t RAM_DISK_SECTORS = 512;
 
+// A folder served as device 1 (docs/two-drives.md): the most files and
+// folders its list holds, 32 bytes each, on the heap. Fewer if RAM is short
+// (halved until it fits); a bigger folder is served cut short, with a warning.
+constexpr uint16_t FOLDER_MAX_ENTRIES = 1024;
+constexpr uint32_t FOLDER_HEAP_LEFT = 16 * 1024;  // heap kept free after the list
+
 // The IORDY timer (iordy_timer.pio) counts and times reads that IORDY holds
 // longer than this. ATA's limit is 1250 ns (tB).
 constexpr uint32_t IORDY_REPORT_NS = 400;

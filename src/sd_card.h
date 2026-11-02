@@ -8,6 +8,7 @@
 #include <Arduino.h>
 
 #include "block_source.h"
+#include "folder_disk.h"
 #include "media_watch.h"
 
 namespace sd_card {
@@ -58,6 +59,19 @@ bool createImage(const char* name, uint32_t sectors, Print& out);
 // A read or write that fails is retried once after restarting the card, so a
 // card pulled and put back while the drive was idle costs nothing.
 const media_watch::Watch& media();
+// Device 1's disk (docs/two-drives.md), kept apart from the image above so
+// the master's proven path is untouched: a second image through SdFat's
+// file layer only (no extent map, no card watch: a card pulled out fails
+// its reads until a restart), or a folder, read-only.
+// Whether `name`, in the card's root folder, is a folder.
+bool isFolder(const char* name);
+// Opens image `name` for device 1, or returns nullptr (with openError()).
+ImageFile* openSlaveImage(const char* name, Print& log);
+// Folder `name`'s files and subfolders, for folder_disk::Volume: listed in
+// the card's own order, hidden and system entries and names starting with
+// a dot left out. A file is read through one open file, kept between reads.
+folder_disk::FolderSource& folderSource(const char* name);
+
 // Core 0's loop: while the card is lost, looks for it coming back (a CMD0
 // every media_watch::PROBE_MS, under a millisecond); while a different card
 // is in, checks that it still is. Restarting a card that answers takes tens

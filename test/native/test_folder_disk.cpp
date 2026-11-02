@@ -7,8 +7,10 @@
 #include <string>
 #include <vector>
 
+#include "ata_device.h"
 #include "check.h"
 #include "folder_disk.h"
+#include "identify.h"
 
 using namespace folder_disk;
 
@@ -350,7 +352,72 @@ TEST(test_folder_disk_is_read_only) {
     CHECK(!disk.read(disk.sectors(), words));
 }
 
+TEST(test_folder_disk_as_device_1) {
+    // The whole path: a master on a generated disk and the folder as device
+    // 1, read through ATA commands as a host would, each fetch to its unit.
+    MemoryFolder f;
+    f.add(0, "notes.txt", false, 0, "Served from a folder, read-only.");
+    f.add(0, "data.bin", false, 70000);
+    std::vector<Entry> entries(16);
+    Volume v;
+    CHECK(v.build(f, entries.data(), 16, "SLAVE"));
+    FolderDisk slave(v);
+    GeneratedDisk master;
+    const IdentifyInfo id0{"HDDSYNTH PROTO", "HSP-000001", "0.29.0", master.sectors()};
+    const IdentifyInfo id1{"HDDSYNTH PRO S", "HSP-000001-S", "0.29.0", slave.sectors()};
+    ata::Device d(id0, &id1);
+    BlockSource* disks[2] = {&master, &slave};
+    auto pump = [&] {
+        ata::Fetch fe;
+        if (d.dataOutHeld()) d.releaseDataOut();
+        if (d.pendingFetch(fe))
+            d.fetchDone(fe.id, fe.store ? disks[fe.unit]->write(fe.lba, fe.buffer) : disks[fe.unit]->read(fe.lba, fe.buffer));
+    };
+    auto wait = [&] {
+        for (int i = 0; i < 1000 && (d.read(ata::Reg::AltStatusDevCtrl) & ata::ST_BSY); ++i) pump();
+    };
+    auto readSector = [&](uint32_t lba, uint8_t out[512]) {
+        d.write(ata::Reg::SectorCount, 1);
+        d.write(ata::Reg::LbaLow, lba & 0xFF);
+        d.write(ata::Reg::LbaMid, (lba >> 8) & 0xFF);
+        d.write(ata::Reg::LbaHigh, (lba >> 16) & 0xFF);
+        d.write(ata::Reg::Device, 0xF0);  // LBA, device 1
+        d.write(ata::Reg::StatusCommand, ata::CMD_READ_SECTORS);
+        wait();
+        if ((d.read(ata::Reg::StatusCommand) & (ata::ST_ERR | ata::ST_DRQ)) != ata::ST_DRQ) return false;
+        for (int i = 0; i < 256; ++i) {
+            uint16_t w = d.read(ata::Reg::Data);
+            out[2 * i] = uint8_t(w);
+            out[2 * i + 1] = uint8_t(w >> 8);
+        }
+        wait();
+        return true;
+    };
+    // Every sector of the volume's metadata and files, as the host reads it.
+    uint8_t got[512], want[512];
+    bool same = true;
+    for (uint32_t lba = 0; lba < 400; ++lba) {
+        if (!readSector(lba, got)) {
+            same = false;
+            break;
+        }
+        v.sector(lba, want);
+        if (std::memcmp(got, want, 512) != 0) same = false;
+    }
+    CHECK(same);
+    // A write to the folder drive fails cleanly with ABRT; the master still writes.
+    d.write(ata::Reg::SectorCount, 1);
+    d.write(ata::Reg::Device, 0xF0);
+    d.write(ata::Reg::StatusCommand, ata::CMD_WRITE_SECTORS);
+    wait();
+    for (int i = 0; i < 256; ++i) d.write(ata::Reg::Data, 0xBEEF);
+    wait();
+    CHECK(d.read(ata::Reg::StatusCommand) & ata::ST_ERR);
+    CHECK_EQ(d.read(ata::Reg::ErrorFeatures) & ata::ER_ABRT, ata::ER_ABRT);
+}
+
 void runFolderDiskTests() {
+    RUN(test_folder_disk_as_device_1);
     RUN(test_folder_short_names);
     RUN(test_folder_volume_reads_back);
     RUN(test_folder_volume_cluster_size_grows);

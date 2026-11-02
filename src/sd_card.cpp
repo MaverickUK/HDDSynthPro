@@ -516,4 +516,129 @@ bool createImage(const char* name, uint32_t sectors, Print& out) {
     return true;
 }
 
+// ---- Device 1's disk ----------------------------------------------------------
+
+bool isFolder(const char* name) {
+    FsFile f;
+    if (!s_sd.fatType() || !f.open(name, O_RDONLY)) return false;
+    bool dir = f.isDir();
+    f.close();
+    return dir;
+}
+
+static FsFile s_slave_image;
+
+// SdFat's file layer, for the slave's image: seek, then read or write.
+class SlaveImageFile : public ImageFile {
+public:
+    uint64_t size() const override { return size_; }
+    bool readAt(uint64_t offset, void* data, size_t bytes) override {
+        return s_slave_image.seekSet(offset) && s_slave_image.read(data, bytes) == int(bytes);
+    }
+    bool writeAt(uint64_t offset, const void* data, size_t bytes) override {
+        return s_slave_image.seekSet(offset) && s_slave_image.write(data, bytes) == bytes;
+    }
+    bool sync() override { return s_slave_image.sync(); }
+    uint64_t size_ = 0;
+};
+static SlaveImageFile s_slave_image_file;
+
+ImageFile* openSlaveImage(const char* name, Print& log) {
+    if (s_slave_image.isOpen()) s_slave_image.close();
+    if (!mount(log)) {
+        s_open_error = "no card";
+        return nullptr;
+    }
+    if (!s_sd.exists(name)) {
+        s_open_error = "not found";
+        return nullptr;
+    }
+    if (!s_slave_image.open(name, O_RDWR)) {
+        s_open_error = "can't open";
+        log.printf("SD error: can't open %s\n", name);
+        return nullptr;
+    }
+    s_slave_image_file.size_ = s_slave_image.fileSize();
+    return &s_slave_image_file;
+}
+
+// The folder served for device 1. Entries are found again by their index in
+// their folder (FsFile::dirIndex), opening each folder from the served one
+// down, so nothing but that index is kept for them.
+class SdFolderSource : public folder_disk::FolderSource {
+public:
+    void serve(const char* name) {
+        name_ = name;
+        close();
+    }
+
+    bool list(uint16_t folder, const folder_disk::Entry* entries, Adder& add) override {
+        FsFile dir;
+        if (!openEntry(folder, entries, dir) || !dir.isDir()) return false;
+        FsFile f;
+        char name[256];
+        while (f.openNext(&dir, O_RDONLY)) {
+            folder_disk::Item item{};
+            f.getName(name, sizeof name);
+            bool skip = name[0] == '.' || f.isHidden() || f.isSystem();
+            if (!skip) {
+                item.name = name;
+                item.dir = f.isDir();
+                item.size = item.dir ? 0 : f.fileSize();
+                f.getModifyDateTime(&item.date, &item.time);
+                item.locator = f.dirIndex();
+            }
+            f.close();
+            if (!skip && !add.add(item)) break;
+        }
+        return true;
+    }
+
+    bool read(uint16_t entry, const folder_disk::Entry* entries, uint32_t offset, uint8_t* out,
+              uint32_t bytes) override {
+        if (entry != open_entry_ || !file_.isOpen()) {
+            close();
+            if (!openEntry(entry, entries, file_)) return false;
+            open_entry_ = entry;
+        }
+        return file_.seekSet(offset) && file_.read(out, bytes) == int(bytes);
+    }
+
+private:
+    void close() {
+        if (file_.isOpen()) file_.close();
+        open_entry_ = folder_disk::ROOT;
+    }
+
+    // Opens `entry` (ROOT: the folder served) into `out`, by its folders' indexes.
+    bool openEntry(uint16_t entry, const folder_disk::Entry* entries, FsFile& out) {
+        uint32_t path[16];  // indexes from the served folder down; folders nest less deeply than this
+        unsigned depth = 0;
+        for (uint16_t e = entry; e != folder_disk::ROOT; e = entries[e].parent) {
+            if (depth == 16) return false;
+            path[depth++] = entries[e].locator;
+        }
+        FsFile at;
+        if (!at.open(name_, O_RDONLY)) return false;
+        while (depth > 0) {
+            FsFile next;
+            if (!next.open(&at, path[--depth], O_RDONLY)) return false;
+            at.close();
+            at = next;
+        }
+        out = at;
+        return true;
+    }
+
+    const char* name_ = "";
+    FsFile file_;
+    uint16_t open_entry_ = folder_disk::ROOT;
+};
+static SdFolderSource s_folder;
+
+folder_disk::FolderSource& folderSource(const char* name) {
+    s_folder.serve(name);
+    return s_folder;
+}
+
 }  // namespace sd_card

@@ -160,6 +160,7 @@ bool dmaRefusedForWiring(Mode m, bool dmarq_wired) {
 
 void defaults(Config& out) {
     std::snprintf(out.image, sizeof out.image, "%s", DEFAULT_IMAGE);
+    out.slave[0] = 0;
     out.mode = Mode::Auto;
     out.dma = DEFAULT_DMA;
     out.write_behind = DEFAULT_WRITE_BEHIND;
@@ -230,8 +231,8 @@ bool parseGeometry(Span v, Geometry& g) {
 
 bool isKey(const char* key) {
     Span k{key, key + std::strlen(key)};
-    if (equalsNoCase(k, "image") || equalsNoCase(k, "mode") || equalsNoCase(k, "seek_timing") ||
-        equalsNoCase(k, "geometry"))
+    if (equalsNoCase(k, "image") || equalsNoCase(k, "slave") || equalsNoCase(k, "mode") ||
+        equalsNoCase(k, "seek_timing") || equalsNoCase(k, "geometry"))
         return true;
     for (const Switch& s : SWITCHES)
         if (equalsNoCase(k, s.key)) return true;
@@ -240,7 +241,7 @@ bool isKey(const char* key) {
 
 void parse(const char* text, size_t len, Config& out) {
     defaults(out);
-    bool seen_image = false, seen_mode = false, seen_seek_timing = false, seen_geometry = false;
+    bool seen_image = false, seen_slave = false, seen_mode = false, seen_seek_timing = false, seen_geometry = false;
     bool seen_switch[SWITCH_COUNT] = {};
     forEachLine(text, len, [&](int n, const Line& l) {
         if (l.blank) return;
@@ -258,6 +259,19 @@ void parse(const char* text, size_t len, Config& out) {
                 return;
             }
             std::snprintf(out.image, sizeof out.image, "%.*s", int(l.value.size()), l.value.begin);
+        } else if (equalsNoCase(l.key, "slave")) {
+            if (seen_slave) warn(out, "line %d: '%.*s' sets slave again; this one counts%s", n, l.key);
+            seen_slave = true;
+            if (equalsNoCase(l.value, NO_IMAGE) || l.value.empty()) {
+                out.slave[0] = 0;
+                return;
+            }
+            if (!validImageName(l.value)) {
+                warn(out, "line %d: slave '%.*s' isn't a file or folder name in the root folder; ignored%s", n,
+                     l.value);
+                return;
+            }
+            std::snprintf(out.slave, sizeof out.slave, "%.*s", int(l.value.size()), l.value.begin);
         } else if (equalsNoCase(l.key, "mode")) {
             if (seen_mode) warn(out, "line %d: '%.*s' sets mode again; this one counts%s", n, l.key);
             seen_mode = true;
@@ -345,6 +359,8 @@ bool servesImage(const Config& c) {
         if (std::tolower(static_cast<unsigned char>(*a)) != *b) return true;
     return *a || *b;  // a different length: some other name
 }
+
+bool hasSlave(const Config& c) { return c.slave[0] != 0; }
 
 const char* defaultFile() {
     return "# HDDSynthPro settings. Changes take effect when the drive restarts.\r\n"

@@ -421,7 +421,28 @@ TEST(test_sector_check_image_text_isnt_identify) {
     CHECK_EQ(c.identifyChecked(), 0u);
 }
 
+TEST(test_sector_check_identify_of_either_unit) {
+    // Two drives: device 1's IDENTIFY (another model and serial) is good
+    // too, not a garbled copy of device 0's; a garbled one is still caught.
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    std::vector<uint16_t> id0 = identifyWords(), id1(256);
+    buildIdentify(IdentifyInfo{"HDDSYNTH PRO S", "HSP-000001-S", "0.11.0", 2048}, id1.data());
+    c.setIdentify(id0.data());
+    c.setIdentify(id1.data(), 1);
+    CHECK_EQ(feed(c, o, id0), 0);
+    CHECK_EQ(feed(c, o, id1), 0);
+    CHECK_EQ(c.identifyChecked(), 2u);
+    CHECK_EQ(c.identifyBad(), 0u);
+    std::vector<uint16_t> garbled = id1;
+    garbled[30] ^= 0x0101;  // in the model
+    CHECK_EQ(feed(c, o, garbled), 1);
+    CHECK_EQ(c.identifyBad(), 1u);
+    CHECK_EQ(c.mismatch().first_word, 30u);
+}
+
 void runSectorCheckTests() {
+    RUN(test_sector_check_identify_of_either_unit);
     RUN(test_sector_check_identify_good);
     RUN(test_sector_check_identify_garbled);
     RUN(test_sector_check_identify_without_data_check);

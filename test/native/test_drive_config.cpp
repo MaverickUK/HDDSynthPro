@@ -266,7 +266,28 @@ TEST(test_config_seek_timing) {
     CHECK_EQ(c.warning_count, size_t(0));
 }
 
+TEST(test_config_slave) {
+    Config c = parsed("");
+    CHECK(!drive_config::hasSlave(c));  // no device 1 by default
+    c = parsed("image = DOS.IMG\nslave = GAMES\n");
+    CHECK(drive_config::hasSlave(c));
+    CHECK_STR(std::string(c.slave), "GAMES");
+    CHECK_STR(std::string(c.image), "DOS.IMG");
+    CHECK_EQ(c.warning_count, size_t(0));
+    c = parsed("slave = SECOND.IMG\n");
+    CHECK_STR(std::string(c.slave), "SECOND.IMG");
+    c = parsed("slave = GAMES\nslave = none\n");
+    CHECK(!drive_config::hasSlave(c));  // the last one counts
+    CHECK_EQ(c.warning_count, size_t(1));
+    c = parsed("slave = GAMES/DOS\n");  // the root folder only
+    CHECK(!drive_config::hasSlave(c));
+    CHECK_EQ(c.warning_count, size_t(1));
+    CHECK(drive_config::isKey("slave"));
+    CHECK(edited("image = A.IMG\n", "slave", "GAMES").find("slave = GAMES") != std::string::npos);
+}
+
 void runDriveConfigTests() {
+    RUN(test_config_slave);
     RUN(test_config_isa);
     RUN(test_config_seek_timing);
     RUN(test_config_image_none);
