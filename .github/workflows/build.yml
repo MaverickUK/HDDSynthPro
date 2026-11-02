@@ -37,7 +37,7 @@ jobs:
         run: |
           set -o pipefail
           sudo apt-get install -y -q dosfstools mtools > /dev/null
-          pip install -q pyfatfs
+          pip install -q pyfatfs "setuptools<81"  # pyfatfs's fs package still imports pkg_resources
           mkdir -p "/tmp/folder/Sub Folder/Deeper Still" /tmp/folder/Empty
           cp -r docs /tmp/folder/Docs
           cp src/*.cpp "/tmp/folder/Sub Folder/"
