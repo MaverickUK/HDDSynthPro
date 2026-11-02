@@ -203,6 +203,8 @@ TEST(test_folder_volume_reads_back) {
     CHECK(v.truncated() == Truncated::No);
     CHECK_EQ(v.count(), 8u);
     CHECK_EQ(v.sectors() % (HEADS * SECTORS_PER_TRACK), 0u);  // whole cylinders
+    CHECK_EQ(v.partSectors() % SECTORS_PER_TRACK, 0u);       // whole tracks, as FDISK makes them
+    CHECK_EQ(v.partStart() + v.partSectors(), v.sectors());   // to the disk's end
     CHECK(v.clusters() >= 4085u && v.clusters() <= 65524u);   // FAT16 by its cluster count
 
     FatReader r(v);
@@ -258,6 +260,7 @@ TEST(test_folder_volume_cluster_size_grows) {
     Volume v;
     CHECK(v.build(f, entries.data(), 8, "BIG"));
     CHECK_EQ(v.clusterBytes(), 32768u);  // 1.4 GB needs 32 KB clusters
+    CHECK_EQ(v.partSectors() % SECTORS_PER_TRACK, 0u);
     FatReader r(v);
     CHECK(r.ok);
     auto root = r.root();

@@ -234,12 +234,23 @@ bool Volume::layout() {
             if (fat_needed <= fat) break;
             fat = fat_needed;
         }
+        // The partition is whole tracks, as FDISK makes them (mtools insists
+        // on it): to the disk's end, or, if FAT16's cluster limit stops
+        // short of that, to the last whole track the clusters reach. Any
+        // sectors after the last cluster are simply unused.
+        const uint32_t meta = RESERVED_SECTORS + FAT_COUNT * fat + ROOT_SECTORS;
+        uint32_t part = total_sectors_ - PART_START;
+        if ((part - meta) / spc > clusters) {
+            part = (meta + clusters * spc) / SECTORS_PER_TRACK * SECTORS_PER_TRACK;
+            clusters = (part - meta) / spc;
+            if (clusters < needed) continue;
+        }
         fat_sectors_ = fat;
         clusters_ = clusters;
         fat_start_ = PART_START + RESERVED_SECTORS;
         root_start_ = fat_start_ + FAT_COUNT * fat_sectors_;
         data_start_ = root_start_ + ROOT_SECTORS;
-        part_sectors_ = RESERVED_SECTORS + FAT_COUNT * fat_sectors_ + ROOT_SECTORS + clusters_ * spc_;
+        part_sectors_ = part;
         uint32_t next = 2;
         for (uint16_t i = 0; i < count_; ++i) {
             entries_[i].first_cluster = next;

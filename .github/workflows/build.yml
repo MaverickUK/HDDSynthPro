@@ -33,8 +33,10 @@ jobs:
       - name: C++ unit tests
         run: test/run_native_tests.sh
       - name: Folder drive image, checked by fsck.fat, mtools and pyfatfs
+        shell: bash
         run: |
-          sudo apt-get install -y -q dosfstools mtools
+          set -o pipefail
+          sudo apt-get install -y -q dosfstools mtools > /dev/null
           pip install -q pyfatfs
           mkdir -p "/tmp/folder/Sub Folder/Deeper Still" /tmp/folder/Empty
           cp -r docs /tmp/folder/Docs
@@ -42,11 +44,25 @@ jobs:
           cp src/*.h "/tmp/folder/Sub Folder/Deeper Still/"
           head -c 5000001 /dev/urandom > /tmp/folder/random.bin
           : > /tmp/folder/empty.txt
-          .pio/native-tests/make_folder_img /tmp/folder /tmp/folder.img
+          # Each check runs even if one before it failed; a failing one's
+          # output becomes an annotation on the run, readable without logs.
+          failed=0
+          check() {
+            local name="$1"; shift
+            if "$@" > /tmp/check.out 2>&1; then
+              tail -20 /tmp/check.out
+            else
+              cat /tmp/check.out
+              echo "::error title=$name failed::$(head -c 3000 /tmp/check.out | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+              failed=1
+            fi
+          }
+          check make_folder_img .pio/native-tests/make_folder_img /tmp/folder /tmp/folder.img
           dd if=/tmp/folder.img of=/tmp/partition.img bs=512 skip=63 status=none
-          fsck.fat -n -v /tmp/partition.img
-          mdir -i /tmp/partition.img -/ :: | tail -5
-          python3 scripts/check_folder_img.py /tmp/folder /tmp/folder.img
+          check fsck.fat fsck.fat -n -v /tmp/partition.img
+          check mtools mdir -i /tmp/partition.img -/ ::
+          check pyfatfs python3 scripts/check_folder_img.py /tmp/folder /tmp/folder.img
+          exit $failed
       - name: Simulator and parser tests
         working-directory: host
         run: pytest -m sim
