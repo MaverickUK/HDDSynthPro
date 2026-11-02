@@ -10,10 +10,37 @@ CORE1_RAM Reg regFor(bool command_block, bool control_block, unsigned address) {
     return Reg::None;
 }
 
-Device::Device(const IdentifyInfo& info)
-    : info_(info), geometry_(startGeometry(info)) {
-    buildIdentify(info_, identify_);
+Device::Device(const IdentifyInfo& info, const IdentifyInfo* device1) : has_device1_(device1 != nullptr) {
+    for (unsigned n = 0; n < (has_device1_ ? 2u : 1u); ++n) {
+        Unit& unit = units_[n];
+        unit.info = n == 0 ? info : *device1;
+        unit.geometry = startGeometry(unit.info);
+        buildIdentify(unit.info, unit.identify);
+    }
     resetToSignature();
+}
+
+// The host changed the Device register: which unit answers from now on.
+CORE1_RAM void Device::deviceWritten() {
+    uint8_t unit = (device_ & DEV_DEV) ? 1 : 0;
+    if (!has_device1_) {
+        absent_selected_ = unit == 1;
+        return;
+    }
+    // Not mid-transfer: ATA forbids changing DEV then, and the command's
+    // state belongs to the unit running it. (Writes while BSY never get here.)
+    if (unit != unit_ && !(status_ & ST_DRQ)) selectUnit(unit);
+}
+
+CORE1_RAM void Device::selectUnit(uint8_t unit) {
+    Unit& from = units_[unit_];
+    from.status = status_;
+    from.error = error_;
+    from.irq = irq_pending_;
+    unit_ = unit;
+    status_ = units_[unit].status;
+    error_ = units_[unit].error;
+    irq_pending_ = units_[unit].irq;
 }
 
 CORE1_RAM void Device::resetToSignature() {
@@ -24,8 +51,14 @@ CORE1_RAM void Device::resetToSignature() {
     lba_mid_ = 0;
     lba_high_ = 0;
     device_ = 0;
-    error_ = 0x01;  // diagnostic code: device 0 passed, device 1 absent
+    error_ = 0x01;  // diagnostic code: device 0 passed, and device 1 passed or absent
     status_ = ST_DRDY | ST_DSC;
+    // Both units set the signature, and device 0 is selected.
+    unit_ = 0;
+    absent_selected_ = false;
+    units_[1].status = ST_DRDY | ST_DSC;
+    units_[1].error = 0x01;
+    units_[1].irq = false;
     data_ = nullptr;
     data_count_ = data_index_ = 0;
     irq_pending_ = false;
@@ -42,7 +75,7 @@ CORE1_RAM void Device::resetToSignature() {
 }
 
 CORE1_RAM void Device::consumeRead(Reg reg) {
-    if (device1Selected()) return;  // device 0 answers 00h and keeps its state
+    if (absent_selected_) return;  // device 0 answers 00h and keeps its state
     if (reg == Reg::Data) {
         if (!(status_ & ST_DRQ) || !data_) return;
         if (++data_index_ >= data_count_) finishDataIn();
@@ -52,7 +85,7 @@ CORE1_RAM void Device::consumeRead(Reg reg) {
 }
 
 CORE1_RAM void Device::consumeDataWords(uint16_t n) {
-    if (n == 0 || device1Selected() || !(status_ & ST_DRQ) || !data_) return;
+    if (n == 0 || absent_selected_ || !(status_ & ST_DRQ) || !data_) return;
     data_index_ = uint16_t(data_index_ + n);
     if (data_index_ >= data_count_) finishDataIn();
 }
@@ -82,7 +115,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
 
     switch (reg) {
         case Reg::Data:
-            if (!receiving_ || device1Selected()) break;  // no data-out phase: ignored
+            if (!receiving_ || absent_selected_) break;  // no data-out phase: ignored
             sectors_[recv_buf_][received_++] = value;
             if (received_ >= SECTOR_WORDS) finishDataOut();
             break;
@@ -91,7 +124,10 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
         case Reg::LbaLow: lba_low_ = v; break;
         case Reg::LbaMid: lba_mid_ = v; break;
         case Reg::LbaHigh: lba_high_ = v; break;
-        case Reg::Device: device_ = v; break;
+        case Reg::Device:
+            device_ = v;
+            deviceWritten();
+            break;
         case Reg::StatusCommand:
             if (acceptsCommand(v)) startCommand(v);
             break;
@@ -104,7 +140,7 @@ CORE1_RAM bool Device::acceptsCommand(uint8_t command) const {
     // commands for the absent device 1 are not ours to run, except EXECUTE
     // DEVICE DIAGNOSTIC, which both devices act on.
     if (status_ & ST_BSY) return false;
-    return !device1Selected() || command == CMD_EXECUTE_DEVICE_DIAGNOSTIC;
+    return !absent_selected_ || command == CMD_EXECUTE_DEVICE_DIAGNOSTIC;
 }
 
 CORE1_RAM void Device::queueCommand(uint8_t command) {
@@ -138,12 +174,16 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         flushing_ = false;
         fetch_pending_ = false;
         ++fetch_id_;
-        // A hardware reset (not a soft one) restores the power-on CHS
-        // translation and write cache setting.
-        setGeometry(startGeometry(info_));
-        write_cache_ = true;
-        setWriteCacheEnabled(identify_, true);
-        standby_ = false;
+        // A hardware reset (not a soft one) restores both units' power-on
+        // CHS translation and write cache setting.
+        for (unsigned n = 0; n < (has_device1_ ? 2u : 1u); ++n) {
+            Unit& unit = units_[n];
+            unit.geometry = startGeometry(unit.info);
+            setCurrentGeometry(unit.identify, unit.geometry);
+            unit.write_cache = true;
+            setWriteCacheEnabled(unit.identify, true);
+            unit.standby = false;
+        }
     } else if (in_reset_) {
         in_reset_ = false;
         resetToSignature();
@@ -152,7 +192,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
 
 CORE1_RAM bool Device::intrq() const {
     // INTRQ belongs to the selected device; nIEN masks it.
-    return irq_pending_ && !device1Selected() && !(device_control_ & DC_NIEN);
+    return irq_pending_ && !absent_selected_ && !(device_control_ & DC_NIEN);
 }
 
 // ---- Commands ---------------------------------------------------------------
@@ -182,7 +222,7 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
     error_ = 0;
     switch (command) {
         case CMD_IDENTIFY_DEVICE:
-            startDataIn(identify_, 256);
+            startDataIn(u().identify, 256);
             break;
         case CMD_EXECUTE_DEVICE_DIAGNOSTIC:
             resetToSignature();  // signature, error 01h, and an interrupt
@@ -191,37 +231,37 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
             break;
         case CMD_READ_SECTORS:
         case CMD_READ_SECTORS_NO_RETRY:
-            standby_ = false;
+            u().standby = false;
             startRead();
             break;
         case CMD_READ_DMA:
         case CMD_READ_DMA_NO_RETRY:
-            if (info_.mdma_mode == NO_DMA) {
+            if (u().info.mdma_mode == NO_DMA) {
                 fail(ER_ABRT);  // not offered
                 break;
             }
-            standby_ = false;
+            u().standby = false;
             dma_ = true;
             startRead();  // the same fetches and read-ahead; the words go by DMA
             break;
         case CMD_WRITE_DMA:
         case CMD_WRITE_DMA_NO_RETRY:
-            if (info_.mdma_mode == NO_DMA) {
+            if (u().info.mdma_mode == NO_DMA) {
                 fail(ER_ABRT);
                 break;
             }
-            standby_ = false;
+            u().standby = false;
             dma_ = true;
             startWrite();
             break;
         case CMD_WRITE_SECTORS:
         case CMD_WRITE_SECTORS_NO_RETRY:
-            standby_ = false;
+            u().standby = false;
             startWrite();
             break;
         case CMD_READ_VERIFY:
         case CMD_READ_VERIFY_NO_RETRY:
-            standby_ = false;
+            u().standby = false;
             readVerify();
             break;
         case CMD_SET_FEATURES:
@@ -242,18 +282,18 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
         case CMD_STANDBY_OLD:
             // STANDBY's Sector Count sets a standby timer; there is no spindle,
             // so the timer is accepted and ignored.
-            standby_ = true;
+            u().standby = true;
             completeNoData();
             break;
         case CMD_IDLE_IMMEDIATE:
         case CMD_IDLE:
         case CMD_IDLE_IMMEDIATE_OLD:
         case CMD_IDLE_OLD:
-            if (standby_) {
+            if (u().standby) {
                 // Waking: busy for a moment, then the interrupt, as a CF card
                 // does. The NS1081 reads Status straight after the command, so
                 // an interrupt raised at once is cleared before it waits for it.
-                standby_ = false;
+                u().standby = false;
                 waking_ = true;
                 status_ = ST_BSY | ST_DRDY | ST_DSC;
             } else {
@@ -262,15 +302,15 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
             break;
         case CMD_CHECK_POWER_MODE:
         case CMD_CHECK_POWER_MODE_OLD:
-            sector_count_ = standby_ ? POWER_STANDBY : POWER_ACTIVE_OR_IDLE;
+            sector_count_ = u().standby ? POWER_STANDBY : POWER_ACTIVE_OR_IDLE;
             completeNoData();
             break;
         default:
             if (command >= CMD_RECALIBRATE && command <= CMD_RECALIBRATE + 0x0F) {
-                standby_ = false;
+                u().standby = false;
                 completeNoData();  // nothing to move: back at cylinder 0 at once
             } else if (command >= CMD_SEEK && command <= CMD_SEEK + 0x0F) {
-                standby_ = false;
+                u().standby = false;
                 seek();
             } else {
                 fail(ER_ABRT);  // includes SET MULTIPLE MODE: not advertised
@@ -295,10 +335,10 @@ CORE1_RAM bool Device::checkRange(uint32_t count, uint32_t& lba) {
     bool valid = decodeAddress(lba);
     last_.lba = lba;
     last_.count = uint16_t(count);
-    if (!valid || lba >= info_.total_sectors || count > info_.total_sectors - lba) {
+    if (!valid || lba >= u().info.total_sectors || count > u().info.total_sectors - lba) {
         // Out of range: fail before doing anything, with the first
         // unreachable address in the task file.
-        if (valid) setTaskFileLba(lba < info_.total_sectors ? info_.total_sectors : lba);
+        if (valid) setTaskFileLba(lba < u().info.total_sectors ? u().info.total_sectors : lba);
         fail(ER_IDNF);
         return false;
     }
@@ -323,7 +363,7 @@ CORE1_RAM void Device::setFeatures() {
     // PIO default, or PIO flow-control mode 0 up to the one IDENTIFY offers.
     // The bus program serves every mode it offers the same way, so there's
     // nothing to switch.
-    uint8_t pio_mode = info_.pio_mode > MAX_PIO_MODE ? MAX_PIO_MODE : info_.pio_mode;
+    uint8_t pio_mode = u().info.pio_mode > MAX_PIO_MODE ? MAX_PIO_MODE : u().info.pio_mode;
     if (features_ == SF_SET_TRANSFER_MODE &&
         (sector_count_ == XFER_PIO_DEFAULT ||
          (sector_count_ >= XFER_PIO_FLOW_0 && sector_count_ <= XFER_PIO_FLOW_0 + pio_mode))) {
@@ -331,16 +371,16 @@ CORE1_RAM void Device::setFeatures() {
         return;
     }
     // Multiword DMA mode 0 up to the one IDENTIFY offers.
-    uint8_t mdma = info_.mdma_mode > MAX_MDMA_MODE ? MAX_MDMA_MODE : info_.mdma_mode;
-    if (features_ == SF_SET_TRANSFER_MODE && info_.mdma_mode != NO_DMA &&
+    uint8_t mdma = u().info.mdma_mode > MAX_MDMA_MODE ? MAX_MDMA_MODE : u().info.mdma_mode;
+    if (features_ == SF_SET_TRANSFER_MODE && u().info.mdma_mode != NO_DMA &&
         sector_count_ >= XFER_MDMA_0 && sector_count_ <= XFER_MDMA_0 + mdma) {
-        setMdmaModeSelected(identify_, uint8_t(sector_count_ - XFER_MDMA_0));
+        setMdmaModeSelected(u().identify, uint8_t(sector_count_ - XFER_MDMA_0));
         completeNoData();
         return;
     }
     if (features_ == SF_ENABLE_WRITE_CACHE || features_ == SF_DISABLE_WRITE_CACHE) {
-        write_cache_ = features_ == SF_ENABLE_WRITE_CACHE;
-        setWriteCacheEnabled(identify_, write_cache_);
+        u().write_cache = features_ == SF_ENABLE_WRITE_CACHE;
+        setWriteCacheEnabled(u().identify, u().write_cache);
         completeNoData();
         return;
     }
@@ -357,7 +397,7 @@ CORE1_RAM void Device::initializeDeviceParameters() {
         fail(ER_ABRT);
         return;
     }
-    uint32_t cylinders = info_.total_sectors / (uint32_t(heads) * spt);
+    uint32_t cylinders = u().info.total_sectors / (uint32_t(heads) * spt);
     if (cylinders > 65535) cylinders = 65535;
     if (cylinders == 0) {
         fail(ER_ABRT);
@@ -368,8 +408,8 @@ CORE1_RAM void Device::initializeDeviceParameters() {
 }
 
 CORE1_RAM void Device::setGeometry(const Geometry& g) {
-    geometry_ = g;
-    setCurrentGeometry(identify_, g);
+    u().geometry = g;
+    setCurrentGeometry(u().identify, g);
 }
 
 CORE1_RAM bool Device::decodeAddress(uint32_t& lba) const {
@@ -382,10 +422,10 @@ CORE1_RAM bool Device::decodeAddress(uint32_t& lba) const {
     uint32_t cylinder = (uint32_t(lba_high_) << 8) | lba_mid_;
     uint32_t head = device_ & 0x0F;
     uint32_t sector = lba_low_;  // 1-based
-    if (sector == 0 || sector > geometry_.sectors_per_track || head >= geometry_.heads ||
-        cylinder >= geometry_.cylinders)
+    if (sector == 0 || sector > u().geometry.sectors_per_track || head >= u().geometry.heads ||
+        cylinder >= u().geometry.cylinders)
         return false;
-    lba = (cylinder * geometry_.heads + head) * geometry_.sectors_per_track + (sector - 1);
+    lba = (cylinder * u().geometry.heads + head) * u().geometry.sectors_per_track + (sector - 1);
     return true;
 }
 
@@ -500,8 +540,8 @@ CORE1_RAM void Device::deliverSector(bool ok) {
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
-    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_, flushing_ || (writing_ && !write_cache_),
-                  last_.count, last_.lba};
+    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_, flushing_ || (writing_ && !u().write_cache),
+                  last_.count, last_.lba, unit_};
     return true;
 }
 
@@ -544,13 +584,13 @@ CORE1_RAM void Device::setTaskFileLba(uint32_t lba) {
         lba_high_ = uint8_t(lba >> 16);
         device_ = uint8_t((device_ & 0xF0) | ((lba >> 24) & 0x0F));
     } else {
-        uint32_t per_cyl = uint32_t(geometry_.heads) * geometry_.sectors_per_track;
+        uint32_t per_cyl = uint32_t(u().geometry.heads) * u().geometry.sectors_per_track;
         uint32_t cylinder = lba / per_cyl;
         uint32_t rest = lba % per_cyl;
-        lba_low_ = uint8_t(rest % geometry_.sectors_per_track + 1);
+        lba_low_ = uint8_t(rest % u().geometry.sectors_per_track + 1);
         lba_mid_ = uint8_t(cylinder);
         lba_high_ = uint8_t(cylinder >> 8);
-        device_ = uint8_t((device_ & 0xF0) | (rest / geometry_.sectors_per_track));
+        device_ = uint8_t((device_ & 0xF0) | (rest / u().geometry.sectors_per_track));
     }
 }
 
@@ -605,7 +645,7 @@ CORE1_RAM void Device::finishDataIn() {
 }
 
 CORE1_RAM bool Device::dmaBurstReady(DmaBurst& burst) {
-    if (!dma_ || dma_burst_running_ || device1Selected()) return false;
+    if (!dma_ || dma_burst_running_ || absent_selected_) return false;
     if (reading_ && data_ && (status_ & ST_DRQ)) {
         burst = DmaBurst{data_ + data_index_, nullptr, uint16_t(data_count_ - data_index_)};
     } else if (writing_ && receiving_) {

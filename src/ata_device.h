@@ -3,9 +3,12 @@
 // write() for every register access the host makes, so both must stay fast
 // (no allocation, no I/O, no waiting).
 //
-// One device, configured as device 0 (master), with no device 1 on the
-// cable. ATA lets device 0 answer for an absent device 1, which this does:
-// see read() and write().
+// Device 0 (master) and, if given one, device 1 (slave): both units share
+// the task file and one command engine, as only one command runs at a time
+// on a cable, and the selected unit's status, error and interrupt are
+// swapped into place when the host changes the Device register's DEV bit
+// (docs/two-drives.md). With no device 1, device 0 answers for it, as ATA
+// lets it: see read() and write().
 //
 // Sector data lives elsewhere (core 0: a generated disk with a RAM overlay
 // now, the SD card later). While core 0 moves a sector the device shows BSY,
@@ -126,6 +129,7 @@ struct Fetch {
                        // CACHE; with store: a write with the write cache off
     uint16_t command_sectors;  // the command's sector count and first sector, for core 0's
     uint32_t command_lba;      // seek timing and the activity link (seek_timing.h)
+    uint8_t unit;              // 0: device 0's disk, 1: device 1's
 };
 
 // A DMA burst for core 1 to run (READ DMA or WRITE DMA): the rest of a
@@ -145,7 +149,9 @@ struct CommandInfo {
 
 class Device {
 public:
-    explicit Device(const IdentifyInfo& info);
+    // `device1`: the slave's identity, or nullptr for a lone master.
+    explicit Device(const IdentifyInfo& info, const IdentifyInfo* device1 = nullptr);
+    bool hasDevice1() const { return has_device1_; }
 
     // ---- Bus side -----------------------------------------------------------
 
@@ -170,7 +176,7 @@ public:
     // come after consumeDataWords().
     // Always inlined: core 1's fast lanes call it, and an out-of-line copy would sit in flash.
     __attribute__((always_inline)) bool dataInRemaining(const uint16_t*& next, uint16_t& left) const {
-        if (device1Selected() || !(status_ & ST_DRQ) || !data_ || dma_) return false;
+        if (absent_selected_ || !(status_ & ST_DRQ) || !data_ || dma_) return false;
         next = data_ + data_index_;
         left = uint16_t(data_count_ - data_index_);
         return true;
@@ -213,7 +219,7 @@ public:
     // clear, it drives the line both ways (intrq()); otherwise it releases it.
     // ATA has the host pull INTRQ down, but older ISA cards don't, and an
     // undriven line floats high, so their edge-triggered IRQ never fires.
-    bool intrqDriven() const { return !device1Selected() && !(device_control_ & DC_NIEN); }
+    bool intrqDriven() const { return !absent_selected_ && !(device_control_ & DC_NIEN); }
 
     // ---- Sector fetches (handed to core 0) ---------------------------------
 
@@ -256,15 +262,33 @@ public:
     uint32_t commandsCompleted() const { return commands_completed_; }
     const CommandInfo& lastCommand() const { return last_; }
     // The CHS translation in use: the default, or set by INITIALIZE DEVICE PARAMETERS.
-    const Geometry& geometry() const { return geometry_; }
-    bool standby() const { return standby_; }
+    const Geometry& geometry() const { return units_[unit_].geometry; }
+    bool standby() const { return units_[unit_].standby; }
+    // The unit selected, or running the command under way: 0 or 1.
+    uint8_t unit() const { return unit_; }
     // True mid-sector in PIO: the host is reading or writing the 256 words of a
     // DRQ block, one register access each. Not in DMA, where the words don't
     // pass through core 1.
     bool transferring() const { return !dma_ && (data_ != nullptr || receiving_); }
 
 private:
-    bool device1Selected() const { return (device_ & DEV_DEV) != 0; }
+    // One drive's own state. The selected unit's status, error and
+    // interrupt live in status_, error_ and irq_pending_ (every access reads
+    // those); the other unit's wait here until it's selected (selectUnit).
+    struct Unit {
+        IdentifyInfo info;
+        Geometry geometry;  // the CHS translation in use
+        uint16_t identify[256];
+        bool standby = false;  // after STANDBY; any media access wakes it
+        bool write_cache = true;
+        uint8_t status = 0;    // while not selected
+        uint8_t error = 0;
+        bool irq = false;
+    };
+    Unit& u() { return units_[unit_]; }
+    const Unit& u() const { return units_[unit_]; }
+    void selectUnit(uint8_t unit);
+    void deviceWritten();  // after device_ changes: the unit it selects
     bool acceptsCommand(uint8_t command) const;
     void resetToSignature();  // registers and status as after a reset
     void abandonCommand() { commands_completed_ = commands_started_; }  // a command cut short ends
@@ -293,9 +317,11 @@ private:
     void finishDataOut();  // all 256 words in: BSY while core 0 stores them
     void setTaskFileLba(uint32_t lba);  // where an error happened
 
-    IdentifyInfo info_;
-    Geometry geometry_;
-    uint16_t identify_[256];
+    Unit units_[2];
+    uint8_t unit_ = 0;  // the selected unit (the one running a command, while one runs)
+    bool has_device1_ = false;
+    // Device 1 selected with no device 1: device 0 answers for it (Status 00h).
+    bool absent_selected_ = false;
     // Two sector buffers: while the host reads one, core 0 fills the other
     // with the next sector of the read (read-ahead); while the host writes
     // one, core 0 stores the other (write-behind).
@@ -346,7 +372,6 @@ private:
     bool ahead_ok_ = false;
     bool ahead_failed_ = false;
     bool flushing_ = false;  // FLUSH CACHE: its fetch is a flush
-    bool write_cache_ = true;
     bool read_ahead_ = true;
     bool write_behind_ = true;  // SET FEATURES 02h/82h; off: each sector synced as it's stored
 
@@ -357,7 +382,6 @@ private:
     bool command_queued_ = false;  // see queueCommand()
     uint8_t queued_command_ = 0;
     bool in_reset_ = false;  // RESET# held or SRST set: BSY until released
-    bool standby_ = false;   // after STANDBY; any media access wakes it
     bool waking_ = false;    // IDLE from standby: BSY until finishWake()
 
     CommandInfo last_{};
@@ -371,7 +395,7 @@ private:
 __attribute__((always_inline)) inline uint16_t Device::peek(Reg reg) const {
     switch (reg) {
         case Reg::Data:
-            if (device1Selected() || !(status_ & ST_DRQ) || !data_) return 0;
+            if (absent_selected_ || !(status_ & ST_DRQ) || !data_) return 0;
             return data_[data_index_];
         case Reg::ErrorFeatures: return error_;
         case Reg::SectorCount: return sector_count_;
@@ -380,7 +404,7 @@ __attribute__((always_inline)) inline uint16_t Device::peek(Reg reg) const {
         case Reg::LbaHigh: return lba_high_;
         case Reg::Device: return device_;
         case Reg::StatusCommand:
-        case Reg::AltStatusDevCtrl: return device1Selected() ? 0 : status_;
+        case Reg::AltStatusDevCtrl: return absent_selected_ ? 0 : status_;
         default: return 0;
     }
 }
