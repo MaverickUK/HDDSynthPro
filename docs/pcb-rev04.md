@@ -10,12 +10,12 @@ Rev 0.3 has four spare bus-switch channels (U6 A1-A4/B1-B4): exactly enough.
 
 | IDE pin | Signal | Unlocks | GPIO | Notes |
 |---|---|---|---|---|
-| 39 | DASP# | Master/slave with a real drive on the same cable; the PC case's disk light | 32 | Open drain. At power-up a slave asserts it to say it's there |
-| 34 | PDIAG# / CBLID | The master/slave reset handshake; Ultra DMA 3+ detects an 80-wire cable on it | 33 | Open drain. The slave reports its diagnostics to the master on it |
-| 28 | CSEL | Cable select: master or slave by the cable's connector | 42 | Read at reset |
+| 39 | DASP# | Sharing the cable with a real drive, as device 0 or device 1; the PC case's disk light | 32 | Open drain. At power-up device 1 asserts it to say it's there |
+| 34 | PDIAG# / CBLID | The two devices' reset handshake; Ultra DMA 3+ detects an 80-wire cable on it | 33 | Open drain. Device 1 reports its diagnostics to device 0 on it |
+| 28 | CSEL | Cable select: device 0 or device 1 by the cable's connector | 42 | Read at reset |
 | 32 | IOCS16# | ISA-era hosts (286, 386, many 486 ISA cards) that use it to choose 16-bit data cycles | **2** | Must answer within tens of ns of the chip select, as IORDY does, so from the bus program's PIO, inside its window. Or decode it in logic (CS0# low and DA2-0 = 000), freeing GPIO 2 ([pcb-bom.md](pcb-bom.md), section 4) |
 
-Without DASP# and PDIAG#, sharing a cable is unsafe, not just unsupported: a real master that doesn't see a slave may answer the absent slave's register reads, and so would fight our drive on the bus (and the reverse). Today the rule is one drive per cable, ours as master.
+Without DASP# and PDIAG#, sharing a cable is unsafe, not just unsupported: a real device 0 that doesn't see device 1 may answer the absent device 1's register reads, and so would fight our drive on the bus (and the reverse). Today the rule is one drive per cable, ours as device 0.
 
 ## 2. PSRAM (strongly recommended)
 
@@ -37,7 +37,7 @@ A 2.54 mm header with a few spare GPIOs (44-46, and 32/33 if they aren't used ab
 ## 6. Nice to have
 
 - **Power from a retro PC:** a 4-pin Molex or floppy (Berg) input, diode-ORed like rev 0.3's other inputs, so the board can live inside the PC. (The 44-pin 2.5-inch connector's power pins are another route: [pcb-bom.md](pcb-bom.md), section 4.)
-- **A user button or 2-way DIP switch:** master/slave or image choice without a console. `HDDSYNTH.INI` can do both, so this is convenience.
+- **A user button or 2-way DIP switch:** device 0 or 1, or the image, chosen without a console. `HDDSYNTH.INI` can do both, so this is convenience.
 
 ## Already right in rev 0.3 (keep)
 

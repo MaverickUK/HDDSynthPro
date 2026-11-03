@@ -7,7 +7,7 @@
 Find out what it takes for the drive to be an IDE CD-ROM drive serving a data ISO from the SD card. Do it in thin slices, as [plan.md](plan.md) did for the hard disk, without touching the hard disk's proven path.
 
 **In scope**
-- One device, a CD-ROM drive, as master, alone on the cable, in a build of its own (`bb48_cdrom`).
+- One device, a CD-ROM drive, as device 0, alone on the cable, in a build of its own (`bb48_cdrom`).
 - ATAPI over PIO: the PACKET command, with the host's 12-byte command packets.
 - A data disc: one Mode 1 track of 2,048-byte sectors, from an `.ISO` file on the card, or a generated test disc.
 - The smallest set of SCSI multimedia (MMC) commands that lets a host find the disc, read its table of contents and read its data.
@@ -17,7 +17,7 @@ Find out what it takes for the drive to be an IDE CD-ROM drive serving a data IS
 - Audio: CD audio tracks, BIN/CUE and other raw 2,352-byte images, PLAY AUDIO, READ CD (raw sectors), CD-Text, subchannel data.
 - Mode 2 and XA sectors, multisession discs, DVDs, writing.
 - DMA, and PIO faster than what the hard disk build offers.
-- A hard disk and a CD together (master and slave), and swapping discs while running.
+- A hard disk and a CD together (devices 0 and 1), and swapping discs while running.
 - The Amiga: its built-in driver needs Kickstart 3.1.4 or later for ATAPI.
 
 **Done means:** through the USB-IDE adapter, macOS mounts an ISO from the SD card and every file reads back identical to the source. On the Pentium 200, Windows 98 reads the same disc with its own driver.
@@ -117,7 +117,7 @@ A new pytest marker, `cdrom`, with tests that skip unless the board runs the `bb
 | Status after reset (DRDY clear for packet devices?) | Follow ATA/ATAPI-5 and the C0 trace; a host that sees the wrong status won't find the drive |
 
 **Questions for after this exploration:**
-- One binary with both a hard disk and a CD-ROM (master and slave), or a CD-ROM mode chosen in `HDDSYNTH.INI`?
+- One binary with both a hard disk and a CD-ROM (devices 0 and 1), or a CD-ROM mode chosen in `HDDSYNTH.INI`?
 - Swapping discs at run time from the console or the HDD Synth (UNIT ATTENTION, "medium may have changed", 06h/28h, and GET EVENT STATUS NOTIFICATION's media events).
 - Audio tracks: BIN/CUE images, PLAY AUDIO through the HDD Synth's speaker, READ CD for raw sectors.
 - The Amiga, which needs Kickstart 3.1.4 or later, or a third-party ATAPI driver, and a CD file system.
