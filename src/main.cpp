@@ -673,6 +673,16 @@ static bool benchRequested() { return watchdog_hw->scratch[0] == BENCH_MAGIC; }
 // card, in the same register (so `T` and `J` undo each other).
 static constexpr uint32_t TEST_DISK_MAGIC = 0x48444454;  // "HDDT"
 static bool testDiskRequested() { return watchdog_hw->scratch[0] == TEST_DISK_MAGIC; }
+// Console `P`: a bus program after the restart it triggers, whatever
+// HDDSYNTH.INI says, until a power cycle (watchdog scratch 1): `e` early
+// answers, `l` the data lane, `i` ide_bus (as `isa = on`), `0` the settings'.
+// For the rig, to compare programs with no card or without editing the file.
+static constexpr uint32_t BUS_MAGIC = 0x48445000;  // "HDP", then the program's letter
+static char busRequested() {
+    uint32_t v = watchdog_hw->scratch[1];
+    char c = char(v & 0xff);
+    return (v & 0xffffff00) == BUS_MAGIC && (c == 'e' || c == 'l' || c == 'i') ? c : 0;
+}
 
 // The generated test disk instead of the welcome disk, under the RAM overlay.
 static void useTestDisk() {
@@ -810,6 +820,12 @@ static void chooseDisk() {
     // isa = on keeps its own program (no early answers, iordy_watchdog.pio):
     // the one the ICL 386 was proven on
     g_early.store(g_config.early_answers && !g_config.isa);
+    switch (busRequested()) {  // console `P`
+        case 'e': g_isa.store(false); g_early.store(true); break;
+        case 'l': g_isa.store(false); g_early.store(false); break;
+        case 'i': g_isa.store(true); g_early.store(false); break;
+        default: break;
+    }
     g_iordy.store(g_config.iordy);
     // The geometry setting, for the image only (the welcome and generated disks
     // lay theirs out for the default), its cylinders cut to fit if it's bigger
@@ -830,8 +846,11 @@ static void chooseDisk() {
     }
     g_geometry.store(geo.cylinders ? uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track : 0,
                      std::memory_order_relaxed);
-    // A host that ignores IORDY reads whatever is on the bus: check image data on the cable too.
-    bus_observer::setImageChecks(g_config.early_answers && !g_test_disk);
+    // A host that ignores IORDY reads whatever is on the bus: check image data
+    // on the cable too, with early answers and on the data lane. Not with
+    // `isa = on`: the ISA card that needs it strobes DIOR# with no chip select,
+    // which the observer takes for data.
+    bus_observer::setImageChecks(!g_isa.load() && !g_test_disk);
     chooseDevice1();
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode and device 1: core 1 reads them
 }
@@ -914,6 +933,8 @@ static void printConfig() {
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
                   drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa),
                   drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy));
+    if (busRequested())
+        Serial.printf("CONFIG bus program set from the console (P%c) until a power cycle\n", busRequested());
     {
         Geometry g = startGeometry(driveIdentity());
         Serial.printf("CONFIG geometry=%u/%u/%u (%s)%s\n", unsigned(g.cylinders), unsigned(g.heads),
@@ -1644,6 +1665,14 @@ static void runShortTest() {
     rp2040.reboot();
 }
 
+// Restarts the board, keeping the watchdog scratch registers (J, T, P). Waits
+// for the reset rather than returning, so nothing feeds the watchdog meanwhile
+// (with RIG_WATCHDOG_MS, loop() would put the restart off for good).
+static void restart() {
+    watchdog_reboot(0, 0, 10);
+    for (;;) tight_loop_contents();
+}
+
 static void handleConsole() {
     while (Serial.available()) {
         int c = Serial.read();
@@ -1661,6 +1690,21 @@ static void handleConsole() {
                 edit_buf[edit_len++] = char(c);
             }
             continue;
+        }
+        static bool bus_letter_next = false;  // `P` then e, l, i or 0
+        if (bus_letter_next) {
+            bus_letter_next = false;
+            if (c == 'e' || c == 'l' || c == 'i' || c == '0') {
+                watchdog_hw->scratch[1] = c == '0' ? 0 : BUS_MAGIC | uint32_t(c);
+                Serial.printf("# restarting with %s\n", c == 'e'   ? "early answers"
+                                                        : c == 'l' ? "the data lane"
+                                                        : c == 'i' ? "ide_bus"
+                                                                   : "the settings' bus program");
+                Serial.flush();
+                delay(50);
+                restart();
+                continue;
+            }
         }
         static bool delay_digit_next = false;  // `D` then a digit
         if (delay_digit_next) {
@@ -1685,7 +1729,7 @@ static void handleConsole() {
                                "I create SD image, K create bench image, "
                                "J serve the bench image or back (restarts), T serve the test disk or back (restarts), "
                                "L activity link, U link loopback test, V drive gone/back, W write-behind, O observer full/spot checks, "
-                               "H seek timing on/off, "
+                               "H seek timing on/off, P then e/l/i/0 bus program (restarts), "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -1724,6 +1768,7 @@ static void handleConsole() {
                 ide_bus::resetLaneStats();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
+            case 'P': bus_letter_next = true; break;  // a bus program until a power cycle
             case 'U': startLoopback(); break;  // the link's loopback test
             case 'V': setAbsent(!g_absent.load(), ""); break;  // the drive gone from the bus, or back
             case 'H':  // seek timing off or on, until a restart (to benchmark)
@@ -1787,7 +1832,7 @@ static void handleConsole() {
                 Serial.println("# restarting");
                 Serial.flush();
                 delay(50);
-                watchdog_reboot(0, 0, 10);
+                restart();
                 break;
             case 'I': sd_card::createImage(sd_card::IMAGE_NAME, gen_disk::DEFAULT_SECTORS, Serial); break;
             case 'K': sd_card::createImage(sd_card::BENCH_IMAGE_NAME, gen_disk::DEFAULT_SECTORS, Serial); break;
@@ -1797,7 +1842,7 @@ static void handleConsole() {
                 Serial.printf("# restarting to serve %s\n", bench ? sd_card::BENCH_IMAGE_NAME : sd_card::IMAGE_NAME);
                 Serial.flush();
                 delay(50);
-                watchdog_reboot(0, 0, 10);
+                restart();
                 break;
             }
             case 'T': {  // serve the test disk after a restart, or back (replug the adapter afterwards)
@@ -1806,7 +1851,7 @@ static void handleConsole() {
                 Serial.printf("# restarting to serve %s\n", test ? "the test disk" : "the card's image or the welcome disk");
                 Serial.flush();
                 delay(50);
-                watchdog_reboot(0, 0, 10);
+                restart();
                 break;
             }
 #endif

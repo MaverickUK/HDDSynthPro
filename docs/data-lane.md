@@ -53,7 +53,7 @@ The Evesham (Athlon XP 2000+, PIO mode 3, `DOSBENCH.IMG` and HDDBENCH; [retro-te
 
 It detected and booted as on early answers, and ran two drives (device 1 an image) cleanly. Before it becomes the default:
 - **Status reads over 1,250 ns:** core 1 answers register reads at the strobe, and on this PC more of them miss than through the USB adapter. Harmless here (the host waits for IORDY), but over ATA's limit.
-- **No bus observer checks on the lane** (`bus_sectors=0`): data reads aren't sampled.
+- **No bus observer checks on the lane** (`bus_sectors=0`): the observer samples lane reads (it checked the generated disk on the rig), but image checks were switched on only with early answers. Since 0.29.0-2d.6 they are on whenever `isa` is off: on the rig, 16 MB read from `HDDSYNTH.IMG` on the lane had 5,805 sectors checked on the cable, 0 bad, and no reads over 1,250 ns. Spot checks put the drive first, and on an image core 0 is mostly busy reading the card, so about 1 sector in 6 is checked; console `O` checks them all, more slowly.
 - **ISA machines** still need `isa = on` (no watchdog), as above.
 
 ## What it changes

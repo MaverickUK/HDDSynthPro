@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased] (branch `two-drives`)
 
+## [0.29.0-2d.6] - 2026-11-03 (branch `two-drives`)
+
+### Added
+- Console `P` then `e`, `l`, `i` or `0`: the bus program (early answers, the data lane, `ide_bus`, or the settings') until a power cycle, whatever `HDDSYNTH.INI` says, kept in watchdog scratch 1 across the restart it triggers. For comparing programs on the rig with no card, or without editing the file.
+
+### Fixed
+- **The bus observer didn't check image data on the lane:** image checks were switched on with `early_answers` only. They are on now whenever `isa` is off (early answers or the lane), and off with `isa = on` even if `early_answers` is on (the ISA card's DIOR# with no chip select looks like data). On the rig, 16 MB read from `HDDSYNTH.IMG` on the lane: 5,805 sectors checked on the cable, 0 bad, no reads over 1,250 ns, 1.51 MB/s.
+- With `RIG_WATCHDOG_MS`, the console's restarts (`!`, `J`, `T`, `P`) didn't happen: `watchdog_reboot` arms the watchdog and returns, and `loop()` went on feeding it. They now wait for the reset.
+- The folder drive (2d.5) seen on the board: the test folder listed (its 32 KB list didn't fit, so half was taken) and read through the USB adapter, byte for byte as far as the adapter shows it ([docs/two-drives.md](docs/two-drives.md)).
+
 ## [0.29.0-2d.5] - 2026-11-03 (branch `two-drives`)
 
 ### Fixed

@@ -117,6 +117,7 @@ Console:
 - `U`: the link's loopback test, with a jumper from GPIO 0 to GPIO 1: `$HDA` and `$HDE` read back, and one `$HDM` sent and read back (`LOOPBACK pass|fail|no-data ... head_sent= head_valid= model=ok`; `-m link`);
 - `H`: seek timing off or on until a restart (`seek_timing` in `HDDSYNTH.INI`; `SEEKTIMING on|off`; `s` shows `seek_timing`, `seek_active`, `seek_rpm`, `seek_actuator`, `seek_commands`, `seek_held`, `seek_avg_us`, `seek_max_us`, `seek_total_us`, `seek_capped`; `-m seek`);
 - `V`: the drive leaves the bus (`ABSENT on`) until the adapter's next RESET#, a second `V`, or 120 s (`ABSENT off ...`); for re-detection without a replug (`HDDPRO_REPLUG=redetect`);
+- `P` then `e`, `l`, `i` or `0`: the bus program (early answers, the data lane, `ide_bus`, or the settings') until a power cycle, whatever `HDDSYNTH.INI` says; restarts (watchdog scratch 1, as `J`/`T` use scratch 0); `S` says so with a `CONFIG bus program set from the console` line;
 - `O`: the bus observer's full checks on or off until a restart (`OBSERVER full|spot`; spot checks by default, full checks slow DMA reads to about 2 MB/s; the soak turns them on);
 - `W`: write-behind on or off until a restart (on by default since 0.17.0; `write_behind` in `HDDSYNTH.INI`);
 - `x` then `Y`: the solder-bridge test, IDE cable unplugged (`short_test.*`; the board reboots afterwards);
