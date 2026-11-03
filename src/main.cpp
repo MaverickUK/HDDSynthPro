@@ -434,6 +434,7 @@ CORE1_RAM void loop1() {
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
     const bool early = g_early.load();  // ide_bus_early's samples (early_answers)
+    const bool data_lane = ide_bus::dataLaneOn();  // data reads never reach core 1 (docs/data-lane.md)
     uint32_t last_access_cycles = 0;  // core 1's cycle counter: core-local, unlike the timer behind the APB bridge
     const uint32_t bus_only_cycles = g_bus_only_cycles;
     ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
@@ -467,7 +468,12 @@ CORE1_RAM void loop1() {
                 ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
                                        runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
             }
-            continue;
+            // Back to the bus, unless a command was just written: run it first.
+            // The host polls STATUS straight after one, and if each poll came
+            // before core 1 found the FIFO empty, the command would never run
+            // and STATUS would show BSY for good (the data lane, 0.29.0-2d.4:
+            // the adapter's polls came that fast).
+            if (!dev.commandQueued()) continue;
         }
         if (early) ide_bus::checkIordyStall();  // IORDY held with no strobe: let it go
         pass_kind = GAP_LANE;
@@ -475,7 +481,13 @@ CORE1_RAM void loop1() {
         // between. Not while the raw trace or the debug delay is on.
         const uint16_t* next;
         uint16_t left;
-        if (dev.dataInRemaining(next, left)) {
+        if (data_lane) {
+            // The data lane serves data reads itself: while a block is on it,
+            // wait for its end there (posting the read-ahead and taking its
+            // result), so the next sector is ready when the host's status read
+            // comes. A flag test otherwise: this runs on every idle pass.
+            if (ide_bus::lane_busy && ide_bus::serveLane(dev, reset_low, g_mailbox, posted_fetch)) continue;
+        } else if (dev.dataInRemaining(next, left)) {
             if (g_fast_lane.load() && !g_trace_bus.load() && !ide_bus::dataReadDelayed()) {
                 if (early ? ide_bus::serveDataInEarly(dev, reset_low, g_mailbox, posted_fetch)
                           : ide_bus::serveDataIn(dev, reset_low, g_mailbox, posted_fetch))
@@ -495,7 +507,7 @@ CORE1_RAM void loop1() {
             dev.setReadAhead(g_read_ahead.load());
             dev.setWriteBehind(g_write_behind.load());
             dev.runQueuedCommand();
-            ide_bus::updateIntrq(dev);
+            ide_bus::syncDataLane(dev);  // IDENTIFY's block onto the lane, then INTRQ
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
             if (early)
@@ -564,7 +576,7 @@ CORE1_RAM void loop1() {
                 FetchResult result;
                 if (g_mailbox.takeResult(result)) {
                     dev.fetchDone(result.id, result.ok);
-                    ide_bus::updateIntrq(dev);
+                    ide_bus::syncDataLane(dev);  // a sector's block onto the lane, then INTRQ
                 }
                 break;
             }
@@ -1505,7 +1517,14 @@ static void printStats() {
                   (unsigned long)g_bench_pio, (unsigned long)g_bench_ram, (unsigned long)g_bench_sio);
     Serial.printf(" c1_bench_ram_per1000=nop:%lu,pio:%lu", (unsigned long)g_bench_nop_ram, (unsigned long)g_bench_pio_ram);
     s_passes_then = passes, s_ms_then = ms;
-    Serial.printf(" iordy_stall_released=%lu", (unsigned long)ide_bus::iordyStallReleases());
+    Serial.printf(" bus=%s iordy_stall_released=%lu", ide_bus::busName(), (unsigned long)ide_bus::iordyStallReleases());
+    if (ide_bus::dataLaneOn())
+        Serial.printf(" lane_blocks=%lu lane_switch_max_ns=%lu", (unsigned long)ide_bus::laneSwitches(),
+                      (unsigned long)ide_bus::laneSwitchMaxNs());
+    {
+        char early_profile[900];
+        if (ide_bus::formatEarlyProfile(early_profile, sizeof early_profile)) Serial.print(early_profile);
+    }
     Serial.printf(" intrq_rises=%lu commands=%lu", (unsigned long)ide_bus::intrqRises(),
                   (unsigned long)g_command_starts.load());
     if (C1_PROFILE) Serial.print(" c1_gap_ns=");
@@ -1694,6 +1713,8 @@ static void handleConsole() {
                 bus_timing::reset();
                 for (auto& g : g_c1_gap) g = 0;
                 bus_observer::resetCounts();
+                ide_bus::resetEarlyProfile();
+                ide_bus::resetLaneStats();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 'U': startLoopback(); break;  // the link's loopback test

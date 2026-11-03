@@ -5,6 +5,7 @@
 // checked, and its timing is proven in host/tests/test_pio_bus_sim.py.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace ata { class Device; }
@@ -73,8 +74,37 @@ void restart();
 void stop();
 
 // Drives INTRQ to match the device: high when asserted, low when not, and
-// released when the device doesn't drive it (ata::Device::intrqDriven).
-void updateIntrq(const ata::Device& dev);
+// released when the device doesn't drive it (ata::Device::intrqDriven). With
+// the data lane, an interrupt waits while the device has moved on ahead of
+// the host (docs/data-lane.md).
+void updateIntrq(ata::Device& dev);
+// The data lane (docs/data-lane.md) serves data register reads: the default
+// bus, unless `early_answers` or `isa` is on. Core 1's fast lanes, the raw
+// trace's data reads and setDataReadDelay() don't apply then.
+bool dataLaneOn();
+// Which program serves the bus, for `s`: "lane" (ide_bus_data with ide_data_in,
+// the default), "ide_bus" (`isa = on`), "early" or "noiordy" (`early_answers`).
+const char* busName();
+// updateIntrq(), after first keeping the data lane in step with the device:
+// the device's next data-in block onto the lane before INTRQ can announce it.
+// Core 1 calls it where a block can begin: after running a command, and when
+// a fetch completes (before every register read is answered, ide_bus does it
+// itself). True while a block is on the lane. Without the lane, updateIntrq().
+bool syncDataLane(ata::Device& dev);
+// A block is on the lane (core 1's loop then calls serveLane).
+extern bool lane_busy;
+// While a block is on the lane (lane_busy): waits for its end and gets the
+// next ready, posting the read-ahead and taking its result meanwhile. True
+// when an access is waiting or the blocks are done (back to the bus); false
+// when a command is queued or RESET# leaves `reset_low` (carry on with the
+// pass, which runs the command or handles the reset).
+bool serveLane(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
+// The lane's blocks started, and the longest core 1 took to move it from one
+// block to the next (a status read arriving meanwhile waits): `s`'s
+// lane_blocks and lane_switch_max_ns. resetLaneStats() clears the longest (`r`).
+uint32_t laneSwitches();
+uint32_t laneSwitchMaxNs();
+void resetLaneStats();
 
 // early_answers: lets IORDY go if the drive has held it cfg::IORDY_STALL_US
 // since a chip select with no strobe (the tight loops call it themselves;
@@ -84,6 +114,12 @@ uint32_t iordyStallReleases();
 // Interrupts raised since start-up (INTRQ driven high from low).
 uint32_t intrqRises();
 
+// Diagnostic (ide_bus.cpp's EARLY_PROFILE, off): early answers that came
+// after the host's strobe had started, by what core 1 was doing, for `s`
+// (" early_requests=... early_late=site:late/over_1us/max_ns,..."). Returns
+// the length written, 0 when not built in. resetEarlyProfile() clears it (`r`).
+size_t formatEarlyProfile(char* buf, size_t size);
+void resetEarlyProfile();
 // Debug (console `D`): answer every data register read at least `ns` later,
 // to find how long the host really waits on IORDY. 0 turns it off.
 void setDataReadDelay(uint32_t ns);

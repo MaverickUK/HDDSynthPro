@@ -34,6 +34,14 @@ def generated_disk(drive):
     require_generated_disk(drive)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def core1_answers_data(drive):
+    # The data lane (the default bus) answers data reads without core 1, so the
+    # delay has nothing to act on: run this with `isa = on` or `early_answers = on`.
+    if stats(drive).get("bus") == "lane":
+        pytest.skip("the data lane answers data reads itself: console D can't delay them")
+
+
 def stats(drive) -> dict:
     return dict(re.findall(r"(\w+)=(\S+)", drive.command("s", "STATS")))
 

@@ -2,6 +2,19 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.29.0-2d.4] - 2026-11-03 (branch `data-lane`)
+
+### Added
+- **The data lane** ([docs/data-lane.md](docs/data-lane.md)): with `early_answers` and `isa` both off, data register reads are answered by PIO and DMA, without core 1. `ide_bus_data` (`ide_bus` with an address check at the strobe) hands each data read to `ide_data_in`, a second state machine in the same block whose FIFO (joined, 8 deep) a DMA channel fills from the device's block; the pair fill the block's 32 instructions. Core 1 starts the channel before the host can see DRQ, moves the device on as soon as the channel has queued the block's last word (STATUS still shows the block's DRQ, and INTRQ waits, until the host has read it), and starts the next block when `ide_data_in` takes the spare word the channel adds after each block. On the USB adapter (built-in disk, PIO mode 3): sequential reads 1.54 MB/s (`ide_bus` 1.38-1.41, early answers 1.18), random reads 80 a second, writes 1.65 MB/s; about 10 reads over 1,250 ns in a `-m speed` run, against about 50,000 with early answers. `s` shows `bus=` (which program serves the bus), and with the lane `lane_blocks` and `lane_switch_max_ns`.
+- `pio_sim`: several state machines in one block (`PioBlock`), WAIT on an IRQ flag, and a DMA channel's model (`DmaToTx`); `test_data_lane_sim.py` (92 tests).
+
+### Fixed
+- **A command written while the host polled STATUS back to back could be left queued for good** (STATUS then read BSY forever): core 1's loop reached its command check only when the bus program's FIFO was empty. It now runs a queued command as soon as it has served the access. Found with the lane, which made each answer a little slower; `ide_bus` had the same weakness.
+
+### Changed
+- `early_answers` keeps its default (on) for now: the lane is chosen with `early_answers = off`. With the lane there's no IORDY watchdog (no room), so ISA cards need `isa = on`, and hosts that ignore IORDY on register reads still need `early_answers = on`.
+- `-m timing` skips on the lane (console `D` can't delay reads core 1 doesn't answer). The raw trace doesn't show data reads on the lane.
+
 ## [0.29.0-2d.3] - 2026-11-03 (branch `two-drives`)
 
 ### Changed
