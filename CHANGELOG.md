@@ -4,10 +4,20 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased] (branch `two-drives`)
 
+## [0.29.0-2d.5] - 2026-11-03 (branch `two-drives`)
+
+### Fixed
+- **The board didn't start with a folder as device 1** (found on the ICL 386, below). Arduino-Pico's libstdc++ is built without exceptions, so `new (std::nothrow)` doesn't return nullptr when memory runs out: the `bad_alloc` it throws inside becomes `abort()`, and core 0 halts, USB with it. `chooseDevice1()` asked for 32 KB for the folder's list first, with 35,848 bytes free in all but not in one piece, so the board halted before it could try half. It now uses `malloc`, which returns nullptr, and halves as intended. Found on the rig with a build that printed each step (it stopped at the allocation); on the host, nothrow `new` does return nullptr, so `make_folder_img` never showed it. **Not yet seen working on the board:** the rig's card stopped answering after a restart (ACMD41 times out until it's power-cycled), so the folder wasn't listed again.
+
+### Added
+- `RIG_WATCHDOG_MS` (build flag, rig only): the hardware watchdog, fed by core 0's loop, so a build that halts restarts by itself and can be flashed again over USB, for work on the rig with nobody to replug it. Not for releases: console `K` and `I` block core 0 longer than it allows.
+
+## 0.29.0-2d.4 on the retro PCs, 3 Nov evening
+
 0.29.0-2d.4 on the ICL 386 and the Evesham, 3 Nov evening ([docs/retro-test.md](docs/retro-test.md#results-3-nov-2026-evening)). No firmware change.
 - **The data lane on the Evesham:** it boots and runs HDDBENCH cleanly, reads 2.18 MB/s and writes 1.98 (early answers: 1.78 and 1.24). But about 1,400 Status reads a benchmark were held past ATA's 1,250 ns (worst 1,540), and the bus observer doesn't check data on the lane.
 - **Two drives:** both PCs' BIOSes find device 1 without DASP#. An image as D: passed FDISK, FORMAT and `FC /B` on the 386 (`isa = on`) and `FC /B` on the Evesham (on the lane), with no failed commands.
-- **Found: the board doesn't start with a folder as device 1** (`device1 = GAMES`): no USB serial port at power-up, every time, while the same folder lays out cleanly on the host. Not yet fixed ([docs/two-drives.md](docs/two-drives.md#on-the-rig-what-to-try-first)).
+- **Found: the board doesn't start with a folder as device 1** (`device1 = GAMES`): no USB serial port at power-up, every time, while the same folder lays out cleanly on the host. Fixed in 2d.5.
 
 ### Added
 - `host/hddproto/test_folder.py`: a test folder for the folder drive, its files' contents following from their names, with `CHECK.BAT` for the retro PC (copies D: to `C:\HDDTEST` and compares each file) and a check of the copies on the Mac afterwards; `test_test_folder.py`.

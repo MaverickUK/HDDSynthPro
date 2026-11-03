@@ -15,7 +15,7 @@
 
 #include <atomic>
 #include <cstdio>
-#include <new>
+#include <cstdlib>
 
 #include "bus_sample.h"
 #include "config.h"
@@ -726,12 +726,15 @@ static void chooseDevice1() {
     if (sd_card::isFolder(name)) {
         // The list on the heap, only when a folder is served: as long as RAM
         // allows, leaving cfg::FOLDER_HEAP_LEFT for whatever allocates later.
+        // malloc, not new (std::nothrow): Arduino-Pico's libstdc++ is built
+        // without exceptions, so a nothrow new that runs out aborts (the board
+        // never started with a folder, 3 Nov 2026). An Entry needs no constructor.
         uint16_t capacity = cfg::FOLDER_MAX_ENTRIES;
         folder_disk::Entry* entries = nullptr;
         while (capacity >= 64) {
-            entries = new (std::nothrow) folder_disk::Entry[capacity];
+            entries = static_cast<folder_disk::Entry*>(std::malloc(capacity * sizeof(folder_disk::Entry)));
             if (entries && rp2040.getFreeHeap() >= int(cfg::FOLDER_HEAP_LEFT)) break;
-            delete[] entries;
+            std::free(entries);
             entries = nullptr;
             capacity /= 2;
         }
@@ -741,7 +744,7 @@ static void chooseDevice1() {
         }
         if (!g_folder.build(sd_card::folderSource(name), entries, capacity, name)) {
             std::snprintf(g_device1_note, sizeof g_device1_note, "%s: can't list it, or nothing fits", name);
-            delete[] entries;
+            std::free(entries);
             return;
         }
         g_folder_capacity = capacity;
@@ -1841,10 +1844,20 @@ void setup() {
     chooseDisk();
     beginSeekTiming();
 #endif
+#ifdef RIG_WATCHDOG_MS
+    // Rig only, for unattended work (PLATFORMIO_BUILD_FLAGS=-DRIG_WATCHDOG_MS=8000):
+    // if core 0 halts (a hard fault, an abort), the board restarts and can be
+    // flashed over USB again, with no replug. Not in releases: console K and
+    // I, which make an image, block core 0 for longer than this.
+    watchdog_enable(RIG_WATCHDOG_MS, true);
+#endif
     printReady();
 }
 
 void loop() {
+#ifdef RIG_WATCHDOG_MS
+    watchdog_update();
+#endif
 #if FIRMWARE_SLICE != 0
     serveFetches();
     iordy_timer::poll();
