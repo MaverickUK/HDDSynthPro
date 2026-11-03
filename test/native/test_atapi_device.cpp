@@ -356,6 +356,160 @@ TEST(atapi_trace_names_the_packet) {
     CHECK_EQ(c.count, 3);
 }
 
+// ---- Awkward hosts: what real drivers do that a tidy host doesn't ------------
+
+namespace {
+
+// A packet written by hand, up to the end of its command phase (the device
+// has it, and has run it unless `run` is false).
+void writePacket(VirtualHost& host, std::initializer_list<uint8_t> bytes, uint16_t limit, bool run = true) {
+    uint8_t p[12] = {};
+    unsigned n = 0;
+    for (uint8_t b : bytes) p[n++] = b;
+    host.dev.write(Reg::Device, 0xA0);
+    host.dev.write(Reg::ErrorFeatures, 0);
+    host.dev.write(Reg::LbaMid, limit & 0xFF);
+    host.dev.write(Reg::LbaHigh, limit >> 8);
+    host.command(atapi::CMD_PACKET);
+    host.pump();  // core 1 runs A0h: DRQ for the packet
+    for (unsigned i = 0; i < 6; ++i) host.dev.write(Reg::Data, uint16_t(p[2 * i] | p[2 * i + 1] << 8));
+    if (run) host.dev.runQueuedCommand();
+}
+
+}  // namespace
+
+TEST(atapi_byte_count_limit_of_zero_means_any) {
+    // ATAPI forbids 0; some drivers send it anyway. Taken as the largest.
+    Device dev(INFO);
+    GeneratedDisk disc(TEST_SECTORS);
+    VirtualHost host{dev, &disc};
+    host.clearAttention();
+    std::vector<uint8_t> d;
+    CHECK_EQ(host.packet({mmc::OP_INQUIRY, 0, 0, 0, 36}, d, 0), ata::ST_DRDY);
+    CHECK_EQ(d.size(), size_t(36));
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 3, 0, 0, 1}, d, 0), ata::ST_DRDY);
+    CHECK(d == expectedFrames(3, 1));
+    // An odd limit, and one of 1: blocks stay whole words
+    CHECK_EQ(host.packet({mmc::OP_INQUIRY, 0, 0, 0, 36}, d, 1), ata::ST_DRDY);
+    CHECK_EQ(d.size(), size_t(36));
+    CHECK_EQ(host.block_bytes[0], 2);
+    CHECK_EQ(host.packet({mmc::OP_INQUIRY, 0, 0, 0, 36}, d, 11), ata::ST_DRDY);
+    CHECK_EQ(host.block_bytes[0], 10);
+}
+
+TEST(atapi_polling_host_with_interrupts_off) {
+    // nIEN set: INTRQ never driven, and a host that only polls Alternate
+    // Status (no acknowledging read of Status) still gets every block.
+    Device dev(INFO);
+    GeneratedDisk disc(TEST_SECTORS);
+    VirtualHost host{dev, &disc};
+    host.clearAttention();
+    dev.write(Reg::AltStatusDevCtrl, ata::DC_NIEN);
+    writePacket(host, {mmc::OP_READ_10, 0, 0, 0, 0, 2, 0, 0, 1}, 0xFFFE);
+    std::vector<uint8_t> d;
+    for (int guard = 0; guard < 10000; ++guard) {
+        CHECK(!dev.intrq());
+        CHECK(!dev.intrqDriven());
+        if (!host.waitNotBusy()) break;
+        if (!(host.altStatus() & ata::ST_DRQ)) break;
+        uint16_t count = uint16_t(host.reg(Reg::LbaMid) | host.reg(Reg::LbaHigh) << 8);
+        for (unsigned w = 0; w < count / 2u; ++w) {
+            uint16_t v = dev.read(Reg::Data);
+            d.push_back(uint8_t(v));
+            d.push_back(uint8_t(v >> 8));
+        }
+    }
+    CHECK(d == expectedFrames(2, 1));
+    CHECK_EQ(host.altStatus(), ata::ST_DRDY);
+    CHECK_EQ(host.reg(Reg::SectorCount), atapi::IR_COD | atapi::IR_IO);
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+}
+
+TEST(atapi_host_gives_up_mid_block) {
+    // A driver that times out reads half a block, then sends the next packet.
+    Device dev(INFO);
+    GeneratedDisk disc(TEST_SECTORS);
+    VirtualHost host{dev, &disc};
+    host.clearAttention();
+    writePacket(host, {mmc::OP_READ_10, 0, 0, 0, 0, 0, 0, 0, 4}, 0xFFFE);
+    CHECK(host.waitNotBusy());
+    CHECK(host.altStatus() & ata::ST_DRQ);
+    for (int i = 0; i < 100; ++i) dev.read(Reg::Data);
+    std::vector<uint8_t> d;
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 9, 0, 0, 1}, d), ata::ST_DRDY);
+    CHECK(d == expectedFrames(9, 1));
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+    // Or gives up at the packet itself, three words in
+    host.dev.write(Reg::LbaMid, 0xFE);
+    host.dev.write(Reg::LbaHigh, 0xFF);
+    host.command(atapi::CMD_PACKET);
+    host.pump();
+    for (int i = 0; i < 3; ++i) dev.write(Reg::Data, 0);
+    CHECK_EQ(host.packet({mmc::OP_INQUIRY, 0, 0, 0, 36}, d), ata::ST_DRDY);
+    CHECK_EQ(d.size(), size_t(36));
+}
+
+TEST(atapi_reply_survives_a_stale_fetch) {
+    // After a soft reset cuts a read short, core 0 may still be filling the
+    // sector buffer for the old fetch; the next packet's reply is apart from it.
+    Device dev(INFO);
+    VirtualHost host{dev, nullptr};  // fetches are served by hand here
+    host.clearAttention();
+    writePacket(host, {mmc::OP_READ_10, 0, 0, 0, 0, 0, 0, 0, 1}, 0xFFFE);
+    ata::Fetch stale;
+    CHECK(dev.pendingFetch(stale));
+    dev.write(Reg::AltStatusDevCtrl, ata::DC_SRST);
+    dev.write(Reg::AltStatusDevCtrl, 0);
+    writePacket(host, {mmc::OP_INQUIRY, 0, 0, 0, 36}, 0xFFFE);
+    std::memset(stale.buffer, 0x5A, 512);  // core 0, late
+    dev.fetchDone(stale.id, true);
+    CHECK(host.altStatus() & ata::ST_DRQ);
+    CHECK_EQ(host.reg(Reg::LbaMid), 36);
+    std::vector<uint8_t> d;
+    for (int w = 0; w < 18; ++w) {
+        uint16_t v = dev.read(Reg::Data);
+        d.push_back(uint8_t(v));
+        d.push_back(uint8_t(v >> 8));
+    }
+    CHECK_EQ(d[0], 0x05);
+    CHECK_STR(std::string(d.begin() + 8, d.begin() + 16), "HDDSYNTH");
+}
+
+TEST(atapi_execute_device_diagnostic) {
+    Device dev(INFO);
+    VirtualHost host{dev, nullptr};
+    dev.write(Reg::LbaMid, 0);
+    host.command(ata::CMD_EXECUTE_DEVICE_DIAGNOSTIC);
+    CHECK(host.waitNotBusy());
+    CHECK(dev.intrq());
+    CHECK(host.atapiSignature());
+    CHECK_EQ(host.reg(Reg::ErrorFeatures), 0x01);  // passed, no device 1
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+}
+
+TEST(atapi_reads_past_the_drq_block_get_nothing) {
+    // A driver that ignores the byte count and reads a whole 2,048-byte frame
+    // in one go: after the first 512-byte block the drive is BSY fetching the
+    // next, so the extra reads return 0 and move nothing. The data isn't lost
+    // to a host that then waits for DRQ. (Drivers that don't wait are docs/
+    // atapi.md's open question: they'd need 2,048-byte blocks.)
+    Device dev(INFO);
+    VirtualHost host{dev, nullptr};
+    host.clearAttention();
+    writePacket(host, {mmc::OP_READ_10, 0, 0, 0, 0, 0, 0, 0, 1}, 0xFFFE);
+    GeneratedDisk disc(TEST_SECTORS);
+    host.source = &disc;
+    CHECK(host.waitNotBusy());
+    host.source = nullptr;  // core 0 slow: the next sector isn't in yet
+    for (int i = 0; i < 256; ++i) dev.read(Reg::Data);
+    CHECK(host.altStatus() & ata::ST_BSY);
+    CHECK_EQ(dev.read(Reg::Data), 0);
+    host.source = &disc;
+    CHECK(host.waitNotBusy());
+    CHECK(host.altStatus() & ata::ST_DRQ);
+    CHECK_EQ(host.reg(Reg::LbaMid) | host.reg(Reg::LbaHigh) << 8, 512);
+}
+
 void runAtapiDeviceTests() {
     RUN(atapi_signature_after_power_on_and_reset);
     RUN(atapi_identify_device_is_aborted_with_the_signature);
@@ -370,4 +524,10 @@ void runAtapiDeviceTests() {
     RUN(atapi_refuses_dma_and_other_ata_commands);
     RUN(atapi_device_1_is_absent);
     RUN(atapi_trace_names_the_packet);
+    RUN(atapi_byte_count_limit_of_zero_means_any);
+    RUN(atapi_polling_host_with_interrupts_off);
+    RUN(atapi_host_gives_up_mid_block);
+    RUN(atapi_reply_survives_a_stale_fetch);
+    RUN(atapi_execute_device_diagnostic);
+    RUN(atapi_reads_past_the_drq_block_get_nothing);
 }

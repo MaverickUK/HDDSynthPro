@@ -13,6 +13,7 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 - **`cdrom = NAME.ISO`** in `HDDSYNTH.INI` (`HDDSYNTH.ISO` by default; the hard disk build ignores it): the ISO to serve, or `none` (or console `T`) for the generated test disc, CD frame n being generated sectors 4n to 4n+3. No ISO: an empty drive. `CONFIG cdrom=... serving=... frames=...`.
 - The trace names a packet: `CMD <t> a0 READ_10 <frame> <frames>`. The READY line ends `slice3 cdrom`, and the hard disk's rig tests skip on that build. A first rig test, `-m cdrom` (`host/tests/test_cdrom.py`: the test disc read whole and at random), not yet run.
 - CI builds `bb48_cdrom` and runs `check_core1_ram.py` on it; it isn't part of a release.
+- **For the bench:** `hddproto/test_iso.py` builds a test ISO whose files can all be checked once mounted (checked here by mounting it with `hdiutil`), and `test_cdrom_iso.py` checks them on the disc the drive serves. `hddproto/packets.py` lists the ATAPI exchanges in a raw trace and the opcodes the CD-ROM build doesn't handle, for slice C0's recording of a real drive. docs/atapi.md has the bench steps. Host tests for awkward hosts: a byte count limit of 0 or odd, polling with interrupts off, a host giving up mid-block or mid-packet, a stale fetch after a reset, reads past a block.
 
 ## [0.28.0] - 2026-10-31
 

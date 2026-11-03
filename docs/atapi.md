@@ -15,6 +15,22 @@ Where it differs from the plan below:
 
 To try it: `PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom`, with `E cdrom = none` and `!` (or `T`) for the test disc. On Windows, set `HDDPRO_CDROM_DEV=\\.\CdRom0`.
 
+### On the bench, step by step
+
+**Slice C0: does the adapter pass ATAPI?** No emulator yet: a real IDE CD-ROM drive and the listen build.
+1. A real IDE CD-ROM drive, jumpered master, on the adapter's 40-pin connector, powered from the adapter's brick.
+2. Does the computer see it? macOS: System Information → USB, and `diskutil list` with a data CD in (does it mount?). Windows: Device Manager, and a drive letter for the disc. If not, stop here: the firmware can't help, and another adapter is the next step.
+3. To record it: an IDE ribbon with two connectors, the adapter on one end, the drive and the BB48 (on the listen build, `PIO_ENV=bb48`, which never drives the bus) on the others. Console `w` (the capture window), then replug the adapter, put in a disc, open a file.
+4. Save the serial log as `host/reference/c0_cdrom_<adapter>.txt` and list its exchanges: `cd host && .venv/bin/python -m hddproto.packets ../host/reference/c0_cdrom_<adapter>.txt`. Its last lines name any opcode the host used that `src/mmc.h` doesn't handle; those go into `mmc` before C1.
+
+**Slices C1 and C2: the emulator.**
+1. Flash and test in one go: `PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom`. Console `h` should say `READY HDDSynthPro 0.29.0 slice3 cdrom`, and `S` the `CONFIG cdrom=... serving=... frames=...` line.
+2. **An empty drive first** (C1): `E cdrom = NOSUCH.ISO`, `!`. The host should list a CD-ROM drive from HDDSYNTH with no disc. The trace at detection: `CMD .. ec IDENTIFY` with `DONE .. ec 41 04` (aborted, as it should be), then `a1 IDENTIFY_PACKET`, then packets such as `a0 INQUIRY` and `a0 TEST_UNIT_READY` ending `DONE .. a0 41 20` (not ready).
+3. **The test disc**: `E cdrom = none`, `!` (or console `T`), replug the adapter, then `-m cdrom`: `test_cdrom.py` reads the whole disc and at random. macOS says it can't read the disc: choose Ignore. Windows: `HDDPRO_CDROM_DEV=\\.\CdRom0`.
+4. **The test ISO** (C2's exit): with the card in the computer, `cd host && .venv/bin/python -m hddproto.test_iso build /Volumes/<CARD>/HDDSYNTH.ISO` (it only adds that one file). Back in the drive, `E cdrom = HDDSYNTH.ISO`, `!`; `-m cdrom` then runs `test_cdrom_iso.py`, which checks every file on the mounted disc.
+5. **If detection fails:** `t` (the raw trace), replug, save the log and run `hddproto.packets` on it, as for C0; `s` for `iordy_max_ns` and `iordy_ignored`. Compare with the C0 trace: the first exchange that differs is the place to look.
+6. Back to the hard disk: flash `bb48_drive` again. The `cdrom` line in `HDDSYNTH.INI` can stay; the hard disk ignores it.
+
 **Beside the other explorations** (not merged, and kept apart on purpose): the two-drives idea (`docs/two-drives.md` on its own branch: a pair of devices behind one bus-facing object) could hold an `atapi::Device` as device 1 the same way it would a second `ata::Device`, since both have the same interface; that's where a hard disk and a CD on one cable would come from. A read-only disk built from a folder on the card could in time feed a disc too, with ISO 9660 in place of FAT. Neither is part of this MVP.
 
 ## Goal and scope
