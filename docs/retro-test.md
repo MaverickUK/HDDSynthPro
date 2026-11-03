@@ -28,7 +28,7 @@ With the rig on the USB adapter as usual:
 The BB48 has no buffers. Its pins are only 5 V tolerant while it's powered, and the PC's controller drives the bus whenever the PC is on, so **the BB48 is powered whenever the PC is**:
 
 - [ ] Everything off. Plug the cable into the PC's IDE header, **red stripe to pin 1**.
-- [ ] Put the drive **alone on its channel**, as master: the firmware doesn't do master/slave yet (no DASP#/PDIAG# handshake). If the PC boots from its own hard disk, use the secondary channel for the BB48; otherwise boot from floppy.
+- [ ] Put the drive **alone on its channel**, as device 0 (the master): it can't share a cable with a real drive (no DASP#/PDIAG# handshake). If the PC boots from its own hard disk, use the secondary channel for the BB48; otherwise boot from floppy.
 - [ ] **Power the BB48 first** (the laptop's USB). Start the console logger: `python3 scripts/retro_log.py 486-pass1` (from the repo, with `host/requirements.txt` installed). It saves every line to `host/runs/retro-<date>-<time>-486-pass1.log`, and shows resets, commands other than reads and writes, errors and `NOIORDY`/`BUSERR`/`STUCK`/`SLOWREAD` lines (marked `!!`), plus a summary of `s` every minute and whenever you press Enter. Type console commands as usual (`S`, `p`, `E key = value`); `q` quits. It prints the READY line on start.
 - [ ] **Then switch the PC on.**
 - [ ] When you're done: **PC off first**, then the BB48's USB. Never unplug the BB48 while the PC is on.

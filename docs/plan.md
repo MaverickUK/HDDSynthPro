@@ -7,7 +7,7 @@
 The prototype proves one thing: an RP2350B can act as an IDE hard disk that a real host reads and writes reliably. Speed, features and the HDD Synth side all come later, in thin layers on top of a working base.
 
 **In scope**
-- One device, configured as master, no slave on the cable.
+- One device, configured as device 0, alone on the cable.
 - PIO mode 0 only, with IORDY used to buy time.
 - LBA28 addressing. The IDENTIFY block reports a default CHS geometry from slice 2 onwards, because some hosts read it. CHS commands come in slice 6. **(amended)**
 - A small fixed-size disk: first generated or in RAM, then a contiguous image file on SD.
@@ -16,7 +16,7 @@ The prototype proves one thing: an RP2350B can act as an IDE hard disk that a re
 **Out of scope for now**
 - Every HDD Synth feature (audio, sample packs, encoder, OLED, supercap).
 - Faster PIO modes, READ/WRITE MULTIPLE, any kind of DMA.
-- ATAPI, slave operation, cable select, 44-pin hosts and real retro machines.
+- ATAPI, operation as device 1, cable select, 44-pin hosts and real retro machines.
 - Bus transceivers and the final board.
 
 **Done means:** the USB-IDE adapter enumerates the drive; the host can partition, format, mount, write and read it; and an overnight soak test of random reads and writes finishes with zero mismatches.
@@ -151,7 +151,7 @@ Each slice ends in a passing automated test before the next starts.
 4. SDIO 4-bit.
 5. Image selection and VHD footers.
 6. A 486-class host.
-7. Slave and cable select.
+7. Device 1 and cable select.
 8. Amiga A600/A1200.
 9. An adapter PCB with transceivers: targets and a draft BOM in [pcb-bom.md](pcb-bom.md).
 10. HDD Synth integration.

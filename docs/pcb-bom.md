@@ -9,7 +9,7 @@ A starting point for the board that replaces the hand-wired prototype. It lists 
 | **Speed: up to multiword DMA mode 2 and PIO mode 4**, not Ultra DMA | Data pre-loaded by DMA, buffered bus, SDIO 4-bit storage (see "Timing" below) |
 | **Disk images live on the SD card, not in flash** | Flash holds the firmware only. The SD card is the hot path: SDIO 4-bit and a fast card; PSRAM as a write cache is recommended |
 | **Slow controls go on an I2C expander** | Encoder, buttons, jumpers, card detect, the activity and handshake lines all move off the GPIOs, which closes the pin budget (section 2) |
-| **Work on as many hosts as practical** | IOCS16#, IORDY-less register reads, master/slave/cable select with a real second drive, both 40- and 44-pin connectors, and optional power from the IDE cable (section 4) |
+| **Work on as many hosts as practical** | IOCS16#, IORDY-less register reads, device 0, device 1 or cable select with a real second drive, both 40- and 44-pin connectors, and optional power from the IDE cable (section 4) |
 
 ## Design targets
 
@@ -109,7 +109,7 @@ Each PIO state machine sees one 32-pin GPIO window: 0–31 or 16–47. The fast 
 |---|---|
 | Encoder A, B, push | 3 |
 | Action button | 1 |
-| Master/slave/cable-select jumpers | 2 |
+| Device 0 / device 1 / cable-select jumpers | 2 |
 | CSEL read | 1 |
 | DASP# drive + read-back | 2 |
 | PDIAG# drive + read-back | 2 |
@@ -145,7 +145,7 @@ Each PIO state machine sees one 32-pin GPIO window: 0–31 or 16–47. The fast 
 | R | 4 | Pull-ups, 10 kΩ | 0402/0603 | — | CSEL, DASP#, PDIAG#, spare |
 | J1 | 1 | IDE header, 40-pin, 2.54 mm, shrouded, keyed | Würth 61204021621 (**check**), or any 2×20 box header | THT | 3.5-inch hosts. Pin 20 removed for the key, unless the pin-20 power option is used |
 | J2 | 1 | IDE header, 44-pin, 2.0 mm | 2×22 2.0 mm male header | THT/SMD | 2.5-inch hosts (Amiga A600/A1200, laptops). Pins 41–42 +5 V, 43 GND. Fit J1 or J2, not both |
-| J3 | 1 | Master / slave / cable-select jumpers | 2×3 2.54 mm header + jumper | THT | Read through the expander |
+| J3 | 1 | Device 0 / device 1 / cable-select jumpers (drives label them master and slave) | 2×3 2.54 mm header + jumper | THT | Read through the expander |
 | J4 | 1 | Activity LED header | 1×2 2.54 mm | THT | DASP# through the open-drain buffer, with a series resistor |
 | D | 1 | Activity LED + resistor | 0603 LED, ~470 Ω | — | Driven from DASP# |
 
@@ -190,7 +190,7 @@ What each kind of host needs, and where that's handled. **HW** means a board fea
 | PCI chipsets (Intel PIIX and others) | Multiword DMA 0–2, SET FEATURES transfer modes, bus mastering | **HW:** DMARQ/DMACK#. **FW:** MW DMA path |
 | Amiga A600/A1200 (Gayle), Atari Falcon | 44-pin 2.5-inch connector, PIO, power from the connector | **HW:** J2 and its power pins |
 | Industrial boards and thin clients | +5 V on pin 20 (disk-on-module style) | **HW:** JP1 + F1 (jumper off by default) |
-| Any host with a second drive | Master or slave, cable select, DASP#/PDIAG# handshake after reset, tri-stated when not selected | **HW:** jumpers, CSEL, open-drain DASP#/PDIAG#, buffer enables. **FW:** the reset handshake timing (device 1 asserts DASP# within 400 ms, PDIAG# within 31 s; check against ATA-4) |
+| Any host with a second drive | Device 0 or device 1, cable select, DASP#/PDIAG# handshake after reset, tri-stated when not selected | **HW:** jumpers, CSEL, open-drain DASP#/PDIAG#, buffer enables. **FW:** the reset handshake timing (device 1 asserts DASP# within 400 ms, PDIAG# within 31 s; check against ATA-4) |
 | Hosts that poll a slow drive | Correct BSY/DRQ behaviour during SD stalls | **FW** (already designed: BSY covers every SD access) |
 
 **Out of scope:**
