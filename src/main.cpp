@@ -435,6 +435,7 @@ CORE1_RAM void loop1() {
     dev.hardReset(reset_low);
     const bool early = g_early.load();  // ide_bus_early's samples (early_answers)
     const bool data_lane = ide_bus::dataLaneOn();  // data reads never reach core 1 (docs/data-lane.md)
+    unsigned served_with_command = 0;  // accesses served since a command was queued
     uint32_t last_access_cycles = 0;  // core 1's cycle counter: core-local, unlike the timer behind the APB bridge
     const uint32_t bus_only_cycles = g_bus_only_cycles;
     ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
@@ -468,12 +469,14 @@ CORE1_RAM void loop1() {
                 ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
                                        runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
             }
-            // Back to the bus, unless a command was just written: run it first.
-            // The host polls STATUS straight after one, and if each poll came
-            // before core 1 found the FIFO empty, the command would never run
-            // and STATUS would show BSY for good (the data lane, 0.29.0-2d.4:
-            // the adapter's polls came that fast).
+            // Back to the bus, but with a command queued only for a few accesses:
+            // the host polls STATUS straight after a command and gets BSY at once,
+            // and if the polls came back to back, before core 1 found the FIFO
+            // empty, the command would otherwise never run (STATUS at BSY for good:
+            // the data lane, 0.29.0-2d.4). Running it at once instead held the
+            // first poll for the whole command (IDENTIFY: 3 us).
             if (!dev.commandQueued()) continue;
+            if (++served_with_command < cfg::COMMAND_POLLS_FIRST) continue;  // cleared when it runs
         }
         if (early) ide_bus::checkIordyStall();  // IORDY held with no strobe: let it go
         pass_kind = GAP_LANE;
@@ -504,6 +507,7 @@ CORE1_RAM void loop1() {
                 recordCommandStart(command_start_us, start_info);
                 start_unrecorded = false;
             }
+            served_with_command = 0;
             dev.setReadAhead(g_read_ahead.load());
             dev.setWriteBehind(g_write_behind.load());
             dev.runQueuedCommand();

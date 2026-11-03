@@ -224,7 +224,11 @@ CORE1_RAM __attribute__((noinline)) static void laneSyncSlow(ata::Device& dev) {
 __attribute__((always_inline)) static inline void laneSync(ata::Device& dev) {
     if (!s_lane) return;
     if (s_lane_words) {
-        if (laneDue()) laneSyncSlow(dev);
+        // Only a block the host has read (step 3, or 2 and 3 if core 1 hadn't
+        // got to step 2): step 2 alone isn't needed for the answer, since the
+        // device still shows the block's DRQ, and doing it here held the read
+        // (Device register reads during IDENTIFY, 1.5 us, 0.29.0-2d.4).
+        if (laneFifoEmpty() && !laneDmaBusy()) laneSyncSlow(dev);
         return;
     }
     // A block to start needs DRQ, so test that first: one load when idle,
