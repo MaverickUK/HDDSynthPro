@@ -70,6 +70,26 @@ On each PC, with step 2's bus program (or early answers, if step 2 failed):
 - [ ] `E device1 = none`, `E early_answers = on`, `E isa = off`, `!`: the card as it was. (Or edit `HDDSYNTH.INI` on the Mac: `device0 = ICL386MB.IMG`, `device1 = none`.)
 - [ ] The logs (`host/runs/retro-*.log`), the `s` lines and the photos: the results go into [data-lane.md](data-lane.md) and [two-drives.md](two-drives.md), and `CHANGELOG.md`.
 
+### Results, 3 Nov 2026 evening
+
+Both PCs ran all three steps (0.29.0-2d.4), each step benchmarked with `DOSBENCH.IMG` (`tools/bench-image`) as device 0, so the numbers compare: HDDBENCH's sequential read and write, and its random read time. Logs: `host/runs/retro-20261103-*`.
+
+| | ICL 386 (ISA card) | Evesham (Athlon XP, PIO 3) |
+|---|---|---|
+| **1. Early answers** | PASS: 1.65 MB/s read, 1.42 ms random, 0.54 MB/s write | PASS: 1.78 MB/s, 1.09 ms, 1.24 MB/s |
+| **2. Other program** | `isa = on`: PASS, 1.49 MB/s, 1.64 ms, 0.74 MB/s | **Data lane: PASS, 2.18 MB/s, 0.98 ms, 1.98 MB/s** |
+| **3. Two drives** | `device1 = HDDBENCH.IMG` (`isa = on`): found by the BIOS; FDISK, FORMAT and `FC /B` on D: fine; 1,489 device 1 commands, none failed | The same image, on the lane: found; `FC /B` identical; 345 device 1 commands, none failed |
+| **3. A folder** (`device1 = GAMES`) | The board doesn't start (below) | Not tried |
+
+- **The answers.** The lane boots and runs the Evesham cleanly and much faster than early answers: reads +22%, writes +60%, and above the 1.8 MB/s once taken for the SD card's limit. And both BIOSes find a second drive without DASP#.
+- **Hosts not waiting for IORDY:** none, on either PC in any step, once the PC was out of reset (the bus floats while a PC powers up).
+- **The lane's Status reads run long:** about 1,400 a benchmark were held past ATA's 1,250 ns (mean 1,283 ns, up to 1,540). Data reads never are. Harmless on the Evesham, which waits for IORDY, but over ATA's limit. Early answers' worst there was 1,030 ns.
+- **The bus observer checks nothing on the lane** (`bus_sectors=0`): those runs rest on HDDBENCH's own check (0 bad sectors).
+- **Early answers on the ICL 386:** IORDY was still low when the card strobed DIOR# with no chip select, until `iordy_timer` hit its limit (655,770 ns, register `-`), about 200 times a benchmark, though it caused no errors; core 1 released IORDY 293,361 times. With `isa = on` the worst read was 1,210 ns and none were slow. The bus observer's false flags on this card (DIOR# with no chip select) were 76 and 116 sectors; HDDBENCH found none bad.
+- **The folder drive stops the board.** With `device1 = GAMES` (made by `host/hddproto/test_folder.py`: 12 files, 3.3 MB, a subfolder two deep and a long name), the BB48 never comes up: no USB serial port, at every power-up. It starts at once without the card. `make_folder_img` lays out a copy of the same folder cleanly under ASan, and the image mounts on the Mac with every file right (`LONGFI~1.BIN` too), so the fault is in the board-only path: `sd_card`'s `SdFolderSource` or `chooseDevice1()`. Not debugged yet.
+- **A misplugged IDE cable** looks like a dead PC: no picture, RESET# pulsing every few seconds, no commands, and the bus lines at odd levels (both chip selects low). Twice tonight, cured by reseating the cable. Unplugged, the PC starts.
+- **Changing `device0` while DOS runs** sends its writes to the new disk: two stray WRITE SECTORS failed out of range (no harm). Switch the PC off, or reset it at once, when C: changes.
+
 ## What to bring
 
 - The BB48 rig, with its IDE cable left on the BB48. Only the cable's other end moves, from the USB adapter to the PC.

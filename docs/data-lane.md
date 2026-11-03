@@ -39,6 +39,23 @@ While a block is on the lane, core 1's loop waits in `serveLane()` for these ste
 
 The lane reads faster than `ide_bus` because the adapter's PIO pace (about one word per 1.1 µs) no longer waits on core 1 for each word. The few reads over 1,250 ns are Alternate Status polls at the end of a WRITE command, while core 1 completes the last store. `ide_bus` has the same race, with 10-60 ns less on it. Taking core 1 out of register reads too (the register table in [no-iordy.md](no-iordy.md)) would end it.
 
+## On a retro PC (the Evesham, 3 Nov 2026)
+
+The Evesham (Athlon XP 2000+, PIO mode 3, `DOSBENCH.IMG` and HDDBENCH; [retro-test.md](retro-test.md#results-3-nov-2026-evening)):
+
+| | Early answers | Data lane |
+|---|---|---|
+| Sequential read | 1.78 MB/s | **2.18 MB/s** |
+| Random read | 1.09 ms | 0.98 ms |
+| Sequential write | 1.24 MB/s | **1.98 MB/s** |
+| Reads over 1,250 ns | 0 | about 1,400, all Status (mean 1,283 ns, worst 1,540) |
+| Reads the host didn't wait for | 0 | 0 |
+
+It detected and booted as on early answers, and ran two drives (device 1 an image) cleanly. Before it becomes the default:
+- **Status reads over 1,250 ns:** core 1 answers register reads at the strobe, and on this PC more of them miss than through the USB adapter. Harmless here (the host waits for IORDY), but over ATA's limit.
+- **No bus observer checks on the lane** (`bus_sectors=0`): data reads aren't sampled.
+- **ISA machines** still need `isa = on` (no watchdog), as above.
+
 ## What it changes
 
 - **Data reads don't reach core 1**, so the raw trace (console `t`) doesn't show them, and console `D` (delay data reads) and `F` (the fast lane) do nothing. `-m timing` skips on the lane. `s` shows `bus=lane`, `lane_blocks` and `lane_switch_max_ns`.

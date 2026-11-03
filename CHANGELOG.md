@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [Unreleased] (branch `two-drives`)
+
+0.29.0-2d.4 on the ICL 386 and the Evesham, 3 Nov evening ([docs/retro-test.md](docs/retro-test.md#results-3-nov-2026-evening)). No firmware change.
+- **The data lane on the Evesham:** it boots and runs HDDBENCH cleanly, reads 2.18 MB/s and writes 1.98 (early answers: 1.78 and 1.24). But about 1,400 Status reads a benchmark were held past ATA's 1,250 ns (worst 1,540), and the bus observer doesn't check data on the lane.
+- **Two drives:** both PCs' BIOSes find device 1 without DASP#. An image as D: passed FDISK, FORMAT and `FC /B` on the 386 (`isa = on`) and `FC /B` on the Evesham (on the lane), with no failed commands.
+- **Found: the board doesn't start with a folder as device 1** (`device1 = GAMES`): no USB serial port at power-up, every time, while the same folder lays out cleanly on the host. Not yet fixed ([docs/two-drives.md](docs/two-drives.md#on-the-rig-what-to-try-first)).
+
+### Added
+- `host/hddproto/test_folder.py`: a test folder for the folder drive, its files' contents following from their names, with `CHECK.BAT` for the retro PC (copies D: to `C:\HDDTEST` and compares each file) and a check of the copies on the Mac afterwards; `test_test_folder.py`.
+
 ## [0.29.0-2d.4] - 2026-11-03 (branch `data-lane`)
 
 ### Added
