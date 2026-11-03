@@ -1,14 +1,23 @@
 #!/bin/sh
-# Build and run the host-side unit tests (macOS: clang++, Linux: g++).
+# Build and run the host-side unit tests (macOS: clang++, Linux: g++,
+# Windows: MinGW g++ from Git Bash, e.g. WinLibs).
 # Usage: test/run_native_tests.sh
 #        SANITIZE=thread test/run_native_tests.sh   # ThreadSanitizer, for cross-core code
 set -e
 cd "$(dirname "$0")/.."
 CXX="${CXX:-c++}"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # Windows has no python3 (only the Store's placeholder), and MinGW has
+        # no sanitizer runtimes: UBSan traps instead of reporting; CI runs ASan.
+        PYTHON="${PYTHON:-python}"
+        SANITIZE="${SANITIZE:-undefined}"
+        SANITIZE_EXTRA=-fsanitize-trap=undefined ;;
+esac
 mkdir -p .pio/native-tests
-python3 scripts/embed_welcome.py  # src/welcome_text.h, from welcome/README.TXT
+"${PYTHON:-python3}" scripts/embed_welcome.py  # src/welcome_text.h, from welcome/README.TXT
 SANITIZE="${SANITIZE:-address,undefined}"
-"$CXX" -std=c++17 -O2 -g -Wall -Wextra -pthread -fsanitize="$SANITIZE" \
+"$CXX" -std=c++17 -O2 -g -Wall -Wextra -pthread -fsanitize="$SANITIZE" ${SANITIZE_EXTRA:-} \
     -Isrc test/native/test_main.cpp test/native/test_ata_device.cpp test/native/test_short_test.cpp \
     test/native/test_activity.cpp src/activity.cpp \
     test/native/test_activity_link.cpp src/activity_link.cpp \

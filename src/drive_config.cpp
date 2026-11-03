@@ -159,8 +159,8 @@ bool dmaRefusedForWiring(Mode m, bool dmarq_wired) {
 }
 
 void defaults(Config& out) {
-    std::snprintf(out.image, sizeof out.image, "%s", DEFAULT_IMAGE);
-    out.slave[0] = 0;
+    std::snprintf(out.device0, sizeof out.device0, "%s", DEFAULT_IMAGE);
+    out.device1[0] = 0;
     out.mode = Mode::Auto;
     out.dma = DEFAULT_DMA;
     out.write_behind = DEFAULT_WRITE_BEHIND;
@@ -231,7 +231,8 @@ bool parseGeometry(Span v, Geometry& g) {
 
 bool isKey(const char* key) {
     Span k{key, key + std::strlen(key)};
-    if (equalsNoCase(k, "image") || equalsNoCase(k, "slave") || equalsNoCase(k, "mode") ||
+    if (equalsNoCase(k, "device0") || equalsNoCase(k, "image") || equalsNoCase(k, "device1") ||
+        equalsNoCase(k, "mode") ||
         equalsNoCase(k, "seek_timing") || equalsNoCase(k, "geometry"))
         return true;
     for (const Switch& s : SWITCHES)
@@ -241,7 +242,16 @@ bool isKey(const char* key) {
 
 void parse(const char* text, size_t len, Config& out) {
     defaults(out);
-    bool seen_image = false, seen_slave = false, seen_mode = false, seen_seek_timing = false, seen_geometry = false;
+    // `image` is device0's old name: device0 counts over it, whichever comes first.
+    bool seen_device0 = false, seen_image = false, seen_device1 = false, seen_mode = false,
+         seen_seek_timing = false, seen_geometry = false;
+    auto setDevice0 = [&](int n, const Line& l) {
+        if (!validImageName(l.value)) {
+            warn(out, "line %d: device0 '%.*s' isn't a file name in the root folder; ignored%s", n, l.value);
+            return;
+        }
+        std::snprintf(out.device0, sizeof out.device0, "%.*s", int(l.value.size()), l.value.begin);
+    };
     bool seen_switch[SWITCH_COUNT] = {};
     forEachLine(text, len, [&](int n, const Line& l) {
         if (l.blank) return;
@@ -251,27 +261,32 @@ void parse(const char* text, size_t len, Config& out) {
             warn(out, "line %d: '%.*s' isn't key = value; ignored%s", n, t);
             return;
         }
-        if (equalsNoCase(l.key, "image")) {
+        if (equalsNoCase(l.key, "device0")) {
+            if (seen_device0) warn(out, "line %d: '%.*s' sets device0 again; this one counts%s", n, l.key);
+            else if (seen_image) warn(out, "line %d: '%.*s' replaces image, its old name%s", n, l.key);
+            seen_device0 = true;
+            setDevice0(n, l);
+        } else if (equalsNoCase(l.key, "image")) {
+            if (seen_device0) {
+                warn(out, "line %d: '%.*s' is device0's old name; device0 counts%s", n, l.key);
+                return;
+            }
             if (seen_image) warn(out, "line %d: '%.*s' sets image again; this one counts%s", n, l.key);
             seen_image = true;
-            if (!validImageName(l.value)) {
-                warn(out, "line %d: image '%.*s' isn't a file name in the root folder; ignored%s", n, l.value);
-                return;
-            }
-            std::snprintf(out.image, sizeof out.image, "%.*s", int(l.value.size()), l.value.begin);
-        } else if (equalsNoCase(l.key, "slave")) {
-            if (seen_slave) warn(out, "line %d: '%.*s' sets slave again; this one counts%s", n, l.key);
-            seen_slave = true;
+            setDevice0(n, l);
+        } else if (equalsNoCase(l.key, "device1")) {
+            if (seen_device1) warn(out, "line %d: '%.*s' sets device1 again; this one counts%s", n, l.key);
+            seen_device1 = true;
             if (equalsNoCase(l.value, NO_IMAGE) || l.value.empty()) {
-                out.slave[0] = 0;
+                out.device1[0] = 0;
                 return;
             }
             if (!validImageName(l.value)) {
-                warn(out, "line %d: slave '%.*s' isn't a file or folder name in the root folder; ignored%s", n,
+                warn(out, "line %d: device1 '%.*s' isn't a file or folder name in the root folder; ignored%s", n,
                      l.value);
                 return;
             }
-            std::snprintf(out.slave, sizeof out.slave, "%.*s", int(l.value.size()), l.value.begin);
+            std::snprintf(out.device1, sizeof out.device1, "%.*s", int(l.value.size()), l.value.begin);
         } else if (equalsNoCase(l.key, "mode")) {
             if (seen_mode) warn(out, "line %d: '%.*s' sets mode again; this one counts%s", n, l.key);
             seen_mode = true;
@@ -315,33 +330,50 @@ void parse(const char* text, size_t len, Config& out) {
     });
 }
 
+// A key's current name: `image` is device0's old one.
+static const char* currentName(Span key) {
+    if (equalsNoCase(key, "image") || equalsNoCase(key, "device0")) return "device0";
+    return nullptr;
+}
+
 size_t setKey(const char* text, size_t len, const char* key, const char* value, char* out, size_t size) {
     if (!isKey(key)) return 0;
-    // The last line setting `key` is the one that counts: that's the one to change.
-    const char* target_begin = nullptr;
+    Span wanted{key, key + std::strlen(key)};
+    const char* renamed = currentName(wanted);  // non-null for a key with an old name
+    if (renamed) key = renamed;
+    // The line that counts is the one to change: the last one setting `key`,
+    // or for device0, its last line under the new name, else under the old.
     const char* target_value_begin = nullptr;
     const char* target_value_end = nullptr;
-    const char* target_end = nullptr;
+    Span target_key{nullptr, nullptr};
+    bool target_new_name = false;
     bool crlf = false;
     forEachLine(text, len, [&](int, const Line& l) {
         if (l.whole.end < text + len && *l.whole.end == '\r') crlf = true;
-        if (l.has_equals && equalsNoCase(l.key, key)) {
-            target_begin = l.whole.begin;
-            target_end = l.whole.end;
-            // Replace from just after "=" and its spaces to the end of the
-            // value (quotes included), so the key's spelling and the comment stay.
-            const char* eq = static_cast<const char*>(std::memchr(l.whole.begin, '=', l.whole.size()));
-            const char* v = eq + 1;
-            while (v < l.value.begin && isSpace(*v) && *v != '"') ++v;
-            target_value_begin = v;
-            target_value_end = l.value.end;
-            if (target_value_end < l.whole.end && *target_value_end == '"') ++target_value_end;
-        }
+        if (!l.has_equals) return;
+        bool matches = renamed ? currentName(l.key) == renamed : equalsNoCase(l.key, key);
+        if (!matches) return;
+        bool new_name = equalsNoCase(l.key, key);
+        if (target_new_name && !new_name) return;  // the new name counts over the old
+        target_new_name = new_name;
+        target_key = l.key;
+        // Replace from just after "=" and its spaces to the end of the
+        // value (quotes included), so the key's spelling and the comment stay.
+        const char* eq = static_cast<const char*>(std::memchr(l.whole.begin, '=', l.whole.size()));
+        const char* v = eq + 1;
+        while (v < l.value.begin && isSpace(*v) && *v != '"') ++v;
+        target_value_begin = v;
+        target_value_end = l.value.end;
+        if (target_value_end < l.whole.end && *target_value_end == '"') ++target_value_end;
     });
     const char* nl = crlf ? "\r\n" : "\n";
     int n;
-    if (target_begin) {
-        (void)target_end;
+    if (target_value_begin && !target_new_name && renamed) {
+        // A line under the old name: rewritten with the new one.
+        n = std::snprintf(out, size, "%.*s%s%.*s%s%.*s", int(target_key.begin - text), text, key,
+                          int(target_value_begin - target_key.end), target_key.end, value,
+                          int(text + len - target_value_end), target_value_end);
+    } else if (target_value_begin) {
         n = std::snprintf(out, size, "%.*s%s%.*s", int(target_value_begin - text), text, value,
                           int(text + len - target_value_end), target_value_end);
     } else {
@@ -353,23 +385,28 @@ size_t setKey(const char* text, size_t len, const char* key, const char* value, 
 }
 
 bool servesImage(const Config& c) {
-    const char* a = c.image;
+    const char* a = c.device0;
     const char* b = NO_IMAGE;
     for (; *a && *b; ++a, ++b)
         if (std::tolower(static_cast<unsigned char>(*a)) != *b) return true;
     return *a || *b;  // a different length: some other name
 }
 
-bool hasSlave(const Config& c) { return c.slave[0] != 0; }
+bool hasDevice1(const Config& c) { return c.device1[0] != 0; }
 
 const char* defaultFile() {
     return "# HDDSynthPro settings. Changes take effect when the drive restarts.\r\n"
            "# One setting per line, as key = value; # starts a comment.\r\n"
            "\r\n"
-           "# The disk image to serve: a file in the card's root folder. If it\r\n"
-           "# isn't there, the drive uses HDDSYNTH.IMG, or else its welcome disk.\r\n"
-           "# none: the built-in test disk (64 MB; writes are lost when it restarts).\r\n"
-           "image = HDDSYNTH.IMG\r\n"
+           "# The disk image to serve as the first drive (device 0): a file in the\r\n"
+           "# card's root folder. If it isn't there, the drive uses HDDSYNTH.IMG, or\r\n"
+           "# else its welcome disk. none: the built-in test disk (64 MB; writes are\r\n"
+           "# lost when it restarts). Older files call this setting image.\r\n"
+           "device0 = HDDSYNTH.IMG\r\n"
+           "\r\n"
+           "# A second drive (device 1), so a PC sees two hard disks: an image, or a\r\n"
+           "# folder in the root folder, served read-only. none: no second drive.\r\n"
+           "device1 = none\r\n"
            "\r\n"
            "# The transfer mode to offer the host: auto (the fastest both sides\r\n"
            "# support), or at most one of pio0-pio4, mdma0-mdma2, udma0-udma6.\r\n"

@@ -2,6 +2,17 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.29.0-2d.3] - 2026-11-03 (branch `two-drives`)
+
+### Changed
+- **The settings are `device0` and `device1`**, ATA's own names for the two drives on a cable, in place of `image` and `slave` (`drive_config`). `image` still works, as `device0`'s old name, so settings files from 0.28.0 and earlier need no change; if a file has both, `device0` counts, with a warning. Console `E` treats the two names as one setting and rewrites an `image` line as `device0` in place, keeping its comment. `C` and the welcome disk's sample write `device0 = HDDSYNTH.IMG` and `device1 = none`.
+- `S` prints `CONFIG ... device0=...`, `CONFIG device0 not used: ...`, `CONFIG device1=... kind=... sectors=...` and `CONFIG device1 not used: ...`; `s` shows `device1=` and `device1_sectors=`.
+- Device 1's IDENTIFY: model `HDDSYNTH PRO D1`, serial `HSP-000001-D1`.
+- `test/run_native_tests.sh` runs from Git Bash on Windows (MinGW g++, e.g. WinLibs): `python` for the welcome text, and UBSan in trap mode, since MinGW has no sanitizer runtimes (CI still runs ASan and UBSan). `scripts/rig.sh` passes it the Python it chose.
+
+### Tested
+- On the rig (Windows, the JMicron-ID adapter, the built-in disk, PIO mode 3, early answers on), with no device 1: `-m speed` on 0.29.0-2d.2 against 0.28.0, the same day: sequential reads 1.18 MB/s on both, writes 1.06 MB/s against 1.08, 74.9 random 4 KB reads a second on both. The worst read (2,140 ns against 2,130, STATUS) is the same on both.
+
 ## [0.29.0-2d.2] - 2026-11-02 (branch `two-drives`)
 
 ### Added

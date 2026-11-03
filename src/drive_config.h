@@ -3,8 +3,10 @@
 // per line, `#` starts a comment; any editor will do (Notepad's CRLF line
 // endings and UTF-8 byte-order mark are fine).
 //
-//   image = HDDSYNTH.IMG   # the disk image, in the card's root folder; none: the built-in disk
-//   mode = auto            # auto, or a transfer mode such as pio0
+//   device0 = HDDSYNTH.IMG # device 0's disk image, in the card's root folder; none: the built-in disk
+//                          # (`image`, its old name, still works)
+//   device1 = GAMES        # a second drive, device 1: an image or a folder (read-only); none by default
+//   mode = auto           # auto, or a transfer mode such as pio0
 //   dma = off              # whether auto may offer multiword DMA (where DMARQ is wired)
 //   write_behind = on      # acknowledge a write while it's stored (faster)
 //   read_ahead = on        # fetch the next sector while the host reads this one
@@ -32,7 +34,7 @@ namespace drive_config {
 
 constexpr const char* FILE_NAME = "HDDSYNTH.INI";
 constexpr const char* DEFAULT_IMAGE = "HDDSYNTH.IMG";
-// `image = none`: no image, the built-in 64 MB test disk (writes kept in RAM
+// `device0 = none`: no image, the built-in 64 MB test disk (writes kept in RAM
 // until a restart), whose data the bus observer can check on the cable.
 constexpr const char* NO_IMAGE = "none";
 constexpr size_t MAX_FILE = 4096;      // longer files are read this far, with a warning
@@ -98,11 +100,13 @@ constexpr bool DEFAULT_EARLY_ANSWERS = true;
 constexpr bool DEFAULT_IORDY = true;
 
 struct Config {
-    char image[MAX_NAME + 1];
-    // `slave = NAME`: device 1's disk (docs/two-drives.md), an image file or a
-    // folder in the card's root folder (served read-only); empty (or `none`):
-    // no device 1, as before.
-    char slave[MAX_NAME + 1];
+    // `device0 = NAME`: device 0's disk image. Its old name, `image`, still
+    // works; if a file has both, device0 counts.
+    char device0[MAX_NAME + 1];
+    // `device1 = NAME`: a second drive, device 1 (docs/two-drives.md), an image
+    // file or a folder in the card's root folder (served read-only); empty (or
+    // `none`): no device 1, as before.
+    char device1[MAX_NAME + 1];
     Mode mode = Mode::Auto;
     bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
@@ -127,16 +131,17 @@ void parse(const char* text, size_t len, Config& out);
 // The defaults, as parse("") gives them.
 void defaults(Config& out);
 
-// False for `image = none` (any case): serve the built-in disk, not an image.
+// False for `device0 = none` (any case): serve the built-in disk, not an image.
 bool servesImage(const Config& c);
-// True if `slave` names a disk for device 1.
-bool hasSlave(const Config& c);
+// True if `device1` names a disk for device 1.
+bool hasDevice1(const Config& c);
 
 // `text` with `key` set to `value`, into `out` (NUL-terminated): the line
 // setting it is replaced in place, keeping its comment, or a new line is
 // added at the end. Comments, other lines and the line endings in use are
-// kept. Returns the new length, or 0 if `out` is too small or `key` is not
-// a known key (isKey).
+// kept. An old name counts as its key (`image` as `device0`), either way
+// round, and a line using it is rewritten with the new name. Returns the
+// new length, or 0 if `out` is too small or `key` is not a known key (isKey).
 size_t setKey(const char* text, size_t len, const char* key, const char* value, char* out, size_t size);
 
 // The file a `C` console command creates: the defaults, commented.

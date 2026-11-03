@@ -526,25 +526,25 @@ bool isFolder(const char* name) {
     return dir;
 }
 
-static FsFile s_slave_image;
+static FsFile s_device1_image;
 
-// SdFat's file layer, for the slave's image: seek, then read or write.
-class SlaveImageFile : public ImageFile {
+// SdFat's file layer, for device 1's image: seek, then read or write.
+class Device1ImageFile : public ImageFile {
 public:
     uint64_t size() const override { return size_; }
     bool readAt(uint64_t offset, void* data, size_t bytes) override {
-        return s_slave_image.seekSet(offset) && s_slave_image.read(data, bytes) == int(bytes);
+        return s_device1_image.seekSet(offset) && s_device1_image.read(data, bytes) == int(bytes);
     }
     bool writeAt(uint64_t offset, const void* data, size_t bytes) override {
-        return s_slave_image.seekSet(offset) && s_slave_image.write(data, bytes) == bytes;
+        return s_device1_image.seekSet(offset) && s_device1_image.write(data, bytes) == bytes;
     }
-    bool sync() override { return s_slave_image.sync(); }
+    bool sync() override { return s_device1_image.sync(); }
     uint64_t size_ = 0;
 };
-static SlaveImageFile s_slave_image_file;
+static Device1ImageFile s_device1_image_file;
 
-ImageFile* openSlaveImage(const char* name, Print& log) {
-    if (s_slave_image.isOpen()) s_slave_image.close();
+ImageFile* openDevice1Image(const char* name, Print& log) {
+    if (s_device1_image.isOpen()) s_device1_image.close();
     if (!mount(log)) {
         s_open_error = "no card";
         return nullptr;
@@ -553,13 +553,13 @@ ImageFile* openSlaveImage(const char* name, Print& log) {
         s_open_error = "not found";
         return nullptr;
     }
-    if (!s_slave_image.open(name, O_RDWR)) {
+    if (!s_device1_image.open(name, O_RDWR)) {
         s_open_error = "can't open";
         log.printf("SD error: can't open %s\n", name);
         return nullptr;
     }
-    s_slave_image_file.size_ = s_slave_image.fileSize();
-    return &s_slave_image_file;
+    s_device1_image_file.size_ = s_device1_image.fileSize();
+    return &s_device1_image_file;
 }
 
 // The folder served for device 1. Entries are found again by their index in

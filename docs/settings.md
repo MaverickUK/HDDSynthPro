@@ -4,7 +4,8 @@ The drive reads its settings from `HDDSYNTH.INI` in the root folder of the micro
 
 ```ini
 # HDDSynthPro settings. Changes take effect when the drive restarts.
-image = HDDSYNTH.IMG
+device0 = HDDSYNTH.IMG
+device1 = none
 mode = auto
 dma = off
 write_behind = on
@@ -23,13 +24,13 @@ isa = off
 
 | Key | Values | Default |
 |---|---|---|
-| `image` | The disk image to serve: a file in the card's root folder, e.g. `GAMES.IMG` (quotes optional; an image over 4 GB on a FAT32 card can be split into `GAMES.IMG`, `GAMES.I01`, `GAMES.I02`..., which `tools/split_image.py` makes, and is served as one disk), or `none` for the built-in 64 MB test disk (its writes are lost when the drive restarts; the soak test uses it, since only its data can be checked on the cable) | `HDDSYNTH.IMG` |
+| `device0` | The disk image to serve as the first drive (device 0; BIOS menus and drive jumpers call it the master): a file in the card's root folder, e.g. `GAMES.IMG` (quotes optional; an image over 4 GB on a FAT32 card can be split into `GAMES.IMG`, `GAMES.I01`, `GAMES.I02`..., which `tools/split_image.py` makes, and is served as one disk), or `none` for the built-in 64 MB test disk (its writes are lost when the drive restarts; the soak test uses it, since only its data can be checked on the cable). Up to 0.28.0 this setting was called `image`, which still works; if a file has both, `device0` counts, with a warning, and console `E` rewrites an `image` line as `device0` | `HDDSYNTH.IMG` |
+| `device1` | **Experimental (branch `two-drives`).** A second drive, device 1 (the slave, in BIOS menus and on drive jumpers), so a retro PC sees two hard disks ([two-drives.md](two-drives.md)): an image file in the card's root folder, served like `device0`'s, or a **folder** in the root folder, whose files and subfolders are served as a read-only FAT16 disk (up to 1,024 entries and 2 GB; writes fail). `none` or nothing: no second drive | `none` |
 | `mode` | The transfer mode to offer the host: `auto` (the fastest both sides support), or one of `pio0`–`pio4`, `mdma0`–`mdma2`, `udma0`–`udma6` to allow at most that one | `auto` |
 | `dma` | `on` or `off`: whether `auto` may offer multiword DMA, where DMARQ is wired. Much faster with DMA-capable hosts (reads about 4 times, writes 5 times through the USB adapter) | `off` until DMA has had a long test |
 | `write_behind` | `on` or `off`: the drive acknowledges each written sector while storing it on the card, so the host sends the next one meanwhile. About 50% faster writes to the card; if power is cut in the millisecond a sector is being stored, that sector is lost | `on` |
 | `read_ahead` | `on` or `off`: the drive fetches the next sector while the host reads this one | `on` |
 | `activity_link` | `on` or `off`: tell an HDD Synth what the drive is doing ([activity-link.md](activity-link.md)) | `on` |
-| `slave` | **Experimental (branch `two-drives`).** A second drive, device 1 (slave), so a retro PC sees two hard disks ([two-drives.md](two-drives.md)): an image file in the card's root folder, served like `image`, or a **folder** in the root folder, whose files and subfolders are served as a read-only FAT16 disk (up to 1,024 entries and 2 GB; writes fail). `none` or nothing: no second drive | none |
 | `seek_timing` | Hold each command for as long as a modelled drive would take: the seek, the wait for the sector to come round, the transfer. So the computer runs at that drive's pace, and an HDD Synth playing the same drive sounds as the computer feels. `off`: as fast as the card allows. `synth`: the drive the HDD Synth is playing (from its `$HDM`, which needs the link's second wire, GPIO 1; until one arrives, while it plays a recorded pack, or 5 s after it stops, nothing is held). A preset, whatever the synth plays: `stepper85` (a 1985 stepper), `voice91` and `voice97` (1991 and 1997 voice coils), `fdb05` (a 2005 7,200 rpm drive). No command is held over a second | `off` |
 | `isa` | `on` for a 16-bit ISA IDE card (286, 386 and many 486 machines). These cards select the drive from the address alone, so memory and DRAM refresh cycles can select it too, and they pass IORDY to the whole ISA bus. The drive pulls IORDY low as soon as it's selected (as ATA's timing needs), so such a cycle would stall for good: that froze an ICL 386. With `on`, the drive lets go of IORDY once it has held it for about 23 µs, which a real access never needs, and such a cycle ends. Leave it `off` for USB adapters and later controllers, which never need it. IOCS16#, which these cards also need, is always on unless DMA is offered (GPIO 2, [wiring.md](wiring.md)) | `off` |
 | `early_answers` | The drive has each register's value ready as soon as it's addressed, for controllers that don't wait for IORDY while the BIOS detects the drive (a Pentium's PIIX, [no-iordy.md](no-iordy.md)). It still holds IORDY for controllers that wait, and lets it go after 23 µs with no strobe, which keeps 16-bit ISA cards safe. `isa = on` overrides it | `on` |
@@ -40,7 +41,7 @@ The on/off settings also take `yes`/`no`, `true`/`false` and `1`/`0`. The consol
 
 **Which disk the drive serves**, in order:
 1. The built-in test disk if console `T` asked for it, or `HDDBENCH.IMG` if console `J` did (both for tests; a power cycle undoes them).
-2. The `image` from the settings, or with `image = none` the built-in test disk.
+2. The `device0` image from the settings, or with `device0 = none` the built-in test disk.
 3. If that isn't on the card, or is empty: `HDDSYNTH.IMG`.
 4. If there's no card, or neither image can be used: the welcome disk.
 
@@ -62,7 +63,7 @@ Eject the disk on the computer first, as you would before unplugging any disk. I
 |---|---|
 | `S` | Reports the card, then `CONFIG` lines: what the file says, which image is being served, any image that couldn't be used and why, and any warnings |
 | `C` | Creates `HDDSYNTH.INI` with the defaults and comments, if there isn't one |
-| `E` | Sets one setting: type `E`, then e.g. `image = GAMES.IMG` or `write_behind = off`, then Enter. The rest of the file, comments included, stays as it was; a setting the file doesn't have yet is added at the end |
+| `E` | Sets one setting: type `E`, then e.g. `device0 = GAMES.IMG` or `write_behind = off`, then Enter. The rest of the file, comments included, stays as it was; a setting the file doesn't have yet is added at the end |
 | `!` | Restarts the drive, so the settings take effect (keeps a `J` or `T` choice) |
 | `T` | Restarts the drive serving the built-in test disk, card or no card, or back (a power cycle undoes it too); replug the adapter afterwards |
 

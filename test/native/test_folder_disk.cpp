@@ -356,20 +356,20 @@ TEST(test_folder_disk_is_read_only) {
 }
 
 TEST(test_folder_disk_as_device_1) {
-    // The whole path: a master on a generated disk and the folder as device
+    // The whole path: device 0 on a generated disk and the folder as device
     // 1, read through ATA commands as a host would, each fetch to its unit.
     MemoryFolder f;
     f.add(0, "notes.txt", false, 0, "Served from a folder, read-only.");
     f.add(0, "data.bin", false, 70000);
     std::vector<Entry> entries(16);
     Volume v;
-    CHECK(v.build(f, entries.data(), 16, "SLAVE"));
-    FolderDisk slave(v);
-    GeneratedDisk master;
-    const IdentifyInfo id0{"HDDSYNTH PROTO", "HSP-000001", "0.29.0", master.sectors()};
-    const IdentifyInfo id1{"HDDSYNTH PRO S", "HSP-000001-S", "0.29.0", slave.sectors()};
+    CHECK(v.build(f, entries.data(), 16, "DEVICE1"));
+    FolderDisk disk1(v);
+    GeneratedDisk disk0;
+    const IdentifyInfo id0{"HDDSYNTH PROTO", "HSP-000001", "0.29.0", disk0.sectors()};
+    const IdentifyInfo id1{"HDDSYNTH PRO D1", "HSP-000001-D1", "0.29.0", disk1.sectors()};
     ata::Device d(id0, &id1);
-    BlockSource* disks[2] = {&master, &slave};
+    BlockSource* disks[2] = {&disk0, &disk1};
     auto pump = [&] {
         ata::Fetch fe;
         if (d.dataOutHeld()) d.releaseDataOut();
@@ -408,7 +408,7 @@ TEST(test_folder_disk_as_device_1) {
         if (std::memcmp(got, want, 512) != 0) same = false;
     }
     CHECK(same);
-    // A write to the folder drive fails cleanly with ABRT; the master still writes.
+    // A write to the folder drive fails cleanly with ABRT; device 0 still writes.
     d.write(ata::Reg::SectorCount, 1);
     d.write(ata::Reg::Device, 0xF0);
     d.write(ata::Reg::StatusCommand, ata::CMD_WRITE_SECTORS);

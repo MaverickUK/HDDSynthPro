@@ -175,9 +175,9 @@ static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: aut
 static std::atomic<uint32_t> g_geometry{0};
 // Device 1 (docs/two-drives.md): its disk's size (0: no device 1) and default
 // geometry, packed as g_geometry is. Core 0 sets both at boot, before the
-// master's size, which core 1 waits for.
-static std::atomic<uint32_t> g_slave_sectors{0};
-static std::atomic<uint32_t> g_slave_geometry{0};
+// device 0's size, which core 1 waits for.
+static std::atomic<uint32_t> g_device1_sectors{0};
+static std::atomic<uint32_t> g_device1_geometry{0};
 static bool g_geometry_trimmed = false;  // the cylinders were cut to fit the disk (CONFIG says so)
 static const char* g_geometry_from = "auto";  // "set", "partition table" or "auto" (the default), for CONFIG
 
@@ -191,11 +191,11 @@ __attribute__((always_inline)) static inline IdentifyInfo driveIdentity() {
                         Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}};
 }
 
-// Device 1's identity: its own model, serial and size, the master's modes.
-__attribute__((always_inline)) static inline IdentifyInfo slaveIdentity() {
-    uint32_t g = g_slave_geometry.load(std::memory_order_relaxed);
-    return IdentifyInfo{"HDDSYNTH PRO S", "HSP-000001-S", FIRMWARE_VERSION,
-                        g_slave_sectors.load(std::memory_order_relaxed),
+// Device 1's identity: its own model, serial and size, device 0's modes.
+__attribute__((always_inline)) static inline IdentifyInfo device1Identity() {
+    uint32_t g = g_device1_geometry.load(std::memory_order_relaxed);
+    return IdentifyInfo{"HDDSYNTH PRO D1", "HSP-000001-D1", FIRMWARE_VERSION,
+                        g_device1_sectors.load(std::memory_order_relaxed),
                         g_pio_mode.load(std::memory_order_relaxed),
                         g_mdma_mode.load(std::memory_order_relaxed),
                         Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}};
@@ -275,9 +275,9 @@ void setup1() {
                                                     g_dmarq_wired.load(), g_dma_auto.load()),
                       std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
-    const IdentifyInfo slave = slaveIdentity();
+    const IdentifyInfo device1 = device1Identity();
     bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
-                        slave.total_sectors ? &slave : nullptr);
+                        device1.total_sectors ? &device1 : nullptr);
     // The third PIO block: multiword DMA if it's offered, otherwise IOCS16#
     // for ISA cards (which never use DMA). Neither fits beside the others.
     if (g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA)
@@ -422,8 +422,8 @@ CORE1_RAM void loop1() {
     // served back to back, and only when it is empty does core 1 do one small
     // bookkeeping step before looking again. So a read waits for one step at
     // most; iordy_timer.pio measures how long the host actually waits.
-    static const IdentifyInfo slave = slaveIdentity();
-    static ata::Device dev(driveIdentity(), slave.total_sectors ? &slave : nullptr);
+    static const IdentifyInfo device1 = device1Identity();
+    static ata::Device dev(driveIdentity(), device1.total_sectors ? &device1 : nullptr);
     uint32_t started = dev.commandsStarted();
     g_done_recorded = dev.commandsCompleted();
     uint32_t command_start_us = 0;
@@ -606,7 +606,7 @@ CORE1_RAM void loop1() {
 
 // Core 0's share of the drive: move the sectors core 1 asks for. The disk is
 // an image on the SD card (slice 5) if there is one to serve (chooseDisk()),
-// else the welcome disk, or the generated test disk with `image = none` or
+// else the welcome disk, or the generated test disk with `device0 = none` or
 // console `T`. Both keep writes in the one RAM overlay, until a restart.
 static const welcome_disk::File WELCOME_FILES[] = {
     {"README.TXT", welcome_text::README, welcome_text::README_SIZE},
@@ -619,11 +619,11 @@ static BlockSource* g_disk = &g_overlay;
 static const char* g_disk_name = "welcome";
 static bool g_test_disk = false;  // the generated disk: the bus observer can check its data
 
-// Device 1's disk (`slave` in HDDSYNTH.INI, docs/two-drives.md), or nullptr:
+// Device 1's disk (`device1` in HDDSYNTH.INI, docs/two-drives.md), or nullptr:
 // a second image, or a folder served read-only.
-static BlockSource* g_slave_disk = nullptr;
-static const char* g_slave_kind = "none";  // "none", "image" or "folder"
-static char g_slave_note[112] = "";         // why the slave configured isn't served
+static BlockSource* g_device1_disk = nullptr;
+static const char* g_device1_kind = "none";  // "none", "image" or "folder"
+static char g_device1_note[112] = "";         // why the device1 configured isn't served
 static folder_disk::Volume g_folder;
 static FolderDisk g_folder_disk(g_folder);
 static uint16_t g_folder_capacity = 0;  // entries the folder's list has room for
@@ -700,13 +700,13 @@ static uint32_t partitionGeometry(BlockSource& disk) {
     return uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track;
 }
 
-// Device 1's disk, from `slave` (docs/two-drives.md): a folder, laid out as
+// Device 1's disk, from `device1` (docs/two-drives.md): a folder, laid out as
 // a read-only FAT16 volume, or an image. Not with the test or bench disk
 // asked for from the console, which are for the rig's tests.
-static void chooseSlave() {
-    if (!drive_config::hasSlave(g_config) || !sd_card::mounted() || testDiskRequested() || benchRequested())
+static void chooseDevice1() {
+    if (!drive_config::hasDevice1(g_config) || !sd_card::mounted() || testDiskRequested() || benchRequested())
         return;
-    const char* name = g_config.slave;
+    const char* name = g_config.device1;
     if (sd_card::isFolder(name)) {
         // The list on the heap, only when a folder is served: as long as RAM
         // allows, leaving cfg::FOLDER_HEAP_LEFT for whatever allocates later.
@@ -720,38 +720,38 @@ static void chooseSlave() {
             capacity /= 2;
         }
         if (!entries) {
-            std::snprintf(g_slave_note, sizeof g_slave_note, "%s: no RAM for its list", name);
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: no RAM for its list", name);
             return;
         }
         if (!g_folder.build(sd_card::folderSource(name), entries, capacity, name)) {
-            std::snprintf(g_slave_note, sizeof g_slave_note, "%s: can't list it, or nothing fits", name);
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: can't list it, or nothing fits", name);
             delete[] entries;
             return;
         }
         g_folder_capacity = capacity;
-        g_slave_disk = &g_folder_disk;
-        g_slave_kind = "folder";
+        g_device1_disk = &g_folder_disk;
+        g_device1_kind = "folder";
     } else {
-        ImageFile* file = sd_card::openSlaveImage(name, Serial);
+        ImageFile* file = sd_card::openDevice1Image(name, Serial);
         if (!file) {
-            std::snprintf(g_slave_note, sizeof g_slave_note, "%s: %s", name, sd_card::openError());
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: %s", name, sd_card::openError());
             return;
         }
         static ImageDisk image(*file);
         if (image.sectors() == 0) {
-            std::snprintf(g_slave_note, sizeof g_slave_note, "%s: empty", name);
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: empty", name);
             return;
         }
-        g_slave_disk = &image;
-        g_slave_kind = "image";
-        g_slave_geometry.store(partitionGeometry(image), std::memory_order_relaxed);
+        g_device1_disk = &image;
+        g_device1_kind = "image";
+        g_device1_geometry.store(partitionGeometry(image), std::memory_order_relaxed);
     }
-    g_slave_sectors.store(g_slave_disk->sectors(), std::memory_order_relaxed);
+    g_device1_sectors.store(g_device1_disk->sectors(), std::memory_order_relaxed);
 }
 
 // The disk: the test disk after console `T`, or HDDBENCH.IMG after `J`; else
 // the image HDDSYNTH.INI names (HDDSYNTH.IMG by default), or the test disk
-// for `image = none`; else HDDSYNTH.IMG; else the welcome disk.
+// for `device0 = none`; else HDDSYNTH.IMG; else the welcome disk.
 static void chooseDisk() {
     uint32_t start = millis();
     drive_config::defaults(g_config);
@@ -770,12 +770,12 @@ static void chooseDisk() {
     } else if (benchRequested()) {
         if (useImage(sd_card::BENCH_IMAGE_NAME, why)) g_disk_name = "bench";
     } else if (!drive_config::servesImage(g_config)) {
-        useTestDisk();  // image = none: the card left alone
-    } else if (useImage(g_config.image, why)) {
+        useTestDisk();  // device0 = none: the card left alone
+    } else if (useImage(g_config.device0, why)) {
         g_disk_name = "image";
     } else {
-        std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.image, why);
-        if (strcasecmp(g_config.image, drive_config::DEFAULT_IMAGE) != 0 &&
+        std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.device0, why);
+        if (strcasecmp(g_config.device0, drive_config::DEFAULT_IMAGE) != 0 &&
             useImage(drive_config::DEFAULT_IMAGE, why))
             g_disk_name = "image";
     }
@@ -813,8 +813,8 @@ static void chooseDisk() {
                      std::memory_order_relaxed);
     // A host that ignores IORDY reads whatever is on the bus: check image data on the cable too.
     bus_observer::setImageChecks(g_config.early_answers && !g_test_disk);
-    chooseSlave();
-    g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode and the slave: core 1 reads them
+    chooseDevice1();
+    g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode and device 1: core 1 reads them
 }
 
 // Console `E`: sets one setting in HDDSYNTH.INI from "key = value", keeping
@@ -829,7 +829,7 @@ static void editConfig(const char* line) {
         for (size_t n = strlen(value); n && (value[n - 1] == ' ' || value[n - 1] == '\t'); --n) value[n - 1] = '\0';
     }
     if (!key[0] || !value[0]) {
-        Serial.println("# E: nothing changed; type key = value, e.g. image = GAMES.IMG");
+        Serial.println("# E: nothing changed; type key = value, e.g. device0 = GAMES.IMG");
         return;
     }
     static char text[drive_config::MAX_FILE], edited[drive_config::MAX_FILE];
@@ -870,16 +870,16 @@ static void printConfig() {
     uint8_t mdma = g_mdma_mode.load();
     char mdma_text[8] = "none";
     if (mdma != NO_DMA) std::snprintf(mdma_text, sizeof mdma_text, "%u", unsigned(mdma));
-    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s pio_offered=%u mdma_offered=%s serving=%s contiguous=%s extents=%u parts=%u\n",
+    Serial.printf("CONFIG file=%s device0=%s mode=%s mode_used=%s pio_offered=%u mdma_offered=%s serving=%s contiguous=%s extents=%u parts=%u\n",
                   g_config_state,
-                  g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
+                  g_config.device0, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name,
                   sd_card::imageContiguous() ? "yes" : "no", sd_card::imageExtents(), sd_card::imageParts());
-    if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
-    if (g_slave_disk) {
-        Serial.printf("CONFIG slave=%s kind=%s sectors=%lu\n", g_config.slave, g_slave_kind,
-                      (unsigned long)g_slave_disk->sectors());
-        if (g_slave_disk == &g_folder_disk) {
+    if (g_image_note[0]) Serial.printf("CONFIG device0 not used: %s\n", g_image_note);
+    if (g_device1_disk) {
+        Serial.printf("CONFIG device1=%s kind=%s sectors=%lu\n", g_config.device1, g_device1_kind,
+                      (unsigned long)g_device1_disk->sectors());
+        if (g_device1_disk == &g_folder_disk) {
             static const char* why[] = {"", ": too many entries", ": the root folder is full", ": over 2 GB"};
             Serial.printf("CONFIG folder entries=%u/%u cluster_bytes=%lu read_only=yes%s%s\n",
                           unsigned(g_folder.count()), unsigned(g_folder_capacity),
@@ -887,8 +887,8 @@ static void printConfig() {
                           g_folder.truncated() == folder_disk::Truncated::No ? "" : " cut_short",
                           why[int(g_folder.truncated())]);
         }
-    } else if (g_slave_note[0]) {
-        Serial.printf("CONFIG slave not used: %s\n", g_slave_note);
+    } else if (g_device1_note[0]) {
+        Serial.printf("CONFIG device1 not used: %s\n", g_device1_note);
     }
     Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s early_answers=%s iordy=%s\n",
                   g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
@@ -1321,7 +1321,7 @@ static void serveFetches() {
     ata::Fetch fetch;
     while (g_held_count < HELD_MAX && g_mailbox.takeRequest(fetch)) {
         uint64_t now = time_us_64();  // the command's time starts before the card's
-        BlockSource* disk = fetch.unit ? g_slave_disk : g_disk;  // device 1's, or the master's
+        BlockSource* disk = fetch.unit ? g_device1_disk : g_disk;  // device 1's, or device 0's
         bool ok = !disk ? false
                   : fetch.store ? disk->write(fetch.lba, fetch.buffer)
                   : fetch.flush ? true  // FLUSH CACHE: nothing to move
@@ -1536,8 +1536,8 @@ static void printStats() {
     Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
                   (unsigned long)g_disk_ms);
     Serial.printf(" image_name=%s config=%s", g_image_name, g_config_state);
-    Serial.printf(" slave=%s slave_sectors=%lu", g_slave_kind,
-                  (unsigned long)(g_slave_disk ? g_slave_disk->sectors() : 0));
+    Serial.printf(" device1=%s device1_sectors=%lu", g_device1_kind,
+                  (unsigned long)(g_device1_disk ? g_device1_disk->sectors() : 0));
     const media_watch::Watch& card = sd_card::media();
     Serial.printf(" card=%s card_lost=%lu card_back=%lu", media_watch::stateName(card.state()),
                   (unsigned long)card.losses(), (unsigned long)card.returns());
@@ -1753,7 +1753,7 @@ static void handleConsole() {
             case 'E':  // set one setting in HDDSYNTH.INI: key = value, then Enter
                 edit_line = true;
                 edit_len = 0;
-                Serial.println("# type key = value (e.g. image = GAMES.IMG or seek_timing = voice97), then Enter");
+                Serial.println("# type key = value (e.g. device0 = GAMES.IMG or seek_timing = voice97), then Enter");
                 break;
             case '!':  // restart, to apply HDDSYNTH.INI (keeps a `J` or `T` choice)
                 Serial.println("# restarting");

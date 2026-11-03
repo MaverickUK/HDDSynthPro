@@ -5,7 +5,7 @@
 ## Use it
 
 1. Build it: `python3 tools/bench-image/build_image.py` (needs `nasm` and `mtools`; FreeDOS is downloaded once into `.cache/`). The image is `tools/bench-image/build/DOSBENCH.IMG`.
-2. Copy it to the SD card, and set `image = DOSBENCH.IMG` in `HDDSYNTH.INI` (console `E image = DOSBENCH.IMG`, then `!`). For a fresh start each time, copy it again: the tests only write the scratch area and `C:\BENCH.LOG`, but a fresh copy rules even that out.
+2. Copy it to the SD card, and set `device0 = DOSBENCH.IMG` in `HDDSYNTH.INI` (console `E device0 = DOSBENCH.IMG`, then `!`). For a fresh start each time, copy it again: the tests only write the scratch area and `C:\BENCH.LOG`, but a fresh copy rules even that out.
 3. In the PC's BIOS, set the drive to auto-detect, or user type 260 cylinders, 16 heads, 63 sectors.
 4. Boot. `AUTOEXEC.BAT` runs `HDDBENCH`. After the benchmark it waits 10 s, then starts the soak, which runs until a key is pressed.
 5. Read the results on the screen, or afterwards in `C:\BENCH.LOG` (on the Mac: `mtype -i DOSBENCH.IMG@@32256 ::BENCH.LOG`). Keep the drive's console log too (`scripts/retro_log.py`): it shows the transfer mode, late reads and the bus observer's checks.

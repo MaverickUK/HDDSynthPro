@@ -14,8 +14,8 @@ using namespace ata;
 
 namespace {
 
-const IdentifyInfo MASTER{"HDDSYNTH PROTO", "HSP-000001", "0.29.0", 131072};
-const IdentifyInfo SLAVE{"HDDSYNTH PRO S", "HSP-000001-S", "0.29.0", 2048};
+const IdentifyInfo DEVICE0{"HDDSYNTH PROTO", "HSP-000001", "0.29.0", 131072};
+const IdentifyInfo DEVICE1{"HDDSYNTH PRO D1", "HSP-000001-D1", "0.29.0", 2048};
 
 // A small disk whose every word names its unit and sector: word i of
 // sector n on unit u is (u << 15) | (n << 4 & 0x7FF0) | (i & 0xF).
@@ -144,7 +144,7 @@ std::string identifyString(const uint16_t* id, unsigned first, unsigned words) {
 }  // namespace
 
 TEST(test_two_drives_both_present_after_power_on) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     CHECK(d.hasDevice1());
@@ -158,21 +158,21 @@ TEST(test_two_drives_both_present_after_power_on) {
 }
 
 TEST(test_two_drives_identify_per_unit) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     uint16_t id0[256], id1[256];
     CHECK(h.identify(0, id0));
     CHECK(h.identify(1, id1));
     CHECK_STR(identifyString(id0, 27, 20), "HDDSYNTH PROTO");
-    CHECK_STR(identifyString(id1, 27, 20), "HDDSYNTH PRO S");
-    CHECK_STR(identifyString(id1, 10, 10), "HSP-000001-S");
+    CHECK_STR(identifyString(id1, 27, 20), "HDDSYNTH PRO D1");
+    CHECK_STR(identifyString(id1, 10, 10), "HSP-000001-D1");
     CHECK_EQ(uint32_t(id0[60]) | (uint32_t(id0[61]) << 16), 131072u);
     CHECK_EQ(uint32_t(id1[60]) | (uint32_t(id1[61]) << 16), 2048u);
 }
 
 TEST(test_two_drives_reads_go_to_the_selected_unit) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     std::vector<uint16_t> out;
@@ -185,29 +185,29 @@ TEST(test_two_drives_reads_go_to_the_selected_unit) {
     CHECK_EQ(out[511], m.word(101, 255));
     CHECK(h.fetches[0] >= 2);
     CHECK(h.fetches[1] >= 3);
-    // Each unit's own size: LBA 3000 exists only on the master.
+    // Each unit's own size: LBA 3000 exists only on device 0.
     CHECK(h.read(0, 3000, 1, out));
     CHECK(!h.read(1, 3000, 1, out));
 }
 
 TEST(test_two_drives_status_and_error_are_per_unit) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     std::vector<uint16_t> out;
-    CHECK(!h.read(1, 5000, 1, out));  // past the slave's end: IDNF
+    CHECK(!h.read(1, 5000, 1, out));  // past device 1's end: IDNF
     CHECK(h.altStatus() & ST_ERR);
     CHECK_EQ(d.read(Reg::ErrorFeatures), ER_IDNF);
     h.select(0);
-    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);  // the master didn't fail
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);  // device 0 didn't fail
     CHECK_EQ(d.read(Reg::ErrorFeatures), 0x01);
     h.select(1);
-    CHECK(h.altStatus() & ST_ERR);  // the slave's error is still there
+    CHECK(h.altStatus() & ST_ERR);  // device 1's error is still there
     CHECK_EQ(d.read(Reg::ErrorFeatures), ER_IDNF);
 }
 
 TEST(test_two_drives_interrupt_belongs_to_its_unit) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     h.select(1);
@@ -217,7 +217,7 @@ TEST(test_two_drives_interrupt_belongs_to_its_unit) {
     CHECK(d.intrq());
     CHECK(d.intrqDriven());
     h.select(0);
-    CHECK(!d.intrq());  // the master has none pending
+    CHECK(!d.intrq());  // device 0 has none pending
     CHECK(d.intrqDriven());  // but it drives the line, being selected and present
     h.select(1);
     CHECK(d.intrq());
@@ -226,7 +226,7 @@ TEST(test_two_drives_interrupt_belongs_to_its_unit) {
 }
 
 TEST(test_two_drives_soft_reset_selects_device_0) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     std::vector<uint16_t> out;
@@ -237,12 +237,12 @@ TEST(test_two_drives_soft_reset_selects_device_0) {
     CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
     CHECK(h.signature());
     h.select(1);
-    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);  // the slave's error is cleared too
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);  // device 1's error is cleared too
     CHECK_EQ(d.read(Reg::ErrorFeatures), 0x01);
 }
 
 TEST(test_two_drives_diagnostic_from_device_1) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     h.command(1, CMD_EXECUTE_DEVICE_DIAGNOSTIC);
@@ -252,10 +252,10 @@ TEST(test_two_drives_diagnostic_from_device_1) {
 }
 
 TEST(test_two_drives_geometry_per_unit) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
-    // INITIALIZE DEVICE PARAMETERS on the slave only: 4 heads, 32 sectors.
+    // INITIALIZE DEVICE PARAMETERS on device 1 only: 4 heads, 32 sectors.
     d.write(Reg::SectorCount, 32);
     d.write(Reg::Device, 0xB0 | 3);
     d.write(Reg::StatusCommand, CMD_INITIALIZE_DEVICE_PARAMETERS);
@@ -263,15 +263,15 @@ TEST(test_two_drives_geometry_per_unit) {
     CHECK_EQ(d.geometry().heads, 4u);
     CHECK_EQ(d.geometry().sectors_per_track, 32u);
     h.select(0);
-    CHECK_EQ(d.geometry().heads, 16u);  // the master's default, untouched
+    CHECK_EQ(d.geometry().heads, 16u);  // device 0's default, untouched
     d.hardReset(true);
     d.hardReset(false);
     h.select(1);
-    CHECK(d.geometry().heads != 4u);  // a hardware reset restores the slave's too
+    CHECK(d.geometry().heads != 4u);  // a hardware reset restores device 1's too
 }
 
 TEST(test_two_drives_standby_per_unit) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     h.command(1, CMD_STANDBY_IMMEDIATE);
@@ -282,20 +282,20 @@ TEST(test_two_drives_standby_per_unit) {
 }
 
 TEST(test_two_drives_select_ignored_mid_transfer) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     h.select(1);
     d.write(Reg::StatusCommand, CMD_IDENTIFY_DEVICE);
     CHECK(h.altStatus() & ST_DRQ);
-    h.select(0);  // forbidden mid-transfer: the slave keeps the bus
+    h.select(0);  // forbidden mid-transfer: device 1 keeps the bus
     CHECK_EQ(d.unit(), 1);
     uint16_t first = d.read(Reg::Data);
     CHECK_EQ(first, 0x0040);  // IDENTIFY word 0: fixed disk
 }
 
 TEST(test_two_drives_writes_refused_by_a_read_only_unit) {
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     CHECK(h.write(0, 10, 0x1234));
@@ -312,7 +312,7 @@ TEST(test_two_drives_bios_probe) {
     // A BIOS's detection after power-on: reset, then for each device select
     // it, wait for BSY to clear, check the registers echo, IDENTIFY, and read
     // the partition table. Both units answer as drives.
-    Device d(MASTER, &SLAVE);
+    Device d(DEVICE0, &DEVICE1);
     TaggedDisk m(0, 131072, true), s(1, 2048, false);
     TwoHost h{d, {&m, &s}};
     d.hardReset(true);
@@ -334,9 +334,9 @@ TEST(test_two_drives_bios_probe) {
     CHECK_EQ(found, 2);
 }
 
-TEST(test_lone_master_still_answers_for_device_1) {
+TEST(test_device_0_alone_still_answers_for_device_1) {
     // No device 1: unchanged, device 0 answers 00h for it and refuses its commands.
-    Device d(MASTER);
+    Device d(DEVICE0);
     TaggedDisk m(0, 131072, true);
     TwoHost h{d, {&m, &m}};
     CHECK(!d.hasDevice1());
@@ -365,5 +365,5 @@ void runTwoDrivesTests() {
     RUN(test_two_drives_select_ignored_mid_transfer);
     RUN(test_two_drives_writes_refused_by_a_read_only_unit);
     RUN(test_two_drives_bios_probe);
-    RUN(test_lone_master_still_answers_for_device_1);
+    RUN(test_device_0_alone_still_answers_for_device_1);
 }

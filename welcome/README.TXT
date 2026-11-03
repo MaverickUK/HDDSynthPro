@@ -36,8 +36,12 @@ THE SETTINGS FILE: HDDSYNTH.INI
 
 Plain text, one setting per line as key = value. # starts a comment.
 
-  image = HDDSYNTH.IMG   The disk image to serve, from the card's root
+  device0 = HDDSYNTH.IMG The disk image to serve, from the card's root
                          folder. none: the built-in 64 MB test disk.
+                         (Older files call it image, which still works.)
+  device1 = none         A second drive, so the computer sees two hard
+                         disks: an image, or a folder on the card served
+                         read-only (experimental). none: no second drive.
   mode = auto            The transfer mode to offer the computer: auto (the
                          fastest both support), or pio0-pio4, mdma0-mdma2
                          or udma0-udma6 to allow at most that mode.

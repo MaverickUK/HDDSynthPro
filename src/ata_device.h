@@ -3,7 +3,7 @@
 // write() for every register access the host makes, so both must stay fast
 // (no allocation, no I/O, no waiting).
 //
-// Device 0 (master) and, if given one, device 1 (slave): both units share
+// Device 0 and, if given one, device 1 (the second drive on the cable): both units share
 // the task file and one command engine, as only one command runs at a time
 // on a cable, and the selected unit's status, error and interrupt are
 // swapped into place when the host changes the Device register's DEV bit
@@ -63,7 +63,7 @@ constexpr uint8_t ER_IDNF = 0x10;  // address not found (out of range)
 constexpr uint8_t ER_ABRT = 0x04;  // command aborted (not supported, or a write's store failed)
 
 // Device register bits
-constexpr uint8_t DEV_DEV = 0x10;  // 1 = device 1 (slave) selected
+constexpr uint8_t DEV_DEV = 0x10;  // 1 = device 1 selected
 constexpr uint8_t DEV_LBA = 0x40;  // 1 = LBA addressing, 0 = CHS
 
 // Device Control register bits
@@ -150,7 +150,7 @@ struct CommandInfo {
 
 class Device {
 public:
-    // `device1`: the slave's identity, or nullptr for a lone master.
+    // `device1`: device 1's identity, or nullptr for device 0 alone.
     explicit Device(const IdentifyInfo& info, const IdentifyInfo* device1 = nullptr);
     bool hasDevice1() const { return has_device1_; }
 

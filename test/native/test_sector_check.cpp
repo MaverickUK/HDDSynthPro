@@ -427,7 +427,7 @@ TEST(test_sector_check_identify_of_either_unit) {
     Checker c(gen_disk::DEFAULT_SECTORS);
     Observer o;
     std::vector<uint16_t> id0 = identifyWords(), id1(256);
-    buildIdentify(IdentifyInfo{"HDDSYNTH PRO S", "HSP-000001-S", "0.11.0", 2048}, id1.data());
+    buildIdentify(IdentifyInfo{"HDDSYNTH PRO D1", "HSP-000001-D1", "0.11.0", 2048}, id1.data());
     c.setIdentify(id0.data());
     c.setIdentify(id1.data(), 1);
     CHECK_EQ(feed(c, o, id0), 0);

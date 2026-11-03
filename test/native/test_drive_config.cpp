@@ -25,7 +25,7 @@ static std::string edited(const std::string& text, const char* key, const char* 
 
 TEST(test_config_defaults) {
     Config c = parsed("");
-    CHECK_STR(std::string(c.image), "HDDSYNTH.IMG");
+    CHECK_STR(std::string(c.device0), "HDDSYNTH.IMG");
     CHECK(c.mode == Mode::Auto);
     CHECK_EQ(c.warning_count, size_t(0));
 }
@@ -33,7 +33,7 @@ TEST(test_config_defaults) {
 TEST(test_config_default_file_is_the_defaults) {
     const char* f = drive_config::defaultFile();
     Config c = parsed(f);
-    CHECK_STR(std::string(c.image), "HDDSYNTH.IMG");
+    CHECK_STR(std::string(c.device0), "HDDSYNTH.IMG");
     CHECK(c.mode == Mode::Auto);
     CHECK_EQ(c.dma, drive_config::DEFAULT_DMA);
     CHECK_EQ(c.write_behind, drive_config::DEFAULT_WRITE_BEHIND);
@@ -44,8 +44,8 @@ TEST(test_config_default_file_is_the_defaults) {
 }
 
 TEST(test_config_reads_both_keys) {
-    Config c = parsed("image = GAMES.IMG\nmode = pio0\n");
-    CHECK_STR(std::string(c.image), "GAMES.IMG");
+    Config c = parsed("device0 = GAMES.IMG\nmode = pio0\n");
+    CHECK_STR(std::string(c.device0), "GAMES.IMG");
     CHECK(c.mode == Mode::Pio0);
     CHECK_EQ(c.warning_count, size_t(0));
 }
@@ -55,31 +55,31 @@ TEST(test_config_as_notepad_writes_it) {
     // comments, a section header and a quoted value.
     Config c = parsed("\xEF\xBB\xBF# settings\r\n[drive]\r\n  IMAGE=\"Work Disk.img\"   # mine\r\n"
                       "Mode\t=  AUTO ; not a comment here\r\n; a comment line\r\n");
-    CHECK_STR(std::string(c.image), "Work Disk.img");
+    CHECK_STR(std::string(c.device0), "Work Disk.img");
     CHECK_EQ(c.warning_count, size_t(1));  // "AUTO ; not..." isn't a mode
     c = parsed("\xEF\xBB\xBFmode = AUTO\r\nimage = DISK#1.IMG # the # in the name stays\r\n");
     CHECK(c.mode == Mode::Auto);
-    CHECK_STR(std::string(c.image), "DISK#1.IMG");
+    CHECK_STR(std::string(c.device0), "DISK#1.IMG");
     CHECK_EQ(c.warning_count, size_t(0));
 }
 
 TEST(test_config_mistakes_are_reported_and_skipped) {
-    Config c = parsed("colour = blue\nimage = ../etc/x.img\nmode = turbo\njust words\n");
-    CHECK_STR(std::string(c.image), "HDDSYNTH.IMG");  // the bad name is ignored
+    Config c = parsed("colour = blue\ndevice0 = ../etc/x.img\nmode = turbo\njust words\n");
+    CHECK_STR(std::string(c.device0), "HDDSYNTH.IMG");  // the bad name is ignored
     CHECK(c.mode == Mode::Auto);
     CHECK_EQ(c.warning_count, size_t(4));
     CHECK(std::strstr(c.warnings[0], "line 1") && std::strstr(c.warnings[0], "colour"));
     CHECK(std::strstr(c.warnings[1], "line 2"));
     CHECK(std::strstr(c.warnings[2], "turbo"));
     CHECK(std::strstr(c.warnings[3], "line 4"));
-    c = parsed("image =\nimage = HDDSYNTH.INI\n");  // empty, and the settings file itself
-    CHECK_STR(std::string(c.image), "HDDSYNTH.IMG");
-    CHECK_EQ(c.warning_count, size_t(3));  // two bad names, and image set twice
+    c = parsed("device0 =\ndevice0 = HDDSYNTH.INI\n");  // empty, and the settings file itself
+    CHECK_STR(std::string(c.device0), "HDDSYNTH.IMG");
+    CHECK_EQ(c.warning_count, size_t(3));  // two bad names, and device0 set twice
 }
 
 TEST(test_config_last_setting_counts) {
-    Config c = parsed("image = A.IMG\nimage = B.IMG\n");
-    CHECK_STR(std::string(c.image), "B.IMG");
+    Config c = parsed("device0 = A.IMG\ndevice0 = B.IMG\n");
+    CHECK_STR(std::string(c.device0), "B.IMG");
     CHECK_EQ(c.warning_count, size_t(1));
 }
 
@@ -148,7 +148,7 @@ TEST(test_config_switches) {
 
 TEST(test_config_switch_keys_editable) {
     CHECK(drive_config::isKey("write_behind") && drive_config::isKey("DMA") && drive_config::isKey("activity_link"));
-    CHECK(drive_config::isKey("image") && drive_config::isKey("mode"));
+    CHECK(drive_config::isKey("device0") && drive_config::isKey("image") && drive_config::isKey("mode"));
     CHECK(!drive_config::isKey("speed"));
     std::string e = edited(drive_config::defaultFile(), "write_behind", "off");
     Config c = parsed(e);
@@ -157,7 +157,7 @@ TEST(test_config_switch_keys_editable) {
     CHECK_EQ(c.warning_count, size_t(0));
     CHECK(e.find("faster writes") != std::string::npos);  // its comment kept
     // A key the file doesn't have yet is added at the end.
-    std::string a = edited("image = A.IMG\n", "dma", "on");
+    std::string a = edited("device0 = A.IMG\n", "dma", "on");
     CHECK(parsed(a).dma);
 }
 
@@ -171,42 +171,42 @@ TEST(test_config_many_mistakes_keep_the_first_few) {
 
 TEST(test_config_set_key_keeps_comments) {
     std::string f = drive_config::defaultFile();
-    std::string g = edited(f, "image", "GAMES.IMG");
-    CHECK_STR(std::string(parsed(g).image), "GAMES.IMG");
+    std::string g = edited(f, "device0", "GAMES.IMG");
+    CHECK_STR(std::string(parsed(g).device0), "GAMES.IMG");
     CHECK(g.find("# The disk image to serve") != std::string::npos);  // comments kept
-    CHECK(g.find("image = GAMES.IMG\r\n") != std::string::npos);      // line ending kept
+    CHECK(g.find("device0 = GAMES.IMG\r\n") != std::string::npos);    // line ending kept
     CHECK_EQ(g.size(), f.size() - std::strlen("HDDSYNTH.IMG") + std::strlen("GAMES.IMG"));
     // A trailing comment and the key's own spelling stay; quotes are replaced.
-    CHECK_STR(edited("Image = \"Old.img\"  # mine\n", "image", "New.img"), "Image = New.img  # mine\n");
+    CHECK_STR(edited("Device0 = \"Old.img\"  # mine\n", "device0", "New.img"), "Device0 = New.img  # mine\n");
     CHECK_STR(edited("mode=pio0\n", "mode", "auto"), "mode=auto\n");
 }
 
 TEST(test_config_set_key_adds_a_missing_one) {
-    CHECK_STR(edited("image = A.IMG\n", "mode", "pio0"), "image = A.IMG\nmode = pio0\n");
-    CHECK_STR(edited("image = A.IMG\r\n", "mode", "pio0"), "image = A.IMG\r\nmode = pio0\r\n");
-    CHECK_STR(edited("image = A.IMG", "mode", "pio0"), "image = A.IMG\nmode = pio0\n");  // no final newline
-    CHECK_STR(edited("", "image", "A.IMG"), "image = A.IMG\n");
+    CHECK_STR(edited("device0 = A.IMG\n", "mode", "pio0"), "device0 = A.IMG\nmode = pio0\n");
+    CHECK_STR(edited("device0 = A.IMG\r\n", "mode", "pio0"), "device0 = A.IMG\r\nmode = pio0\r\n");
+    CHECK_STR(edited("device0 = A.IMG", "mode", "pio0"), "device0 = A.IMG\nmode = pio0\n");  // no final newline
+    CHECK_STR(edited("", "device0", "A.IMG"), "device0 = A.IMG\n");
     // The line that counts (the last) is the one changed.
-    CHECK_STR(edited("image = A\nimage = B\n", "image", "C"), "image = A\nimage = C\n");
+    CHECK_STR(edited("device0 = A\ndevice0 = B\n", "device0", "C"), "device0 = A\ndevice0 = C\n");
 }
 
 TEST(test_config_set_key_refuses) {
     char out[8];
     CHECK_EQ(drive_config::setKey("", 0, "colour", "blue", out, sizeof out), size_t(0));  // unknown key
-    CHECK_EQ(drive_config::setKey("", 0, "image", "A_LONG_NAME.IMG", out, sizeof out), size_t(0));  // no room
+    CHECK_EQ(drive_config::setKey("", 0, "device0", "A_LONG_NAME.IMG", out, sizeof out), size_t(0));  // no room
 }
 
 TEST(test_config_image_none) {
-    // `image = none`: the built-in disk, in any case, with no warning.
-    for (const char* line : {"image = none", "image = NONE", "Image = None"}) {
+    // `device0 = none`: the built-in disk, in any case, with no warning.
+    for (const char* line : {"device0 = none", "device0 = NONE", "Device0 = None", "image = none"}) {
         Config c = parsed(line);
         CHECK(!drive_config::servesImage(c));
         CHECK_EQ(c.warning_count, size_t(0));
     }
     CHECK(drive_config::servesImage(parsed("")));                     // the default image
-    CHECK(drive_config::servesImage(parsed("image = NONE.IMG")));     // a file that starts with "none"
-    CHECK(drive_config::servesImage(parsed("image = non")));
-    CHECK_STR(edited("image = HDDSYNTH.IMG\r\n", "image", "none"), "image = none\r\n");  // what console E writes
+    CHECK(drive_config::servesImage(parsed("device0 = NONE.IMG")));   // a file that starts with "none"
+    CHECK(drive_config::servesImage(parsed("device0 = non")));
+    CHECK_STR(edited("device0 = HDDSYNTH.IMG\r\n", "device0", "none"), "device0 = none\r\n");  // what console E writes
 }
 
 // isa = on: IORDY from the strobe, for ISA cards (an ICL 386, 0.21.0).
@@ -266,28 +266,63 @@ TEST(test_config_seek_timing) {
     CHECK_EQ(c.warning_count, size_t(0));
 }
 
-TEST(test_config_slave) {
+TEST(test_config_device1) {
     Config c = parsed("");
-    CHECK(!drive_config::hasSlave(c));  // no device 1 by default
-    c = parsed("image = DOS.IMG\nslave = GAMES\n");
-    CHECK(drive_config::hasSlave(c));
-    CHECK_STR(std::string(c.slave), "GAMES");
-    CHECK_STR(std::string(c.image), "DOS.IMG");
+    CHECK(!drive_config::hasDevice1(c));  // no device 1 by default
+    c = parsed("device0 = DOS.IMG\ndevice1 = GAMES\n");
+    CHECK(drive_config::hasDevice1(c));
+    CHECK_STR(std::string(c.device1), "GAMES");
+    CHECK_STR(std::string(c.device0), "DOS.IMG");
     CHECK_EQ(c.warning_count, size_t(0));
-    c = parsed("slave = SECOND.IMG\n");
-    CHECK_STR(std::string(c.slave), "SECOND.IMG");
-    c = parsed("slave = GAMES\nslave = none\n");
-    CHECK(!drive_config::hasSlave(c));  // the last one counts
+    c = parsed("device1 = SECOND.IMG\n");
+    CHECK_STR(std::string(c.device1), "SECOND.IMG");
+    c = parsed("device1 = GAMES\ndevice1 = none\n");
+    CHECK(!drive_config::hasDevice1(c));  // the last one counts
     CHECK_EQ(c.warning_count, size_t(1));
-    c = parsed("slave = GAMES/DOS\n");  // the root folder only
-    CHECK(!drive_config::hasSlave(c));
+    c = parsed("device1 = GAMES/DOS\n");  // the root folder only
+    CHECK(!drive_config::hasDevice1(c));
     CHECK_EQ(c.warning_count, size_t(1));
-    CHECK(drive_config::isKey("slave"));
-    CHECK(edited("image = A.IMG\n", "slave", "GAMES").find("slave = GAMES") != std::string::npos);
+    CHECK(drive_config::isKey("device1"));
+    CHECK(!drive_config::isKey("slave"));
+    CHECK_EQ(parsed("slave = GAMES\n").warning_count, size_t(1));  // not a key
+    CHECK(edited("device0 = A.IMG\n", "device1", "GAMES").find("device1 = GAMES") != std::string::npos);
+    // The default file has no device 1.
+    CHECK(!drive_config::hasDevice1(parsed(drive_config::defaultFile())));
+}
+
+// `image`, device0's old name (up to 0.28.0), still works; device0 counts over it.
+TEST(test_config_image_is_device0s_old_name) {
+    Config c = parsed("image = OLD.IMG\n");
+    CHECK_STR(std::string(c.device0), "OLD.IMG");
+    CHECK_EQ(c.warning_count, size_t(0));
+    c = parsed("device0 = NEW.IMG\nimage = OLD.IMG\n");  // device0 first
+    CHECK_STR(std::string(c.device0), "NEW.IMG");
+    CHECK_EQ(c.warning_count, size_t(1));
+    CHECK(std::strstr(c.warnings[0], "old name"));
+    c = parsed("image = OLD.IMG\ndevice0 = NEW.IMG\n");  // device0 last
+    CHECK_STR(std::string(c.device0), "NEW.IMG");
+    CHECK_EQ(c.warning_count, size_t(1));
+    // Console E, either name: the old line is changed in place, under the new name.
+    CHECK_STR(edited("# disk\nimage = OLD.IMG  # mine\nmode = auto\n", "device0", "NEW.IMG"),
+              "# disk\ndevice0 = NEW.IMG  # mine\nmode = auto\n");
+    CHECK_STR(edited("Image=\"OLD.IMG\"\r\n", "image", "none"), "device0=none\r\n");
+    CHECK_STR(edited("", "image", "A.IMG"), "device0 = A.IMG\n");
+    // With both, the device0 line is the one changed, wherever it is.
+    CHECK_STR(edited("device0 = A\nimage = B\n", "image", "C"), "device0 = C\nimage = B\n");
+    CHECK_STR(edited("image = A\ndevice0 = B\nimage = D\n", "device0", "C"),
+              "image = A\ndevice0 = C\nimage = D\n");
+    // A file from 0.28.0 or earlier, edited with E, ends up using only the new name.
+    std::string old = "# HDDSynthPro settings\r\nimage = ICL386MB.IMG\r\nisa = on\r\n";
+    std::string now = edited(old, "device0", "none");
+    CHECK(now.find("image") == std::string::npos);
+    CHECK(!drive_config::servesImage(parsed(now)));
+    CHECK(parsed(now).isa);
+    CHECK_EQ(parsed(now).warning_count, size_t(0));
 }
 
 void runDriveConfigTests() {
-    RUN(test_config_slave);
+    RUN(test_config_device1);
+    RUN(test_config_image_is_device0s_old_name);
     RUN(test_config_isa);
     RUN(test_config_seek_timing);
     RUN(test_config_image_none);

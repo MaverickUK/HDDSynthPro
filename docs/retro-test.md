@@ -18,7 +18,7 @@ Two passes, ideally on separate evenings:
 With the rig on the USB adapter as usual:
 
 - [ ] Console `h`: `READY HDDSynthPro 0.17.1 slice3` (or later).
-- [ ] `E image = none`, Enter; `E mode = pio0`, Enter; `!`. Then `S`: `CONFIG ... image=none mode=pio0` and `dma=off`.
+- [ ] `E device0 = none`, Enter; `E mode = pio0`, Enter; `!`. Then `S`: `CONFIG ... device0=none mode=pio0` and `dma=off`.
 - [ ] `K` (creates `HDDBENCH.IMG`, 64 MB of zeros, if it isn't there yet), for pass 2.
 
 `pio0` offers only the slowest mode, so a BIOS that sets its controller from the IDENTIFY block can't choose a timing the drive hasn't been tried at with this controller. `dma` stays off: a 486's ISA or VLB controller has no multiword DMA anyway.
@@ -28,7 +28,7 @@ With the rig on the USB adapter as usual:
 The BB48 has no buffers. Its pins are only 5 V tolerant while it's powered, and the PC's controller drives the bus whenever the PC is on, so **the BB48 is powered whenever the PC is**:
 
 - [ ] Everything off. Plug the cable into the PC's IDE header, **red stripe to pin 1**.
-- [ ] Put the drive **alone on its channel**, as master: the firmware doesn't do master/slave yet (no DASP#/PDIAG# handshake). If the PC boots from its own hard disk, use the secondary channel for the BB48; otherwise boot from floppy.
+- [ ] Put the drive **alone on its channel**, as device 0 (the master): it can't share a cable with a real drive (no DASP#/PDIAG# handshake). If the PC boots from its own hard disk, use the secondary channel for the BB48; otherwise boot from floppy.
 - [ ] **Power the BB48 first** (the laptop's USB). Start the console logger: `python3 scripts/retro_log.py 486-pass1` (from the repo, with `host/requirements.txt` installed). It saves every line to `host/runs/retro-<date>-<time>-486-pass1.log`, and shows resets, commands other than reads and writes, errors and `NOIORDY`/`BUSERR`/`STUCK`/`SLOWREAD` lines (marked `!!`), plus a summary of `s` every minute and whenever you press Enter. Type console commands as usual (`S`, `p`, `E key = value`); `q` quits. It prints the READY line on start.
 - [ ] **Then switch the PC on.**
 - [ ] When you're done: **PC off first**, then the BB48's USB. Never unplug the BB48 while the PC is on.
@@ -59,7 +59,7 @@ The test disk holds a pattern computed from each LBA, with no partitions or file
 
 On the console (the PC off, or at least not using the disk):
 
-- [ ] `E image = HDDBENCH.IMG`, Enter; `E mode = auto`, Enter; `!`. `S`: `serving=HDDBENCH.IMG`, and `mode=auto` (PIO up to mode 3). Use `E image`, not `J`: `J` is forgotten when the BB48 loses power, and it would serve `HDDSYNTH.IMG` next time.
+- [ ] `E device0 = HDDBENCH.IMG`, Enter; `E mode = auto`, Enter; `!`. `S`: `serving=HDDBENCH.IMG`, and `mode=auto` (PIO up to mode 3). Use `E device0`, not `J`: `J` is forgotten when the BB48 loses power, and it would serve `HDDSYNTH.IMG` next time.
 - [ ] Reboot the PC; it detects the drive again (the geometry is the same, 64 MB). Note the mode it sets: `SET_FEATURES 3 ...` (`8` = PIO 0, `9`-`11` = PIO 1-3). Many 486 BIOSes never send it, and stay at their default timing.
 - [ ] `FDISK`, a primary partition, active; reboot; `FORMAT C: /S`. Boot from it.
 - [ ] Copy files on and off; time copying the large file (from floppy to C: is limited by the floppy; C: to C: is the disk's).
@@ -70,7 +70,7 @@ Write-behind is on, so a power cut in the few ms while a sector is being stored 
 
 ## 6. Afterwards, back on the bench
 
-- [ ] `E image = HDDSYNTH.IMG`, `E mode = auto`, `!`: the rig as it was.
+- [ ] `E device0 = HDDSYNTH.IMG`, `E mode = auto`, `!`: the rig as it was.
 - [ ] The logs, the `s` lines and the photos come back to the repo: `host/runs/` for the logs, the results into [speed-log.md](speed-log.md) and `CHANGELOG.md`. Note the PC: CPU, the board or the IDE card (ISA, VLB or PCI), and the BIOS make and date.
 
 ## If something fails

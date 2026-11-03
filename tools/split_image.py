@@ -1,7 +1,7 @@
 """Copies a disk or an image into a split image that a FAT32 card can hold:
 NAME.IMG, then NAME.I01, NAME.I02... of at most 4,095 MiB each (FAT32's file
 limit is 4 GiB less a byte; parts must be whole sectors). The drive serves
-the parts as one disk when HDDSYNTH.INI says `image = NAME.IMG`
+the parts as one disk when HDDSYNTH.INI says `device0 = NAME.IMG`
 (src/image_parts.h).
 
 Usage: python3 tools/split_image.py SOURCE DEST_FOLDER NAME.IMG
