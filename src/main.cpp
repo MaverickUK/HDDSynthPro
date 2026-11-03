@@ -1,12 +1,15 @@
 // HDDSynthPro IDE drive emulator prototype.
 //
-// Two builds (FIRMWARE_SLICE, set in platformio.ini):
+// Three builds (FIRMWARE_SLICE and HDDPRO_CDROM, set in platformio.ini):
 //   bb48        slice 0, listen only: core 1 drains the PIO listener and
 //               records every bus access. Every pin stays an input.
 //   bb48_drive  slices 1-3, the drive: core 1 serves the bus (ide_bus) and
 //               runs the ATA device; core 0 fetches sectors for it from
 //               the SD card's image, the welcome disk or the test disk.
 //               Commands are traced; raw accesses on request (console `t`).
+//   bb48_cdrom  the drive as a CD-ROM drive (docs/atapi.md, exploratory):
+//               the same, with atapi::Device serving an ISO from the card,
+//               the generated test disc, or no disc.
 // In both, core 1 records events into the trace ring and core 0 owns USB
 // serial: it prints the trace and runs the console.
 #include <Arduino.h>
@@ -19,6 +22,7 @@
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"
+#include "drive_device.h"  // HDDPRO_CDROM
 #include "short_test.h"
 #include "spsc_ring.h"
 #include "trace_format.h"
@@ -40,6 +44,9 @@
 #include "seek_timing.h"
 #include "sentence.h"
 #include "ata_device.h"
+#if HDDPRO_CDROM
+#include "atapi_device.h"
+#endif
 #include "block_source.h"
 #include "bus_observer.h"
 #include <hardware/watchdog.h>
@@ -163,6 +170,9 @@ static SharedFlag g_command_active{false};
 // Core 1 starts first, so it waits for it: IDENTIFY reports the real size.
 // The PIO mode to offer (HDDSYNTH.INI's `mode`) is set before it.
 static std::atomic<uint32_t> g_disk_sectors{0};
+#if HDDPRO_CDROM
+static std::atomic<bool> g_disk_chosen{false};  // the CD-ROM build: a drive with no disc has 0 sectors
+#endif
 static std::atomic<uint8_t> g_pio_mode{0};
 static std::atomic<uint8_t> g_mdma_mode{NO_DMA};       // set by core 1 at start-up (setup1)
 static std::atomic<uint8_t> g_mode_asked{0};            // HDDSYNTH.INI's mode, for core 1
@@ -178,7 +188,7 @@ static const char* g_geometry_from = "auto";  // "set", "partition table" or "au
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
 __attribute__((always_inline)) static inline IdentifyInfo driveIdentity() {
     uint32_t g = g_geometry.load(std::memory_order_relaxed);
-    return IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
+    return IdentifyInfo{HDDPRO_CDROM ? "HDDSYNTH PRO CD-ROM" : "HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
                         g_disk_sectors.load(std::memory_order_acquire),
                         g_pio_mode.load(std::memory_order_relaxed),
                         g_mdma_mode.load(std::memory_order_relaxed),
@@ -250,13 +260,18 @@ void setup1() {
     }
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
+#if HDDPRO_CDROM
+    while (!g_disk_chosen.load(std::memory_order_acquire)) tight_loop_contents();  // no disc: 0 sectors
+#else
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
+#endif
     ide_bus::begin(g_isa.load(), g_early.load(), g_iordy.load());
     busSwitchesOn();
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
-    g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
-                                                    g_dmarq_wired.load(), g_dma_auto.load()),
+    g_mdma_mode.store(HDDPRO_CDROM ? NO_DMA  // the CD-ROM drive offers PIO only, for now
+                                   : drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
+                                                                   g_dmarq_wired.load(), g_dma_auto.load()),
                       std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
     bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity());
@@ -280,7 +295,7 @@ void setup1() {
 // A burst that ended goes back to the device; a new one starts when the
 // device has a sector (or buffer) for it; and when the command is over, done
 // or cut short (RESET#, SRST, a new command, an error), ide_dma tidies up.
-CORE1_RAM static void serviceDma(ata::Device& dev) {
+CORE1_RAM static void serviceDma(DriveDevice& dev) {
     if (ide_dma::burstRunning()) {
         if (!ide_dma::burstDone()) {
             if (!dev.dmaCommand()) ide_dma::endCommand();  // cut short mid-burst
@@ -298,7 +313,7 @@ CORE1_RAM static void serviceDma(ata::Device& dev) {
 }
 
 // Posts the device's fetch to core 0, once per fetch.
-CORE1_RAM static void postFetch(ata::Device& dev, uint32_t& posted_fetch) {
+CORE1_RAM static void postFetch(DriveDevice& dev, uint32_t& posted_fetch) {
     uint32_t id = dev.pendingFetchId();
     if (id == 0 || id == posted_fetch) return;  // the common case, without a call
     ata::Fetch fetch;
@@ -308,7 +323,7 @@ CORE1_RAM static void postFetch(ata::Device& dev, uint32_t& posted_fetch) {
 // BSY for a while: waking from standby, or after a data-out block. Step 3 of
 // loop1, and early_answers' tight bus loop runs it too, since the host may
 // poll status throughout the hold and the loop never goes quiet to return.
-CORE1_RAM static void busyTimers(ata::Device& dev) {
+CORE1_RAM static void busyTimers(DriveDevice& dev) {
     static uint32_t wake_start_us = 0;  // 0: not timing a wake
     static uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
     if (!dev.dataOutHeld()) {
@@ -331,8 +346,12 @@ CORE1_RAM static void busyTimers(ata::Device& dev) {
 
 CORE1_RAM static void recordBus(uint32_t sample) { record(TraceKind::Bus, sample); }
 
-CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
+CORE1_RAM static void recordCommandStart(uint32_t t_us, const DriveCommandInfo& c) {
+#if HDDPRO_CDROM
+    record(commandStartEvent(t_us, c.command, c.lba, c.count, c.packet));
+#else
     record(commandStartEvent(t_us, c.command, c.lba, c.count));
+#endif
 }
 
 // early_answers: a queued command, run from the tight bus loop (ide_bus::
@@ -349,7 +368,7 @@ static uint32_t g_early_command_start_us = 0;
 // adapter's back-to-back reads, 0.27.0).
 static uint32_t g_done_recorded = 0;
 
-CORE1_RAM static void recordDone(ata::Device& dev) {
+CORE1_RAM static void recordDone(DriveDevice& dev) {
     if (dev.commandsCompleted() == g_done_recorded) return;
     g_done_recorded = dev.commandsCompleted();
     if (g_done_recorded == dev.commandsStarted()) g_command_active.store(false);
@@ -358,12 +377,12 @@ CORE1_RAM static void recordDone(ata::Device& dev) {
 }
 
 // The tight loop's idle work: the BSY timers, and DONE for a command just completed.
-CORE1_RAM static void earlyIdle(ata::Device& dev) {
+CORE1_RAM static void earlyIdle(DriveDevice& dev) {
     busyTimers(dev);
     recordDone(dev);
 }
 
-CORE1_RAM static void runCommandEarly(ata::Device& dev) {
+CORE1_RAM static void runCommandEarly(DriveDevice& dev) {
     recordDone(dev);  // the last command's DONE before this one's CMD
     dev.setReadAhead(g_read_ahead.load());
     dev.setWriteBehind(g_write_behind.load());
@@ -387,7 +406,7 @@ CORE1_RAM static void runCommandEarly(ata::Device& dev) {
 // check_core1_ram.py's one-offs).
 static SharedFlag g_absent{false};
 
-__attribute__((noinline)) static void stayAbsent(ata::Device& dev) {
+__attribute__((noinline)) static void stayAbsent(DriveDevice& dev) {
     dev.hardReset(true);
     ide_bus::stop();
     ide_dma::endCommand();
@@ -404,11 +423,11 @@ CORE1_RAM void loop1() {
     // served back to back, and only when it is empty does core 1 do one small
     // bookkeeping step before looking again. So a read waits for one step at
     // most; iordy_timer.pio measures how long the host actually waits.
-    static ata::Device dev(driveIdentity());
+    static DriveDevice dev(driveIdentity());
     uint32_t started = dev.commandsStarted();
     g_done_recorded = dev.commandsCompleted();
     uint32_t command_start_us = 0;
-    ata::CommandInfo start_info{};  // the command whose CMD line is still to record
+    DriveCommandInfo start_info{};  // the command whose CMD line is still to record
     bool start_unrecorded = false;
     bool quiet = false;  // a command just started: bookkeeping waits (COMMAND_QUIET_US)
     uint32_t posted_fetch = 0;
@@ -600,6 +619,16 @@ static BlockSource* g_disk = &g_overlay;
 static const char* g_disk_name = "welcome";
 static bool g_test_disk = false;  // the generated disk: the bus observer can check its data
 
+#if HDDPRO_CDROM
+// The CD-ROM build with no ISO to serve: a drive with no disc in it.
+class EmptyDrive : public BlockSource {
+public:
+    uint32_t sectors() const override { return 0; }
+    bool read(uint32_t, uint16_t[256]) override { return false; }
+};
+static EmptyDrive g_no_disc;
+#endif
+
 // The BB48's LED as the drive's activity light, like a hard disk's: lit while
 // a command runs, and for at least LED_MIN_MS after any command starts. The
 // activity link sends the same busy flag.
@@ -676,6 +705,21 @@ static void chooseDisk() {
         g_config_state = truncated ? "truncated" : "present";
     }
     const char* why = "";
+#if HDDPRO_CDROM
+    // The CD-ROM build: the test disc after console `T` or with `cdrom = none`;
+    // else the ISO HDDSYNTH.INI names (HDDSYNTH.ISO by default); else no disc.
+    g_disk = &g_no_disc;
+    g_disk_name = "no disc";
+    if (testDiskRequested() || (sd_card::mounted() && !drive_config::servesDisc(g_config))) {
+        g_disk = &g_overlay;  // read-only here, so the overlay stays empty
+        useTestDisk();
+    } else if (sd_card::mounted()) {
+        if (useImage(g_config.cdrom, why))
+            g_disk_name = "disc";
+        else
+            std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.cdrom, why);
+    }
+#else
     if (testDiskRequested()) {
         useTestDisk();  // the card, if any, left alone
     } else if (!sd_card::mounted()) {
@@ -692,6 +736,7 @@ static void chooseDisk() {
             useImage(drive_config::DEFAULT_IMAGE, why))
             g_disk_name = "image";
     }
+#endif
     g_disk_ms = millis() - start;
     g_pio_mode.store(drive_config::pioModeOffered(g_config.mode), std::memory_order_relaxed);
     g_mode_asked.store(uint8_t(g_config.mode), std::memory_order_relaxed);  // core 1 decides DMA from it
@@ -727,6 +772,9 @@ static void chooseDisk() {
     // A host that ignores IORDY reads whatever is on the bus: check image data on the cable too.
     bus_observer::setImageChecks(g_config.early_answers && !g_test_disk);
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
+#if HDDPRO_CDROM
+    g_disk_chosen.store(true, std::memory_order_release);
+#endif
 }
 
 // Console `E`: sets one setting in HDDSYNTH.INI from "key = value", keeping
@@ -788,6 +836,10 @@ static void printConfig() {
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name,
                   sd_card::imageContiguous() ? "yes" : "no", sd_card::imageExtents(), sd_card::imageParts());
     if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
+#if HDDPRO_CDROM
+    Serial.printf("CONFIG cdrom=%s serving=%s frames=%lu\n", g_config.cdrom, g_disk_name,
+                  (unsigned long)(g_disk->sectors() / atapi::SECTORS_PER_FRAME));
+#endif
     Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s early_answers=%s iordy=%s\n",
                   g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
@@ -1349,7 +1401,7 @@ static void printSlowReads() {
 #endif
 
 static void printReady() {
-    Serial.printf("READY HDDSynthPro %s slice%d\n", FIRMWARE_VERSION, FIRMWARE_SLICE);
+    Serial.printf("READY HDDSynthPro %s slice%d%s\n", FIRMWARE_VERSION, FIRMWARE_SLICE, HDDPRO_CDROM ? " cdrom" : "");
 }
 
 // Current level of every bus line: a wiring check. With the adapter powered

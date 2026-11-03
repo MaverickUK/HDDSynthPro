@@ -6,6 +6,8 @@
 //   RESET <t_us> ASSERT|RELEASE
 //   STALL <t_us>
 //   CMD <t_us> <cmd> <name> <lba> <count>          a command started (drive builds)
+//                                                  (PACKET, the CD-ROM build: name is the
+//                                                  packet's, lba and count are frames)
 //   DONE <t_us> <cmd> <status> <error> <dur_us>    ...and completed
 // cmd, status and error are hex; lba and count decimal.
 // op is RD, WR or BOTH; block is CMD, CTL, NONE or BOTH; data and pins are hex.
@@ -24,13 +26,16 @@ struct TraceEvent {
     // CommandStart: the start LBA. CommandEnd: status | error << 8.
     uint32_t pins;
     TraceKind kind;
-    // CommandStart: command | count << 8. CommandEnd: command | duration_us << 8.
+    // CommandStart: command | count << 8 | packet opcode << 24 (PACKET only).
+    // CommandEnd: command | duration_us << 8.
     uint32_t extra = 0;
 };
 
 // Builders for the command events, so both sides agree on the packing.
-inline TraceEvent commandStartEvent(uint32_t t_us, uint8_t command, uint32_t lba, uint16_t count) {
-    return TraceEvent{t_us, lba, TraceKind::CommandStart, uint32_t(command) | (uint32_t(count) << 8)};
+inline TraceEvent commandStartEvent(uint32_t t_us, uint8_t command, uint32_t lba, uint16_t count,
+                                    uint8_t packet = 0) {
+    return TraceEvent{t_us, lba, TraceKind::CommandStart,
+                      uint32_t(command) | (uint32_t(count) << 8) | (uint32_t(packet) << 24)};
 }
 inline TraceEvent commandEndEvent(uint32_t t_us, uint8_t command, uint8_t status, uint8_t error,
                                   uint32_t duration_us) {

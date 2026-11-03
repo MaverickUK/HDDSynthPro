@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace ata { class Device; }
+#include "drive_device.h"
 class FetchMailbox;
 
 namespace ide_bus {
@@ -26,7 +26,7 @@ void begin(bool isa, bool early, bool iordy = true);
 
 // Serves at most one register access. Call in a tight loop on core 1.
 // Returns true if there was one; `sample` gets the pin sample for the trace.
-bool serviceOnce(ata::Device& dev, uint32_t& sample);
+bool serviceOnce(DriveDevice& dev, uint32_t& sample);
 
 // The fast lane for a data-in block (the 256 words of a sector or IDENTIFY):
 // answers data reads straight from the device's buffer until the block is
@@ -40,10 +40,10 @@ bool serviceOnce(ata::Device& dev, uint32_t& sample);
 // to the device. So a read-ahead is under way while the host reads, it's in
 // when the block ends, and the next sector's DRQ comes at once; and a read
 // never waits behind more than one job, nor a status read behind any.
-bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
+bool serveDataIn(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
 // The same for ide_bus_early (`early_answers`), whose samples are requests and
 // read reports.
-bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
+bool serveDataInEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
 // early_answers' tight bus loop, after an access: serves accesses inline and
 // keeps fetches moving until the bus is quiet for `quiet_cycles` (core 1's
 // cycle counter), a command or data block needs the main loop, or RESET#
@@ -54,8 +54,8 @@ bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, u
 // return for one.
 // `bus`, if not null, records each access served (the raw trace), not the
 // answer requests.
-void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
-                   uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&),
+void serveBusEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
+                   uint32_t quiet_cycles, void (*timers)(DriveDevice&), void (*command)(DriveDevice&),
                    void (*bus)(uint32_t) = nullptr);
 
 // True while setDataReadDelay() is on.
@@ -74,7 +74,7 @@ void stop();
 
 // Drives INTRQ to match the device: high when asserted, low when not, and
 // released when the device doesn't drive it (ata::Device::intrqDriven).
-void updateIntrq(const ata::Device& dev);
+void updateIntrq(const DriveDevice& dev);
 
 // early_answers: lets IORDY go if the drive has held it cfg::IORDY_STALL_US
 // since a chip select with no strobe (the tight loops call it themselves;

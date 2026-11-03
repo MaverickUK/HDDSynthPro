@@ -160,6 +160,7 @@ bool dmaRefusedForWiring(Mode m, bool dmarq_wired) {
 
 void defaults(Config& out) {
     std::snprintf(out.image, sizeof out.image, "%s", DEFAULT_IMAGE);
+    std::snprintf(out.cdrom, sizeof out.cdrom, "%s", DEFAULT_CDROM);
     out.mode = Mode::Auto;
     out.dma = DEFAULT_DMA;
     out.write_behind = DEFAULT_WRITE_BEHIND;
@@ -231,7 +232,7 @@ bool parseGeometry(Span v, Geometry& g) {
 bool isKey(const char* key) {
     Span k{key, key + std::strlen(key)};
     if (equalsNoCase(k, "image") || equalsNoCase(k, "mode") || equalsNoCase(k, "seek_timing") ||
-        equalsNoCase(k, "geometry"))
+        equalsNoCase(k, "geometry") || equalsNoCase(k, "cdrom"))
         return true;
     for (const Switch& s : SWITCHES)
         if (equalsNoCase(k, s.key)) return true;
@@ -241,6 +242,7 @@ bool isKey(const char* key) {
 void parse(const char* text, size_t len, Config& out) {
     defaults(out);
     bool seen_image = false, seen_mode = false, seen_seek_timing = false, seen_geometry = false;
+    bool seen_cdrom = false;
     bool seen_switch[SWITCH_COUNT] = {};
     forEachLine(text, len, [&](int n, const Line& l) {
         if (l.blank) return;
@@ -258,6 +260,14 @@ void parse(const char* text, size_t len, Config& out) {
                 return;
             }
             std::snprintf(out.image, sizeof out.image, "%.*s", int(l.value.size()), l.value.begin);
+        } else if (equalsNoCase(l.key, "cdrom")) {
+            if (seen_cdrom) warn(out, "line %d: '%.*s' sets cdrom again; this one counts%s", n, l.key);
+            seen_cdrom = true;
+            if (!validImageName(l.value)) {
+                warn(out, "line %d: cdrom '%.*s' isn't a file name in the root folder; ignored%s", n, l.value);
+                return;
+            }
+            std::snprintf(out.cdrom, sizeof out.cdrom, "%.*s", int(l.value.size()), l.value.begin);
         } else if (equalsNoCase(l.key, "mode")) {
             if (seen_mode) warn(out, "line %d: '%.*s' sets mode again; this one counts%s", n, l.key);
             seen_mode = true;
@@ -338,13 +348,21 @@ size_t setKey(const char* text, size_t len, const char* key, const char* value, 
     return (n > 0 && size_t(n) < size) ? size_t(n) : 0;
 }
 
-bool servesImage(const Config& c) {
-    const char* a = c.image;
+namespace {
+
+// True unless `name` is `none`, in any case.
+bool notNone(const char* name) {
     const char* b = NO_IMAGE;
-    for (; *a && *b; ++a, ++b)
-        if (std::tolower(static_cast<unsigned char>(*a)) != *b) return true;
-    return *a || *b;  // a different length: some other name
+    for (; *name && *b; ++name, ++b)
+        if (std::tolower(static_cast<unsigned char>(*name)) != *b) return true;
+    return *name || *b;  // a different length: some other name
 }
+
+}  // namespace
+
+bool servesImage(const Config& c) { return notNone(c.image); }
+
+bool servesDisc(const Config& c) { return notNone(c.cdrom); }
 
 const char* defaultFile() {
     return "# HDDSynthPro settings. Changes take effect when the drive restarts.\r\n"

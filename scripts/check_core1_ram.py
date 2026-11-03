@@ -25,6 +25,7 @@ RAM = (0x20000000, 0x20082000)
 # Called by core 1 only at start-up or on a bus reset, never per access.
 ONE_OFFS = (
     "ata::Device::Device(",       # loop1's static device, constructed once
+    "atapi::Device::Device(",     # likewise, in the CD-ROM build
     "ide_bus::restart(",          # when the host releases RESET#
     "iordy_timer::requestReset(",  # likewise
     "stayAbsent(",                # console `V`: the drive goes silent, once per absence

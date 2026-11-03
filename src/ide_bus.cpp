@@ -8,6 +8,10 @@
 #include <hardware/structs/m33.h>
 
 #include "ata_device.h"
+#include "drive_device.h"
+#if HDDPRO_CDROM
+#include "atapi_device.h"
+#endif
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"
@@ -202,7 +206,7 @@ __attribute__((always_inline)) static inline void waitCycles(uint32_t cycles) {
 
 // Inlined into both callers: a call here costs every access its register
 // saves and restores, about 100 ns (0.8.1's worst read).
-__attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32_t sample) {
+__attribute__((always_inline)) static inline void serve(DriveDevice& dev, uint32_t sample) {
     if (s_early) sample = earlyAddress(sample);
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (s_early) {
@@ -233,7 +237,7 @@ __attribute__((always_inline)) static inline void serve(ata::Device& dev, uint32
     updateIntrq(dev);
 }
 
-CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
+CORE1_RAM bool serviceOnce(DriveDevice& dev, uint32_t& sample) {
     if (rxEmpty(s_pio, s_sm)) return false;
     sample = pio_sm_get(s_pio, s_sm);
     serve(dev, sample);
@@ -243,7 +247,7 @@ CORE1_RAM bool serviceOnce(ata::Device& dev, uint32_t& sample) {
 // The lane's rare case: an access mid-block that isn't a data read. Kept out
 // of line so the lane's loop keeps its values in registers (0.8.12 inline:
 // a third of data words held past 400 ns, against 2%).
-__attribute__((noinline)) CORE1_RAM static void serveOther(ata::Device& dev, uint32_t sample, uint16_t served) {
+__attribute__((noinline)) CORE1_RAM static void serveOther(DriveDevice& dev, uint32_t sample, uint16_t served) {
     if (bus::op(sample) == bus::Op::Read) {
         // A status poll (every sector boundary, with read-ahead): answer
         // first. Catching the device up can't change it: the block isn't
@@ -259,7 +263,7 @@ __attribute__((noinline)) CORE1_RAM static void serveOther(ata::Device& dev, uin
     serve(dev, sample);
 }
 
-CORE1_RAM bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
+CORE1_RAM bool serveDataIn(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
     const uint16_t* next;
     uint16_t left;
     if (!dev.dataInRemaining(next, left)) return true;
@@ -315,7 +319,7 @@ __attribute__((always_inline)) static inline bool rxWaiting(PIO pio, uint sm) {
 // catches the device up and is served as serviceOnce would.
 static constexpr uint32_t DATA_ADDRESS = bus::maskOf(cfg::PIN_CS1_N);  // CS0# low, CS1# high, DA2-0 = 0
 
-CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
+CORE1_RAM bool serveDataInEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
     const uint16_t* next;
     uint16_t left;
     if (!dev.dataInRemaining(next, left)) return true;
@@ -373,8 +377,8 @@ CORE1_RAM bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& 
 // ends while the host polls), until the bus has been quiet for `quiet_cycles`,
 // a command is queued, a data-in block starts (the fast lane's job), or
 // RESET# changes: the main loop's work. Not while the raw trace is on.
-CORE1_RAM void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
-                             uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&),
+CORE1_RAM void serveBusEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
+                             uint32_t quiet_cycles, void (*timers)(DriveDevice&), void (*command)(DriveDevice&),
                              void (*bus)(uint32_t)) {
     PIO pio = s_pio;
     uint sm = s_sm;
@@ -444,7 +448,7 @@ void setDataReadDelay(uint32_t ns) {
 static volatile uint32_t s_intrq_rises = 0;  // interrupts raised (driven high from low), for `s`
 static bool s_intrq_high = false;
 
-CORE1_RAM void updateIntrq(const ata::Device& dev) {
+CORE1_RAM void updateIntrq(const DriveDevice& dev) {
     bool high = dev.intrq() && dev.intrqDriven();
     if (high && !s_intrq_high) s_intrq_rises = s_intrq_rises + 1;
     s_intrq_high = high;

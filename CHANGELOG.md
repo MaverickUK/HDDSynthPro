@@ -2,6 +2,18 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.29.0] - 2026-11-03
+
+**Exploratory (branch `atapi-cdrom`), host-tested only; not yet on hardware.** A first CD-ROM drive: the MVP of [docs/atapi.md](docs/atapi.md)'s slices C1 and C2, a data disc over PIO. No audio, no DMA, no disc changes. The hard disk build is unchanged by it: its core 1 code is the same, instruction for instruction and address for address, as 0.28.0's (only the calls into flash for one-offs and the addresses of data moved, by 0x40 bytes, which keeps every word in its SRAM bank).
+
+### Added
+- **The `bb48_cdrom` build** (`-DHDDPRO_CDROM=1`): the drive as an ATAPI CD-ROM drive. `atapi::Device` (`src/atapi_device.*`) takes `ata::Device`'s place behind the same interface, picked per build by `src/drive_device.h`'s `DriveDevice`, so `ide_bus` and `loop1` are written once. It has the packet device's reset signature (14h/EBh), aborts IDENTIFY DEVICE with it, answers IDENTIFY PACKET DEVICE and DEVICE RESET, and runs PACKET in PIO: the 12-byte packet, data blocks of up to the host's byte count with an interrupt each, then the status phase; errors are CHECK CONDITION with the sense key in the Error register.
+- **The packet commands** (`src/mmc.*`, pure C++): TEST UNIT READY, REQUEST SENSE, INQUIRY, START STOP UNIT, PREVENT ALLOW MEDIUM REMOVAL, READ CAPACITY, READ(10), READ(12), SEEK(10), VERIFY(10), READ TOC (formats 0, 1 and 2, LBA or MSF), GET CONFIGURATION (the CD-ROM profile), GET EVENT STATUS NOTIFICATION (polled, media events), MODE SENSE(6) and (10) (pages 01h and 2Ah) and SET CD SPEED. A unit attention after power-on and each hardware reset, as a real drive gives.
+- **A disc read is one 512-byte DRQ block per sector fetched**: CD frame n is sectors 4n to 4n+3 of the image, so `ImageDisk` serves an ISO unchanged, and the fetch mailbox and core 1's fast lane carry the blocks. No read-ahead yet.
+- **`cdrom = NAME.ISO`** in `HDDSYNTH.INI` (`HDDSYNTH.ISO` by default; the hard disk build ignores it): the ISO to serve, or `none` (or console `T`) for the generated test disc, CD frame n being generated sectors 4n to 4n+3. No ISO: an empty drive. `CONFIG cdrom=... serving=... frames=...`.
+- The trace names a packet: `CMD <t> a0 READ_10 <frame> <frames>`. The READY line ends `slice3 cdrom`, and the hard disk's rig tests skip on that build. A first rig test, `-m cdrom` (`host/tests/test_cdrom.py`: the test disc read whole and at random), not yet run.
+- CI builds `bb48_cdrom` and runs `check_core1_ram.py` on it; it isn't part of a release.
+
 ## [0.28.0] - 2026-10-31
 
 **Not yet tried on hardware** (built while the rig was out of reach); host-tested only. On the same firmware, 0.27.0's automatic geometry booted the ICL 386's MS-DOS 5 image on the Evesham with its BIOS on auto and only `image =` set (7,476 sectors checked on the cable, 0 bad; core 1 released IORDY 43,490 times, harmlessly). And the ICL 386 booted MS-DOS 5 and ran games on all defaults, early answers with `isa = off`: core 1's IORDY release (0.27.0) took over from `iordy_watchdog.pio`, 44,002 times in the session. There the bus observer flagged 11 of 3,667 sectors falsely: the ISA card strobes DIOR# with no chip select (19.9 million times), which it counts as DMA words, losing its place in the sectors.

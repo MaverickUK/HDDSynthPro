@@ -18,6 +18,7 @@ SANITIZE="${SANITIZE:-address,undefined}"
     test/native/test_image_parts.cpp src/image_parts.cpp \
     test/native/test_media_watch.cpp src/media_watch.cpp \
     test/native/test_welcome_disk.cpp src/welcome_disk.cpp \
+    test/native/test_mmc.cpp test/native/test_atapi_device.cpp src/mmc.cpp src/atapi_device.cpp \
     src/trace_format.cpp src/identify.cpp src/ata_device.cpp src/short_test.cpp \
     -o .pio/native-tests/run_tests
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/classify_trace.cpp src/activity.cpp \

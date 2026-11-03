@@ -1,6 +1,21 @@
 # ATAPI CD-ROM: plan for a first exploration
 
-28 Oct 2026. A plan, nothing built yet. Branch `atapi-cdrom`.
+28 Oct 2026, planned. Branch `atapi-cdrom`.
+
+## Status (3 Nov 2026, 0.29.0): the MVP is built, host-tested only
+
+The firmware side of slices C1 and C2: the `bb48_cdrom` build serves the test disc or an ISO over PIO, and `test/run_native_tests.sh` drives `atapi::Device` through whole PACKET exchanges. **Nothing has run on hardware yet**, and slice C0 (does the NS1081 pass ATAPI at all?) is still the first thing to find out.
+
+Where it differs from the plan below:
+- **No templates.** `src/drive_device.h` makes `DriveDevice` an alias, `ata::Device` or `atapi::Device` per build, and `ide_bus` and `loop1` take a `DriveDevice&`. The hard disk build compiles to the same core 1 code as before, instruction for instruction at the same addresses (checked against 0.28.0's ELF). Only the calls into flash for one-offs (the linker's veneers, in a new order) and data addresses (0x40 bytes later, so every word stays in its SRAM bank) moved. `atapi::Device` has its own `CommandInfo` (with the packet's opcode) for the same reason: one more field in `ata::CommandInfo` lengthened `ata::Device::startCommand` by 4 bytes and moved everything after it.
+- **No ISO means no disc**, not the test disc: the drive answers NOT READY, "medium not present", as a real one with an empty tray does. The test disc is `cdrom = none` or console `T`.
+- **A few more commands** than the table: MODE SENSE(6), SEEK(10), VERIFY(10) and READ TOC's full TOC (format 2), cheap to answer and asked for by some hosts. GET EVENT STATUS NOTIFICATION reports "new media" once after power-on or a reset, then "no change". GET CONFIGURATION and GET EVENT STATUS NOTIFICATION report no unit attention, as MMC asks.
+- **Status after a reset is 00h** (DRDY clear until a command has run), and IDENTIFY PACKET DEVICE offers accelerated DRQ (the packet is wanted within 50 µs, with no interrupt): the drive sets DRQ at once. Both are for slice C0's trace to confirm.
+- **No read-ahead:** each 512-byte block is fetched under BSY once the host has read the one before. A 1x CD is 150 KB/s; this should manage several times that.
+
+To try it: `PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom`, with `E cdrom = none` and `!` (or `T`) for the test disc. On Windows, set `HDDPRO_CDROM_DEV=\\.\CdRom0`.
+
+**Beside the other explorations** (not merged, and kept apart on purpose): the two-drives idea (`docs/two-drives.md` on its own branch: a pair of devices behind one bus-facing object) could hold an `atapi::Device` as device 1 the same way it would a second `ata::Device`, since both have the same interface; that's where a hard disk and a CD on one cable would come from. A read-only disk built from a folder on the card could in time feed a disc too, with ISO 9660 in place of FAT. Neither is part of this MVP.
 
 ## Goal and scope
 

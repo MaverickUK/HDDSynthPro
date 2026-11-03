@@ -14,6 +14,7 @@
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
 //   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
+//   cdrom = HDDSYNTH.ISO   # the CD-ROM build only: the disc image; none: the test disc
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -35,6 +36,9 @@ constexpr const char* DEFAULT_IMAGE = "HDDSYNTH.IMG";
 // `image = none`: no image, the built-in 64 MB test disk (writes kept in RAM
 // until a restart), whose data the bus observer can check on the cable.
 constexpr const char* NO_IMAGE = "none";
+// The CD-ROM build's disc (docs/atapi.md): an ISO in the root folder, or
+// `cdrom = none` for the generated test disc. No such file: no disc in the drive.
+constexpr const char* DEFAULT_CDROM = "HDDSYNTH.ISO";
 constexpr size_t MAX_FILE = 4096;      // longer files are read this far, with a warning
 constexpr size_t MAX_NAME = 64;        // an image name, without the NUL
 constexpr size_t MAX_WARNINGS = 4;
@@ -99,6 +103,7 @@ constexpr bool DEFAULT_IORDY = true;
 
 struct Config {
     char image[MAX_NAME + 1];
+    char cdrom[MAX_NAME + 1];  // the CD-ROM build's disc; the hard disk build ignores it
     Mode mode = Mode::Auto;
     bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
@@ -125,6 +130,8 @@ void defaults(Config& out);
 
 // False for `image = none` (any case): serve the built-in disk, not an image.
 bool servesImage(const Config& c);
+// False for `cdrom = none`: the CD-ROM build serves the test disc.
+bool servesDisc(const Config& c);
 
 // `text` with `key` set to `value`, into `out` (NUL-terminated): the line
 // setting it is replaced in place, keeping its comment, or a new line is
