@@ -52,7 +52,7 @@ The Evesham (Athlon XP 2000+, PIO mode 3, `DOSBENCH.IMG` and HDDBENCH; [retro-te
 | Reads the host didn't wait for | 0 | 0 |
 
 It detected and booted as on early answers, and ran two drives (device 1 an image) cleanly. Before it becomes the default:
-- **Status reads over 1,250 ns:** core 1 answers register reads at the strobe, and on this PC more of them miss than through the USB adapter. Harmless here (the host waits for IORDY), but over ATA's limit.
+- **Status reads over 1,250 ns:** core 1 answers register reads at the strobe, and on this PC more of them miss than through the USB adapter. Harmless here (the host waits for IORDY), but over ATA's limit; see [below](#status-reads-over-1250-ns-investigated-3-nov-2026-2d6).
 - **No bus observer checks on the lane** (`bus_sectors=0`): the observer samples lane reads (it checked the generated disk on the rig), but image checks were switched on only with early answers. Since 0.29.0-2d.6 they are on whenever `isa` is off: on the rig, 16 MB read from `HDDSYNTH.IMG` on the lane had 5,805 sectors checked on the cable, 0 bad, and no reads over 1,250 ns. Spot checks put the drive first, and on an image core 0 is mostly busy reading the card, so about 1 sector in 6 is checked; console `O` checks them all, more slowly.
 - **ISA machines** still need `isa = on` (no watchdog), as above.
 
@@ -74,6 +74,14 @@ It detected and booted as on early answers, and ran two drives (device 1 an imag
   - a data read with no block (no hang, DD not left driven, the next block aligned);
   - a chip select with no strobe.
 - **On the rig:** `-m speed` and slices 1-4 on the built-in disk, with the bus observer checking sectors on the cable.
+
+## Status reads over 1,250 ns (investigated 3 Nov 2026, 2d.6)
+
+On the Evesham about 1,400 Status reads a benchmark ran past ATA's 1,250 ns (mean 1,283, worst 1,540). On the USB adapter a `-m speed` run on the lane gives the same kind: 698 in one run, 695 of them STATUS during WRITE commands, nearly all at 1,260 ns. Data reads never are.
+
+Timing each of core 1's bookkeeping steps (a temporary build; the patch is kept in `host/runs/tools/step_profile.diff`, git-ignored) gave the longest of each: running a command 1,260 ns, step 2 (a fetch result: `fetchDone` and `syncDataLane`) 1,720, step 3 860, step 1 795, step 0 515, the write-behind's store post 550. But only about 6% of the slow reads came straight after a step over 600 ns (1,122 of 19,346 in that build's run). The rest came after ordinary passes: a Status read during a write costs core 1's current pass, a few hundred nanoseconds, plus its own answer, and the total sits right at the limit. So the count swings with where the code lands in RAM: 698, 19,346 and 33,064 slow reads in three builds whose only differences were the timing probes.
+
+No cheap fix, then: splitting step 2 would cover the 6%. What would end it is taking core 1 out of Status reads, with the bus program answering from a table core 1 keeps up to date ([no-iordy.md](no-iordy.md)), or out of writes, with a write lane (DMA from the bus program's RX FIFO). Both need PIO instructions the lane's block doesn't have, so another block or a smaller program first. Meanwhile the slow reads are harmless to hosts that wait for IORDY, which ATA requires from PIO mode 3 up.
 
 ## Found on the way
 
