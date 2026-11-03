@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [Unreleased] (branch `atapi-cdrom`)
+
+No firmware change: 0.29.0 on its first hardware, and a checker for DOS.
+
+### Added
+- **`CDCHECK.COM` on the test ISO** (`tools/cdcheck/cdcheck.asm`, NASM): checks every file on DOS, through the CD-ROM driver and MSCDEX, by size and CRC-32 against a table `hddproto.test_iso` builds into it. It reads the names DOS sees back from a first build of the disc (`iso9660_files`, `dos_names`), since `hdiutil` keeps long ISO 9660 names DOS can't open; those files are left out and counted. `CDCHECK /R` repeats until a key. Tested in DOSBox-X: the disc passes, a copy with one byte changed fails with ERRORLEVEL 1.
+
+### Tested
+- **The Evesham (Athlon XP 2000+), 3 Nov:** its BIOS lists the drive as an ATAPI device and tries to boot from it (READ(10), NOT READY with no disc). From a Windows 98 startup floppy (`OAKCDROM.SYS`, MSCDEX) the drive is D:; with `HDDSYNTH.ISO` (the test ISO), `DIR` lists it and `CDCHECK` passes all 13 files (216 READ(10) commands, none failed). The driver probes device 1 and correctly finds nothing (LBA High reads 00h after DEVICE RESET to it); its E: was the PC's own optical drive. It asks READ SUB-CHANNEL (42h) and gets ILLEGAL REQUEST, harmlessly. **Reads past 1,250 ns:** about 19,500 over the session, worst 1,960 ns (Alternate Status), with `iordy_ignored=0`: the host waited for every one, but they're over ATA's limit. The hard disk build on early answers had none on this PC, so the CD build costs core 1 more per access somewhere; not yet found.
+
 ## [0.29.0] - 2026-11-03
 
 **Exploratory (branch `atapi-cdrom`), host-tested only; not yet on hardware.** A first CD-ROM drive: the MVP of [docs/atapi.md](docs/atapi.md)'s slices C1 and C2, a data disc over PIO. No audio, no DMA, no disc changes. The hard disk build is unchanged by it: its core 1 code is the same, instruction for instruction and address for address, as 0.28.0's (only the calls into flash for one-offs and the addresses of data moved, by 0x40 bytes, which keeps every word in its SRAM bank).

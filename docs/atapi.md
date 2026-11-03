@@ -2,9 +2,15 @@
 
 28 Oct 2026, planned. Branch `atapi-cdrom`.
 
-## Status (3 Nov 2026, 0.29.0): the MVP is built, host-tested only
+## Status (3 Nov 2026, 0.29.0): the MVP is built, and reads on a retro PC
 
-The firmware side of slices C1 and C2: the `bb48_cdrom` build serves the test disc or an ISO over PIO, and `test/run_native_tests.sh` drives `atapi::Device` through whole PACKET exchanges. **Nothing has run on hardware yet**, and slice C0 (does the NS1081 pass ATAPI at all?) is still the first thing to find out.
+The firmware side of slices C1 and C2: the `bb48_cdrom` build serves the test disc or an ISO over PIO, and `test/run_native_tests.sh` drives `atapi::Device` through whole PACKET exchanges.
+
+**First hardware (3 Nov, the Evesham, Athlon XP 2000+, PIO mode 3, early answers):** slice C0 was skipped, and C1 and C2 ran on a retro PC first, ahead of slice C3's plan. The USB adapter's runs (`-m cdrom`, 20 replugs) are still to do.
+- **The BIOS** lists the drive as an ATAPI device (DEVICE RESET, IDENTIFY PACKET DEVICE, MODE SENSE(10) with the unit attention first) and tries to boot from it: READ(10), NOT READY with no disc. Five starts, the same each time.
+- **A Windows 98 startup floppy** (`OAKCDROM.SYS` and MSCDEX) makes it D:. The driver also probes device 1 and correctly finds nothing; a second CD-ROM letter (E:) was the PC's own optical drive. It asks READ SUB-CHANNEL (42h), for the audio position, and takes ILLEGAL REQUEST.
+- **The test ISO** (`HDDSYNTH.ISO`): `DIR D:` lists it and `CDCHECK` (on the disc, below) passes all 13 files, 216 READ(10) commands and none failed.
+- **Reads past 1,250 ns:** about 19,500 in the session, worst 1,960 ns (Alternate Status; mostly 1,600-2,000 ns, on every register, data included), `iordy_ignored=0`. The host waited for each one, but they're over ATA's limit. The hard disk build on early answers had none on this PC (the data lane had about 1,400, all Status), so something in the CD build costs core 1 more per access: `atapi::Device`'s inline paths (`peek`, `consumeRead`, the per-block fetch with no read-ahead) or where its code sits in RAM. To find first: `s` on the hard disk build against this one on the same PC, then the USB adapter's `-m cdrom` for a repeatable figure.
 
 Where it differs from the plan below:
 - **No templates.** `src/drive_device.h` makes `DriveDevice` an alias, `ata::Device` or `atapi::Device` per build, and `ide_bus` and `loop1` take a `DriveDevice&`. The hard disk build compiles to the same core 1 code as before, instruction for instruction at the same addresses (checked against 0.28.0's ELF). Only the calls into flash for one-offs (the linker's veneers, in a new order) and data addresses (0x40 bytes later, so every word stays in its SRAM bank) moved. `atapi::Device` has its own `CommandInfo` (with the packet's opcode) for the same reason: one more field in `ata::CommandInfo` lengthened `ata::Device::startCommand` by 4 bytes and moved everything after it.
@@ -22,6 +28,8 @@ To try it: `PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom`, with `E cdrom = none` a
 2. Does the computer see it? macOS: System Information → USB, and `diskutil list` with a data CD in (does it mount?). Windows: Device Manager, and a drive letter for the disc. If not, stop here: the firmware can't help, and another adapter is the next step.
 3. To record it: an IDE ribbon with two connectors, the adapter on one end, the drive and the BB48 (on the listen build, `PIO_ENV=bb48`, which never drives the bus) on the others. Console `w` (the capture window), then replug the adapter, put in a disc, open a file.
 4. Save the serial log as `host/reference/c0_cdrom_<adapter>.txt` and list its exchanges: `cd host && .venv/bin/python -m hddproto.packets ../host/reference/c0_cdrom_<adapter>.txt`. Its last lines name any opcode the host used that `src/mmc.h` doesn't handle; those go into `mmc` before C1.
+
+**On a retro PC with DOS** (as the Evesham ran it): a Windows 98 startup floppy, with CD-ROM support. `D:`, `DIR`, then `CDCHECK`, which the test ISO carries (`tools/cdcheck`, built by `test_iso` when NASM is installed): it reads every file whose ISO 9660 name DOS can open and checks its size and CRC-32, ending `all ok` or naming each bad file; `CDCHECK /R` repeats until a key, as a soak. The serial log goes on the Mac as usual. The drive looks for the ISO at start-up, so after putting the card back, `!`.
 
 **Slices C1 and C2: the emulator.**
 1. Flash and test in one go: `PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom`. Console `h` should say `READY HDDSynthPro 0.29.0 slice3 cdrom`, and `S` the `CONFIG cdrom=... serving=... frames=...` line.

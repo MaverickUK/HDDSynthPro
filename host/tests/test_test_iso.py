@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -57,3 +58,30 @@ def test_mounted_copy_checks_out(iso, tmp_path):
         assert any("ONE.BIN: missing" in p for p in problems)
     finally:
         subprocess.run(["hdiutil", "detach", str(mount)], capture_output=True)
+
+
+def test_iso9660_names_are_read_back(iso):
+    names = test_iso.dos_names(iso.read_bytes())
+    assert names["DATA/SUB/DEEPER/LAST.BIN"] == "DATA\\SUB\\DEEPER\\LAST.BIN"
+    assert names["BIG5MB.BIN"] == "BIG5MB.BIN"
+
+
+@pytest.mark.skipif(not shutil.which("nasm"), reason="CDCHECK.COM needs NASM")
+def test_cdcheck_is_on_the_disc_with_every_dos_file(iso):
+    on_disc = test_iso.iso9660_files(iso.read_bytes())
+    assert "CDCHECK.COM" in on_disc
+    names = test_iso.dos_names(iso.read_bytes())
+    table = test_iso.files_inc(names)
+    for path, data in test_iso.expected().items():
+        if test_iso.is_dos_path(names[path]):
+            assert f'"{names[path]}", 0' in table
+            assert f"dd {len(data)}, 0x{zlib.crc32(data):08x}" in table
+
+
+def test_dos_paths():
+    assert test_iso.is_dos_path("DATA\\SUB\\DEEP.BIN")
+    assert test_iso.is_dos_path("64K.BIN")
+    assert test_iso.is_dos_path("README")
+    assert not test_iso.is_dos_path("A LONG FILE NAME WITH SPAC.BIN")
+    assert not test_iso.is_dos_path("TOOLONGNAME.BIN")
+    assert not test_iso.is_dos_path("NAME.LONG")
