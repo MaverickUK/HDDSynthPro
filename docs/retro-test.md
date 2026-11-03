@@ -6,6 +6,70 @@ Two passes, ideally on separate evenings:
 1. **The test disk, PIO mode 0.** Every sector read is checked on the cable by the bus observer, so this pass says whether the controller works with the drive at all, and whether it waits for IORDY.
 2. **The scratch image, `auto`.** FDISK, FORMAT, copying files and benchmarks, on `HDDBENCH.IMG`. The SD card's `HDDSYNTH.IMG` isn't touched.
 
+## Session, 3 Nov 2026: the data lane and two drives (0.29.0-2d.4)
+
+Two questions for the ICL 386 and the Evesham. The answers decide what comes next:
+- **Should the data lane become the default?** On the USB adapter, `early_answers = on` (today's default) holds about 50,000 reads a speed run past ATA's 1.25 µs. The lane ([data-lane.md](data-lane.md), chosen with `early_answers = off`) answers data reads without core 1: faster, and in time for hosts that ignore IORDY. But it has no IORDY watchdog, so ISA cards can't use it, and register reads go to core 1 at the strobe, as `ide_bus` does.
+- **Does a BIOS find a second drive?** `device1` ([two-drives.md](two-drives.md)): an image or a folder on the card, served read-only. The BB48 has no DASP#, which some BIOSes use to find device 1.
+
+### On the Mac, before you start
+
+- [ ] `git checkout two-drives && git pull` (at b64d613 or later). The host tools: `python3 -m venv host/.venv && host/.venv/bin/pip install -r host/requirements.txt`, if the venv isn't there.
+- [ ] The BB48 already runs **0.29.0-2d.4**. Check with console `h` (`READY HDDSynthPro 0.29.0-2d.4 slice3`). To flash it again: `~/.platformio-venv/bin/pio run -e bb48_drive -t upload`.
+- [ ] On the card, in its root folder: make a folder **`GAMES`** with a few files (a large one for `COPY` and `FC`, a subfolder, a long file name), from the Mac's Finder. The firmware never creates or changes files there. The card holds `ICL386MB.IMG` (MS-DOS 5, which both PCs have booted) and `HDDSYNTH.INI`.
+- [ ] The card's settings as left: `device0 = ICL386MB.IMG`, `early_answers = on`, `isa = off`, `device1 = none`. Console `S` shows them.
+- [ ] The rest of the set-up is as below: [What to bring](#what-to-bring) and [the power-order rule](#2-connecting-the-power-order-rule). Log each step with `python3 scripts/retro_log.py <pc>-<step>`, e.g. `icl386-1-early` (it saves every line to `host/runs/`).
+
+To change a setting: console `E`, then `key = value` and Enter, then `!` (the drive restarts and reads the file again). Then reboot the PC, so its BIOS detects the drive afresh.
+
+### What to note at each step
+
+- **The BIOS:** does it detect `HDDSYNTH PROTO` (and in step 3 `HDDSYNTH PRO D1`, its slave or device 1)? Photos.
+- **It boots** MS-DOS 5 from C:.
+- **Console `s`:**
+  - `bus=` (which program served the bus);
+  - `iordy_ignored` (**0**, or the host read without waiting);
+  - `iordy_max_ns` and `iordy_max_reg`;
+  - `iordy_slow`;
+  - `bus_identify_bad` (0);
+  - `commands`;
+  - with the lane, `lane_blocks`.
+- **The log's `!!` lines:** `NOIORDY`, `BUSERR`, `STUCK`, `SLOWREAD`, resets.
+- **Speed:** `HDDBENCH` from the benchmark image if it's on C: (or time a `COPY` of a large file to NUL).
+
+### Step 1: as it is (early answers)
+
+| ICL 386 (ISA card, IOCS16# wire on) | Evesham |
+|---|---|
+| Settings as left. Boot, a benchmark or `COPY`, then `s` | The same |
+
+The reference for steps 2 and 3, on the firmware the steps use.
+
+### Step 2: the other bus program
+
+| ICL 386 | Evesham |
+|---|---|
+| `E isa = on`, `!`. `s` shows `bus=ide_bus`: the old program with the IORDY watchdog. The lane isn't for ISA cards (no watchdog: a memory or refresh cycle aliasing the drive's address would stall the bus). This checks the old program on this firmware | `E early_answers = off`, `!`. `s` shows **`bus=lane`**. The main test: does the BIOS detect the drive, does it boot, is it faster, is `iordy_ignored` still 0? On 31 Oct this PC had 247 reads that didn't wait for IORDY, which early answers covered. The lane covers data reads, not register reads |
+
+- **The Evesham boots and runs cleanly on the lane:** the lane becomes the default, with `isa = on` for ISA machines.
+- **It fails** (no detection, a hang, `iordy_ignored` above 0 with errors): note which registers (`NOIORDY` lines), then `E early_answers = on`, `!`. Early answers stays the default.
+
+### Step 3: two drives
+
+On each PC, with step 2's bus program (or early answers, if step 2 failed):
+
+- [ ] `E device1 = GAMES`, `!`. `S` shows `CONFIG device1=GAMES kind=folder sectors=...` and a `CONFIG folder entries=...` line.
+- [ ] Reboot the PC. In the BIOS set-up, auto-detect the primary slave (or let it find it). Does it show `HDDSYNTH PRO D1`? Note its geometry. If it doesn't find it, note that, and try setting the slave by hand to the geometry `S` gives.
+- [ ] In DOS: `DIR D:`, `DIR D:\SUBFOLDER`. `COPY D:\BIGFILE C:\` then `FC /B D:\BIGFILE C:\BIGFILE` (no differences). Then delete the copy from C:.
+- [ ] A write to D: (`COPY C:\COMMAND.COM D:\`): it should fail cleanly ("write fault", abort or fail), and leave the PC working. Nothing on the card changes.
+- [ ] `s`: the console's `CMD` lines for device 1 end in `d1`.
+- [ ] Optional: `E device1 = HDDBENCH.IMG`, `!`, a second image as D: (FDISK and FORMAT it, then copy files to it). `HDDBENCH.IMG` is scratch.
+
+### Afterwards
+
+- [ ] `E device1 = none`, `E early_answers = on`, `E isa = off`, `!`: the card as it was. (Or edit `HDDSYNTH.INI` on the Mac: `device0 = ICL386MB.IMG`, `device1 = none`.)
+- [ ] The logs (`host/runs/retro-*.log`), the `s` lines and the photos: the results go into [data-lane.md](data-lane.md) and [two-drives.md](two-drives.md), and `CHANGELOG.md`.
+
 ## What to bring
 
 - The BB48 rig, with its IDE cable left on the BB48. Only the cable's other end moves, from the USB adapter to the PC.
