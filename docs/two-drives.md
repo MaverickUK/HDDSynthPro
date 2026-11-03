@@ -67,5 +67,5 @@ All of these pass, locally and in CI (with ASan and UBSan there):
 ## On the rig: what to try first
 
 1. **One drive, no `device1`:** `-m speed` and slices 1-4, against 0.28.0's figures: core 1's code moved, so check it didn't slow (CLAUDE.md, core split). Done for `-m speed` on 3 Nov (0.29.0-2d.2 against 0.28.0, the same day and rig: reads 1.18 MB/s both, writes 1.06 against 1.08, 74.9 random reads a second both).
-2. **Two images** (`device1 = SECOND.IMG`): on a retro PC (whether a USB adapter shows device 1 at all is untested; many bridges only expose device 0). Device 1's `CMD` lines on the console end in `d1`.
+2. **Two images** (`device1 = SECOND.IMG`): the rig's USB adapter (a JMicron JM20337) shows device 1 as a second disk once its USB connection restarts (3 Nov: 300 rounds of interleaved reads and writes across both, 0 mismatches). Next, on a retro PC: does its BIOS find device 1 without DASP#? Device 1's `CMD` lines on the console end in `d1`.
 3. **A folder** as device 1, on the retro PC: `DIR D:`, `COPY` a big file and compare it (`FC /B`), then a write (it should fail cleanly).
