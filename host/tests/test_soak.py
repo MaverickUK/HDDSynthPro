@@ -25,6 +25,9 @@ diagnostic run carry on and collect several.
 The bus observer checks every sector on the cable (console `O`, full
 checks), even though that slows multiword DMA reads to about 2 MB/s;
 HDDPRO_SOAK_SPOT_CHECKS=1 leaves it on spot checks, for a soak at full speed.
+HDDPRO_SOAK_IORDY_MAX_NS (default 1250, ATA's limit) raises the longest read
+allowed, for a bus program known to run over it (the data lane's Status polls
+during writes, docs/data-lane.md), so the soak tests the data.
 Exit criterion: an overnight soak with zero mismatches and zero hangs.
 """
 from __future__ import annotations
@@ -57,7 +60,7 @@ SECTOR = gen_disk.SECTOR_BYTES
 TOTAL = gen_disk.DEFAULT_SECTORS
 WINDOW_START = 100_000  # as in test_slice4.py
 WINDOW = 256
-IORDY_MAX_NS = 1250
+IORDY_MAX_NS = int(os.environ.get("HDDPRO_SOAK_IORDY_MAX_NS", "1250"))
 CHECK_EVERY_S = 300     # the drive's view
 # Idle pauses, for standby and wake. macOS's disk sleep (pmset disksleep) is
 # 10 minutes on the rig, so a pause has to be longer than that. Windows never
