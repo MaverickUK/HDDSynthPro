@@ -78,6 +78,8 @@ DMA_COMMANDS = (0xC8, 0xC9, 0xCA, 0xCB)       # READ DMA, WRITE DMA
 # data any other way, so a quiet fallback to PIO can't pass as a DMA soak.
 REQUIRE_DMA = os.environ.get("HDDPRO_SOAK_REQUIRE_DMA", "") not in ("", "0")
 WAKE_COMMANDS = (0xE1, 0x95)                 # IDLE IMMEDIATE
+PACKET = 0xA0                                # ATAPI (the CD-ROM, bb48_hdcd)
+SENSE_ILLEGAL_REQUEST = 0x5
 FULL_CHECKS = os.environ.get("HDDPRO_SOAK_SPOT_CHECKS", "") in ("", "0")
 
 
@@ -129,7 +131,12 @@ def check_drive(drive, start_mark: int) -> str:
         f"IORDY held a {fields['iordy_max_reg']} read for {iordy_ns} ns: {stats}"
     t = trace.parse(drive.lines_since(start_mark))
     assert not t.resets, f"the host reset the drive: {t.resets[:4]}"
-    failed = [str(c) for c in t.commands if c.status is not None and not c.ok]
+    # A CD-ROM (bb48_hdcd) answers a packet it doesn't support with ILLEGAL
+    # REQUEST (sense key 5, the Error register's top four bits), as a real
+    # drive does: Windows asks for a few now and then. Counted, not failed.
+    refused = [c for c in t.commands if c.status is not None and not c.ok and c.command == PACKET
+               and c.error >> 4 == SENSE_ILLEGAL_REQUEST]
+    failed = [str(c) for c in t.commands if c.status is not None and not c.ok and c not in refused]
     assert not failed, f"failed commands: {failed[:5]}"
     standbys = sum(1 for c in t.commands if c.command in STANDBY_COMMANDS)
     wakes = sum(1 for c in t.commands if c.command in WAKE_COMMANDS)
@@ -138,7 +145,8 @@ def check_drive(drive, start_mark: int) -> str:
         pio = [str(c) for c in t.commands if c.command in (0x20, 0x21, 0x30, 0x31)]
         assert dma and not pio, f"not a DMA soak: {dma} DMA commands, PIO data commands {pio[:3]}"
     return (f"commands {len(t.commands)} ({dma} DMA), standbys {standbys}, wakes {wakes}, "
-            f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']}), "
+            + (f"CD-ROM packets refused (ILLEGAL REQUEST) {len(refused)}, " if refused else "")
+            + f"IORDY max {iordy_ns} ns ({fields['iordy_max_reg']}), "
             f"early {fields.get('iordy_early', '?')} ({fields.get('iordy_early_reg', '-')}); "
             f"bus observer: {fields.get('bus_sectors', '?')} sectors checked, {fields.get('bus_bad', '?')} bad, "
             f"{fields.get('bus_gaps', '?')} gaps, {fields.get('bus_dma_words', '?')} DMA words, ring max {fields.get('bus_ring_max', '?')}, dropped {fields.get('bus_dropped', '?')}")
