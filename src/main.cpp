@@ -248,6 +248,19 @@ static bool dmarqWired() {
 // adapter (0.23.x-0.26.2: up to 3,570 ns, and the adapter never saw DRQ).
 constexpr bool C1_PROFILE = false;
 
+// The longest time core 1 spent on a command (the device's own work and its
+// trace: a CD-ROM packet's reply is built there) while the host's next access
+// waited, and which command and packet it was, for `s` (`cmd_run_max_ns`,
+// `cmd_run_max`). A bench diagnostic, built in only with -DCMD_PROFILE=1
+// (docs/bench-checklist.md), so the normal builds' core 1 code stays as measured.
+#ifndef CMD_PROFILE
+#define CMD_PROFILE 0
+#endif
+#if CMD_PROFILE
+static volatile uint32_t g_cmd_run_max = 0;   // cycles
+static volatile uint32_t g_cmd_run_what = 0;  // command | packet << 8
+#endif
+
 // Core 1's longest loop passes, in cycles (DWT CYCCNT), by what the pass did,
 // for console `s` (`c1_gap_ns`): a pass that takes long is a register read
 // left waiting. Racy across cores, as diagnostics may be; `r` clears it.
@@ -430,7 +443,29 @@ CORE1_RAM static void earlyIdle(DriveDevice& dev) {
     if (dev.dmaCommand() || ide_dma::active()) serviceDma(dev);
 }
 
+// CMD_PROFILE's bookkeeping: `start` is when the command's handling began.
+CORE1_RAM static inline void noteCommandTime(DriveDevice& dev, uint32_t start) {
+#if CMD_PROFILE
+    uint32_t t = m33_hw->dwt_cyccnt - start;
+    if (t > g_cmd_run_max) {
+        g_cmd_run_max = t;
+        const DriveCommandInfo& c = dev.lastCommand();
+#if HDDPRO_CDROM || HDDPRO_HDCD
+        g_cmd_run_what = uint32_t(c.command) | uint32_t(c.packet) << 8;
+#else
+        g_cmd_run_what = c.command;
+#endif
+    }
+#else
+    (void)dev;
+    (void)start;
+#endif
+}
+
 CORE1_RAM static void runCommandEarly(DriveDevice& dev) {
+#if CMD_PROFILE
+    const uint32_t profile_start = m33_hw->dwt_cyccnt;
+#endif
     recordDone(dev);  // the last command's DONE before this one's CMD
     dev.setReadAhead(g_read_ahead.load());
     dev.setWriteBehind(g_write_behind.load());
@@ -444,6 +479,9 @@ CORE1_RAM static void runCommandEarly(DriveDevice& dev) {
         g_command_starts.fetch_add(1, std::memory_order_relaxed);
         g_command_active.store(true);
     }
+#if CMD_PROFILE
+    noteCommandTime(dev, profile_start);
+#endif
 }
 
 // Console `V`: the drive goes silent, as if unplugged, while core 0 holds
@@ -566,10 +604,16 @@ CORE1_RAM void loop1() {
                 start_unrecorded = false;
             }
             served_with_command = 0;
+#if CMD_PROFILE
+            const uint32_t profile_start = m33_hw->dwt_cyccnt;
+#endif
             dev.setReadAhead(g_read_ahead.load());
             dev.setWriteBehind(g_write_behind.load());
             dev.runQueuedCommand();
             ide_bus::syncDataLane(dev);  // IDENTIFY's block onto the lane, then INTRQ
+#if CMD_PROFILE
+            noteCommandTime(dev, profile_start);
+#endif
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
             if (early)
@@ -1768,6 +1812,14 @@ static void printStats() {
                   (unsigned long)bus_observer::expectMissed());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
+#if CMD_PROFILE
+    {
+        uint32_t what = g_cmd_run_what;  // command, and a packet's opcode
+        Serial.printf(" cmd_run_max_ns=%lu cmd_run_max=%02x/%02x",
+                      (unsigned long)(uint64_t(g_cmd_run_max) * 1000000000ull / clock_get_hz(clk_sys)),
+                      unsigned(what & 0xFF), unsigned((what >> 8) & 0xFF));
+    }
+#endif
     Serial.printf(" clk_sys_mhz=%lu clk_peri_mhz=%lu", (unsigned long)(clock_get_hz(clk_sys) / 1000000),
                   (unsigned long)(clock_get_hz(clk_peri) / 1000000));
     Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
@@ -1950,6 +2002,9 @@ static void handleConsole() {
 #endif
 #if FIRMWARE_SLICE != 0
             case 'r':
+#if CMD_PROFILE
+                g_cmd_run_max = 0;
+#endif
                 iordy_timer::reset();
                 bus_timing::reset();
                 for (auto& g : g_c1_gap) g = 0;

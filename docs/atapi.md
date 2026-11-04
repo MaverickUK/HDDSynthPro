@@ -15,6 +15,14 @@
 
 Disc reads now fetch the next 512-byte sector into a second buffer while the host takes the one before, as the hard disk does (`read_ahead`, console `A`): host-tested (`atapi_read_ahead_*`: one BSY wait for a two-frame read instead of eight; a read-ahead that fails reports MEDIUM ERROR after the sector before; one cut short by a reset is stale). Not yet measured: the 1.36 MB/s Windows read the Doom disc at (dev.3, no read-ahead) is the figure to beat.
 
+## The CD build's slow reads: what the code says (4 Nov 2026, 0.30.0-dev.6)
+
+On the rig the CD-ROM build held Alternate Status reads up to 2.8-3.6 µs (the hard disk build, on the same early answers: about 1.3 µs at worst in DMA, 2.1 µs in a PIO speed run), and on the Evesham about 19,500 reads a session past 1,250 ns, worst 1,960 ns, where the hard disk build had none. Read from the code, without the bus:
+- **Not the bus code's size:** the hot functions are a little bigger (`serviceOnce` 812 bytes against 768, `serveBusEarly` 1,424 against 1,348), tens of cycles at most; a 3.6 µs read is about 720 cycles.
+- **Not flash:** no function core 1 reaches from `loop1` loads from flash. Its literal pools hold only the identity strings, read once at start-up, and the sense constants are immediates in `mmc::execute`. (`check_core1_ram.py` follows calls, not data loads, so this was checked by scanning the literal pools.)
+- **The likely part:** in early answers' tight loop a command runs straight after the access that queued it, and for the CD-ROM that's the packet's last word: `runPacket` and `mmc::execute` (1,680 bytes, the biggest function on core 1), the trace's CMD and DONE records, then the device's next step, all before the host's next access, typically an Alternate Status poll, is answered. The hard disk's commands are short by comparison (IDENTIFY points at a buffer). Plus early answers' own latency, which the hard disk shows too.
+- **The measurement:** a build with `-DCMD_PROFILE=1` prints `cmd_run_max_ns` and `cmd_run_max` (command/packet) in `s`: the longest time core 1 spent on a command while the host waited. If it's near the slow reads' excess over about 1 µs, the packet is the cause, and the fix is to answer the host's first poll (BSY) before running it, or to hand `mmc::execute` to core 0 as a fetch is. If it's small, the cause is early answers itself, and the CD-ROM build should try `ide_bus` (`P i`), whose worst read on the hard disk is about 1.2 µs.
+
 ## Status (3 Nov 2026, 0.29.0): the MVP is built, and reads on a retro PC
 
 The firmware side of slices C1 and C2: the `bb48_cdrom` build serves the test disc or an ISO over PIO, and `test/run_native_tests.sh` drives `atapi::Device` through whole PACKET exchanges.
