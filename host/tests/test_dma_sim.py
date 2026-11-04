@@ -125,3 +125,25 @@ def test_dd_driven_only_during_read_strobes(read_program, mode):
     assert sim.pindirs & 0xFFFF == 0  # released at the end
     for s in run.strobes:
         assert s.held_ns is not None and s.held_ns < 25, f"DD driven {s.held_ns} ns after DIOR# rose"
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_read_bursts_of_a_cd_roms_lengths(read_program, mode):
+    """The CD-ROM build (docs/atapi.md) sends each packet's reply as one burst
+    of its own length: READ CAPACITY's 4 words, REQUEST SENSE's 9, INQUIRY's
+    18, then a disc read's 256-word sectors. Every word within tE and held
+    tF, every burst exactly its length, and DMARQ low between them."""
+    t = MDMA_MODES[mode]
+    lengths = [4, 9, 18, 256, 256]
+    bursts = [[(n * 1000 + i * 37) & 0xFFFF for i in range(n)] for n in lengths]
+    run = run_mdma(make_sim(read_program, write=False), t, bursts, write=False,
+                   timeout_ns=timeout_for(t, sum(lengths)))
+    assert not run.errors, run.errors
+    assert [s.value for s in run.strobes] == [w for b in bursts for w in b]
+    assert run.bursts_done == len(lengths)
+    lasts = [run.strobes.index(s) for s in run.strobes if s.dmarq_low_after_fall_ns is not None]
+    ends = [sum(lengths[:k + 1]) - 1 for k in range(len(lengths))]
+    assert lasts == ends
+    for s in run.strobes:
+        assert s.valid_from_ns is not None and s.valid_from_ns <= s.fall_ns + t.tE
+        assert s.held_ns is not None and s.held_ns >= t.tF
