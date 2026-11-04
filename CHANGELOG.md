@@ -2,7 +2,20 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
-## [Unreleased] (branch `two-drives`)
+## [0.30.0-dev.1] - 2026-11-04 (branch `merge-cdrom`)
+
+`two-drives` (0.29.0-2d.6) and `atapi-cdrom` (0.29.0) merged: one codebase with the data lane, two drives and the CD-ROM build. Their entries follow, each under its own branch.
+
+### Changed
+- **The bus code takes `DriveDevice`** (atapi-cdrom's per-build alias) throughout, the data lane's functions included; `atapi::Device` has every call the lane makes, so both builds compile it.
+- **The CD-ROM build runs early answers where the settings would pick the data lane** (`CONFIG the CD-ROM build runs early answers, not the data lane`): the lane was written and tested for the hard disk's 256-word blocks, the CD-ROM proven on early answers and `ide_bus`. `isa = on` still gives `ide_bus`.
+- **The CD-ROM build has one drive**, the CD-ROM as device 0: `device1` is the hard disk build's. Its notes read `CONFIG cdrom not used`, the hard disk's `CONFIG device0 not used`.
+- `HDDSYNTH.INI` has `device0`, `device1` and `cdrom`; `image` is still device0's old name.
+
+### Fixed
+- **A trace clash the merge would have made:** two-drives marked device 1's `CMD` in bit 31 of the event, atapi-cdrom put the packet's opcode in bits 24-31, so a READ(12) (A8h) would have printed as device 1's. The unit now has its own byte, in the padding after the event's kind (still 16 bytes, now checked by a `static_assert`; `config.h` said 12, which the padding never allowed); a host test holds READ(12) to device 0.
+
+## Branch `two-drives`, unreleased
 
 ### Tested
 - **The data lane soaked 400 minutes** on the USB adapter (2d.6, built-in disk, PIO mode 3, full observer checks, 3-4 Nov): 18.6 GB, no mismatches, 642,672 commands, no resets, 31.9 million sectors checked on the cable, 0 bad. Worst read 1,340 ns, Alternate Status ([docs/data-lane.md](docs/data-lane.md)).
@@ -87,6 +100,28 @@ An experiment: two drives on one cable, and a folder on the card as a drive ([do
 ### Not yet known
 - Whether retro BIOSes see the slave without DASP#/PDIAG# (the BB48 has neither; PCB rev 0.4 adds them).
 - Core 1's read timing with this build, one drive or two: `-m speed` and slices 1-4 first.
+## Branch `atapi-cdrom`, unreleased
+
+No firmware change: 0.29.0 on its first hardware, and a checker for DOS.
+
+### Added
+- **`CDCHECK.COM` on the test ISO** (`tools/cdcheck/cdcheck.asm`, NASM): checks every file on DOS, through the CD-ROM driver and MSCDEX, by size and CRC-32 against a table `hddproto.test_iso` builds into it. It reads the names DOS sees back from a first build of the disc (`iso9660_files`, `dos_names`), since `hdiutil` keeps long ISO 9660 names DOS can't open; those files are left out and counted. `CDCHECK /R` repeats until a key. Tested in DOSBox-X: the disc passes, a copy with one byte changed fails with ERRORLEVEL 1.
+
+### Tested
+- **The Evesham (Athlon XP 2000+), 3 Nov:** its BIOS lists the drive as an ATAPI device and tries to boot from it (READ(10), NOT READY with no disc). From a Windows 98 startup floppy (`OAKCDROM.SYS`, MSCDEX) the drive is D:; with `HDDSYNTH.ISO` (the test ISO), `DIR` lists it and `CDCHECK` passes all 13 files (216 READ(10) commands, none failed). The driver probes device 1 and correctly finds nothing (LBA High reads 00h after DEVICE RESET to it); its E: was the PC's own optical drive. It asks READ SUB-CHANNEL (42h) and gets ILLEGAL REQUEST, harmlessly. **A real disc**, `DOOM_SE.ISO` (22 MB): Doom runs from the CD in its `-cdrom` mode, its settings and saves in `C:\DOOMDATA` on the floppy's RAM drive (C: with no hard disk): 2,474 READ(10), none failed. 107 data reads didn't wait for IORDY (as the hard disk build's 247 on this PC on 31 Oct; early answers cover them), none with the test disc. **Reads past 1,250 ns:** about 19,500 over the session, worst 1,960 ns (Alternate Status), with `iordy_ignored=0`: the host waited for every one, but they're over ATA's limit. The hard disk build on early answers had none on this PC, so the CD build costs core 1 more per access somewhere; not yet found.
+
+## [0.29.0] - 2026-11-03 (branch `atapi-cdrom`)
+
+**Exploratory (branch `atapi-cdrom`), host-tested only; not yet on hardware.** A first CD-ROM drive: the MVP of [docs/atapi.md](docs/atapi.md)'s slices C1 and C2, a data disc over PIO. No audio, no DMA, no disc changes. The hard disk build is unchanged by it: its core 1 code is the same, instruction for instruction and address for address, as 0.28.0's (only the calls into flash for one-offs and the addresses of data moved, by 0x40 bytes, which keeps every word in its SRAM bank).
+
+### Added
+- **The `bb48_cdrom` build** (`-DHDDPRO_CDROM=1`): the drive as an ATAPI CD-ROM drive. `atapi::Device` (`src/atapi_device.*`) takes `ata::Device`'s place behind the same interface, picked per build by `src/drive_device.h`'s `DriveDevice`, so `ide_bus` and `loop1` are written once. It has the packet device's reset signature (14h/EBh), aborts IDENTIFY DEVICE with it, answers IDENTIFY PACKET DEVICE and DEVICE RESET, and runs PACKET in PIO: the 12-byte packet, data blocks of up to the host's byte count with an interrupt each, then the status phase; errors are CHECK CONDITION with the sense key in the Error register.
+- **The packet commands** (`src/mmc.*`, pure C++): TEST UNIT READY, REQUEST SENSE, INQUIRY, START STOP UNIT, PREVENT ALLOW MEDIUM REMOVAL, READ CAPACITY, READ(10), READ(12), SEEK(10), VERIFY(10), READ TOC (formats 0, 1 and 2, LBA or MSF), GET CONFIGURATION (the CD-ROM profile), GET EVENT STATUS NOTIFICATION (polled, media events), MODE SENSE(6) and (10) (pages 01h and 2Ah) and SET CD SPEED. A unit attention after power-on and each hardware reset, as a real drive gives.
+- **A disc read is one 512-byte DRQ block per sector fetched**: CD frame n is sectors 4n to 4n+3 of the image, so `ImageDisk` serves an ISO unchanged, and the fetch mailbox and core 1's fast lane carry the blocks. No read-ahead yet.
+- **`cdrom = NAME.ISO`** in `HDDSYNTH.INI` (`HDDSYNTH.ISO` by default; the hard disk build ignores it): the ISO to serve, or `none` (or console `T`) for the generated test disc, CD frame n being generated sectors 4n to 4n+3. No ISO: an empty drive. `CONFIG cdrom=... serving=... frames=...`.
+- The trace names a packet: `CMD <t> a0 READ_10 <frame> <frames>`. The READY line ends `slice3 cdrom`, and the hard disk's rig tests skip on that build. A first rig test, `-m cdrom` (`host/tests/test_cdrom.py`: the test disc read whole and at random), not yet run.
+- CI builds `bb48_cdrom` and runs `check_core1_ram.py` on it; it isn't part of a release.
+- **For the bench:** `hddproto/test_iso.py` builds a test ISO whose files can all be checked once mounted (checked here by mounting it with `hdiutil`), and `test_cdrom_iso.py` checks them on the disc the drive serves. `hddproto/packets.py` lists the ATAPI exchanges in a raw trace and the opcodes the CD-ROM build doesn't handle, for slice C0's recording of a real drive. docs/atapi.md has the bench steps. Host tests for awkward hosts: a byte count limit of 0 or odd, polling with interrupts off, a host giving up mid-block or mid-packet, a stale fetch after a reset, reads past a block.
 
 ## [0.28.0] - 2026-10-31
 

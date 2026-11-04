@@ -108,7 +108,12 @@ TEST(test_format_commands) {
               "DONE 950 20 50 00 850\n");
     CHECK_STR(format(TraceRun{commandStartEvent(5, 0x77, 0, 0), 1, 5}), "CMD 5 77 ? 0 0\n");
     // Device 1's commands (two drives) end in d1; device 0's lines are unchanged.
-    CHECK_STR(format(TraceRun{commandStartEvent(7, 0x20, 4096, 256, 1), 1, 7}), "CMD 7 20 READ_SECTORS 4096 256 d1\n");
+    CHECK_STR(format(TraceRun{commandStartEvent(7, 0x20, 4096, 256, 0, 1), 1, 7}), "CMD 7 20 READ_SECTORS 4096 256 d1\n");
+    // PACKET (the CD-ROM build): named by its packet; lba and count are frames
+    CHECK_STR(format(TraceRun{commandStartEvent(7, 0xA0, 16, 4, 0x28), 1, 7}), "CMD 7 a0 READ_10 16 4\n");
+    CHECK_STR(format(TraceRun{commandStartEvent(8, 0xA0, 0, 0, 0x00), 1, 8}), "CMD 8 a0 TEST_UNIT_READY 0 0\n");
+    // A packet opcode from 80h up shares no bits with the unit (bit 31 once held it)
+    CHECK_STR(format(TraceRun{commandStartEvent(9, 0xA0, 16, 4, 0xA8), 1, 9}), "CMD 9 a0 READ_12 16 4\n");
     // Commands are never merged, even when identical.
     TraceCoalescer c;
     TraceRun done;
@@ -419,6 +424,8 @@ void runWelcomeDiskTests();
 void runSeekTimingTests();
 void runTwoDrivesTests();
 void runFolderDiskTests();
+void runMmcTests();
+void runAtapiDeviceTests();
 
 int main() {
     RUN(test_pin_layout);
@@ -455,6 +462,8 @@ int main() {
     runSeekTimingTests();
     runTwoDrivesTests();
     runFolderDiskTests();
+    runMmcTests();
+    runAtapiDeviceTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

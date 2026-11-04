@@ -9,6 +9,7 @@
 #include "bus_observer.pio.h"
 #include "bus_sample.h"
 #include "config.h"
+#include "drive_device.h"  // HDDPRO_CDROM
 #include "identify.h"
 #include "sector_check.h"
 
@@ -77,7 +78,11 @@ static std::atomic<bool> s_started{false};
 void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyInfo* identity1) {
     static sector_check::Checker checker(disk_sectors);
     uint16_t identify[256];
+#if HDDPRO_CDROM
+    buildIdentifyPacket(identity, identify);  // the CD-ROM drive's IDENTIFY
+#else
     buildIdentify(identity, identify);
+#endif
     checker.setIdentify(identify);
     if (identity1) {
         buildIdentify(*identity1, identify);

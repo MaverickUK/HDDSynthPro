@@ -209,6 +209,25 @@ TEST(test_config_image_none) {
     CHECK_STR(edited("device0 = HDDSYNTH.IMG\r\n", "device0", "none"), "device0 = none\r\n");  // what console E writes
 }
 
+// cdrom: the CD-ROM build's disc, beside the hard disk's image.
+TEST(test_config_cdrom) {
+    Config c = parsed("");
+    CHECK_STR(c.cdrom, "HDDSYNTH.ISO");
+    CHECK(drive_config::servesDisc(c));
+    c = parsed("image = DOS.IMG\ncdrom = GAMES.ISO\n");
+    CHECK_STR(c.device0, "DOS.IMG");
+    CHECK_STR(c.cdrom, "GAMES.ISO");
+    CHECK_EQ(c.warning_count, size_t(0));
+    c = parsed("cdrom = None");
+    CHECK(!drive_config::servesDisc(c));
+    CHECK(drive_config::servesImage(c));  // the hard disk's image is unaffected
+    c = parsed("cdrom = DIR/GAMES.ISO");
+    CHECK_STR(c.cdrom, "HDDSYNTH.ISO");
+    CHECK_EQ(c.warning_count, size_t(1));
+    CHECK(drive_config::isKey("cdrom"));
+    CHECK_STR(edited("image = A.IMG\n", "cdrom", "B.ISO"), "image = A.IMG\ncdrom = B.ISO\n");
+}
+
 // isa = on: IORDY from the strobe, for ISA cards (an ICL 386, 0.21.0).
 TEST(test_config_isa) {
     CHECK(!parsed("").isa);  // off: ATA hosts need IORDY from the chip select
@@ -326,6 +345,7 @@ void runDriveConfigTests() {
     RUN(test_config_isa);
     RUN(test_config_seek_timing);
     RUN(test_config_image_none);
+    RUN(test_config_cdrom);
     RUN(test_config_defaults);
     RUN(test_config_default_file_is_the_defaults);
     RUN(test_config_reads_both_keys);

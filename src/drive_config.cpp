@@ -161,6 +161,7 @@ bool dmaRefusedForWiring(Mode m, bool dmarq_wired) {
 void defaults(Config& out) {
     std::snprintf(out.device0, sizeof out.device0, "%s", DEFAULT_IMAGE);
     out.device1[0] = 0;
+    std::snprintf(out.cdrom, sizeof out.cdrom, "%s", DEFAULT_CDROM);
     out.mode = Mode::Auto;
     out.dma = DEFAULT_DMA;
     out.write_behind = DEFAULT_WRITE_BEHIND;
@@ -232,8 +233,8 @@ bool parseGeometry(Span v, Geometry& g) {
 bool isKey(const char* key) {
     Span k{key, key + std::strlen(key)};
     if (equalsNoCase(k, "device0") || equalsNoCase(k, "image") || equalsNoCase(k, "device1") ||
-        equalsNoCase(k, "mode") ||
-        equalsNoCase(k, "seek_timing") || equalsNoCase(k, "geometry"))
+        equalsNoCase(k, "mode") || equalsNoCase(k, "seek_timing") || equalsNoCase(k, "geometry") ||
+        equalsNoCase(k, "cdrom"))
         return true;
     for (const Switch& s : SWITCHES)
         if (equalsNoCase(k, s.key)) return true;
@@ -244,7 +245,7 @@ void parse(const char* text, size_t len, Config& out) {
     defaults(out);
     // `image` is device0's old name: device0 counts over it, whichever comes first.
     bool seen_device0 = false, seen_image = false, seen_device1 = false, seen_mode = false,
-         seen_seek_timing = false, seen_geometry = false;
+         seen_seek_timing = false, seen_geometry = false, seen_cdrom = false;
     auto setDevice0 = [&](int n, const Line& l) {
         if (!validImageName(l.value)) {
             warn(out, "line %d: device0 '%.*s' isn't a file name in the root folder; ignored%s", n, l.value);
@@ -287,6 +288,14 @@ void parse(const char* text, size_t len, Config& out) {
                 return;
             }
             std::snprintf(out.device1, sizeof out.device1, "%.*s", int(l.value.size()), l.value.begin);
+        } else if (equalsNoCase(l.key, "cdrom")) {
+            if (seen_cdrom) warn(out, "line %d: '%.*s' sets cdrom again; this one counts%s", n, l.key);
+            seen_cdrom = true;
+            if (!validImageName(l.value)) {
+                warn(out, "line %d: cdrom '%.*s' isn't a file name in the root folder; ignored%s", n, l.value);
+                return;
+            }
+            std::snprintf(out.cdrom, sizeof out.cdrom, "%.*s", int(l.value.size()), l.value.begin);
         } else if (equalsNoCase(l.key, "mode")) {
             if (seen_mode) warn(out, "line %d: '%.*s' sets mode again; this one counts%s", n, l.key);
             seen_mode = true;
@@ -384,13 +393,21 @@ size_t setKey(const char* text, size_t len, const char* key, const char* value, 
     return (n > 0 && size_t(n) < size) ? size_t(n) : 0;
 }
 
-bool servesImage(const Config& c) {
-    const char* a = c.device0;
+namespace {
+
+// True unless `name` is `none`, in any case.
+bool notNone(const char* name) {
     const char* b = NO_IMAGE;
-    for (; *a && *b; ++a, ++b)
-        if (std::tolower(static_cast<unsigned char>(*a)) != *b) return true;
-    return *a || *b;  // a different length: some other name
+    for (; *name && *b; ++name, ++b)
+        if (std::tolower(static_cast<unsigned char>(*name)) != *b) return true;
+    return *name || *b;  // a different length: some other name
 }
+
+}  // namespace
+
+bool servesImage(const Config& c) { return notNone(c.device0); }
+
+bool servesDisc(const Config& c) { return notNone(c.cdrom); }
 
 bool hasDevice1(const Config& c) { return c.device1[0] != 0; }
 

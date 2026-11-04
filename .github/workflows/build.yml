@@ -5,7 +5,7 @@ name: Build and test
 
 on:
   push:
-    branches: [main, two-drives]
+    branches: [main, two-drives, merge-cdrom]
     tags: ['v*']
   pull_request:
 
@@ -27,9 +27,11 @@ jobs:
       - run: pip install platformio -r host/requirements.txt
 
       # Builds first: it installs pioasm, which the PIO simulator tests use.
-      - run: pio run -e bb48 -e bb48_drive
+      - run: pio run -e bb48 -e bb48_drive -e bb48_cdrom
       - name: Core 1 runs only from RAM
-        run: python3 scripts/check_core1_ram.py
+        run: |
+          python3 scripts/check_core1_ram.py
+          python3 scripts/check_core1_ram.py .pio/build/bb48_cdrom/firmware.elf
       - name: C++ unit tests
         run: test/run_native_tests.sh
       - name: Folder drive image, checked by fsck.fat, mtools and pyfatfs

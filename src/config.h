@@ -100,7 +100,7 @@ constexpr uint32_t COMMAND_QUIET_US = 4;
 constexpr unsigned COMMAND_POLLS_FIRST = 8;
 
 // Trace ring between core 1 (producer) and core 0 (consumer):
-// 8192 events x 12 bytes = 96 KB.
+// 8192 events x 16 bytes = 128 KB (12 bytes of data, padded).
 constexpr size_t TRACE_RING_EVENTS = 8192;
 
 // The listen build's capture window (console `w`): with no drive answering,

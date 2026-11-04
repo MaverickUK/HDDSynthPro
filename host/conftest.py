@@ -55,15 +55,24 @@ def drive(session_stamp):
     RUNS.mkdir(parents=True, exist_ok=True)
     log = DriveLog(raw_log_path=RUNS / f"{session_stamp}-serial.log")
     log.open()
-    log.ready = log.command("h", "READY", timeout=5)  # "READY HDDSynthPro <version> slice<N>"
+    log.ready = log.command("h", "READY", timeout=5)  # "READY HDDSynthPro <version> slice<N>[ cdrom]"
     yield log
     log.close()
 
 
+def is_cdrom_build(drive) -> bool:
+    """Whether the board runs the CD-ROM build (bb48_cdrom, docs/atapi.md)."""
+    return "cdrom" in drive.ready.split()
+
+
 @pytest.fixture
 def firmware_slice(drive) -> int:
-    """Which build the board runs: 0 = listen only, 3 = the drive (slices 1-5)."""
-    return int(drive.ready.split()[-1].removeprefix("slice"))
+    """Which build the board runs: 0 = listen only, 3 = the drive (slices 1-5).
+    The hard disk's tests all ask for it, so on the CD-ROM build they skip here."""
+    if is_cdrom_build(drive):
+        pytest.skip("the board runs the CD-ROM build (bb48_cdrom); this test needs bb48_drive or bb48")
+    word = next(w for w in drive.ready.split() if w.startswith("slice"))
+    return int(word.removeprefix("slice"))
 
 
 def require_build(firmware_slice: int, drive_build: bool):

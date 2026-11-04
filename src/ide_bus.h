@@ -8,7 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace ata { class Device; }
+#include "drive_device.h"
 class FetchMailbox;
 
 namespace ide_bus {
@@ -27,7 +27,7 @@ void begin(bool isa, bool early, bool iordy = true);
 
 // Serves at most one register access. Call in a tight loop on core 1.
 // Returns true if there was one; `sample` gets the pin sample for the trace.
-bool serviceOnce(ata::Device& dev, uint32_t& sample);
+bool serviceOnce(DriveDevice& dev, uint32_t& sample);
 
 // The fast lane for a data-in block (the 256 words of a sector or IDENTIFY):
 // answers data reads straight from the device's buffer until the block is
@@ -41,10 +41,10 @@ bool serviceOnce(ata::Device& dev, uint32_t& sample);
 // to the device. So a read-ahead is under way while the host reads, it's in
 // when the block ends, and the next sector's DRQ comes at once; and a read
 // never waits behind more than one job, nor a status read behind any.
-bool serveDataIn(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
+bool serveDataIn(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
 // The same for ide_bus_early (`early_answers`), whose samples are requests and
 // read reports.
-bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
+bool serveDataInEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
 // early_answers' tight bus loop, after an access: serves accesses inline and
 // keeps fetches moving until the bus is quiet for `quiet_cycles` (core 1's
 // cycle counter), a command or data block needs the main loop, or RESET#
@@ -55,8 +55,8 @@ bool serveDataInEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, u
 // return for one.
 // `bus`, if not null, records each access served (the raw trace), not the
 // answer requests.
-void serveBusEarly(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
-                   uint32_t quiet_cycles, void (*timers)(ata::Device&), void (*command)(ata::Device&),
+void serveBusEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
+                   uint32_t quiet_cycles, void (*timers)(DriveDevice&), void (*command)(DriveDevice&),
                    void (*bus)(uint32_t) = nullptr);
 
 // True while setDataReadDelay() is on.
@@ -77,7 +77,7 @@ void stop();
 // released when the device doesn't drive it (ata::Device::intrqDriven). With
 // the data lane, an interrupt waits while the device has moved on ahead of
 // the host (docs/data-lane.md).
-void updateIntrq(ata::Device& dev);
+void updateIntrq(DriveDevice& dev);
 // The data lane (docs/data-lane.md) serves data register reads: the default
 // bus, unless `early_answers` or `isa` is on. Core 1's fast lanes, the raw
 // trace's data reads and setDataReadDelay() don't apply then.
@@ -90,7 +90,7 @@ const char* busName();
 // Core 1 calls it where a block can begin: after running a command, and when
 // a fetch completes (before every register read is answered, ide_bus does it
 // itself). True while a block is on the lane. Without the lane, updateIntrq().
-bool syncDataLane(ata::Device& dev);
+bool syncDataLane(DriveDevice& dev);
 // A block is on the lane (core 1's loop then calls serveLane).
 extern bool lane_busy;
 // While a block is on the lane (lane_busy): waits for its end and gets the
@@ -98,7 +98,7 @@ extern bool lane_busy;
 // when an access is waiting or the blocks are done (back to the bus); false
 // when a command is queued or RESET# leaves `reset_low` (carry on with the
 // pass, which runs the command or handles the reset).
-bool serveLane(ata::Device& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
+bool serveLane(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch);
 // The lane's blocks started, and the longest core 1 took to move it from one
 // block to the next (a status read arriving meanwhile waits): `s`'s
 // lane_blocks and lane_switch_max_ns. resetLaneStats() clears the longest (`r`).

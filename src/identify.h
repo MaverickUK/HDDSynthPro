@@ -61,6 +61,13 @@ constexpr uint8_t MAX_PIO_MODE = 3;
 // on the nth DATA access). Word 255 carries the integrity checksum.
 void buildIdentify(const IdentifyInfo& info, uint16_t words[256]);
 
+// The 256-word IDENTIFY PACKET DEVICE block of a CD-ROM drive (the CD-ROM
+// build, atapi_device.h; ATA/ATAPI-5 layout): removable, 12-byte packets,
+// DRQ for the packet within 50 us, LBA, IORDY and PIO modes up to
+// `info.pio_mode`; no DMA. Uses the model, serial and firmware; the capacity
+// is the disc's, which READ CAPACITY reports, so it isn't here.
+void buildIdentifyPacket(const IdentifyInfo& info, uint16_t words[256]);
+
 // Rewrites the "current CHS translation" words (54-58), after INITIALIZE
 // DEVICE PARAMETERS, and fixes up the checksum. `words` must already hold a
 // valid IDENTIFY block (from buildIdentify): the checksum is adjusted for the

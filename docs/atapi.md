@@ -1,6 +1,46 @@
 # ATAPI CD-ROM: plan for a first exploration
 
-28 Oct 2026. A plan, nothing built yet. Branch `atapi-cdrom`.
+28 Oct 2026, planned. Branch `atapi-cdrom`.
+
+## Status (3 Nov 2026, 0.29.0): the MVP is built, and reads on a retro PC
+
+The firmware side of slices C1 and C2: the `bb48_cdrom` build serves the test disc or an ISO over PIO, and `test/run_native_tests.sh` drives `atapi::Device` through whole PACKET exchanges.
+
+**First hardware (3 Nov, the Evesham, Athlon XP 2000+, PIO mode 3, early answers):** slice C0 was skipped, and C1 and C2 ran on a retro PC first, ahead of slice C3's plan. The USB adapter's runs (`-m cdrom`, 20 replugs) are still to do.
+- **The BIOS** lists the drive as an ATAPI device (DEVICE RESET, IDENTIFY PACKET DEVICE, MODE SENSE(10) with the unit attention first) and tries to boot from it: READ(10), NOT READY with no disc. Five starts, the same each time.
+- **A Windows 98 startup floppy** (`OAKCDROM.SYS` and MSCDEX) makes it D:. The driver also probes device 1 and correctly finds nothing; a second CD-ROM letter (E:) was the PC's own optical drive. It asks READ SUB-CHANNEL (42h), for the audio position, and takes ILLEGAL REQUEST.
+- **The test ISO** (`HDDSYNTH.ISO`): `DIR D:` lists it and `CDCHECK` (on the disc, below) passes all 13 files, 216 READ(10) commands and none failed.
+- **A real disc: `DOOM_SE.ISO`** (22 MB, ISO 9660, in six pieces on the card; `E cdrom = DOOM_SE.ISO`, `!`). The CD runs Doom without installing it: from the startup floppy, `MD C:\DOOMDATA` (the floppy's RAM drive is C: when the PC has no hard disk; Doom's `-cdrom` mode keeps its settings and saves there), then `D:`, `CD \DOOMCD`, `SETUP`, `DOOM`. It loaded and played: 2,474 READ(10), none failed, the same three expected refusals as before, nothing stuck. **107 data reads the host didn't wait for IORDY** (`iordy_ignored`, in a few bursts as the game loaded; 0 with the test disc). The hard disk build saw the same on this PC on 31 Oct (247), and early answers covered them; the game running says they did here too, but nothing checks a real disc's data on the cable (the bus observer knows only the generated disc).
+- **Reads past 1,250 ns:** about 19,500 in the session, worst 1,960 ns (Alternate Status; mostly 1,600-2,000 ns, on every register, data included), `iordy_ignored=0`. The host waited for each one, but they're over ATA's limit. The hard disk build on early answers had none on this PC (the data lane had about 1,400, all Status), so something in the CD build costs core 1 more per access: `atapi::Device`'s inline paths (`peek`, `consumeRead`, the per-block fetch with no read-ahead) or where its code sits in RAM. To find first: `s` on the hard disk build against this one on the same PC, then the USB adapter's `-m cdrom` for a repeatable figure.
+
+Where it differs from the plan below:
+- **No templates.** `src/drive_device.h` makes `DriveDevice` an alias, `ata::Device` or `atapi::Device` per build, and `ide_bus` and `loop1` take a `DriveDevice&`. The hard disk build compiles to the same core 1 code as before, instruction for instruction at the same addresses (checked against 0.28.0's ELF). Only the calls into flash for one-offs (the linker's veneers, in a new order) and data addresses (0x40 bytes later, so every word stays in its SRAM bank) moved. `atapi::Device` has its own `CommandInfo` (with the packet's opcode) for the same reason: one more field in `ata::CommandInfo` lengthened `ata::Device::startCommand` by 4 bytes and moved everything after it.
+- **No ISO means no disc**, not the test disc: the drive answers NOT READY, "medium not present", as a real one with an empty tray does. The test disc is `cdrom = none` or console `T`.
+- **A few more commands** than the table: MODE SENSE(6), SEEK(10), VERIFY(10) and READ TOC's full TOC (format 2), cheap to answer and asked for by some hosts. GET EVENT STATUS NOTIFICATION reports "new media" once after power-on or a reset, then "no change". GET CONFIGURATION and GET EVENT STATUS NOTIFICATION report no unit attention, as MMC asks.
+- **Status after a reset is 00h** (DRDY clear until a command has run), and IDENTIFY PACKET DEVICE offers accelerated DRQ (the packet is wanted within 50 µs, with no interrupt): the drive sets DRQ at once. Both are for slice C0's trace to confirm.
+- **No read-ahead:** each 512-byte block is fetched under BSY once the host has read the one before. A 1x CD is 150 KB/s; this should manage several times that.
+
+To try it: `PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom`, with `E cdrom = none` and `!` (or `T`) for the test disc. On Windows, set `HDDPRO_CDROM_DEV=\\.\CdRom0`.
+
+### On the bench, step by step
+
+**Slice C0: does the adapter pass ATAPI?** No emulator yet: a real IDE CD-ROM drive and the listen build.
+1. A real IDE CD-ROM drive, jumpered master, on the adapter's 40-pin connector, powered from the adapter's brick.
+2. Does the computer see it? macOS: System Information → USB, and `diskutil list` with a data CD in (does it mount?). Windows: Device Manager, and a drive letter for the disc. If not, stop here: the firmware can't help, and another adapter is the next step.
+3. To record it: an IDE ribbon with two connectors, the adapter on one end, the drive and the BB48 (on the listen build, `PIO_ENV=bb48`, which never drives the bus) on the others. Console `w` (the capture window), then replug the adapter, put in a disc, open a file.
+4. Save the serial log as `host/reference/c0_cdrom_<adapter>.txt` and list its exchanges: `cd host && .venv/bin/python -m hddproto.packets ../host/reference/c0_cdrom_<adapter>.txt`. Its last lines name any opcode the host used that `src/mmc.h` doesn't handle; those go into `mmc` before C1.
+
+**On a retro PC with DOS** (as the Evesham ran it): a Windows 98 startup floppy, with CD-ROM support. `D:`, `DIR`, then `CDCHECK`, which the test ISO carries (`tools/cdcheck`, built by `test_iso` when NASM is installed): it reads every file whose ISO 9660 name DOS can open and checks its size and CRC-32, ending `all ok` or naming each bad file; `CDCHECK /R` repeats until a key, as a soak. The serial log goes on the Mac as usual. The drive looks for the ISO at start-up, so after putting the card back, `!`.
+
+**Slices C1 and C2: the emulator.**
+1. Flash and test in one go: `PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom`. Console `h` should say `READY HDDSynthPro 0.29.0 slice3 cdrom`, and `S` the `CONFIG cdrom=... serving=... frames=...` line.
+2. **An empty drive first** (C1): `E cdrom = NOSUCH.ISO`, `!`. The host should list a CD-ROM drive from HDDSYNTH with no disc. The trace at detection: `CMD .. ec IDENTIFY` with `DONE .. ec 41 04` (aborted, as it should be), then `a1 IDENTIFY_PACKET`, then packets such as `a0 INQUIRY` and `a0 TEST_UNIT_READY` ending `DONE .. a0 41 20` (not ready).
+3. **The test disc**: `E cdrom = none`, `!` (or console `T`), replug the adapter, then `-m cdrom`: `test_cdrom.py` reads the whole disc and at random. macOS says it can't read the disc: choose Ignore. Windows: `HDDPRO_CDROM_DEV=\\.\CdRom0`.
+4. **The test ISO** (C2's exit): with the card in the computer, `cd host && .venv/bin/python -m hddproto.test_iso build /Volumes/<CARD>/HDDSYNTH.ISO` (it only adds that one file). Back in the drive, `E cdrom = HDDSYNTH.ISO`, `!`; `-m cdrom` then runs `test_cdrom_iso.py`, which checks every file on the mounted disc.
+5. **If detection fails:** `t` (the raw trace), replug, save the log and run `hddproto.packets` on it, as for C0; `s` for `iordy_max_ns` and `iordy_ignored`. Compare with the C0 trace: the first exchange that differs is the place to look.
+6. Back to the hard disk: flash `bb48_drive` again. The `cdrom` line in `HDDSYNTH.INI` can stay; the hard disk ignores it.
+
+**Beside the other explorations** (not merged, and kept apart on purpose): the two-drives idea (`docs/two-drives.md` on its own branch: a pair of devices behind one bus-facing object) could hold an `atapi::Device` as device 1 the same way it would a second `ata::Device`, since both have the same interface; that's where a hard disk and a CD on one cable would come from. A read-only disk built from a folder on the card could in time feed a disc too, with ISO 9660 in place of FAT. Neither is part of this MVP.
 
 ## Goal and scope
 
