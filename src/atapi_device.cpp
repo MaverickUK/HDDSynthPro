@@ -6,21 +6,26 @@ namespace atapi {
 
 using namespace ata;  // the registers' bits and the commands both kinds of device share
 
-Device::Device(const IdentifyInfo& info) : info_(info), disc_{info.total_sectors / SECTORS_PER_FRAME} {
+Device::Device(const IdentifyInfo& info, uint8_t position)
+    : info_(info),
+      position_(position),
+      dev_bit_(position ? DEV_DEV : 0),
+      id_tag_(position ? 0x80000000u : 0),
+      disc_{info.total_sectors / SECTORS_PER_FRAME} {
     buildIdentifyPacket(info_, identify_);
     resetToSignature();
     mmc::powerOn(mmc_, disc_);
 }
 
-CORE1_RAM void Device::resetToSignature() {
+CORE1_RAM void Device::resetToSignature(uint8_t device) {
     // The packet device signature, which tells a host this is ATAPI. Status
     // is 00h: DRDY stays clear until a command has run (ATA/ATAPI-5).
     sector_count_ = 1;
     lba_low_ = 1;
     lba_mid_ = 0x14;
     lba_high_ = 0xEB;
-    device_ = 0;
-    error_ = 0x01;  // diagnostic code: device 0 passed, device 1 absent
+    device_ = device;
+    error_ = 0x01;  // diagnostic code: passed (and, as device 0, device 1 absent)
     status_ = 0;
     data_ = nullptr;
     data_count_ = data_index_ = 0;
@@ -36,7 +41,7 @@ CORE1_RAM void Device::resetToSignature() {
 }
 
 CORE1_RAM void Device::consumeRead(Reg reg) {
-    if (device1Selected()) return;
+    if (notSelected()) return;
     if (reg == Reg::Data) {
         if (!(status_ & ST_DRQ) || !data_) return;
         if (++data_index_ >= data_count_) finishDataIn();
@@ -46,7 +51,7 @@ CORE1_RAM void Device::consumeRead(Reg reg) {
 }
 
 CORE1_RAM void Device::consumeDataWords(uint16_t n) {
-    if (n == 0 || device1Selected() || !(status_ & ST_DRQ) || !data_) return;
+    if (n == 0 || notSelected() || !(status_ & ST_DRQ) || !data_) return;
     data_index_ = uint16_t(data_index_ + n);
     if (data_index_ >= data_count_) finishDataIn();
 }
@@ -78,7 +83,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
 
     switch (reg) {
         case Reg::Data:
-            if (!receiving_packet_ || device1Selected()) break;
+            if (!receiving_packet_ || notSelected()) break;
             packet_[2 * packet_words_] = uint8_t(value);  // low byte first
             packet_[2 * packet_words_ + 1] = uint8_t(value >> 8);
             if (++packet_words_ == mmc::PACKET_BYTES / 2) {
@@ -99,7 +104,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
 
 CORE1_RAM bool Device::acceptsCommand(uint8_t command) const {
     if (in_reset_) return false;
-    if (device1Selected()) return command == CMD_EXECUTE_DEVICE_DIAGNOSTIC;
+    if (notSelected()) return command == CMD_EXECUTE_DEVICE_DIAGNOSTIC;
     // DEVICE RESET is how a host recovers a packet device that's stuck busy.
     return !(status_ & ST_BSY) || command == CMD_DEVICE_RESET;
 }
@@ -143,7 +148,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
 }
 
 CORE1_RAM bool Device::intrq() const {
-    return irq_pending_ && !device1Selected() && !(device_control_ & DC_NIEN);
+    return irq_pending_ && !notSelected() && !(device_control_ & DC_NIEN);
 }
 
 // ---- ATA commands -------------------------------------------------------------
@@ -189,7 +194,7 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
             ++commands_completed_;
             break;
         case CMD_DEVICE_RESET:
-            resetToSignature();  // no interrupt
+            resetToSignature(dev_bit_);  // no interrupt; still the device selected, as device 1 too
             ++commands_completed_;
             break;
         case CMD_SET_FEATURES:
@@ -394,12 +399,12 @@ CORE1_RAM void Device::requestFetch() {
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
-    fetch = Fetch{fetch_id_, read_lba_, buffer_, false, false, command_sectors_, command_lba_, 0};  // unit 0: one drive
+    fetch = Fetch{fetch_id_ | id_tag_, read_lba_, buffer_, false, false, command_sectors_, command_lba_, position_};
     return true;
 }
 
 CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
-    if (!fetch_pending_ || id != fetch_id_) return;  // stale: a reset or a newer command
+    if (!fetch_pending_ || id != (fetch_id_ | id_tag_)) return;  // stale: a reset or a newer command
     fetch_pending_ = false;
     if (!ok) {
         mmc_.sense = mmc::SENSE_READ_ERROR;
@@ -417,7 +422,7 @@ CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
 // ---- DMA -----------------------------------------------------------------------
 
 CORE1_RAM bool Device::dmaBurstReady(DmaBurst& burst) {
-    if (!dma_ || dma_burst_running_ || !data_ || !(status_ & ST_DRQ) || device1Selected()) return false;
+    if (!dma_ || dma_burst_running_ || !data_ || !(status_ & ST_DRQ) || notSelected()) return false;
     burst = DmaBurst{data_ + data_index_, nullptr, uint16_t(data_count_ - data_index_)};
     dma_burst_running_ = true;
     return true;

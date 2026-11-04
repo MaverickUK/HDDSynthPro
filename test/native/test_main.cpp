@@ -426,6 +426,7 @@ void runTwoDrivesTests();
 void runFolderDiskTests();
 void runMmcTests();
 void runAtapiDeviceTests();
+void runHdcdTests();
 
 int main() {
     RUN(test_pin_layout);
@@ -464,6 +465,7 @@ int main() {
     runFolderDiskTests();
     runMmcTests();
     runAtapiDeviceTests();
+    runHdcdTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

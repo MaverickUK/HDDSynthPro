@@ -59,8 +59,13 @@ struct CommandInfo {
 class Device {
 public:
     // `info.total_sectors`: the image's 512-byte sectors (four per frame), or
-    // 0 for no disc in the drive.
-    explicit Device(const IdentifyInfo& info);
+    // 0 for no disc in the drive. `position`: 0, the only drive (the CD-ROM
+    // build), or 1, device 1 beside a hard disk (hdcd::Device, the bb48_hdcd
+    // build): it answers when DEV is 1, its fetches carry unit 1, and their
+    // ids have the top bit set, apart from the hard disk's.
+    explicit Device(const IdentifyInfo& info, uint8_t position = 0);
+    // Whether the host has this drive selected (DEV matches its position).
+    bool selected() const { return !notSelected(); }
 
     // ---- Bus side (as ata::Device) ------------------------------------------
 
@@ -73,7 +78,7 @@ public:
     void consumeRead(Reg reg);
 
     __attribute__((always_inline)) bool dataInRemaining(const uint16_t*& next, uint16_t& left) const {
-        if (device1Selected() || !(status_ & ata::ST_DRQ) || !data_ || dma_) return false;
+        if (notSelected() || !(status_ & ata::ST_DRQ) || !data_ || dma_) return false;
         next = data_ + data_index_;
         left = uint16_t(data_count_ - data_index_);
         return true;
@@ -96,12 +101,12 @@ public:
     void hardReset(bool asserted);
 
     bool intrq() const;
-    bool intrqDriven() const { return !device1Selected() && !(device_control_ & ata::DC_NIEN); }
+    bool intrqDriven() const { return !notSelected() && !(device_control_ & ata::DC_NIEN); }
 
     // ---- Sector fetches (handed to core 0) ---------------------------------
 
     bool pendingFetch(ata::Fetch& fetch);
-    uint32_t pendingFetchId() const { return fetch_pending_ ? fetch_id_ : 0; }
+    uint32_t pendingFetchId() const { return fetch_pending_ ? (fetch_id_ | id_tag_) : 0; }
     void fetchDone(uint32_t id, bool ok);
 
     // ---- DMA (PACKET with its DMA bit) ----------------------------------------
@@ -133,9 +138,9 @@ public:
     const mmc::Sense& sense() const { return mmc_.sense; }
 
 private:
-    bool device1Selected() const { return (device_ & ata::DEV_DEV) != 0; }
+    bool notSelected() const { return (device_ & ata::DEV_DEV) != dev_bit_; }
     bool acceptsCommand(uint8_t command) const;
-    void resetToSignature();
+    void resetToSignature(uint8_t device = 0);  // `device`: the Device register after it
     void abandonCommand() { commands_completed_ = commands_started_; }
     void beginCommand(uint8_t command);  // counted as started, for the trace
     void startCommand(uint8_t command);
@@ -153,6 +158,9 @@ private:
     void requestFetch();
 
     IdentifyInfo info_;
+    uint8_t position_;     // 0 or 1: which device it is
+    uint8_t dev_bit_;      // the Device register's DEV bit that selects it
+    uint32_t id_tag_;      // or'ed into fetch ids: 0, or the top bit as device 1
     uint16_t identify_[256];
     // A fetched sector, and a packet's reply, apart: after DEVICE RESET cuts a
     // read short, core 0 may still be filling the sector buffer for the stale
@@ -217,7 +225,7 @@ private:
 __attribute__((always_inline)) inline uint16_t Device::peek(Reg reg) const {
     switch (reg) {
         case Reg::Data:
-            if (device1Selected() || !(status_ & ata::ST_DRQ) || !data_) return 0;
+            if (notSelected() || !(status_ & ata::ST_DRQ) || !data_) return 0;
             return data_[data_index_];
         case Reg::ErrorFeatures: return error_;
         case Reg::SectorCount: return sector_count_;
@@ -226,7 +234,7 @@ __attribute__((always_inline)) inline uint16_t Device::peek(Reg reg) const {
         case Reg::LbaHigh: return lba_high_;
         case Reg::Device: return device_;
         case Reg::StatusCommand:
-        case Reg::AltStatusDevCtrl: return device1Selected() ? 0 : status_;
+        case Reg::AltStatusDevCtrl: return notSelected() ? 0 : status_;
         default: return 0;
     }
 }
