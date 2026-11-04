@@ -2,7 +2,8 @@
 directory it was made from, through pyfatfs, an independent FAT reader:
 the partition table, then every folder and file, in listing order, byte for
 byte. Short names differ from the long ones, so entries are matched by
-position (both sides sorted by long name, as the tool lists them).
+position: the tool lists each folder sorted by long name, and pyfatfs returns
+its subfolders first, then its files, each in that order.
 
 Usage: python scripts/check_folder_img.py <directory> <image>
 Needs: pip install pyfatfs"""
@@ -16,8 +17,11 @@ from pyfatfs.PyFatFS import PyFatFS
 
 
 def listing(path):
+    """A folder's entries in the order pyfatfs lists the image's: folders, then
+    files (PyFatFS.listdir returns dirs + files), each sorted by name."""
     names = sorted(n for n in os.listdir(path) if not n.startswith("."))
-    return [(n, os.path.isdir(os.path.join(path, n))) for n in names]
+    entries = [(n, os.path.isdir(os.path.join(path, n))) for n in names]
+    return [e for e in entries if e[1]] + [e for e in entries if not e[1]]
 
 
 def digest(data):
@@ -45,7 +49,7 @@ def main(directory, image):
         theirs = [n for n in fs.listdir(image_dir) if n not in (".", "..")]
         ours = listing(host_dir)
         assert len(theirs) == len(ours), f"{image_dir}: {len(theirs)} entries, {len(ours)} expected"
-        # pyfatfs lists in directory order, which is the tool's sorted order
+        # pyfatfs: folders first, then files, each in directory order (the tool's sorted order)
         for (name, is_dir), short in zip(ours, theirs):
             host_path = os.path.join(host_dir, name)
             image_path = image_dir.rstrip("/") + "/" + short
