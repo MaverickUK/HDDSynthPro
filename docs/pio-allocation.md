@@ -8,6 +8,8 @@ How the drive should share the RP2350's three PIO blocks once 4-bit SDIO for the
 
 The RP2350 has three PIO blocks, each with 32 instruction slots and 4 state machines. Each block reaches one 32-pin window of GPIOs at a time: base 0 (GPIO 0-31) or base 16 (GPIO 16-47).
 
+*The table below is as of 0.16.0. Since then the bus program has variants (early answers 32, the data lane 27 + 5, `iordy_watchdog` 7 with `isa`), the diagnostics' block also holds `iordy_check` (5), and block 2, when DMA isn't offered, holds `iocs16` (6) and `bus_timing` (22). The current map, and how the register table would fit, are in [no-iordy.md](no-iordy.md#fitting-it-in-reviewed-4-nov-2026-0300-dev8).*
+
 | User | Instructions | State machines | Window | Today (0.16.0) |
 |---|---|---|---|---|
 | `ide_bus.pio`: every register access, IORDY | 32 | 1 | base 0 (GPIO 4-30) | block of its own, always |

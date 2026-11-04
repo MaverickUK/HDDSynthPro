@@ -9,6 +9,8 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 - **Release notes for 0.30.0** (`docs/release-notes/v0.30.0.md`, for the people flashing it), and CI's release uses `docs/release-notes/vX.Y.Z.md` when there is one (GitHub's generated notes otherwise) and publishes the CD-ROM and hard disk + CD-ROM UF2s too (`hddsynthpro-bb48-cdrom-...`, `hddsynthpro-bb48-hdcd-...`).
 
+- **The register table's design brought up to date** ([docs/no-iordy.md](docs/no-iordy.md)): today's PIO block map (every block nearly full), where the table program would fit (DD's drivers in block 0, write capture in block 1, IORDY's diagnostics off), BSY after a command across blocks (`irq next`, two tables), and why it might end slow reads on every host and the ISA/PCI split with them.
+
 ### Fixed
 - Compiler warnings in the builds that don't use everything `main.cpp` holds (`chooseDevice1` in the CD-ROM build, `restart` in the listen build), and a device 1 note that could be cut short.
 
