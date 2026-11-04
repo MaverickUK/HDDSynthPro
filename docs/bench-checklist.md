@@ -2,6 +2,8 @@
 
 Everything built on 4 Nov while nobody could replug the USB adapter, in one sitting. Branches: `merge-cdrom` (0.30.0-dev.3, CI green) and `hdd-cd` (0.30.0-dev.8, from it; everything below is on it). Run from an administrator Git Bash on the Windows PC, in `host/`, with `export PYTHONUTF8=1 HDDPRO_DISK=PhysicalDrive1`. `runs/tools/` holds the helpers named below (git-ignored, on that PC).
 
+**Steps 1, 2 and 2b run by themselves:** after step 0, `python bench_session.py` in `host/` flashes each build, sets the console up, re-detects, runs the tests and prints a summary beside the figures below (`--list` for the steps, `--only`/`--from` to pick, `--dry-run` to see the plan; results in `runs/bench-<time>/summary.md`). It restores `device1` and `mode` at the end. What stays by hand: the replug, MSCDEX and the retro PCs, the soak (`--only hdcd-soak` runs it), step 5's flash.
+
 ## 0. Bring the rig back
 
 - [ ] **Replug the USB adapter** (it dropped off USB on 4 Nov: its controller hung, no probing on the IDE side). If it misbehaves again (garbled names, a disk of the wrong size, double detections in most cycles), **restart the PC** before blaming the firmware; it has been declining for weeks.
