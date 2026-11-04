@@ -11,6 +11,8 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 - **The register table's design brought up to date** ([docs/no-iordy.md](docs/no-iordy.md)): today's PIO block map (every block nearly full), where the table program would fit (DD's drivers in block 0, write capture in block 1, IORDY's diagnostics off), BSY after a command across blocks (`irq next`, two tables), and why it might end slow reads on every host and the ISA/PCI split with them.
 
+- **A design for the HDD Synth's CD-ROM screen and disc swapping** ([docs/hddsynth-cdrom-display-brief.md](docs/hddsynth-cdrom-display-brief.md)): activity link protocol version 3, with known answers for both sides' tests, the synth's screens, HDDSynthPro's work, and the owner's decisions. Design only.
+
 ### Fixed
 - Compiler warnings in the builds that don't use everything `main.cpp` holds (`chooseDevice1` in the CD-ROM build, `restart` in the listen build), and a device 1 note that could be cut short.
 
