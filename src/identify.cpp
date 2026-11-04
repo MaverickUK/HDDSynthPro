@@ -149,10 +149,15 @@ void buildIdentifyPacket(const IdentifyInfo& info, uint16_t w[256]) {
     putAtaString(&w[10], 10, info.serial);
     putAtaString(&w[23], 4, info.firmware);
     putAtaString(&w[27], 20, info.model);
-    w[49] = (1u << 11) | (1u << 9);  // IORDY supported, LBA supported; no DMA
+    w[49] = (1u << 11) | (1u << 9);  // IORDY supported, LBA supported
+    uint8_t mdma = info.mdma_mode == NO_DMA ? NO_DMA
+                   : info.mdma_mode > MAX_MDMA_MODE ? MAX_MDMA_MODE : info.mdma_mode;
+    if (mdma != NO_DMA) w[49] |= 1u << 8;  // DMA supported: PACKET's data by multiword DMA
     uint8_t pio_mode = info.pio_mode > MAX_PIO_MODE ? MAX_PIO_MODE : info.pio_mode;
     w[51] = uint16_t((pio_mode > 2 ? 2 : pio_mode) << 8);
     w[53] = 0x0002;  // words 64-70 are valid
+    // As buildIdentify: modes 0 to `mdma` supported, the fastest selected.
+    w[63] = mdma == NO_DMA ? 0 : uint16_t(((1u << (mdma + 1)) - 1) | (1u << (8 + mdma)));
     w[64] = pio_mode == 3 ? 0x0001 : 0x0000;
     static const uint16_t CYCLE_NS[] = {600, 383, 240, 180};
     w[67] = CYCLE_NS[pio_mode];

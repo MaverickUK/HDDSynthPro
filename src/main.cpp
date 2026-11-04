@@ -285,9 +285,10 @@ void setup1() {
     busSwitchesOn();
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
-    g_mdma_mode.store(HDDPRO_CDROM ? NO_DMA  // the CD-ROM drive offers PIO only, for now
-                                   : drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
-                                                                   g_dmarq_wired.load(), g_dma_auto.load()),
+    // Both builds by the same settings (`mode`, `dma`): the CD-ROM drive moves
+    // PACKET's data by DMA when offered (0.30.0-dev.3).
+    g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
+                                                    g_dmarq_wired.load(), g_dma_auto.load()),
                       std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
     const IdentifyInfo device1 = device1Identity();
@@ -394,10 +395,14 @@ CORE1_RAM static void recordDone(DriveDevice& dev) {
     record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(), t - g_early_command_start_us));
 }
 
-// The tight loop's idle work: the BSY timers, and DONE for a command just completed.
+// The tight loop's idle work: the BSY timers, DONE for a command just
+// completed, and a DMA command's bursts. In DMA the host waits for DMARQ
+// instead of polling, so the bus goes quiet and the main loop's step 1 came
+// only after EARLY_BUS_ONLY_US: a 64 KB READ DMA took 12 s (0.30.0-dev.3).
 CORE1_RAM static void earlyIdle(DriveDevice& dev) {
     busyTimers(dev);
     recordDone(dev);
+    if (dev.dmaCommand() || ide_dma::active()) serviceDma(dev);
 }
 
 CORE1_RAM static void runCommandEarly(DriveDevice& dev) {

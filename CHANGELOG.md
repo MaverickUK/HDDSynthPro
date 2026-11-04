@@ -2,6 +2,19 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.3] - 2026-11-04 (branch `merge-cdrom`)
+
+### Added
+- **The CD-ROM build moves PACKET's data by multiword DMA** when it's offered (by the same settings as the hard disk: `mode = mdma0-2`, or `dma = on` with `mode = auto`, and DMARQ wired). IDENTIFY PACKET DEVICE offers modes 0 to 2 (word 49 bit 8, word 63), SET FEATURES selects one, and a PACKET with its DMA bit takes the packet by PIO, then sends each block as an `ide_dma` burst (a reply whole, a disc read a 512-byte sector per burst), with no byte count limit and one interrupt, at the status phase. Not offered, the DMA bit is still refused (ABRT). Host tests: `atapi_offers_multiword_dma`, `atapi_dma_packets`, `atapi_dma_errors_and_resets_end_the_dma_command`.
+- **On the rig** (the Windows rig's adapter, which sends every packet by DMA and so found no CD-ROM drive before): Windows 11 lists `HDDSYNTH PRO CD-ROM USB Device` as D:. `-m cdrom` passes: the whole 64 MB test disc read and checked byte for byte (2.42 MB/s) and random reads, 103,103 sectors checked on the cable by the bus observer, 0 bad, from 31 million DMA words. With the card's `DOOM_SE.ISO`, Windows mounts the CDFS volume `DOOM_SE` and all 27 files (22.7 MB) read without an error (1.36 MB/s: the card over SPI, and no read-ahead yet). Its polling (GET EVENT STATUS NOTIFICATION, once a second) completes in 25 us.
+
+### Fixed
+- **Multiword DMA under early answers** (the default bus program since 0.27.0) **took about 12 s per 64 KB read**: the tight bus loop never served DMA, and the main loop's DMA step waited for the bus to be quiet for 10 ms (`EARLY_BUS_ONLY_US`), which in DMA it is between every burst, since the host waits for DMARQ instead of polling. The tight loop's idle work now runs DMA as well. On the rig (hard disk build, MDMA 2, early answers): reads 8.84 MB/s, 1,000 random 4 KB reads a second, writes 12.48 MB/s, worst read 1,140 ns (0.18.1 on `ide_bus`: 7.70, 1,100, 13.9). Unseen until now because DMA is off by default and the retro PCs ran PIO; found by the CD-ROM build, which always runs early answers. The hard disk's core 1 bus functions are where they were; `loop1` grew by 92 bytes.
+- **Not yet benchmarked in PIO after this change** (`-m speed` on the lane and early answers): the USB adapter dropped off USB when the board went back from the CD-ROM build to the hard disk's (below), and needs replugging.
+
+### Rig
+- The adapter went off USB altogether after the switch back from the CD-ROM build (no USB device, no probing on the IDE side: its controller hung), and only a replug or a PC restart will bring it back (restarting its root hub needs a reboot). Its USB serial number has come through in about 25 garbled variants over the weeks, so this is its decline as much as the switch. Earlier the same day one switch back went cleanly.
+
 ## [0.30.0-dev.2] - 2026-11-04 (branch `merge-cdrom`)
 
 ### Added

@@ -510,6 +510,180 @@ TEST(atapi_reads_past_the_drq_block_get_nothing) {
     CHECK_EQ(host.reg(Reg::LbaMid) | host.reg(Reg::LbaHigh) << 8, 512);
 }
 
+// ---- PACKET with its DMA bit (multiword DMA offered) ---------------------------
+
+namespace {
+
+IdentifyInfo dmaInfo() {
+    IdentifyInfo info = INFO;
+    info.mdma_mode = 2;
+    return info;
+}
+
+// A PACKET exchange the DMA way, as the USB adapter does it: the DMA bit and
+// no byte count limit, the packet by PIO, then each block as ide_dma moves
+// it (DMARQ, a burst, dmaBurstDone), until the status phase. Returns the
+// final Status; `out` gets the data, `bursts` each burst's words.
+uint8_t dmaPacket(VirtualHost& host, std::initializer_list<uint8_t> bytes, std::vector<uint8_t>& out,
+                  std::vector<uint16_t>& bursts) {
+    Device& dev = host.dev;
+    uint8_t p[12] = {};
+    unsigned n = 0;
+    for (uint8_t b : bytes) p[n++] = b;
+    out.clear();
+    bursts.clear();
+    dev.write(Reg::Device, 0xA0);
+    dev.write(Reg::ErrorFeatures, atapi::FEATURES_DMA);
+    dev.write(Reg::LbaMid, 0);
+    dev.write(Reg::LbaHigh, 0);
+    host.command(atapi::CMD_PACKET);
+    if (!host.waitNotBusy()) return 0xFF;
+    uint8_t st = host.altStatus();
+    if (!(st & ata::ST_DRQ)) return st;  // refused at once
+    for (unsigned i = 0; i < 6; ++i) dev.write(Reg::Data, uint16_t(p[2 * i] | p[2 * i + 1] << 8));
+    for (int guard = 0; guard < 100000; ++guard) {
+        if (!host.waitNotBusy()) return 0xFF;
+        ata::DmaBurst burst;
+        if (dev.dmaBurstReady(burst)) {
+            CHECK(dev.dmaCommand());
+            CHECK(!dev.intrq());           // DMARQ asks for a block, not INTRQ
+            CHECK(!dev.transferring());    // core 1 isn't pinned to the bus meanwhile
+            const uint16_t* next;
+            uint16_t left;
+            CHECK(!dev.dataInRemaining(next, left));  // nor the fast lane
+            ata::DmaBurst again;
+            CHECK(!dev.dmaBurstReady(again));  // one burst at a time
+            bursts.push_back(burst.count);
+            for (uint16_t w = 0; w < burst.count; ++w) {
+                out.push_back(uint8_t(burst.from[w]));
+                out.push_back(uint8_t(burst.from[w] >> 8));
+            }
+            dev.dmaBurstDone();
+            continue;
+        }
+        if (dev.intrq()) ++host.interrupts;
+        st = host.reg(Reg::StatusCommand);
+        if (!(st & ata::ST_DRQ)) {
+            CHECK(!dev.dmaCommand());  // the status phase: core 1 ends the DMA command
+            CHECK_EQ(host.reg(Reg::SectorCount), atapi::IR_COD | atapi::IR_IO);
+            return st;
+        }
+    }
+    return 0xFF;
+}
+
+}  // namespace
+
+TEST(atapi_offers_multiword_dma) {
+    Device dev(dmaInfo());
+    VirtualHost host{dev, nullptr};
+    auto identify = [&](uint16_t w[256]) {
+        host.command(atapi::CMD_IDENTIFY_PACKET_DEVICE);
+        CHECK(host.waitNotBusy());
+        for (int i = 0; i < 256; ++i) w[i] = dev.read(Reg::Data);
+        uint8_t sum = 0;
+        for (int i = 0; i < 256; ++i) sum = uint8_t(sum + (w[i] & 0xFF) + (w[i] >> 8));
+        CHECK_EQ(sum, 0);
+    };
+    uint16_t w[256];
+    identify(w);
+    CHECK(w[49] & (1u << 8));  // DMA supported
+    CHECK_EQ(w[63], 0x0407);   // modes 0-2, mode 2 selected
+    // SET FEATURES picks mode 1; word 63 follows, checksum and all
+    dev.write(Reg::ErrorFeatures, ata::SF_SET_TRANSFER_MODE);
+    dev.write(Reg::SectorCount, ata::XFER_MDMA_0 + 1);
+    host.command(ata::CMD_SET_FEATURES);
+    CHECK(host.waitNotBusy());
+    CHECK_EQ(host.reg(Reg::StatusCommand), ata::ST_DRDY);
+    identify(w);
+    CHECK_EQ(w[63], 0x0207);
+    // Past the mode offered: refused
+    dev.write(Reg::ErrorFeatures, ata::SF_SET_TRANSFER_MODE);
+    dev.write(Reg::SectorCount, ata::XFER_MDMA_0 + 3);
+    host.command(ata::CMD_SET_FEATURES);
+    CHECK(host.waitNotBusy());
+    CHECK(host.reg(Reg::StatusCommand) & ata::ST_ERR);
+}
+
+TEST(atapi_dma_packets) {
+    Device dev(dmaInfo());
+    GeneratedDisk disc(TEST_SECTORS);
+    VirtualHost host{dev, &disc};
+    std::vector<uint8_t> d;
+    std::vector<uint16_t> bursts;
+    // No data (the adapter's first packet): the unit attention, then good
+    uint8_t st = dmaPacket(host, {mmc::OP_TEST_UNIT_READY}, d, bursts);
+    CHECK(st & ata::ST_ERR);
+    CHECK_EQ(host.reg(Reg::ErrorFeatures) >> 4, mmc::KEY_UNIT_ATTENTION);
+    CHECK(bursts.empty());
+    CHECK(!dev.dmaCommand());
+    CHECK_EQ(dmaPacket(host, {mmc::OP_TEST_UNIT_READY}, d, bursts), ata::ST_DRDY);
+    // A reply in one burst, whatever the byte count registers say
+    unsigned before = host.interrupts;
+    CHECK_EQ(dmaPacket(host, {mmc::OP_INQUIRY, 0, 0, 0, 36}, d, bursts), ata::ST_DRDY);
+    CHECK(bursts == std::vector<uint16_t>({18}));
+    CHECK_STR(std::string(d.begin() + 8, d.begin() + 16), "HDDSYNTH");
+    CHECK_EQ(host.interrupts - before, 1u);  // the status phase only
+    // An odd length: the last word's high byte is padding
+    CHECK_EQ(dmaPacket(host, {mmc::OP_REQUEST_SENSE, 0, 0, 0, 17}, d, bursts), ata::ST_DRDY);
+    CHECK(bursts == std::vector<uint16_t>({9}));
+    // Two frames: a burst per sector fetched, the data intact
+    before = host.interrupts;
+    CHECK_EQ(dmaPacket(host, {mmc::OP_READ_10, 0, 0, 0, 0, 5, 0, 0, 2}, d, bursts), ata::ST_DRDY);
+    CHECK(d == expectedFrames(5, 2));
+    CHECK_EQ(bursts.size(), size_t(8));
+    for (uint16_t b : bursts) CHECK_EQ(b, 256);
+    CHECK_EQ(host.interrupts - before, 1u);
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+    // PIO still works on the same drive
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 7, 0, 0, 1}, d), ata::ST_DRDY);
+    CHECK(d == expectedFrames(7, 1));
+}
+
+TEST(atapi_dma_errors_and_resets_end_the_dma_command) {
+    Device dev(dmaInfo());
+    GeneratedDisk disc(TEST_SECTORS);
+    VirtualHost host{dev, &disc};
+    std::vector<uint8_t> d;
+    std::vector<uint16_t> bursts;
+    dmaPacket(host, {mmc::OP_TEST_UNIT_READY}, d, bursts);  // the unit attention
+    // The card fails mid-read: CHECK CONDITION, and no DMA command left
+    FailingDisk bad;
+    host.source = &bad;
+    uint8_t st = dmaPacket(host, {mmc::OP_READ_10, 0, 0, 0, 0, 0, 0, 0, 1}, d, bursts);
+    CHECK(st & ata::ST_ERR);
+    CHECK_EQ(host.reg(Reg::ErrorFeatures) >> 4, mmc::KEY_MEDIUM_ERROR);
+    CHECK(!dev.dmaCommand());
+    host.source = &disc;
+    // A burst under way when RESET# comes: the DMA command ends with it
+    dev.write(Reg::ErrorFeatures, atapi::FEATURES_DMA);
+    host.command(atapi::CMD_PACKET);
+    host.pump();
+    const uint8_t p[12] = {mmc::OP_READ_10, 0, 0, 0, 0, 0, 0, 0, 1};
+    for (unsigned i = 0; i < 6; ++i) dev.write(Reg::Data, uint16_t(p[2 * i] | p[2 * i + 1] << 8));
+    CHECK(host.waitNotBusy());
+    ata::DmaBurst burst;
+    CHECK(dev.dmaBurstReady(burst));
+    dev.hardReset(true);
+    CHECK(!dev.dmaCommand());
+    dev.hardReset(false);
+    dev.dmaBurstDone();  // core 1 finishing the cut-short burst: nothing to move on
+    CHECK(host.atapiSignature());
+    CHECK(!(host.altStatus() & ata::ST_DRQ));
+    // The same with SRST
+    dmaPacket(host, {mmc::OP_TEST_UNIT_READY}, d, bursts);  // the reset's unit attention
+    dev.write(Reg::ErrorFeatures, atapi::FEATURES_DMA);
+    host.command(atapi::CMD_PACKET);
+    host.pump();
+    for (unsigned i = 0; i < 6; ++i) dev.write(Reg::Data, uint16_t(p[2 * i] | p[2 * i + 1] << 8));
+    CHECK(host.waitNotBusy());
+    CHECK(dev.dmaBurstReady(burst));
+    dev.write(Reg::AltStatusDevCtrl, ata::DC_SRST);
+    CHECK(!dev.dmaCommand());
+    dev.write(Reg::AltStatusDevCtrl, 0);
+    CHECK(host.atapiSignature());
+}
+
 void runAtapiDeviceTests() {
     RUN(atapi_signature_after_power_on_and_reset);
     RUN(atapi_identify_device_is_aborted_with_the_signature);
@@ -530,4 +704,7 @@ void runAtapiDeviceTests() {
     RUN(atapi_reply_survives_a_stale_fetch);
     RUN(atapi_execute_device_diagnostic);
     RUN(atapi_reads_past_the_drq_block_get_nothing);
+    RUN(atapi_offers_multiword_dma);
+    RUN(atapi_dma_packets);
+    RUN(atapi_dma_errors_and_resets_end_the_dma_command);
 }

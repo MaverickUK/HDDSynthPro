@@ -1,8 +1,8 @@
 // The CD-ROM build's device (docs/atapi.md): an ATAPI CD-ROM drive serving a
 // data disc, in place of ata::Device. Pure C++, host-tested. Runs on core 1
 // behind the same interface as ata::Device, so ide_bus and loop1 drive it
-// unchanged (drive_device.h picks one per build); the DMA, write and standby
-// parts of that interface are there but never used.
+// unchanged (drive_device.h picks one per build); the write and standby parts
+// of that interface are there but never used.
 //
 // What makes it a packet device:
 //   - its reset signature (LBA Mid/High 14h/EBh), and IDENTIFY DEVICE aborted;
@@ -11,6 +11,10 @@
 //     register, then the device answers it (mmc.h) with data blocks of up to
 //     the byte count the host allows (LBA Mid/High), an interrupt for each,
 //     and an interrupt at the end; Sector Count holds the interrupt reason.
+//     With PACKET's DMA bit (multiword DMA, when IDENTIFY PACKET DEVICE
+//     offers it) the packet still comes by PIO, but the data goes in DMA
+//     bursts, one per block, with no byte count limit and no interrupt until
+//     the status phase: ide_dma moves them, as for the hard disk's READ DMA.
 //
 // A disc read goes one 512-byte DRQ block per fetch, as the hard disk does:
 // CD frame n is sectors 4n to 4n+3 of the image, so ImageDisk serves an ISO
@@ -37,7 +41,7 @@ constexpr uint8_t CMD_IDENTIFY_PACKET_DEVICE = 0xA1;
 constexpr uint8_t IR_COD = 0x01;  // a command packet (1), or data (0)
 constexpr uint8_t IR_IO = 0x02;   // to the host (1), or from it (0)
 
-constexpr uint8_t FEATURES_DMA = 0x01;  // PACKET's Features bit 0: the data by DMA (not offered)
+constexpr uint8_t FEATURES_DMA = 0x01;  // PACKET's Features bit 0: the data by DMA (if offered)
 
 // 512-byte sectors of the image per CD frame.
 constexpr uint32_t SECTORS_PER_FRAME = mmc::FRAME_BYTES / 512;
@@ -69,7 +73,7 @@ public:
     void consumeRead(Reg reg);
 
     __attribute__((always_inline)) bool dataInRemaining(const uint16_t*& next, uint16_t& left) const {
-        if (device1Selected() || !(status_ & ata::ST_DRQ) || !data_) return false;
+        if (device1Selected() || !(status_ & ata::ST_DRQ) || !data_ || dma_) return false;
         next = data_ + data_index_;
         left = uint16_t(data_count_ - data_index_);
         return true;
@@ -100,11 +104,17 @@ public:
     uint32_t pendingFetchId() const { return fetch_pending_ ? fetch_id_ : 0; }
     void fetchDone(uint32_t id, bool ok);
 
-    // ---- Not offered: DMA, standby ---------------------------------------------
+    // ---- DMA (PACKET with its DMA bit) ----------------------------------------
 
-    bool dmaCommand() const { return false; }
-    bool dmaBurstReady(ata::DmaBurst&) { return false; }
-    void dmaBurstDone() {}
+    // True while a packet's data goes by DMA: core 1 keeps DMARQ an output.
+    bool dmaCommand() const { return dma_; }
+    // A block ready for core 1 to move (ide_dma), or false (BSY: a fetch first);
+    // dmaBurstDone() once the host has taken every word.
+    bool dmaBurstReady(ata::DmaBurst& burst);
+    void dmaBurstDone();
+
+    // ---- Not offered: standby -------------------------------------------------
+
     bool waking() const { return false; }
     void finishWake() {}
     bool standby() const { return false; }
@@ -117,7 +127,8 @@ public:
     uint32_t commandsCompleted() const { return commands_completed_; }
     // PACKET counts as started once its packet is in.
     const CommandInfo& lastCommand() const { return last_; }
-    bool transferring() const { return data_ != nullptr || receiving_packet_; }
+    // A PIO DRQ block (core 1 then only serves the bus); not a DMA one.
+    bool transferring() const { return !dma_ && (data_ != nullptr || receiving_packet_); }
     uint32_t discFrames() const { return disc_.frames; }
     const mmc::Sense& sense() const { return mmc_.sense; }
 
@@ -179,6 +190,8 @@ private:
     uint16_t buf_bytes_ = 0;         // its length in bytes
     uint16_t buf_pos_ = 0;           // ...sent so far
     uint16_t block_bytes_ = 0;       // the block being read
+    bool dma_ = false;               // the packet's data by DMA (Features bit 0)
+    bool dma_burst_running_ = false; // between dmaBurstReady() and dmaBurstDone()
 
     // Disc read in progress, in the image's 512-byte sectors
     bool reading_ = false;

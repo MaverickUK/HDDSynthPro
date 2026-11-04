@@ -29,6 +29,7 @@ CORE1_RAM void Device::resetToSignature() {
     receiving_packet_ = false;
     packet_queued_ = false;
     packet_command_ = false;
+    dma_ = dma_burst_running_ = false;
     reading_ = false;
     fetch_pending_ = false;  // a fetch still on core 0 becomes stale
     ++fetch_id_;
@@ -61,6 +62,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
             status_ = ST_BSY;
             irq_pending_ = false;
             command_queued_ = packet_queued_ = false;
+            dma_ = dma_burst_running_ = false;  // core 1 then ends any burst
         } else if (was_srst) {
             in_reset_ = false;
             resetToSignature();
@@ -129,6 +131,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         command_queued_ = packet_queued_ = false;
         device_control_ = 0;
         receiving_packet_ = false;
+        dma_ = dma_burst_running_ = false;
         reading_ = false;
         fetch_pending_ = false;
         ++fetch_id_;
@@ -158,6 +161,7 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
     data_count_ = data_index_ = 0;
     receiving_packet_ = false;
     packet_command_ = false;
+    dma_ = dma_burst_running_ = false;
     reading_ = false;
     if (fetch_pending_) {
         fetch_pending_ = false;
@@ -216,11 +220,16 @@ CORE1_RAM void Device::setFeatures() {
     last_.lba = features_;
     last_.count = sector_count_;
     uint8_t pio_mode = info_.pio_mode > MAX_PIO_MODE ? MAX_PIO_MODE : info_.pio_mode;
+    uint8_t mdma = info_.mdma_mode > MAX_MDMA_MODE ? MAX_MDMA_MODE : info_.mdma_mode;
     bool ok = false;
     switch (features_) {
-        case SF_SET_TRANSFER_MODE:  // PIO default, or flow-control modes up to the one offered; no DMA
+        case SF_SET_TRANSFER_MODE:  // PIO default, flow-control modes, or multiword DMA, up to those offered
             ok = sector_count_ == XFER_PIO_DEFAULT ||
                  (sector_count_ >= XFER_PIO_FLOW_0 && sector_count_ <= XFER_PIO_FLOW_0 + pio_mode);
+            if (info_.mdma_mode != NO_DMA && sector_count_ >= XFER_MDMA_0 && sector_count_ <= XFER_MDMA_0 + mdma) {
+                setMdmaModeSelected(identify_, uint8_t(sector_count_ - XFER_MDMA_0));
+                ok = true;
+            }
             break;
         case 0x55: case 0xAA:  // read look-ahead off, on
         case 0x66: case 0xCC:  // power-on defaults: keep, revert
@@ -253,6 +262,7 @@ CORE1_RAM void Device::completeNoData() {
 
 CORE1_RAM void Device::fail(uint8_t error) {
     data_ = nullptr;
+    dma_ = dma_burst_running_ = false;
     error_ = error;
     status_ = ST_DRDY | ST_ERR;
     irq_pending_ = true;
@@ -262,10 +272,13 @@ CORE1_RAM void Device::fail(uint8_t error) {
 // ---- PACKET -------------------------------------------------------------------
 
 CORE1_RAM void Device::startPacket() {
-    if (features_ & FEATURES_DMA) {  // not offered
-        beginCommand(CMD_PACKET);
-        fail(ER_ABRT);
-        return;
+    if (features_ & FEATURES_DMA) {
+        if (info_.mdma_mode == NO_DMA) {  // not offered
+            beginCommand(CMD_PACKET);
+            fail(ER_ABRT);
+            return;
+        }
+        dma_ = true;  // the packet by PIO, the data by DMA; the byte count isn't used
     }
     limit_ = uint16_t(lba_high_ << 8 | lba_mid_);
     if (limit_ == 0 || limit_ == 0xFFFF) limit_ = 0xFFFE;  // 0 isn't allowed; FFFFh means "any"
@@ -313,6 +326,7 @@ CORE1_RAM void Device::runPacket() {
 
 CORE1_RAM void Device::packetDone() {
     packet_command_ = false;
+    dma_ = dma_burst_running_ = false;  // the status phase: core 1 ends the DMA command
     sector_count_ = IR_COD | IR_IO;  // status
     status_ = ST_DRDY;
     irq_pending_ = true;
@@ -323,6 +337,7 @@ CORE1_RAM void Device::packetFail() {
     // CHECK CONDITION: the sense key in the Error register's top four bits;
     // ABRT too for a packet the drive refused.
     packet_command_ = false;
+    dma_ = dma_burst_running_ = false;
     reading_ = false;
     data_ = nullptr;
     uint8_t key = mmc_.sense.key;
@@ -338,13 +353,13 @@ CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
     data_count_ = count;
     data_index_ = 0;
     status_ = ST_DRDY | ST_DRQ;
-    irq_pending_ = true;
+    irq_pending_ = !dma_;  // in DMA, DMARQ asks for each block; the interrupt is the status phase's
 }
 
 CORE1_RAM void Device::sendBlock() {
     uint16_t left = uint16_t(buf_bytes_ - buf_pos_);
     uint16_t block = left;
-    if (block > limit_) block = uint16_t(limit_ & ~1u);  // a block that isn't the last stays whole words
+    if (block > limit_ && !dma_) block = uint16_t(limit_ & ~1u);  // a block that isn't the last stays whole words
     block_bytes_ = block;
     lba_mid_ = uint8_t(block);
     lba_high_ = uint8_t(block >> 8);
@@ -397,6 +412,24 @@ CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
     buf_bytes_ = uint16_t(ata::SECTOR_WORDS * 2);
     buf_pos_ = 0;
     sendBlock();
+}
+
+// ---- DMA -----------------------------------------------------------------------
+
+CORE1_RAM bool Device::dmaBurstReady(DmaBurst& burst) {
+    if (!dma_ || dma_burst_running_ || !data_ || !(status_ & ST_DRQ) || device1Selected()) return false;
+    burst = DmaBurst{data_ + data_index_, nullptr, uint16_t(data_count_ - data_index_)};
+    dma_burst_running_ = true;
+    return true;
+}
+
+CORE1_RAM void Device::dmaBurstDone() {
+    if (!dma_burst_running_) return;
+    dma_burst_running_ = false;
+    if (data_) {
+        data_index_ = data_count_;
+        finishDataIn();  // the next block, a fetch under BSY, or the status phase
+    }
 }
 
 }  // namespace atapi

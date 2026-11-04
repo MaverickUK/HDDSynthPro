@@ -31,6 +31,10 @@ The USB-IDE adapter paces PIO reads itself, at about one data word per 1.1 µs, 
 
 A burst is a sector: the device has the next one fetched (read-ahead) or a buffer free (write-behind), or DMARQ stays low until it has.
 
+**Core 1 starts each burst** (`serviceDma` in `main.cpp`): from the main loop's step 1, and with early answers also from the tight bus loop's idle work, since in DMA the host waits for DMARQ instead of polling, so the bus is quiet between bursts and the main loop's steps would wait out `EARLY_BUS_ONLY_US` (10 ms) each time: 12 s per 64 KB read until 0.30.0-dev.3.
+
+**The CD-ROM build** ([atapi.md](atapi.md)) uses the same programs for PACKET's data phase (0.30.0-dev.3): each block of a reply or a disc read is one burst, of any length, with the packet itself still by PIO.
+
 **DMACK# isn't watched.** A strobe with the chip selects off only comes after DMACK#, and DD is driven only while DIOR# is low, so a host that stops early never finds the bus driven. On the PCB DMACK# is on GPIO 3 for later use (Ultra DMA needs it).
 
 **PIO blocks:** `ide_dma` takes the third block, which SDIO will want too; how they and the diagnostics share the three is in [pio-allocation.md](pio-allocation.md).
