@@ -2,7 +2,7 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
-## [0.30.0-dev.6] - 2026-11-05 (branch `hdd-cd`)
+## [0.30.0-dev.6] - 2026-11-04 (branch `hdd-cd`)
 
 From a review of everything since 0.28.0 (`main`), before the next bench session.
 
