@@ -2,6 +2,15 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.6] - 2026-11-05 (branch `hdd-cd`)
+
+From a review of everything since 0.28.0 (`main`), before the next bench session.
+
+### Fixed
+- **`bb48_hdcd`: a device could act on what the other was selected for.** A device ignores register writes while it's busy, so with the host selecting the disk while the CD-ROM fetched, the CD-ROM still thought itself selected: the wrapper routed the disk's Status reads to it, and the CD-ROM could take the disk's next command (in a host test, an IDENTIFY DEVICE meant for the disk returned the CD-ROM's IDENTIFY PACKET DEVICE). `hdcd::Device` now keeps the Device register itself, from every write (and 0 after RESET#, SRST and EXECUTE DEVICE DIAGNOSTIC), routes by it, and gives both devices the register again before each command. Host tests: `hdcd_selecting_the_disk_while_the_cdrom_is_busy` (failed five ways before), `hdcd_resets_select_device_0`.
+- **A CD-ROM's ISO marked read-only didn't open** (`can't open`), in both CD-ROM builds: images open for writing. Discs now open read-only (`sd_card::openImage`'s and `openDevice1Image`'s `read_only`), so an ISO copied off a CD with its read-only attribute works. A hard disk's image still opens for writing or not at all, since device 0's writes can reach the card's sectors directly.
+- **Device 1 could be device 0's own image** (`device1 = DOS.IMG` beside `device0 = DOS.IMG`, or naming `HDDSYNTH.IMG` when device 0 had fallen back to it): the PC would see one filesystem as two disks, and writes through either would corrupt it. Refused now: `CONFIG device1 not used: NAME: device 0 serves it already` (seen on the board).
+
 ## [0.30.0-dev.5] - 2026-11-04 (branch `hdd-cd`)
 
 ### Added

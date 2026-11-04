@@ -416,6 +416,78 @@ TEST(hdcd_execute_device_diagnostic_runs_on_both) {
     CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
 }
 
+TEST(hdcd_selecting_the_disk_while_the_cdrom_is_busy) {
+    // The CD-ROM ignores the Device register while it fetches (BSY), so its own
+    // copy still says device 1. The disk must answer from then on, and only
+    // the disk may run the next command.
+    Device dev(DISK, nullptr, &DISC);
+    GeneratedDisk disk(DISK.total_sectors);
+    DiscSource disc;
+    Host host{dev, {&disk, &disc}};
+    std::vector<uint8_t> d;
+    host.packet({mmc::OP_TEST_UNIT_READY}, d);  // the unit attention
+    host.serve = false;
+    host.select(1);
+    dev.write(Reg::LbaMid, 0xFE);
+    dev.write(Reg::LbaHigh, 0xFF);
+    host.command(atapi::CMD_PACKET);
+    host.pump();
+    const uint8_t p[12] = {mmc::OP_READ_10, 0, 0, 0, 0, 0, 0, 0, 1};
+    for (unsigned i = 0; i < 6; ++i) dev.write(Reg::Data, uint16_t(p[2 * i] | p[2 * i + 1] << 8));
+    host.pump();
+    CHECK(host.altStatus() & ata::ST_BSY);  // the CD-ROM, fetching
+    uint32_t cd_started = dev.cdrom().commandsStarted();
+    // The host gives up on it and selects the disk
+    host.select(0);
+    CHECK(!dev.cdSelected());
+    CHECK(dev.cdrom().selected());  // its own copy lags, as on a real drive
+    CHECK_EQ(host.altStatus(), ata::ST_DRDY | ata::ST_DSC);  // the disk's Status, not the CD-ROM's BSY
+    host.command(ata::CMD_IDENTIFY_DEVICE);
+    host.serve = true;
+    CHECK(host.waitNotBusy());
+    CHECK(host.reg(Reg::StatusCommand) & ata::ST_DRQ);
+    uint16_t w[256];
+    for (auto& word : w) word = dev.read(Reg::Data);
+    CHECK_EQ(w[27], uint16_t('H' << 8 | 'D'));
+    CHECK_EQ(w[0] & 0x8000, 0);  // the disk's IDENTIFY
+    CHECK_EQ(dev.cdrom().commandsStarted(), cd_started);  // the CD-ROM ran nothing of it
+    // It was busy when the IDENTIFY came, so it catches up at the next command
+    host.command(ata::CMD_CHECK_POWER_MODE);
+    CHECK(host.waitNotBusy());
+    CHECK(!dev.cdrom().selected());
+    CHECK_EQ(dev.cdrom().commandsStarted(), cd_started);
+    // Back to the CD-ROM: a new packet works
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 2, 0, 0, 1}, d), ata::ST_DRDY);
+    CHECK(d == discFrames(2, 1));
+}
+
+TEST(hdcd_resets_select_device_0) {
+    Device dev(DISK, nullptr, &DISC);
+    GeneratedDisk disk(DISK.total_sectors);
+    DiscSource disc;
+    Host host{dev, {&disk, &disc}};
+    // SRST written with device 1 selected
+    host.select(1);
+    dev.write(Reg::AltStatusDevCtrl, ata::DC_SRST);
+    dev.write(Reg::AltStatusDevCtrl, 0);
+    CHECK(!dev.cdSelected());
+    CHECK_EQ(host.signature(), 0x0000);
+    // RESET#
+    host.select(1);
+    dev.hardReset(true);
+    dev.hardReset(false);
+    CHECK(!dev.cdSelected());
+    CHECK_EQ(host.signature(), 0x0000);
+    // EXECUTE DEVICE DIAGNOSTIC, queued as core 1 does it
+    host.select(1);
+    dev.queueCommand(ata::CMD_EXECUTE_DEVICE_DIAGNOSTIC);
+    dev.runQueuedCommand();
+    CHECK(!dev.cdSelected());
+    CHECK_EQ(host.signature(), 0x0000);
+    host.select(1);
+    CHECK_EQ(host.signature(), 0xEB14);
+}
+
 void runHdcdTests() {
     RUN(hdcd_each_device_shows_its_signature);
     RUN(hdcd_a_bios_probe_finds_a_disk_and_a_cdrom);
@@ -426,4 +498,6 @@ void runHdcdTests() {
     RUN(hdcd_dma_on_either_device);
     RUN(hdcd_without_a_cdrom_is_the_hard_disk_build);
     RUN(hdcd_execute_device_diagnostic_runs_on_both);
+    RUN(hdcd_selecting_the_disk_while_the_cdrom_is_busy);
+    RUN(hdcd_resets_select_device_0);
 }

@@ -23,7 +23,10 @@ void printInfo(Print& out);
 // Mounts the card and opens image `name` if it is there. Returns the image,
 // or nullptr (no card, no image, or an error, written to `log`).
 // Closes any image opened before. `name` must outlive the open image.
-ImageFile* openImage(const char* name, Print& log);
+// `read_only`: opened for reading only, for a CD-ROM's disc, which is never
+// written, so an ISO with the read-only attribute (as files copied off a CD
+// often have) opens too. A hard disk's image opens for writing, or not at all.
+ImageFile* openImage(const char* name, Print& log, bool read_only = false);
 // Why the last openImage() returned nullptr: "no card", "not found" or "can't open".
 const char* openError();
 
@@ -66,7 +69,8 @@ const media_watch::Watch& media();
 // Whether `name`, in the card's root folder, is a folder.
 bool isFolder(const char* name);
 // Opens image `name` for device 1, or returns nullptr (with openError()).
-ImageFile* openDevice1Image(const char* name, Print& log);
+// `read_only` as for openImage: a CD-ROM's disc (bb48_hdcd).
+ImageFile* openDevice1Image(const char* name, Print& log, bool read_only = false);
 // Folder `name`'s files and subfolders, for folder_disk::Volume: listed in
 // the card's own order, hidden and system entries and names starting with
 // a dot left out. A file is read through one open file, kept between reads.

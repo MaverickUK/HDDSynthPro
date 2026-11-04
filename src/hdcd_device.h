@@ -6,7 +6,11 @@
 // Two devices on one cable, as on a real bus: both take every write to the
 // task file, Device and Device Control registers, and RESET#; the selected
 // one answers reads, runs commands and drives INTRQ. So this passes writes
-// to both and everything else to the one selected. Without a CD-ROM it is
+// to both and everything else to the one selected. Which one is selected is
+// kept here, from every Device register write: a device ignores writes while
+// it's busy, so its own copy can lag (the host selecting the disk while the
+// CD-ROM fetches), and before each command both are given the register again,
+// so neither runs a command meant for the other. Without a CD-ROM it is
 // the hard disk build's ata::Device (with its own device 1, a second image
 // or a folder, if any), plus one branch per access.
 //
@@ -48,7 +52,7 @@ public:
 
     // The CD-ROM is selected: it answers. Always inlined, as every access asks
     // (core 1's code must stay in RAM, as for ata::Device).
-    __attribute__((always_inline)) bool cdSelected() const { return cd_on_ && cd_.selected(); }
+    __attribute__((always_inline)) bool cdSelected() const { return cd_on_ && (device_reg_ & ata::DEV_DEV); }
 
     __attribute__((always_inline)) uint16_t read(Reg reg) {
         uint16_t value = peek(reg);
@@ -130,7 +134,11 @@ private:
     atapi::Device cd_;
     bool cd_on_;
     void noteStarts(uint32_t hd_before, uint32_t cd_before);
+    void resyncDevice();  // both devices told the Device register again, before a command
     bool cd_last_ = false;  // the CD-ROM started the latest command (else the disk)
+    uint8_t device_reg_ = 0;     // the Device register as the host last wrote it (0 after a reset)
+    uint8_t device_control_ = 0;  // Device Control, for SRST's release
+    bool diag_queued_ = false;   // EXECUTE DEVICE DIAGNOSTIC queued: both then select device 0
     mutable CommandInfo last_{};
 };
 

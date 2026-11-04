@@ -768,8 +768,8 @@ static char g_image_note[96] = "";            // why the configured image isn't
 
 // Opens image `name` as the disk. False, with sd_card::openError() or
 // "empty" as the reason in `why`, if it can't be used.
-static bool useImage(const char* name, const char*& why) {
-    ImageFile* file = sd_card::openImage(name, Serial);
+static bool useImage(const char* name, const char*& why, bool read_only = false) {
+    ImageFile* file = sd_card::openImage(name, Serial, read_only);
     if (!file) {
         why = sd_card::openError();
         return false;
@@ -811,7 +811,7 @@ static void chooseCdrom1() {
         g_device1_disc = "test disc";
     } else if (!sd_card::mounted()) {
         std::snprintf(g_device1_note, sizeof g_device1_note, "%s: no card", name);
-    } else if (ImageFile* file = sd_card::openDevice1Image(name, Serial)) {
+    } else if (ImageFile* file = sd_card::openDevice1Image(name, Serial, true)) {  // a disc: read-only
         static ImageDisk disc(*file);
         g_device1_disk = &disc;
         g_device1_disc = name;
@@ -865,6 +865,11 @@ static void chooseDevice1() {
         g_folder_capacity = capacity;
         g_device1_disk = &g_folder_disk;
         g_device1_kind = "folder";
+    } else if (strcasecmp(name, g_image_name) == 0) {
+        // The image device 0 serves (named, or fallen back to): the PC would see
+        // one filesystem as two disks, and writes through either would corrupt it.
+        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: device 0 serves it already", name);
+        return;
     } else {
         ImageFile* file = sd_card::openDevice1Image(name, Serial);
         if (!file) {
@@ -906,7 +911,7 @@ static void chooseDisk() {
         g_disk = &g_overlay;  // read-only here, so the overlay stays empty
         useTestDisk();
     } else if (sd_card::mounted()) {
-        if (useImage(g_config.cdrom, why))
+        if (useImage(g_config.cdrom, why, true))  // a disc: read-only
             g_disk_name = "disc";
         else
             std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.cdrom, why);

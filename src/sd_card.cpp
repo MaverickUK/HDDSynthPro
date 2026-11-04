@@ -82,6 +82,7 @@ void printInfo(Print& out) {
 
 static media_watch::Watch s_watch;
 static const char* s_served_name = nullptr;  // the image being served, kept while the card is out
+static oflag_t s_image_flags = O_RDWR;  // how it was opened: reopened the same way (read-only for a disc)
 // A split image (image_parts.h): its parts, all of the image's sectors, its
 // size in bytes (media_watch's identity), and why it couldn't be served.
 static unsigned s_parts = 1;
@@ -135,7 +136,7 @@ static bool reattach(uint32_t now) {
         s_watch.cameBackWithout("can't mount", now);
         return false;
     }
-    if (!s_image.open(s_served_name, O_RDWR)) {
+    if (!s_image.open(s_served_name, s_image_flags)) {
         s_watch.cameBackWithout(s_sd.exists(s_served_name) ? "can't open" : "image not found", now);
         return false;
     }
@@ -371,7 +372,7 @@ public:
 };
 static SdImageFile s_image_file;
 
-ImageFile* openImage(const char* name, Print& log) {
+ImageFile* openImage(const char* name, Print& log, bool read_only) {
     if (s_image.isOpen()) s_image.close();
     s_open_name = nullptr;
     s_watch = media_watch::Watch();
@@ -383,7 +384,8 @@ ImageFile* openImage(const char* name, Print& log) {
         s_open_error = "not found";
         return nullptr;
     }
-    if (!s_image.open(name, O_RDWR)) {
+    s_image_flags = read_only ? O_RDONLY : O_RDWR;
+    if (!s_image.open(name, s_image_flags)) {
         s_open_error = "can't open";
         log.printf("SD error: can't open %s\n", name);
         return nullptr;
@@ -543,7 +545,7 @@ public:
 };
 static Device1ImageFile s_device1_image_file;
 
-ImageFile* openDevice1Image(const char* name, Print& log) {
+ImageFile* openDevice1Image(const char* name, Print& log, bool read_only) {
     if (s_device1_image.isOpen()) s_device1_image.close();
     if (!mount(log)) {
         s_open_error = "no card";
@@ -553,7 +555,7 @@ ImageFile* openDevice1Image(const char* name, Print& log) {
         s_open_error = "not found";
         return nullptr;
     }
-    if (!s_device1_image.open(name, O_RDWR)) {
+    if (!s_device1_image.open(name, read_only ? O_RDONLY : O_RDWR)) {
         s_open_error = "can't open";
         log.printf("SD error: can't open %s\n", name);
         return nullptr;
