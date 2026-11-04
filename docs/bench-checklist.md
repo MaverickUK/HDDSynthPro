@@ -32,6 +32,7 @@ dev.3 changed early answers' tight loop (DMA now runs from its idle work). DMA w
 
 - [ ] Flash `bb48_cdrom` with `PLATFORMIO_BUILD_FLAGS="-DRIG_WATCHDOG_MS=8000 -DCMD_PROFILE=1"`, `E mode = mdma2`, `T`, re-detect. `r`, then `HDDPRO_CDROM_DEV=//./CdRom0 pytest -s -m cdrom`, then `s`: note `iordy_max_ns`, `iordy_slow`, `cmd_run_max_ns` and `cmd_run_max` (command/packet).
 - [ ] The same with `P i` (`ide_bus`), then `P e` back. Which program has the fewest reads past 1,250 ns, and does `cmd_run_max_ns` account for them?
+- [ ] If `cmd_run_max_ns` is well over 1 µs, try the candidate fix: build with `-DEARLY_POLL_FIRST_NS=1000` added (the host's first poll answered, BSY, before the packet runs), early answers, the same run. Fewer reads past 1,250 ns, and no errors? Then it can become the default.
 
 ## 3. A short soak
 

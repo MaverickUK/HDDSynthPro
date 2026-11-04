@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.8] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **A candidate fix for the CD-ROM build's slow reads, off by default:** `-DEARLY_POLL_FIRST_NS=1000` makes early answers' tight loop wait up to that long after a command is queued for the host's next access (its first status poll), answer it (BSY), and only then run the command, so a long packet holds the host's second poll, which comes later, rather than its first. For the bench to measure with `CMD_PROFILE` ([docs/bench-checklist.md](docs/bench-checklist.md)); compiled and checked (`check_core1_ram.py`), not yet run on hardware. Normal builds are unchanged.
+
+### Fixed
+- Compiler warnings in the builds that don't use everything `main.cpp` holds (`chooseDevice1` in the CD-ROM build, `restart` in the listen build), and a device 1 note that could be cut short.
+
 ## [0.30.0-dev.7] - 2026-11-04 (branch `hdd-cd`)
 
 ### Added

@@ -889,13 +889,12 @@ static void chooseCdrom1() {
 // Device 1's disk, from `device1` (docs/two-drives.md): a folder, laid out as
 // a read-only FAT16 volume, or an image. Not with the test or bench disk
 // asked for from the console, which are for the rig's tests.
-static void chooseDevice1() {
+[[maybe_unused]] static void chooseDevice1() {  // not in the CD-ROM build, one drive
     if (drive_config::device1IsCdrom(g_config)) {
 #if HDDPRO_HDCD
         chooseCdrom1();
 #else
-        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: a CD-ROM as device 1 needs the bb48_hdcd build",
-                      g_config.device1);
+        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: a CD-ROM needs bb48_hdcd", g_config.device1);
 #endif
         return;
     }
@@ -2017,7 +2016,7 @@ static void runShortTest() {
 // Restarts the board, keeping the watchdog scratch registers (J, T, P). Waits
 // for the reset rather than returning, so nothing feeds the watchdog meanwhile
 // (with RIG_WATCHDOG_MS, loop() would put the restart off for good).
-static void restart() {
+[[maybe_unused]] static void restart() {  // the console's, not in the listen build
     watchdog_reboot(0, 0, 10);
     for (;;) tight_loop_contents();
 }

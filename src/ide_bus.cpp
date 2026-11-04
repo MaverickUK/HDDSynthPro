@@ -68,6 +68,21 @@ static uint32_t s_armed_at = 0;
 static bool s_armed = false;
 static bool s_stall_release = false;  // ide_bus_early (begin)
 static uint32_t s_stall_cycles = 0;
+
+// A candidate fix for the CD-ROM build's slow reads (docs/atapi.md), off
+// unless built with -DEARLY_POLL_FIRST_NS=N (1000, say): in early answers'
+// tight loop, after an access queues a command, core 1 waits up to N ns for
+// the host's next access (its first status poll, typically within a
+// microsecond), answers it (BSY), and only then runs the command. A command
+// that takes core 1 long (a CD-ROM packet's reply) then holds the host's
+// second poll, which comes later, rather than its first. For the bench to
+// measure against CMD_PROFILE's cmd_run_max_ns; untested on hardware.
+#ifndef EARLY_POLL_FIRST_NS
+#define EARLY_POLL_FIRST_NS 0
+#endif
+#if EARLY_POLL_FIRST_NS
+static uint32_t s_poll_first_cycles = 0;  // EARLY_POLL_FIRST_NS in clk_sys cycles, set in begin()
+#endif
 static volatile uint32_t s_stall_releases = 0;
 
 // A sample from ide_bus_early with the address it belongs to: requests set
@@ -439,6 +454,9 @@ void begin(bool isa, bool early, bool iordy) {
     s_stall_release = early && iordy;
     s_armed = false;
     s_stall_cycles = cfg::IORDY_STALL_US * (clock_get_hz(clk_sys) / 1000000);
+#if EARLY_POLL_FIRST_NS
+    s_poll_first_cycles = uint32_t(uint64_t(EARLY_POLL_FIRST_NS) * clock_get_hz(clk_sys) / 1000000000ull);
+#endif
     const pio_program* program = noiordy ? &ide_bus_noiordy_program
                                  : early ? &ide_bus_early_program
                                  : lane  ? &ide_bus_data_program
@@ -783,6 +801,20 @@ CORE1_RAM bool serveDataInEarly(DriveDevice& dev, bool reset_low, FetchMailbox& 
 // ends while the host polls), until the bus has been quiet for `quiet_cycles`,
 // a command is queued, a data-in block starts (the fast lane's job), or
 // RESET# changes: the main loop's work. Not while the raw trace is on.
+#if EARLY_POLL_FIRST_NS
+// EARLY_POLL_FIRST_NS: the host's next access, if it comes within that long,
+// answered before the command just queued runs.
+__attribute__((always_inline)) static inline void servePollFirst(DriveDevice& dev, PIO pio, uint sm,
+                                                                  void (*bus)(uint32_t)) {
+    const uint32_t start = m33_hw->dwt_cyccnt;
+    while (!rxWaiting(pio, sm))
+        if (m33_hw->dwt_cyccnt - start > s_poll_first_cycles) return;
+    uint32_t sample = pio_sm_get(pio, sm);
+    serve(dev, sample);  // a status poll gets BSY: the command is queued, not run
+    if (bus && (sample & STROBE_BITS) != 0) bus(sample);
+}
+#endif
+
 CORE1_RAM void serveBusEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
                              uint32_t quiet_cycles, void (*timers)(DriveDevice&), void (*command)(DriveDevice&),
                              void (*bus)(uint32_t)) {
@@ -800,6 +832,9 @@ CORE1_RAM void serveBusEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mai
                 bus(sample);  // the trace, after the answer
             }
             if (dev.commandQueued()) {
+#if EARLY_POLL_FIRST_NS
+                servePollFirst(dev, pio, sm, bus);
+#endif
                 site(SITE_COMMAND);
                 command(dev);  // run it here, not in the main loop
             }
