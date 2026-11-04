@@ -1,6 +1,6 @@
 // HDDSynthPro IDE drive emulator prototype.
 //
-// Three builds (FIRMWARE_SLICE and HDDPRO_CDROM, set in platformio.ini):
+// Four builds (FIRMWARE_SLICE, HDDPRO_CDROM and HDDPRO_HDCD, in platformio.ini):
 //   bb48        slice 0, listen only: core 1 drains the PIO listener and
 //               records every bus access. Every pin stays an input.
 //   bb48_drive  slices 1-3, the drive: core 1 serves the bus (ide_bus) and
@@ -10,7 +10,9 @@
 //   bb48_cdrom  the drive as a CD-ROM drive (docs/atapi.md, exploratory):
 //               the same, with atapi::Device serving an ISO from the card,
 //               the generated test disc, or no disc.
-// In both, core 1 records events into the trace ring and core 0 owns USB
+//   bb48_hdcd   the hard disk drive as bb48_drive, and with `device1 = cdrom`
+//               a CD-ROM drive as device 1 (hdcd::Device, exploratory).
+// In all, core 1 records events into the trace ring and core 0 owns USB
 // serial: it prints the trace and runs the console.
 #include <Arduino.h>
 
@@ -47,6 +49,8 @@
 #include "ata_device.h"
 #if HDDPRO_CDROM
 #include "atapi_device.h"
+#elif HDDPRO_HDCD
+#include "hdcd_device.h"
 #endif
 #include "block_source.h"
 #include "bus_observer.h"
@@ -188,6 +192,13 @@ static std::atomic<uint32_t> g_geometry{0};
 // device 0's size, which core 1 waits for.
 static std::atomic<uint32_t> g_device1_sectors{0};
 static std::atomic<uint32_t> g_device1_geometry{0};
+#if HDDPRO_HDCD
+// The bb48_hdcd build: device 1 is the CD-ROM drive (g_device1_sectors is then
+// its disc's, 0 for none). A plain bool: core 0 sets it before publishing
+// g_disk_sectors (release), and core 1 reads it only after waiting for that
+// (acquire); an atomic's load could be called out of line, from flash.
+static bool g_device1_cdrom = false;
+#endif
 static bool g_geometry_trimmed = false;  // the cylinders were cut to fit the disk (CONFIG says so)
 static const char* g_geometry_from = "auto";  // "set", "partition table" or "auto" (the default), for CONFIG
 
@@ -204,7 +215,13 @@ __attribute__((always_inline)) static inline IdentifyInfo driveIdentity() {
 // Device 1's identity: its own model, serial and size, device 0's modes.
 __attribute__((always_inline)) static inline IdentifyInfo device1Identity() {
     uint32_t g = g_device1_geometry.load(std::memory_order_relaxed);
+#if HDDPRO_HDCD
+    const bool cdrom = g_device1_cdrom;
+    return IdentifyInfo{cdrom ? "HDDSYNTH PRO CD-ROM" : "HDDSYNTH PRO D1", cdrom ? "HSP-000001-CD" : "HSP-000001-D1",
+                        FIRMWARE_VERSION,
+#else
     return IdentifyInfo{"HDDSYNTH PRO D1", "HSP-000001-D1", FIRMWARE_VERSION,
+#endif
                         g_device1_sectors.load(std::memory_order_relaxed),
                         g_pio_mode.load(std::memory_order_relaxed),
                         g_mdma_mode.load(std::memory_order_relaxed),
@@ -292,8 +309,14 @@ void setup1() {
                       std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
     const IdentifyInfo device1 = device1Identity();
+#if HDDPRO_HDCD
+    const bool cdrom1 = g_device1_cdrom;  // a CD-ROM, disc or none
+    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                        device1.total_sectors || cdrom1 ? &device1 : nullptr, cdrom1);
+#else
     bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
                         device1.total_sectors ? &device1 : nullptr);
+#endif
     // The third PIO block: multiword DMA if it's offered, otherwise IOCS16#
     // for ISA cards (which never use DMA). Neither fits beside the others.
     if (g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA)
@@ -368,6 +391,8 @@ CORE1_RAM static void recordBus(uint32_t sample) { record(TraceKind::Bus, sample
 CORE1_RAM static void recordCommandStart(uint32_t t_us, const DriveCommandInfo& c) {
 #if HDDPRO_CDROM
     record(commandStartEvent(t_us, c.command, c.lba, c.count, c.packet));
+#elif HDDPRO_HDCD
+    record(commandStartEvent(t_us, c.command, c.lba, c.count, c.packet, c.unit));
 #else
     record(commandStartEvent(t_us, c.command, c.lba, c.count, 0, c.unit));
 #endif
@@ -448,6 +473,11 @@ CORE1_RAM void loop1() {
     // most; iordy_timer.pio measures how long the host actually waits.
 #if HDDPRO_CDROM
     static DriveDevice dev(driveIdentity());  // one drive: the CD-ROM is device 0
+#elif HDDPRO_HDCD
+    static const IdentifyInfo device1 = device1Identity();
+    static const bool cdrom1 = g_device1_cdrom;
+    static DriveDevice dev(driveIdentity(), !cdrom1 && device1.total_sectors ? &device1 : nullptr,
+                           cdrom1 ? &device1 : nullptr);
 #else
     static const IdentifyInfo device1 = device1Identity();
     static DriveDevice dev(driveIdentity(), device1.total_sectors ? &device1 : nullptr);
@@ -764,10 +794,47 @@ static uint32_t partitionGeometry(BlockSource& disk) {
     return uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track;
 }
 
+#if HDDPRO_HDCD
+// The bb48_hdcd build's CD-ROM drive as device 1 (`device1 = cdrom`, or an
+// ISO): its disc, as the CD-ROM build chooses one. The generated test disc
+// after console `T` or with `cdrom = none` (read-only, so the disk's RAM
+// overlay isn't shared); else the ISO; else a drive with no disc in it.
+static GeneratedDisk g_test_disc;
+static const char* g_device1_disc = "no disc";
+
+static void chooseCdrom1() {
+    g_device1_cdrom = true;
+    g_device1_kind = "cdrom";
+    const char* name = drive_config::device1Disc(g_config);
+    if (testDiskRequested() || (sd_card::mounted() && !drive_config::servesDisc(g_config))) {
+        g_device1_disk = &g_test_disc;
+        g_device1_disc = "test disc";
+    } else if (!sd_card::mounted()) {
+        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: no card", name);
+    } else if (ImageFile* file = sd_card::openDevice1Image(name, Serial)) {
+        static ImageDisk disc(*file);
+        g_device1_disk = &disc;
+        g_device1_disc = name;
+    } else {
+        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: %s", name, sd_card::openError());
+    }
+    g_device1_sectors.store(g_device1_disk ? g_device1_disk->sectors() : 0, std::memory_order_relaxed);
+}
+#endif
+
 // Device 1's disk, from `device1` (docs/two-drives.md): a folder, laid out as
 // a read-only FAT16 volume, or an image. Not with the test or bench disk
 // asked for from the console, which are for the rig's tests.
 static void chooseDevice1() {
+    if (drive_config::device1IsCdrom(g_config)) {
+#if HDDPRO_HDCD
+        chooseCdrom1();
+#else
+        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: a CD-ROM as device 1 needs the bb48_hdcd build",
+                      g_config.device1);
+#endif
+        return;
+    }
     if (!drive_config::hasDevice1(g_config) || !sd_card::mounted() || testDiskRequested() || benchRequested())
         return;
     const char* name = g_config.device1;
@@ -915,6 +982,11 @@ static void chooseDisk() {
     g_disk_chosen.store(true, std::memory_order_release);
 #else
     chooseDevice1();  // two drives are the hard disk build's
+#if HDDPRO_HDCD
+    // The CD-ROM drive was proven on early answers and ide_bus, not on the
+    // data lane: early answers instead, as in the CD-ROM build.
+    if (g_device1_cdrom && !g_isa.load() && !g_early.load()) g_early.store(true);
+#endif
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode and device 1: core 1 reads them
 #endif
 }
@@ -983,7 +1055,12 @@ static void printConfig() {
                   (unsigned long)(g_disk->sectors() / atapi::SECTORS_PER_FRAME));
 #else
     if (g_image_note[0]) Serial.printf("CONFIG device0 not used: %s\n", g_image_note);
-    if (g_device1_disk) {
+#if HDDPRO_HDCD
+    if (g_device1_cdrom)
+        Serial.printf("CONFIG device1=%s kind=cdrom disc=%s frames=%lu\n", g_config.device1, g_device1_disc,
+                      (unsigned long)(g_device1_sectors.load() / atapi::SECTORS_PER_FRAME));
+#endif
+    if (g_device1_disk && g_device1_kind[0] != 'c') {
         Serial.printf("CONFIG device1=%s kind=%s sectors=%lu\n", g_config.device1, g_device1_kind,
                       (unsigned long)g_device1_disk->sectors());
         if (g_device1_disk == &g_folder_disk) {
@@ -1007,6 +1084,9 @@ static void printConfig() {
         Serial.printf("CONFIG bus program set from the console (P%c) until a power cycle\n", busRequested());
 #if HDDPRO_CDROM
     if (!g_isa.load()) Serial.println("CONFIG the CD-ROM build runs early answers, not the data lane");
+#elif HDDPRO_HDCD
+    if (g_device1_cdrom && !g_isa.load())
+        Serial.println("CONFIG with a CD-ROM as device 1, early answers, not the data lane");
 #endif
     {
         Geometry g = startGeometry(driveIdentity());
@@ -1592,7 +1672,7 @@ static void printSlowReads() {
 #endif
 
 static void printReady() {
-    Serial.printf("READY HDDSynthPro %s slice%d%s\n", FIRMWARE_VERSION, FIRMWARE_SLICE, HDDPRO_CDROM ? " cdrom" : "");
+    Serial.printf("READY HDDSynthPro %s slice%d%s\n", FIRMWARE_VERSION, FIRMWARE_SLICE, HDDPRO_CDROM ? " cdrom" : HDDPRO_HDCD ? " hdcd" : "");
 }
 
 // Current level of every bus line: a wiring check. With the adapter powered

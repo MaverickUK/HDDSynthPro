@@ -142,6 +142,11 @@ bool servesImage(const Config& c);
 bool hasDevice1(const Config& c);
 // False for `cdrom = none`: the CD-ROM build serves the test disc.
 bool servesDisc(const Config& c);
+// True if device 1 is to be a CD-ROM drive (the bb48_hdcd build): `device1 =
+// cdrom` (the `cdrom` setting's disc), or a device1 name ending in .ISO.
+bool device1IsCdrom(const Config& c);
+// That drive's disc: the ISO device1 names, or `cdrom`'s (which may be `none`).
+const char* device1Disc(const Config& c);
 
 // `text` with `key` set to `value`, into `out` (NUL-terminated): the line
 // setting it is replaced in place, keeping its comment, or a new line is

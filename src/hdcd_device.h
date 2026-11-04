@@ -42,14 +42,15 @@ public:
     // as a CD-ROM drive (its `total_sectors` the disc's, 0 for no disc), or
     // nullptr. Not both: `cdrom` wins.
     Device(const IdentifyInfo& disk0, const IdentifyInfo* disk1, const IdentifyInfo* cdrom);
-    bool hasCdrom() const { return cd_on_; }
+    __attribute__((always_inline)) bool hasCdrom() const { return cd_on_; }
 
     // ---- Bus side (as ata::Device) ------------------------------------------
 
-    // The CD-ROM is selected: it answers. Inline, as every access asks.
+    // The CD-ROM is selected: it answers. Always inlined, as every access asks
+    // (core 1's code must stay in RAM, as for ata::Device).
     __attribute__((always_inline)) bool cdSelected() const { return cd_on_ && cd_.selected(); }
 
-    uint16_t read(Reg reg) {
+    __attribute__((always_inline)) uint16_t read(Reg reg) {
         uint16_t value = peek(reg);
         consumeRead(reg);
         return value;
@@ -77,23 +78,23 @@ public:
     // (and EXECUTE DEVICE DIAGNOSTIC by both).
     void write(Reg reg, uint16_t value);
     void queueCommand(uint8_t command);
-    bool commandQueued() const { return hd_.commandQueued() || (cd_on_ && cd_.commandQueued()); }
+    __attribute__((always_inline)) bool commandQueued() const { return hd_.commandQueued() || (cd_on_ && cd_.commandQueued()); }
     void runQueuedCommand();
 
-    void setReadAhead(bool on) { hd_.setReadAhead(on); }
-    void setWriteBehind(bool on) { hd_.setWriteBehind(on); }
-    bool dataOutHeld() const { return hd_.dataOutHeld(); }
-    void releaseDataOut() { hd_.releaseDataOut(); }
+    __attribute__((always_inline)) void setReadAhead(bool on) { hd_.setReadAhead(on); }
+    __attribute__((always_inline)) void setWriteBehind(bool on) { hd_.setWriteBehind(on); }
+    __attribute__((always_inline)) bool dataOutHeld() const { return hd_.dataOutHeld(); }
+    __attribute__((always_inline)) void releaseDataOut() { hd_.releaseDataOut(); }
 
     void hardReset(bool asserted);
 
-    bool intrq() const { return cdSelected() ? cd_.intrq() : hd_.intrq(); }
-    bool intrqDriven() const { return cdSelected() ? cd_.intrqDriven() : hd_.intrqDriven(); }
+    __attribute__((always_inline)) bool intrq() const { return cdSelected() ? cd_.intrq() : hd_.intrq(); }
+    __attribute__((always_inline)) bool intrqDriven() const { return cdSelected() ? cd_.intrqDriven() : hd_.intrqDriven(); }
 
     // ---- Sector fetches (handed to core 0) ---------------------------------
 
     bool pendingFetch(ata::Fetch& fetch);
-    uint32_t pendingFetchId() const {
+    __attribute__((always_inline)) uint32_t pendingFetchId() const {
         uint32_t id = hd_.pendingFetchId();
         return id || !cd_on_ ? id : cd_.pendingFetchId();
     }
@@ -101,25 +102,25 @@ public:
 
     // ---- DMA -------------------------------------------------------------------
 
-    bool dmaCommand() const { return hd_.dmaCommand() || (cd_on_ && cd_.dmaCommand()); }
+    __attribute__((always_inline)) bool dmaCommand() const { return hd_.dmaCommand() || (cd_on_ && cd_.dmaCommand()); }
     bool dmaBurstReady(ata::DmaBurst& burst);
     void dmaBurstDone();
 
     // ---- The hard disk's alone ---------------------------------------------------
 
-    bool waking() const { return hd_.waking(); }
-    void finishWake() { hd_.finishWake(); }
-    bool standby() const { return hd_.standby(); }
+    __attribute__((always_inline)) bool waking() const { return hd_.waking(); }
+    __attribute__((always_inline)) void finishWake() { hd_.finishWake(); }
+    __attribute__((always_inline)) bool standby() const { return hd_.standby(); }
 
     // ---- State for tests and the trace ---------------------------------------
 
-    uint8_t status() const { return cdSelected() ? cd_.status() : hd_.status(); }
-    uint8_t error() const { return cdSelected() ? cd_.error() : hd_.error(); }
-    uint32_t commandsStarted() const { return hd_.commandsStarted() + cd_.commandsStarted(); }
-    uint32_t commandsCompleted() const { return hd_.commandsCompleted() + cd_.commandsCompleted(); }
+    __attribute__((always_inline)) uint8_t status() const { return cdSelected() ? cd_.status() : hd_.status(); }
+    __attribute__((always_inline)) uint8_t error() const { return cdSelected() ? cd_.error() : hd_.error(); }
+    __attribute__((always_inline)) uint32_t commandsStarted() const { return hd_.commandsStarted() + cd_.commandsStarted(); }
+    __attribute__((always_inline)) uint32_t commandsCompleted() const { return hd_.commandsCompleted() + cd_.commandsCompleted(); }
     // The command started last, by either device.
     const CommandInfo& lastCommand() const;
-    bool transferring() const { return cdSelected() ? cd_.transferring() : hd_.transferring(); }
+    __attribute__((always_inline)) bool transferring() const { return cdSelected() ? cd_.transferring() : hd_.transferring(); }
 
     const ata::Device& disk() const { return hd_; }
     const atapi::Device& cdrom() const { return cd_; }

@@ -411,6 +411,17 @@ bool servesDisc(const Config& c) { return notNone(c.cdrom); }
 
 bool hasDevice1(const Config& c) { return c.device1[0] != 0; }
 
+bool device1IsCdrom(const Config& c) {
+    Span name{c.device1, c.device1 + std::strlen(c.device1)};
+    if (equalsNoCase(name, "cdrom")) return true;
+    return name.size() > 4 && equalsNoCase(Span{name.end - 4, name.end}, ".iso");
+}
+
+const char* device1Disc(const Config& c) {
+    Span name{c.device1, c.device1 + std::strlen(c.device1)};
+    return equalsNoCase(name, "cdrom") ? c.cdrom : c.device1;
+}
+
 const char* defaultFile() {
     return "# HDDSynthPro settings. Changes take effect when the drive restarts.\r\n"
            "# One setting per line, as key = value; # starts a comment.\r\n"

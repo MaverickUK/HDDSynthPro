@@ -75,7 +75,7 @@ static constexpr unsigned SERVE_EVERY = 32;  // words checked between calls to `
 
 static std::atomic<bool> s_started{false};
 
-void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyInfo* identity1) {
+void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyInfo* identity1, bool packet1) {
     static sector_check::Checker checker(disk_sectors);
     uint16_t identify[256];
 #if HDDPRO_CDROM
@@ -85,7 +85,10 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyIn
 #endif
     checker.setIdentify(identify);
     if (identity1) {
-        buildIdentify(*identity1, identify);
+        if (packet1)
+            buildIdentifyPacket(*identity1, identify);
+        else
+            buildIdentify(*identity1, identify);
         checker.setIdentify(identify, 1);
     }
     s_checker = &checker;

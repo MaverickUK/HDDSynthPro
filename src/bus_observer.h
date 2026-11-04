@@ -18,8 +18,11 @@ namespace bus_observer {
 // Starts the program and its DMA channel. Call on core 1 next to
 // iordy_timer::begin, so the two never race to claim a PIO. `identity` is
 // the drive's, so IDENTIFY blocks on the bus can be checked too.
-// `identity1`: device 1's, with two drives (docs/two-drives.md), or nullptr.
-void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyInfo* identity1 = nullptr);
+// `identity1`: device 1's, with two drives (docs/two-drives.md), or nullptr;
+// `packet1`: device 1 is a CD-ROM drive (the bb48_hdcd build), whose block is
+// IDENTIFY PACKET DEVICE's.
+void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyInfo* identity1 = nullptr,
+           bool packet1 = false);
 
 // Checks the samples so far; call often from core 0: data sectors with
 // `check` (the disk is the generated one), and IDENTIFY blocks with `check`

@@ -228,6 +228,23 @@ TEST(test_config_cdrom) {
     CHECK_STR(edited("image = A.IMG\n", "cdrom", "B.ISO"), "image = A.IMG\ncdrom = B.ISO\n");
 }
 
+// device1 = cdrom, or an ISO: device 1 is a CD-ROM drive (the bb48_hdcd build).
+TEST(test_config_device1_cdrom) {
+    drive_config::Config c = parsed("device1 = cdrom\ncdrom = DOOM.ISO\n");
+    CHECK(drive_config::device1IsCdrom(c));
+    CHECK_STR(drive_config::device1Disc(c), "DOOM.ISO");
+    c = parsed("device1 = CDROM\n");
+    CHECK(drive_config::device1IsCdrom(c));
+    CHECK_STR(drive_config::device1Disc(c), "HDDSYNTH.ISO");  // cdrom's default
+    c = parsed("device1 = Games.iso\n");
+    CHECK(drive_config::device1IsCdrom(c));
+    CHECK_STR(drive_config::device1Disc(c), "Games.iso");
+    CHECK(!drive_config::device1IsCdrom(parsed("device1 = GAMES.IMG\n")));
+    CHECK(!drive_config::device1IsCdrom(parsed("device1 = GAMES\n")));
+    CHECK(!drive_config::device1IsCdrom(parsed("device1 = .ISO\n")));  // no name before it
+    CHECK(!drive_config::device1IsCdrom(parsed("")));
+}
+
 // isa = on: IORDY from the strobe, for ISA cards (an ICL 386, 0.21.0).
 TEST(test_config_isa) {
     CHECK(!parsed("").isa);  // off: ATA hosts need IORDY from the chip select
@@ -346,6 +363,7 @@ void runDriveConfigTests() {
     RUN(test_config_seek_timing);
     RUN(test_config_image_none);
     RUN(test_config_cdrom);
+    RUN(test_config_device1_cdrom);
     RUN(test_config_defaults);
     RUN(test_config_default_file_is_the_defaults);
     RUN(test_config_reads_both_keys);
