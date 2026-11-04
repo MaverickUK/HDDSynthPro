@@ -43,7 +43,7 @@ dev.3 changed early answers' tight loop (DMA now runs from its idle work). DMA w
 
 ## 4. Retro PCs
 
-- [ ] **Every PC, every build:** note `dior_no_cs` in `s` and the `NOCS` lines (0.30.0-dev.2) with the controller type. ISA cards should show millions, PCI controllers 0. With enough machines, the drive could choose its bus program by itself.
+- [ ] **Every PC, every build:** the table in [auto-bus.md](auto-bus.md#what-to-record-on-each-pc), the evidence for the drive choosing its own bus program. At three moments (the BIOS has found the drive, the DOS prompt, after a benchmark; `r` before each): `bus`, `dior_no_cs` and the `NOCS` line, `iordy_ignored` and any `NOIORDY` lines, `rd_t1_ns`, `rd_strobe_ns`, with the controller type. ISA cards should show millions, PCI controllers 0. On a PC that isn't an ISA machine, `P l` and boot again: found, benchmark run, `iordy_ignored=0`? **Never `P l` on an ISA machine.**
 - [ ] **The Evesham on `bb48_hdcd`:** `device0 = ICL386MB.IMG`, `device1 = cdrom`, `cdrom = DOOM_SE.ISO`. Does the BIOS list a hard disk and a CD-ROM? MS-DOS 5 from C:, then a CD-ROM driver (`OAKCDROM.SYS`, MSCDEX) finding the drive as device 1, and Doom from D:. PIO there (`mode = auto`), as its DOS driver uses.
 - [ ] The folder drive's `CHECK.BAT` (two drives, still to do), and the data lane on another PC.
 
