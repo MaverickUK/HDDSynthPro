@@ -66,6 +66,10 @@ const media_watch::Watch& media();
 // device 0's proven path is untouched: a second image through SdFat's
 // file layer only (no extent map, no card watch: a card pulled out fails
 // its reads until a restart), or a folder, read-only.
+// Reads the first `size` bytes of file `name` (a CD's CUE sheet) into `buf`:
+// `truncated` if there's more. Only reads. False, with `why`, if it can't.
+bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& truncated, const char*& why,
+                   Print& log);
 // Whether `name`, in the card's root folder, is a folder.
 bool isFolder(const char* name);
 // Opens image `name` for device 1, or returns nullptr (with openError()).

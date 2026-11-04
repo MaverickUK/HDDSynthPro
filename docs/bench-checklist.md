@@ -28,6 +28,7 @@ dev.3 changed early answers' tight loop (DMA now runs from its idle work). DMA w
 - [ ] `HDDPRO_CDROM_DEV=//./CdRom0 pytest -s -m cdrom` (device 1): every byte of the test disc. Compare its MB/s with dev.3's 2.42 MB/s, **the first measure of CD-ROM read-ahead** (dev.5).
 - [ ] Interleave both (a speed run on the disk while `-m cdrom` reads the disc, in two terminals): no errors, `bus_bad=0`.
 - [ ] Disc changes (console `M`, dev.7): with Windows showing the CD drive, `M none` (Windows should show it empty), `M DOOM_SE.ISO` (Windows should mount `DOOM_SE` without a restart), `M test`. Then on the Evesham, in DOS with MSCDEX: `DIR D:`, `M test`, `DIR D:` again (does MSCDEX notice?).
+- [ ] **BIN/CUE (dev.9):** on the PC, `python tools/iso_to_bincue.py DOOM_SE.ISO --audio 30 --out DOOMBIN` and copy `DOOMBIN.BIN` and `DOOMBIN.CUE` to the card's root folder. `M DOOMBIN.CUE`: a `# DOOMBIN.CUE: DOOMBIN.BIN, track 1 of 2 ...` line and `DISC DOOMBIN.CUE frames=11431` (the ISO's, not the audio's). Windows mounts it as `DOOM_SE`; reading `//./CdRom0` whole should match `DOOM_SE.ISO`'s SHA-256. Note its MB/s against the ISO's (the BIN is read through SdFat's file layer).
 - [ ] `T` off: `ICL386MB.IMG` as C: and `DOOM_SE.ISO` on the CD. Windows mounts `DOOM_SE` (CDFS); read every file (dev.3: 27 files, 22.7 MB, 1.36 MB/s without read-ahead).
 
 ## 2b. The CD-ROM build's slow reads ([atapi.md](atapi.md#the-cd-builds-slow-reads-what-the-code-says-4-nov-2026-0300-dev6))

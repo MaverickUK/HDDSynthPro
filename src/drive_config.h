@@ -16,7 +16,7 @@
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
 //   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
-//   cdrom = HDDSYNTH.ISO   # the CD-ROM build only: the disc image; none: the test disc
+//   cdrom = HDDSYNTH.ISO   # the CD-ROM builds: the disc, an ISO or a CUE sheet; none: the test disc
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -38,7 +38,7 @@ constexpr const char* DEFAULT_IMAGE = "HDDSYNTH.IMG";
 // `device0 = none`: no image, the built-in 64 MB test disk (writes kept in RAM
 // until a restart), whose data the bus observer can check on the cable.
 constexpr const char* NO_IMAGE = "none";
-// The CD-ROM build's disc (docs/atapi.md): an ISO in the root folder, or
+// The CD-ROM build's disc (docs/atapi.md): an ISO or a CUE sheet (with its BIN) in the root folder, or
 // `cdrom = none` for the generated test disc. No such file: no disc in the drive.
 constexpr const char* DEFAULT_CDROM = "HDDSYNTH.ISO";
 constexpr size_t MAX_FILE = 4096;      // longer files are read this far, with a warning
@@ -143,7 +143,7 @@ bool hasDevice1(const Config& c);
 // False for `cdrom = none`: the CD-ROM build serves the test disc.
 bool servesDisc(const Config& c);
 // True if device 1 is to be a CD-ROM drive (the bb48_hdcd build): `device1 =
-// cdrom` (the `cdrom` setting's disc), or a device1 name ending in .ISO.
+// cdrom` (the `cdrom` setting's disc), or a device1 name ending in .ISO or .CUE.
 bool device1IsCdrom(const Config& c);
 // That drive's disc: the ISO device1 names, or `cdrom`'s (which may be `none`).
 const char* device1Disc(const Config& c);

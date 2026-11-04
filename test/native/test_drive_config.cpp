@@ -239,6 +239,10 @@ TEST(test_config_device1_cdrom) {
     c = parsed("device1 = Games.iso\n");
     CHECK(drive_config::device1IsCdrom(c));
     CHECK_STR(drive_config::device1Disc(c), "Games.iso");
+    c = parsed("device1 = MYST.cue\n");  // a CUE sheet, with its BIN
+    CHECK(drive_config::device1IsCdrom(c));
+    CHECK_STR(drive_config::device1Disc(c), "MYST.cue");
+    CHECK(!drive_config::device1IsCdrom(parsed("device1 = MYST.BIN\n")));  // the BIN alone: a hard disk image
     CHECK(!drive_config::device1IsCdrom(parsed("device1 = GAMES.IMG\n")));
     CHECK(!drive_config::device1IsCdrom(parsed("device1 = GAMES\n")));
     CHECK(!drive_config::device1IsCdrom(parsed("device1 = .ISO\n")));  // no name before it

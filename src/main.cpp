@@ -53,6 +53,7 @@
 #include "hdcd_device.h"
 #endif
 #include "block_source.h"
+#include "cue_sheet.h"
 #include "bus_observer.h"
 #include <hardware/watchdog.h>
 #include "fetch_mailbox.h"
@@ -832,7 +833,7 @@ static char g_image_note[96] = "";            // why the configured image isn't
 
 // Opens image `name` as the disk. False, with sd_card::openError() or
 // "empty" as the reason in `why`, if it can't be used.
-static bool useImage(const char* name, const char*& why, bool read_only = false) {
+[[maybe_unused]] static bool useImage(const char* name, const char*& why, bool read_only = false) {
     ImageFile* file = sd_card::openImage(name, Serial, read_only);
     if (!file) {
         why = sd_card::openError();
@@ -847,6 +848,57 @@ static bool useImage(const char* name, const char*& why, bool read_only = false)
     g_image_name = name;
     return true;
 }
+
+#if HDDPRO_CDROM || HDDPRO_HDCD
+// A CD-ROM's disc from the card, read-only: an ISO as it is, or a CUE
+// sheet's data track from its BIN (cue_sheet.h). Device 0's image slot in the
+// CD-ROM build, device 1's in bb48_hdcd. nullptr if it can't be used, with why.
+static BlockSource* openCdDisc(const char* name, const char*& why) {
+#if HDDPRO_CDROM
+    auto open = sd_card::openImage;
+#else
+    auto open = sd_card::openDevice1Image;
+#endif
+    if (!cue_sheet::isCueName(name)) {
+        ImageFile* file = open(name, Serial, true);
+        if (!file) {
+            why = sd_card::openError();
+            return nullptr;
+        }
+        static ImageDisk iso(*file);  // always the same file object, reopened
+        if (!iso.sectors()) why = "empty";
+        return iso.sectors() ? &iso : nullptr;
+    }
+    static char text[cue_sheet::MAX_TEXT];
+    static cue_sheet::Sheet sheet;  // its BIN's name, which the open file keeps
+    size_t len = 0;
+    bool truncated = false;
+    if (!sd_card::readFileStart(name, text, sizeof text, len, truncated, why, Serial)) return nullptr;
+    if (truncated)  // a long sheet: up to its last whole line
+        while (len && text[len - 1] != '\n') --len;
+    if (!cue_sheet::parse(text, len, sheet)) {
+        why = sheet.error;
+        return nullptr;
+    }
+    ImageFile* file = open(sheet.file, Serial, true);
+    if (!file) {
+        static char bin_why[cue_sheet::MAX_FILE_NAME + 24];
+        std::snprintf(bin_why, sizeof bin_why, "%s %s", sheet.file, sd_card::openError());
+        why = bin_why;
+        return nullptr;
+    }
+    static RawTrackDisk raw(*file);
+    raw.setTrack(sheet.track);
+    if (!raw.sectors()) {
+        why = "its data track is empty";
+        return nullptr;
+    }
+    Serial.printf("# %s: %s, track 1 of %u%s (%lu-byte frames from byte %lu), %lu frames\n", name, sheet.file,
+                  unsigned(sheet.tracks), truncated ? "+" : "", (unsigned long)sheet.track.stride, (unsigned long)sheet.track.data_offset,
+                  (unsigned long)(raw.sectors() / atapi::SECTORS_PER_FRAME));
+    return &raw;
+}
+#endif
 
 // The geometry an image's partition table was made with, packed as
 // g_geometry is, or 0 (then 16 x 63).
@@ -875,12 +927,12 @@ static void chooseCdrom1() {
         g_device1_disc = "test disc";
     } else if (!sd_card::mounted()) {
         std::snprintf(g_device1_note, sizeof g_device1_note, "%s: no card", name);
-    } else if (ImageFile* file = sd_card::openDevice1Image(name, Serial, true)) {  // a disc: read-only
-        static ImageDisk disc(*file);
-        g_device1_disk = &disc;
-        g_device1_disc = name;
     } else {
-        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: %s", name, sd_card::openError());
+        const char* why = "";
+        if ((g_device1_disk = openCdDisc(name, why)))
+            g_device1_disc = name;
+        else
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: %s", name, why);
     }
     g_device1_sectors.store(g_device1_disk ? g_device1_disk->sectors() : 0, std::memory_order_relaxed);
 }
@@ -974,10 +1026,13 @@ static void chooseDisk() {
         g_disk = &g_overlay;  // read-only here, so the overlay stays empty
         useTestDisk();
     } else if (sd_card::mounted()) {
-        if (useImage(g_config.cdrom, why, true))  // a disc: read-only
+        if (BlockSource* disc = openCdDisc(g_config.cdrom, why)) {  // a disc: read-only
+            g_disk = disc;
+            g_image_name = g_config.cdrom;
             g_disk_name = "disc";
-        else
+        } else {
             std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.cdrom, why);
+        }
     }
 #else
     if (testDiskRequested()) {
@@ -1083,7 +1138,9 @@ static uint32_t openDisc(const char* name) {
     if (test) {
         g_disk = &g_overlay;  // read-only here, so the overlay stays empty
         useTestDisk();
-    } else if (!none && useImage(name, why, true)) {
+    } else if (BlockSource* disc = none ? nullptr : openCdDisc(name, why)) {
+        g_disk = disc;
+        g_image_name = name;
         g_disk_name = "disc";
     } else if (!none) {
         Serial.printf("# DISC %s: %s\n", name, why);
@@ -1096,13 +1153,11 @@ static uint32_t openDisc(const char* name) {
         g_device1_disk = &g_test_disc;
         g_device1_disc = "test disc";
     } else if (!none) {
-        if (ImageFile* file = sd_card::openDevice1Image(name, Serial, true)) {
-            static ImageDisk disc(*file);  // always the same file object, reopened
-            g_device1_disk = &disc;
+        const char* why = "";
+        if ((g_device1_disk = openCdDisc(name, why)))
             g_device1_disc = g_disc_next;
-        } else {
-            Serial.printf("# DISC %s: %s\n", name, sd_card::openError());
-        }
+        else
+            Serial.printf("# DISC %s: %s\n", name, why);
     }
     uint32_t sectors = g_device1_disk ? g_device1_disk->sectors() : 0;
     g_device1_sectors.store(sectors, std::memory_order_relaxed);

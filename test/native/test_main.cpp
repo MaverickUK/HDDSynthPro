@@ -419,6 +419,7 @@ void runActivityLinkTests();
 void runDriveConfigTests();
 void runSectorCheckTests();
 void runImagePartsTests();
+void runCueSheetTests();
 void runMediaWatchTests();
 void runWelcomeDiskTests();
 void runSeekTimingTests();
@@ -458,6 +459,7 @@ int main() {
     runDriveConfigTests();
     runSectorCheckTests();
     runImagePartsTests();
+    runCueSheetTests();
     runMediaWatchTests();
     runWelcomeDiskTests();
     runSeekTimingTests();

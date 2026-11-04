@@ -2,6 +2,12 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.9] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **BIN/CUE images for the CD-ROM drive** ([docs/atapi.md](docs/atapi.md#bincue-images-0300-dev9)): `cdrom = NAME.CUE`, `device1 = NAME.CUE` or console `M NAME.CUE` serves the CUE sheet's first track, if it is data, from the BIN it names: MODE1/2048, MODE1/2352, MODE2/2352 (XA form 1) or MODE2/2336, each frame's 2,048 data bytes read out of the raw ones. The data track ends where the next track in its file starts, so a mixed-mode game serves its data without its music (no audio tracks: the drive has no audio output); an audio CD is refused with the reason. `src/cue_sheet.*` (pure, `test_cue_sheet.cpp`) reads the first 1.5 KB of the sheet and maps the drive's sectors into the BIN (`RawTrackDisk`); `sd_card::readFileStart` reads the sheet (only reads). Core 0 only: the hard disk build's core 1 functions are at the same addresses and sizes; the CD-ROM builds use about 1.7 KB more RAM (`bb48_hdcd` 94.0%). The BIN's frames aren't 512-byte aligned, so it's read through SdFat's file layer, not the extent map. **Not yet tried on the board.**
+- **`tools/iso_to_bincue.py`:** a BIN/CUE from an ISO to test with (MODE1 or `--mode2`, `--audio N` for a silent audio track after it; EDC/ECC left as zeros, which the drive never reads). Its four kinds read back through `RawTrackDisk` identical to the ISO.
+
 ## [0.30.0-dev.8] - 2026-11-04 (branch `hdd-cd`)
 
 ### Added

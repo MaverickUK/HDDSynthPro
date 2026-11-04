@@ -520,6 +520,30 @@ bool createImage(const char* name, uint32_t sectors, Print& out) {
 
 // ---- Device 1's disk ----------------------------------------------------------
 
+bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& truncated, const char*& why,
+                   Print& log) {
+    len = 0;
+    truncated = false;
+    if (!mount(log)) {
+        why = "no card";
+        return false;
+    }
+    FsFile f;
+    if (!f.open(name, O_RDONLY)) {
+        why = s_sd.exists(name) ? "can't open" : "not found";
+        return false;
+    }
+    int n = f.read(buf, size);
+    truncated = n >= 0 && uint64_t(n) < f.fileSize();
+    f.close();
+    if (n < 0) {
+        why = "can't read";
+        return false;
+    }
+    len = size_t(n);
+    return true;
+}
+
 bool isFolder(const char* name) {
     FsFile f;
     if (!s_sd.fatType() || !f.open(name, O_RDONLY)) return false;

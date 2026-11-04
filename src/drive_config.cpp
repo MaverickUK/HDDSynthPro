@@ -414,7 +414,9 @@ bool hasDevice1(const Config& c) { return c.device1[0] != 0; }
 bool device1IsCdrom(const Config& c) {
     Span name{c.device1, c.device1 + std::strlen(c.device1)};
     if (equalsNoCase(name, "cdrom")) return true;
-    return name.size() > 4 && equalsNoCase(Span{name.end - 4, name.end}, ".iso");
+    if (name.size() <= 4) return false;
+    Span ext{name.end - 4, name.end};
+    return equalsNoCase(ext, ".iso") || equalsNoCase(ext, ".cue");
 }
 
 const char* device1Disc(const Config& c) {
@@ -433,8 +435,9 @@ const char* defaultFile() {
            "device0 = HDDSYNTH.IMG\r\n"
            "\r\n"
            "# A second drive (device 1), so a PC sees two hard disks: an image, or a\r\n"
-           "# folder in the root folder, served read-only. cdrom (or an .ISO file's\r\n"
-           "# name): a CD-ROM drive, in the bb48_hdcd firmware. none: no second drive.\r\n"
+           "# folder in the root folder, served read-only. cdrom (or an .ISO or .CUE\r\n"
+           "# file's name): a CD-ROM drive, in the bb48_hdcd firmware. none: no second\r\n"
+           "# drive.\r\n"
            "device1 = none\r\n"
            "\r\n"
            "# The transfer mode to offer the host: auto (the fastest both sides\r\n"
@@ -482,8 +485,9 @@ const char* defaultFile() {
            "# and 63 sectors), or cylinders/heads/sectors, e.g. geometry = 756/13/51.\r\n"
            "geometry = auto\r\n"
            "\r\n"
-           "# The CD-ROM drive's disc (the CD-ROM firmware, or device1 = cdrom): an ISO\r\n"
-           "# in the root folder, read-only. none: the built-in test disc.\r\n"
+           "# The CD-ROM drive's disc (the CD-ROM firmware, or device1 = cdrom): an ISO,\r\n"
+           "# or a CUE sheet and its BIN (the data track), in the root folder, read-only.\r\n"
+           "# none: the built-in test disc.\r\n"
            "cdrom = HDDSYNTH.ISO\r\n";
 }
 

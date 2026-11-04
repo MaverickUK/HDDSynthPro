@@ -25,6 +25,7 @@ SANITIZE="${SANITIZE:-address,undefined}"
     test/native/test_seek_timing.cpp src/seek_timing.cpp src/drive_params.cpp src/drive_timing.cpp src/sentence.cpp \
     test/native/test_sector_check.cpp src/sector_check.cpp \
     test/native/test_image_parts.cpp src/image_parts.cpp \
+    test/native/test_cue_sheet.cpp src/cue_sheet.cpp \
     test/native/test_media_watch.cpp src/media_watch.cpp \
     test/native/test_welcome_disk.cpp src/welcome_disk.cpp \
     test/native/test_two_drives.cpp \

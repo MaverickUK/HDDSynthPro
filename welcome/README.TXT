@@ -42,13 +42,15 @@ Plain text, one setting per line as key = value. # starts a comment.
   device1 = none         A second drive, so the computer sees two hard
                          disks: an image, or a folder on the card served
                          read-only (experimental). Not the same image as
-                         device0. cdrom, or an .ISO file's name: a CD-ROM
-                         drive instead (the bb48_hdcd firmware only).
+                         device0. cdrom, or an .ISO or .CUE file's name: a
+                         CD-ROM drive instead (the bb48_hdcd firmware only).
                          none: no second drive.
   cdrom = HDDSYNTH.ISO   The CD-ROM drive's disc: an ISO (a data CD's
-                         image) on the card, read-only. none: the built-in
-                         test disc. Used by the CD-ROM firmware, and by
-                         bb48_hdcd with device1 = cdrom.
+                         image), or a CUE sheet with its BIN (the first
+                         track, its data; audio tracks are left out), on
+                         the card, read-only. none: the built-in test disc.
+                         Used by the CD-ROM firmware, and by bb48_hdcd with
+                         device1 = cdrom.
   mode = auto            The transfer mode to offer the computer: auto (the
                          fastest both support), or pio0-pio4, mdma0-mdma2
                          or udma0-udma6 to allow at most that mode.
