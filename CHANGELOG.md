@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.2] - 2026-11-04 (branch `merge-cdrom`)
+
+### Added
+- **`dior_no_cs` in `s`, and a `NOCS` line:** DIOR# strobes with no chip select while the drive offers no DMA (`n/a` while it does). An ISA card passes every I/O read the PC makes to the cable this way (the ICL 386: 19.9 million in a session, which the bus observer counted as DMA words); a PCI controller or a USB adapter shouldn't strobe at all outside the drive's addresses. `NOCS <ms> ms after RESET# release` says how soon the first came after each release (or boot). Evidence for choosing the bus program by itself one day (the lane on PCI hosts, `ide_bus` on ISA ones); [docs/retro-test.md](docs/retro-test.md) asks for it on every PC. Core 0 only. On the rig: 0 through the USB adapter, over a speed run.
+
+### Tested
+- **The merge (dev.1) on the rig** (USB adapter, generated disk, the lane, PIO mode 3): `-m speed` as 2d.6 (1.54 MB/s reads, 80 IOPS, 1.68 MB/s writes, worst read 1,320 ns, Alternate Status), slices 3 and 4 pass. The hard disk build's core 1 bus functions are at 2d.6's addresses.
+
 ## [0.30.0-dev.1] - 2026-11-04 (branch `merge-cdrom`)
 
 `two-drives` (0.29.0-2d.6) and `atapi-cdrom` (0.29.0) merged: one codebase with the data lane, two drives and the CD-ROM build. Their entries follow, each under its own branch.

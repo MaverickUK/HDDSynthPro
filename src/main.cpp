@@ -1377,8 +1377,23 @@ static struct {
 constexpr uint32_t IDENTIFY_CHECK_MS = 10000;
 static uint32_t g_identify_check_until_ms = 30000;
 
+// What kind of host bus the drive is on, as evidence for choosing a bus
+// program by itself one day: an ISA card passes every I/O read the PC makes
+// to the cable as DIOR# with no chip select (the ICL 386: 19.9 million in a
+// session), where a PCI controller or a USB adapter strobes only for the
+// drive. The bus observer counts them as DMA words, which they can only be
+// when the drive offers DMA. Counted from each RESET# release (or boot).
+static uint32_t g_release_ms = 0;
+static uint64_t g_no_cs_at_release = 0;
+static bool g_no_cs_reported = false;
+
 static void noteActivity(const TraceEvent& e) {
-    if (e.kind == TraceKind::ResetRelease) g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
+    if (e.kind == TraceKind::ResetRelease) {
+        g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
+        g_release_ms = millis();
+        g_no_cs_at_release = bus_observer::dmaWords();
+        g_no_cs_reported = false;
+    }
     uint8_t command = uint8_t(e.extra);
     if (!activity::isMediaCommand(command)) return;
     if (e.kind == TraceKind::CommandStart) {
@@ -1526,6 +1541,17 @@ static void printCardChanges() {
     if (printLine(line, size_t(n))) shown = card.state();
 }
 
+// A NOCS line the first time after each RESET# release (or boot) that the host
+// strobes DIOR# with no chip select, while the drive offers no DMA: how soon
+// an ISA host shows itself (g_release_ms above).
+static void printNoChipSelect() {
+    if (g_no_cs_reported || g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA) return;
+    if (bus_observer::dmaWords() == g_no_cs_at_release) return;
+    g_no_cs_reported = true;
+    Serial.printf("NOCS %lu ms after RESET# release: DIOR# with no chip select (an ISA card?)\n",
+                  (unsigned long)(millis() - g_release_ms));
+}
+
 // A NOIORDY line when the host ends reads without waiting for IORDY, at most
 // once a second: such a host reads garbage whenever core 1 is slower than its
 // strobe (iordy_check.pio).
@@ -1636,6 +1662,12 @@ static void printStats() {
                   (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
                   (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps(),
                   (unsigned long long)bus_observer::dmaWords());
+    // The same words, as the ISA signature (printNoChipSelect): only while the
+    // drive offers no DMA, since otherwise they may be DMA.
+    if (g_mdma_mode.load(std::memory_order_relaxed) == NO_DMA)
+        Serial.printf(" dior_no_cs=%llu", (unsigned long long)bus_observer::dmaWords());
+    else
+        Serial.print(" dior_no_cs=n/a");
     Serial.printf(" bus_ring_max=%lu/%lu bus_dropped=%llu bus_lost=%lu bus_checks=%s",
                   (unsigned long)bus_observer::ringMax(), (unsigned long)bus_observer::ringSize(),
                   (unsigned long long)bus_observer::dropped(), (unsigned long)bus_observer::lost(),
@@ -1978,6 +2010,7 @@ void loop() {
     bus_timing::printPending(2);
     printSlowReads();
     printIgnoredIordy();
+    printNoChipSelect();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.
     bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0, serveFetches);
     updateLed();

@@ -33,8 +33,9 @@ To change a setting: console `E`, then `key = value` and Enter, then `!` (the dr
   - `iordy_slow`;
   - `bus_identify_bad` (0);
   - `commands`;
-  - with the lane, `lane_blocks`.
-- **The log's `!!` lines:** `NOIORDY`, `BUSERR`, `STUCK`, `SLOWREAD`, resets.
+  - with the lane, `lane_blocks`;
+  - **`dior_no_cs`** (0.30.0-dev.2): DIOR# strobes with no chip select. Note it on **every** PC, ISA or not, with the controller's type: an ISA card should show millions, a PCI controller 0. With enough machines it would let the drive choose its bus program by itself (the lane on PCI, `ide_bus` on ISA).
+- **The log's `!!` lines:** `NOIORDY`, `BUSERR`, `STUCK`, `SLOWREAD`, resets. Also **`NOCS`**: how many ms after each RESET# release the first strobe with no chip select came, so how soon the drive could tell.
 - **Speed:** `HDDBENCH` from the benchmark image if it's on C: (or time a `COPY` of a large file to NUL).
 
 ### Step 1: as it is (early answers)
