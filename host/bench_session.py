@@ -92,8 +92,8 @@ STEPS = [
     Step("cd-pollfirst", "bb48_cdrom: the candidate fix, EARLY_POLL_FIRST_NS=1000", "bb48_cdrom",
          flags="-DCMD_PROFILE=1 -DEARLY_POLL_FIRST_NS=1000", program="e", settings={"mode": "mdma2"},
          marker="cdrom", cdrom=True, note="checklist 2b: fewer reads past 1,250 ns, no errors?"),
-    Step("hdcd-soak", "bb48_hdcd: a 60-minute soak with the CD-ROM in", "bb48_hdcd", settings=HDCD,
-         marker="slice6", note="checklist 3 (not in the default run: --only hdcd-soak)", default=False),
+    Step("hdcd-soak", "bb48_hdcd: a 60-minute soak while the CD-ROM is read", "bb48_hdcd", settings=HDCD,
+         marker="slice6", interleave=True, note="checklist 3 (not in the default run: --only hdcd-soak)", default=False),
 ]
 STATS_KEPT = ("bus", "iordy_max_ns", "iordy_max_reg", "iordy_slow", "iordy_ignored", "bus_sectors", "bus_bad",
               "bus_gaps", "dior_no_cs", "cmd_run_max_ns", "cmd_run_max", "commands")
@@ -284,8 +284,19 @@ class Session:
         self.log(f"pytest -m '{step.marker}'")
         if self.dry:
             return "", "dry run"
+        reader = None
+        if step.interleave:  # the test disc, whose size the reader wraps at
+            self.drive.send("M")
+            time.sleep(0.3)
+            mark = self.drive.mark()
+            self.drive.send("test\r")
+            try:
+                self.log("  " + self.drive.wait_for(lambda l: l.startswith("DISC "), mark, 30))
+            except TimeoutError:
+                self.log("  M test: no DISC line")
+            time.sleep(5)  # Windows sees the new disc
+            reader = CdReader(self.cd_dev, TEST_DISC_FRAMES * 2048)
         self.close()  # pytest opens the port itself
-        reader = CdReader(self.cd_dev) if step.interleave else None
         if reader:
             reader.start()
         lines = []
@@ -341,8 +352,8 @@ def cd_state() -> str:
 class CdReader:
     """Reads the CD-ROM over and over in 64 KB requests, until stopped."""
 
-    def __init__(self, path: str):
-        self.path, self.bytes, self.errors, self.last_error = path, 0, 0, ""
+    def __init__(self, path: str, size: int):
+        self.path, self.size, self.bytes, self.errors, self.last_error = path, size, 0, 0, ""
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._start = 0.0
@@ -370,7 +381,7 @@ class CdReader:
                 self.errors += 1
                 self.last_error = str(e)
                 n = 0
-            if n < 65536:
+            if n < 65536 or offset + n >= self.size:  # the disc's end: from the start again
                 offset = 0
             else:
                 offset += n
@@ -421,6 +432,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="say what it would do, touching nothing")
     ap.add_argument("--cd-dev", default="//./CdRom0", help="the CD-ROM's raw device (default //./CdRom0)")
     ap.add_argument("--keep-settings", action="store_true", help="don't restore HDDSYNTH.INI at the end")
+    ap.add_argument("--as-is", action="store_true",
+                    help="run the tests on the board as it is set up, and the adapter as it was plugged in: no "
+                         "flash, console set-up or re-detection, each of which takes the drive off the bus "
+                         "(the USB adapter hangs when a CD-ROM vanishes under it)")
     a = ap.parse_args()
 
     if a.list:
@@ -461,14 +476,17 @@ def main():
             log(f"== {step.key}: {step.title}")
             started = time.monotonic()
             try:
-                if session.flashed != (step.env, step.flags):
-                    session.flash(step.env, step.flags)
-                    session.flashed = (step.env, step.flags)
-                    session.read_settings()
-                session.set_settings(step.settings)
-                session.ensure_test_disk()
-                session.set_program(step.program)
-                session.redetect(cdrom_only=step.env == "bb48_cdrom")
+                if a.as_is:
+                    log("as it is: no flash, settings, test disk, bus program or re-detection")
+                else:
+                    if session.flashed != (step.env, step.flags):
+                        session.flash(step.env, step.flags)
+                        session.flashed = (step.env, step.flags)
+                        session.read_settings()
+                    session.set_settings(step.settings)
+                    session.ensure_test_disk()
+                    session.set_program(step.program)
+                    session.redetect(cdrom_only=step.env == "bb48_cdrom")
                 if not a.dry_run:
                     session.drive.send("r")  # read timings from here
                 text, summary = session.pytest(step) if step.marker else ("", "")
