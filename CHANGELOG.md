@@ -7,6 +7,8 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Added
 - **A candidate fix for the CD-ROM build's slow reads, off by default:** `-DEARLY_POLL_FIRST_NS=1000` makes early answers' tight loop wait up to that long after a command is queued for the host's next access (its first status poll), answer it (BSY), and only then run the command, so a long packet holds the host's second poll, which comes later, rather than its first. For the bench to measure with `CMD_PROFILE` ([docs/bench-checklist.md](docs/bench-checklist.md)); compiled and checked (`check_core1_ram.py`), not yet run on hardware. Normal builds are unchanged.
 
+- **Release notes for 0.30.0** (`docs/release-notes/v0.30.0.md`, for the people flashing it), and CI's release uses `docs/release-notes/vX.Y.Z.md` when there is one (GitHub's generated notes otherwise) and publishes the CD-ROM and hard disk + CD-ROM UF2s too (`hddsynthpro-bb48-cdrom-...`, `hddsynthpro-bb48-hdcd-...`).
+
 ### Fixed
 - Compiler warnings in the builds that don't use everything `main.cpp` holds (`chooseDevice1` in the CD-ROM build, `restart` in the listen build), and a device 1 note that could be cut short.
 

@@ -90,6 +90,9 @@ jobs:
           mkdir dist
           cp .pio/build/bb48/firmware.uf2 "dist/hddsynthpro-bb48-listen-v${{ steps.version.outputs.version }}.uf2"
           cp .pio/build/bb48_drive/firmware.uf2 "dist/hddsynthpro-bb48-drive-v${{ steps.version.outputs.version }}.uf2"
+          # Exploratory (docs/atapi.md): a CD-ROM drive, and a hard disk with a CD-ROM as device 1
+          cp .pio/build/bb48_cdrom/firmware.uf2 "dist/hddsynthpro-bb48-cdrom-v${{ steps.version.outputs.version }}.uf2"
+          cp .pio/build/bb48_hdcd/firmware.uf2 "dist/hddsynthpro-bb48-hdcd-v${{ steps.version.outputs.version }}.uf2"
       - uses: actions/upload-artifact@v7
         with:
           name: firmware-v${{ steps.version.outputs.version }}
@@ -103,6 +106,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7  # for the release notes
       - uses: actions/download-artifact@v8
         with:
           name: firmware-v${{ needs.build.outputs.version }}
@@ -111,7 +115,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # docs/release-notes/vX.Y.Z.md if there is one, else GitHub's notes from the commits
+          notes="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then notes_arg=(--notes-file "$notes"); else notes_arg=(--generate-notes); fi
           gh release create "${GITHUB_REF_NAME}" dist/*.uf2 \
             --repo "${GITHUB_REPOSITORY}" \
             --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+            "${notes_arg[@]}"
