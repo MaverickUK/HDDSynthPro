@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.10] - 2026-11-04 (branch `hdd-cd`)
+
+### Fixed
+- **`bb48_hdcd` with a CD-ROM as device 1 runs on `ide_bus`, not early answers.** On the bench (USB adapter, Windows) early answers never got past the adapter's power-on probe: its register check (A5/5A/AA/55 written to Sector Count and LBA Low/Mid/High, then read back) recorded LBA High as 00 every time (11,879 times in 75 s) and no read-back, every Status read was held 1.7-2.4 µs, and the adapter retried for good, never offered USB a disk and dropped off USB (a replug after a long spell of it). With or without DMA offered; the hard disk alone (`device1 = none`) on early answers and `bb48_drive` were detected as before. Why is still open (the trace is kept for it). Console `P e` still picks early answers, to reproduce it; `S` says which program runs.
+
+### Tested on the bench (4 Nov, the USB adapter on Windows)
+- **PIO speed after dev.3's DMA fix:** the data lane 1.54 MB/s reads, 1.68 writes; early answers 1.21 and 1.13; as before. Slices 3-4 pass on the lane.
+- **`bb48_hdcd` on `ide_bus`, `mode = mdma2`, a CD-ROM as device 1:** Windows shows both drives (the disk, and the CD-ROM as D:). The disk in MDMA 2: 9.02 MB/s reads, 1,142 random 4 KB reads a second, 13.25 MB/s writes (as `bb48_drive`). The CD-ROM's 64 MB test disc, every byte checked: 3.42 MB/s with read-ahead (the CD-ROM build without it: 2.42). Both at once: the disk 4.16/5.16 MB/s, the CD-ROM read without errors. Console `M` disc changes seen by Windows as they happen (`DOOM_SE.ISO` mounted as CDFS, ejected, mounted again), and every file on it read through Windows (22.7 MB).
+- Without DMA offered (`mode = auto`) the adapter's TEST UNIT READY (a PACKET with the DMA bit set) is refused and it resets and re-detects for good: `bb48_hdcd` with a CD-ROM needs `mode = mdma2` on this adapter, as the CD-ROM build does.
+
 ## [0.30.0-dev.9] - 2026-11-04 (branch `hdd-cd`)
 
 ### Added

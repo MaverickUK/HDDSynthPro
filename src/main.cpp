@@ -1110,9 +1110,14 @@ static void chooseDisk() {
 #else
     chooseDevice1();  // two drives are the hard disk build's
 #if HDDPRO_HDCD
-    // The CD-ROM drive was proven on early answers and ide_bus, not on the
-    // data lane: early answers instead, as in the CD-ROM build.
-    if (g_device1_cdrom && !g_isa.load() && !g_early.load()) g_early.store(true);
+    // A CD-ROM as device 1 runs on ide_bus (as console `P i`): on early
+    // answers the USB adapter's register check after RESET# never passed, so
+    // it never detected the drive and dropped off USB (4 Nov, 0.30.0-dev.10).
+    // Console `P e` still picks early answers, to reproduce it.
+    if (g_device1_cdrom && busRequested() != 'e') {
+        g_isa.store(true);
+        g_early.store(false);
+    }
 #endif
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode and device 1: core 1 reads them
 #endif
@@ -1299,8 +1304,9 @@ static void printConfig() {
 #if HDDPRO_CDROM
     if (!g_isa.load()) Serial.println("CONFIG the CD-ROM build runs early answers, not the data lane");
 #elif HDDPRO_HDCD
-    if (g_device1_cdrom && !g_isa.load())
-        Serial.println("CONFIG with a CD-ROM as device 1, early answers, not the data lane");
+    if (g_device1_cdrom)
+        Serial.println(g_early.load() ? "CONFIG with a CD-ROM as device 1 on early answers (console P e): the USB adapter can't detect it"
+                                      : "CONFIG with a CD-ROM as device 1, ide_bus");
 #endif
     {
         Geometry g = startGeometry(driveIdentity());
