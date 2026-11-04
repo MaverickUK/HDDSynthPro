@@ -1,5 +1,29 @@
 # Next bench session (written 4 Nov 2026)
 
+## Next: the Evesham with a hard disk and a CD-ROM (prepared 4 Nov, late)
+
+The BB48 is ready for it, whichever computer its USB goes to (the settings are on the card):
+- **The build:** a normal `bb48_hdcd` 0.30.0-dev.10, without `RIG_WATCHDOG_MS`. The READY line ends `slice3 hdcd`.
+- **Device 0:** `ICL386MB.IMG` (MS-DOS 5), PIO mode 3. `S` shows `geometry=756/13/51 (partition table)`.
+- **Device 1:** a CD-ROM with `DOOM_SE.ISO` in it (`frames=11431`).
+- **`HDDSYNTH.INI`:** `device0 = ICL386MB.IMG`, `device1 = cdrom`, `cdrom = DOOM_SE.ISO`, `mode = auto`, `early_answers = on`, `isa = off`.
+- **No console `T` or `P`** is set: `S` shows `serving=ICL386MB.IMG`.
+- **The bus program:** `ide_bus`, which `bb48_hdcd` picks with a CD-ROM as device 1 (`CONFIG with a CD-ROM as device 1, ide_bus`). The Evesham waited for IORDY on every read on the data lane (`iordy_ignored=0`), so `ide_bus` should suit it.
+- **The observer:** it checks the image's data on the cable (`bus_image=on`).
+
+**From the Mac:** plug the BB48's USB in first, then run `python3 scripts/retro_log.py evesham-hdcd` from the repo (`host/requirements.txt` installed; `HDDPRO_PORT=/dev/cu.usbmodem...` if it doesn't find the board). Send `h` and `S`, and check the lines above. Then follow the power order in [retro-test.md](retro-test.md#2-connecting-the-power-order-rule).
+
+1. [ ] **The cable** on the Evesham's primary channel. Its own optical drive is on the other channel; it was E: last time.
+2. [ ] **The BIOS,** primary master and slave on Auto: does it list a hard disk and `HDDSYNTH PRO CD-ROM`? Put the floppy first in the boot order: the BIOS tries to boot from the CD (NOT READY last time, with no disc). Here, then at the DOS prompt and after Doom (`r` before each), record the [auto-bus table](auto-bus.md#what-to-record-on-each-pc): `bus`, `dior_no_cs` and the `NOCS` line, `iordy_ignored` and any `NOIORDY` lines, `iordy_slow`, `iordy_max_ns`, `rd_t1_ns`, `rd_strobe_ns`; plus `bus_sectors`/`bus_bad`.
+3. [ ] **Boot the Windows 98 startup floppy.** MS-DOS 5 on the image has no CD-ROM driver, but the floppy loads `OAKCDROM.SYS` and MSCDEX. C: should be the image's disk, the RAM drive the next letter, then the CD-ROM: the driver's lines name its letter. Does `DIR C:` list MS-DOS 5's files, and `DIR` on the CD `DOOM_SE`'s?
+4. [ ] **Doom from the CD:** `MD C:\DOOMDATA` (on the image this time, so its saves stay), then on the CD's drive `CD \DOOMCD`, `SETUP`, `DOOM`. Play a level. Afterwards `s`: no failed commands but the expected refusals (READ SUB-CHANNEL 42h gets ILLEGAL REQUEST), `bus_bad=0`, no `STUCK`.
+5. [ ] **Optional, a disc change:** with MSCDEX loaded, `DIR` the CD, console `M` then `test` and Enter, `DIR` again (does MSCDEX notice the test disc?), then `M DOOM_SE.ISO` back.
+6. [ ] **Optional:** boot MS-DOS 5 from C: with the CD-ROM driver. Copy `OAKCDROM.SYS` and `MSCDEX.EXE` from the floppy's boot (the RAM drive holds MSCDEX) to C:, and add them to `CONFIG.SYS`/`AUTOEXEC.BAT` (a version check may need `SETVER`).
+
+**If the BIOS doesn't find the drives,** console `P e` (early answers, which restarts): the program the Evesham ran each drive on alone. Early answers failed only the USB adapter's register check, with a CD-ROM as device 1. Record which one worked. `P 0` goes back to the settings'.
+
+**Afterwards:** `E device1 = none`, then `!`. Leave `cdrom = DOOM_SE.ISO`: it only matters with `device1 = cdrom`. Results go in `CHANGELOG.md` (the dev.10 entry, or the next), [atapi.md](atapi.md) and the release notes, whose `bb48_hdcd` line says it isn't yet tried on a retro PC.
+
 > **After the evening of 4 Nov (0.30.0-dev.10):** steps 1 and 2 are done except BIN/CUE (results in `CHANGELOG.md`, dev.10): `bb48_hdcd` passed everything on `ide_bus`, which it now uses with a CD-ROM as device 1. Still to do:
 >
 > 1. ~~**The soak.**~~ Done (4 Nov, 21:29): an hour clean, see the CHANGELOG (dev.10). The board is set up for it (`bb48_hdcd` dev.10 with `RIG_WATCHDOG_MS`, the test disk, `device1 = cdrom`, `mode = mdma2`). **Don't flash or restart it**: replug only the USB adapter, wait for disk 1 and D: in Windows, then `python bench_session.py --only hdcd-soak --as-is --cd-dev //./D:`. The adapter hangs whenever a CD-ROM vanishes under it (a flash, a restart, console `V`), so with a CD-ROM in, set the board up first, then replug the adapter, then run with `--as-is`.
