@@ -62,10 +62,15 @@ bool createImage(const char* name, uint32_t sectors, Print& out);
 // A read or write that fails is retried once after restarting the card, so a
 // card pulled and put back while the drive was idle costs nothing.
 const media_watch::Watch& media();
+// Times the card was started again after it stopped answering (device 0's or
+// device 1's reads, or `S` and `M` finding it silent): CARD lines and `s`.
+uint32_t restarts();
 // Device 1's disk (docs/two-drives.md), kept apart from the image above so
 // device 0's proven path is untouched: a second image through SdFat's
-// file layer only (no extent map, no card watch: a card pulled out fails
-// its reads until a restart), or a folder, read-only.
+// file layer only (no extent map), or a folder, read-only. An image read or
+// write that fails is retried once after restarting the card, with the same
+// checks as device 0's (the same card and image); while device 0's card is
+// lost or changed they fail at once. A folder's reads aren't retried.
 // Reads the first `size` bytes of file `name` (a CD's CUE sheet) into `buf`:
 // `truncated` if there's more. Only reads. False, with `why`, if it can't.
 bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& truncated, const char*& why,

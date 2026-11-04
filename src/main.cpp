@@ -1823,27 +1823,44 @@ static bool printLine(const char* line, size_t n) {
 
 #if FIRMWARE_SLICE != 0
 // A CARD line when the card the image is on is pulled out, comes back, or a
-// different card (or the image changed) comes back, which isn't served.
+// different card (or the image changed) comes back, which isn't served; and
+// when the card stopped answering and was restarted between two looks here
+// (counted, so a loss and return within one pass isn't missed: 4 Nov, two
+// went unreported on the Evesham).
 static void printCardChanges() {
     static media_watch::State shown = sd_card::media().state();
+    static uint32_t shown_losses = sd_card::media().losses(), shown_restarts = sd_card::restarts();
     const media_watch::Watch& card = sd_card::media();
-    if (card.state() == shown) return;
+    const uint32_t losses = card.losses(), restarts = sd_card::restarts();
+    const bool moved = losses != shown_losses || restarts != shown_restarts;
+    if (card.state() == shown && !moved) return;
     char line[160];
     int n;
     switch (card.state()) {
         case media_watch::State::Present:
-            n = std::snprintf(line, sizeof line, "CARD back %s\n", g_image_name);
+            n = card.state() == shown
+                    ? std::snprintf(line, sizeof line, "CARD lost and back %s: it stopped answering and was restarted (%lu in all)\n",
+                                    g_image_name, (unsigned long)restarts)
+                    : std::snprintf(line, sizeof line, "CARD back %s\n", g_image_name);
             break;
         case media_watch::State::Changed:
             n = std::snprintf(line, sizeof line,
                               "CARD changed: %s; not served (eject the disk on the computer, then restart the drive)\n",
                               card.why());
             break;
+        case media_watch::State::None:  // device 0 isn't on the card: device 1's disk, `S` or `M` restarted it
+            n = std::snprintf(line, sizeof line, "CARD restarted: it stopped answering (%lu in all)\n",
+                              (unsigned long)restarts);
+            break;
         default:
             n = std::snprintf(line, sizeof line, "CARD lost: the image's reads and writes fail until it's back\n");
             break;
     }
-    if (printLine(line, size_t(n))) shown = card.state();
+    if (printLine(line, size_t(n))) {
+        shown = card.state();
+        shown_losses = losses;
+        shown_restarts = restarts;
+    }
 }
 
 // A NOCS line the first time after each RESET# release (or boot) that the host
@@ -1999,8 +2016,8 @@ static void printStats() {
     Serial.printf(" device1=%s device1_sectors=%lu", g_device1_kind,
                   (unsigned long)(g_device1_disk ? g_device1_disk->sectors() : 0));
     const media_watch::Watch& card = sd_card::media();
-    Serial.printf(" card=%s card_lost=%lu card_back=%lu", media_watch::stateName(card.state()),
-                  (unsigned long)card.losses(), (unsigned long)card.returns());
+    Serial.printf(" card=%s card_lost=%lu card_back=%lu card_restarts=%lu", media_watch::stateName(card.state()),
+                  (unsigned long)card.losses(), (unsigned long)card.returns(), (unsigned long)sd_card::restarts());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
