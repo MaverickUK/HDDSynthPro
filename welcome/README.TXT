@@ -41,7 +41,14 @@ Plain text, one setting per line as key = value. # starts a comment.
                          (Older files call it image, which still works.)
   device1 = none         A second drive, so the computer sees two hard
                          disks: an image, or a folder on the card served
-                         read-only (experimental). none: no second drive.
+                         read-only (experimental). Not the same image as
+                         device0. cdrom, or an .ISO file's name: a CD-ROM
+                         drive instead (the bb48_hdcd firmware only).
+                         none: no second drive.
+  cdrom = HDDSYNTH.ISO   The CD-ROM drive's disc: an ISO (a data CD's
+                         image) on the card, read-only. none: the built-in
+                         test disc. Used by the CD-ROM firmware, and by
+                         bb48_hdcd with device1 = cdrom.
   mode = auto            The transfer mode to offer the computer: auto (the
                          fastest both support), or pio0-pio4, mdma0-mdma2
                          or udma0-udma6 to allow at most that mode.
@@ -58,11 +65,34 @@ Plain text, one setting per line as key = value. # starts a comment.
                          voice97 or fdb05.
   isa = off              on for a 16-bit ISA IDE card (286, 386, many
                          486s); off for anything later.
+  early_answers = on     Have each register's value ready the moment it's
+                         addressed, for controllers that don't wait for
+                         the drive. off: faster on PCs that do wait (most
+                         from the Pentium on), but not for ISA cards.
+  iordy = on             off for a controller that checks IORDY before
+                         each access (an Amiga 1200), with early_answers.
+  geometry = auto        The cylinders/heads/sectors the BIOS sees: auto
+                         (from the image's partition table), or e.g.
+                         756/13/51 to match an old BIOS's setting.
 
 The on/off settings also take yes/no, true/false and 1/0.
 
 Changes take effect when the drive restarts. A mistake in the file never
 stops the drive: it's reported on the serial console and skipped.
+
+WHICH SETTINGS FOR YOUR COMPUTER
+
+  286, 386, or a 486 with an ISA IDE card    the defaults, or isa = on
+  A PCI controller (Pentium and later)       the defaults
+  ... faster, if the controller waits        early_answers = off
+      for the drive (never with ISA cards)
+  A USB-IDE adapter that can do DMA          dma = on (or mode = mdma2)
+  The CD-ROM through a USB-IDE adapter       mode = mdma2 (it asks for DMA)
+  Amiga 1200 (not working yet)               iordy = off
+
+Start with the defaults: every PC tried so far worked with them. If a
+change doesn't suit the computer, the drive may not be found, or reads may
+fail; put the setting back and restart.
 
 WHICH DISK THE DRIVE SERVES
 

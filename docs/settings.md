@@ -25,7 +25,7 @@ isa = off
 | Key | Values | Default |
 |---|---|---|
 | `device0` | The disk image to serve as the first drive (device 0; BIOS menus and drive jumpers call it the master): a file in the card's root folder, e.g. `GAMES.IMG` (quotes optional; an image over 4 GB on a FAT32 card can be split into `GAMES.IMG`, `GAMES.I01`, `GAMES.I02`..., which `tools/split_image.py` makes, and is served as one disk), or `none` for the built-in 64 MB test disk (its writes are lost when the drive restarts; the soak test uses it, since only its data can be checked on the cable). Up to 0.28.0 this setting was called `image`, which still works; if a file has both, `device0` counts, with a warning, and console `E` rewrites an `image` line as `device0` | `HDDSYNTH.IMG` |
-| `device1` | **Experimental (branch `two-drives`).** A second drive, device 1 (the slave, in BIOS menus and on drive jumpers), so a retro PC sees two hard disks ([two-drives.md](two-drives.md)): an image file in the card's root folder, served like `device0`'s, or a **folder** in the root folder, whose files and subfolders are served as a read-only FAT16 disk (up to 1,024 entries and 2 GB; writes fail). **`cdrom`, or a name ending in `.ISO`: a CD-ROM drive as device 1** (the `bb48_hdcd` build only, exploratory: [atapi.md](atapi.md)), serving `cdrom`'s disc or the ISO named; the hard disk build doesn't serve it and says so (`CONFIG device1 not used`). `none` or nothing: no second drive | `none` |
+| `device1` | **Experimental.** A second drive, device 1 (the slave, in BIOS menus and on drive jumpers), so a retro PC sees two hard disks ([two-drives.md](two-drives.md)): an image file in the card's root folder, served like `device0`'s, or a **folder** in the root folder, whose files and subfolders are served as a read-only FAT16 disk (up to 1,024 entries and 2 GB; writes fail). **`cdrom`, or a name ending in `.ISO`: a CD-ROM drive as device 1** (the `bb48_hdcd` build only, exploratory: [atapi.md](atapi.md)), serving `cdrom`'s disc or the ISO named; the hard disk build doesn't serve it and says so (`CONFIG device1 not used`). `none` or nothing: no second drive | `none` |
 | `mode` | The transfer mode to offer the host: `auto` (the fastest both sides support), or one of `pio0`–`pio4`, `mdma0`–`mdma2`, `udma0`–`udma6` to allow at most that one | `auto` |
 | `dma` | `on` or `off`: whether `auto` may offer multiword DMA, where DMARQ is wired. Much faster with DMA-capable hosts (reads about 4 times, writes 5 times through the USB adapter) | `off` until DMA has had a long test |
 | `write_behind` | `on` or `off`: the drive acknowledges each written sector while storing it on the card, so the host sends the next one meanwhile. About 50% faster writes to the card; if power is cut in the millisecond a sector is being stored, that sector is lost | `on` |
@@ -37,6 +37,17 @@ isa = off
 | `iordy` | `off` for a controller that checks IORDY before it starts each access, such as an Amiga 1200's: the drive never touches IORDY. Use with `early_answers = on` | `on` |
 | `geometry` | The CHS geometry the drive reports, which the BIOS's auto-detect picks up. `auto`: the geometry the image's partition table was made with (an image from an old drive boots with the BIOS on auto, its boot code finding its sectors where it expects them), or 16 heads and 63 sectors if the table doesn't say (none, or one made for a translated geometry). Or cylinders/heads/sectors such as `756/13/51`, to set it. Applies to an image on the card only; the cylinders are cut to fit if it's bigger than the image | `auto` |
 | `cdrom` | **The CD-ROM builds only** (`bb48_cdrom`, and `bb48_hdcd` with `device1 = cdrom`; exploratory: [atapi.md](atapi.md)): the disc image to serve, a data ISO (one Mode 1 track of 2,048-byte frames) in the card's root folder, read-only; `none` for the generated test disc (64 MB, no file system, every byte checkable). If the file isn't there, the drive is an empty CD-ROM drive (NOT READY, "medium not present"). The hard disk build ignores it, so one card can carry both builds' settings | `HDDSYNTH.ISO` |
+
+**Which settings for which computer** (the welcome disk's README has the same):
+
+| Computer | Settings |
+|---|---|
+| 286, 386, or a 486 with a 16-bit ISA IDE card | the defaults (the ICL 386 booted on them), or `isa = on` |
+| A PCI controller (Pentium and later) | the defaults |
+| ...faster, if the controller waits for IORDY | `early_answers = off`, the data lane ([data-lane.md](data-lane.md)); never with an ISA card |
+| A USB-IDE adapter that can do DMA | `dma = on`, or `mode = mdma2` (DMA hasn't run on a retro PC yet) |
+| The CD-ROM through the Windows rig's USB-IDE adapter | `mode = mdma2`: it sends every packet by DMA |
+| Amiga 1200 (not booting yet) | `iordy = off` |
 
 The on/off settings also take `yes`/`no`, `true`/`false` and `1`/`0`. The console's `W`, `A` and `L` switch write-behind, read-ahead and the activity link until the next restart, without changing the file, and `H` switches seek timing off and on (to compare speeds).
 

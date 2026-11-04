@@ -433,7 +433,8 @@ const char* defaultFile() {
            "device0 = HDDSYNTH.IMG\r\n"
            "\r\n"
            "# A second drive (device 1), so a PC sees two hard disks: an image, or a\r\n"
-           "# folder in the root folder, served read-only. none: no second drive.\r\n"
+           "# folder in the root folder, served read-only. cdrom (or an .ISO file's\r\n"
+           "# name): a CD-ROM drive, in the bb48_hdcd firmware. none: no second drive.\r\n"
            "device1 = none\r\n"
            "\r\n"
            "# The transfer mode to offer the host: auto (the fastest both sides\r\n"
@@ -479,7 +480,11 @@ const char* defaultFile() {
            "# The CHS geometry the drive reports, which a BIOS's auto-detect picks up:\r\n"
            "# auto (the one the image's partition table was made with, else 16 heads\r\n"
            "# and 63 sectors), or cylinders/heads/sectors, e.g. geometry = 756/13/51.\r\n"
-           "geometry = auto\r\n";
+           "geometry = auto\r\n"
+           "\r\n"
+           "# The CD-ROM drive's disc (the CD-ROM firmware, or device1 = cdrom): an ISO\r\n"
+           "# in the root folder, read-only. none: the built-in test disc.\r\n"
+           "cdrom = HDDSYNTH.ISO\r\n";
 }
 
 }  // namespace drive_config
