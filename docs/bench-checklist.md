@@ -2,7 +2,7 @@
 
 > **After the evening of 4 Nov (0.30.0-dev.10):** steps 1 and 2 are done except BIN/CUE (results in `CHANGELOG.md`, dev.10): `bb48_hdcd` passed everything on `ide_bus`, which it now uses with a CD-ROM as device 1. Still to do:
 >
-> 1. **The soak.** The board is set up for it (`bb48_hdcd` dev.10 with `RIG_WATCHDOG_MS`, the test disk, `device1 = cdrom`, `mode = mdma2`). **Don't flash or restart it**: replug only the USB adapter, wait for disk 1 and D: in Windows, then `python bench_session.py --only hdcd-soak --as-is --cd-dev //./D:`. The adapter hangs whenever a CD-ROM vanishes under it (a flash, a restart, console `V`), so with a CD-ROM in, set the board up first, then replug the adapter, then run with `--as-is`.
+> 1. ~~**The soak.**~~ Done (4 Nov, 21:29): an hour clean, see the CHANGELOG (dev.10). The board is set up for it (`bb48_hdcd` dev.10 with `RIG_WATCHDOG_MS`, the test disk, `device1 = cdrom`, `mode = mdma2`). **Don't flash or restart it**: replug only the USB adapter, wait for disk 1 and D: in Windows, then `python bench_session.py --only hdcd-soak --as-is --cd-dev //./D:`. The adapter hangs whenever a CD-ROM vanishes under it (a flash, a restart, console `V`), so with a CD-ROM in, set the board up first, then replug the adapter, then run with `--as-is`.
 > 2. **BIN/CUE** (step 2's item): `tools/iso_to_bincue.py` on `DOOM_SE.ISO`, copy the BIN and CUE to the card, then console `M DOOM_SE.CUE` and compare D:'s files with the ISO's.
 > 3. Optional: step 2b's profiles (`--from cd-profile`): the CD-ROM build as device 0 flashes and re-detects too, so expect a replug after each flash.
 
