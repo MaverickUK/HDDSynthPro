@@ -1,12 +1,12 @@
 # Next bench session (written 4 Nov 2026)
 
-Everything built on 4 Nov while nobody could replug the USB adapter, in one sitting. Branches: `merge-cdrom` (0.30.0-dev.3, CI green) and `hdd-cd` (0.30.0-dev.5, from it). Run from an administrator Git Bash on the Windows PC, in `host/`, with `export PYTHONUTF8=1 HDDPRO_DISK=PhysicalDrive1`. `runs/tools/` holds the helpers named below (git-ignored, on that PC).
+Everything built on 4 Nov while nobody could replug the USB adapter, in one sitting. Branches: `merge-cdrom` (0.30.0-dev.3, CI green) and `hdd-cd` (0.30.0-dev.8, from it; everything below is on it). Run from an administrator Git Bash on the Windows PC, in `host/`, with `export PYTHONUTF8=1 HDDPRO_DISK=PhysicalDrive1`. `runs/tools/` holds the helpers named below (git-ignored, on that PC).
 
 ## 0. Bring the rig back
 
 - [ ] **Replug the USB adapter** (it dropped off USB on 4 Nov: its controller hung, no probing on the IDE side). If it misbehaves again (garbled names, a disk of the wrong size, double detections in most cycles), **restart the PC** before blaming the firmware; it has been declining for weeks.
 - [ ] Power-cycle the BB48 too: that clears the console's `T` (test disk) and `P l` (data lane) and unsticks the SD card if a warm restart left it stuck (SdFat code 23).
-- [ ] The board runs `bb48_drive` 0.30.0-dev.4 built with `RIG_WATCHDOG_MS=8000`, a rig-only build. Console `h` shows the READY line.
+- [ ] The board runs `bb48_drive` 0.30.0-dev.7 built with `RIG_WATCHDOG_MS=8000`, a rig-only build. Console `h` shows the READY line.
 - [ ] `git checkout hdd-cd && git pull` (it holds everything in `merge-cdrom` too).
 
 ## 1. PIO after the DMA fix (0.30.0-dev.3), on `bb48_drive`
