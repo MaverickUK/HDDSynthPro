@@ -684,6 +684,111 @@ TEST(atapi_dma_errors_and_resets_end_the_dma_command) {
     CHECK(host.atapiSignature());
 }
 
+// ---- Read-ahead ------------------------------------------------------------------
+
+namespace {
+
+// A disc read by hand, counting how often the host found the drive BSY
+// between blocks: core 0 serves one fetch per `pump` only when asked.
+struct ReadAheadRun {
+    std::vector<uint8_t> data;
+    unsigned busy_waits = 0;  // blocks the host had to wait for
+};
+
+ReadAheadRun readWatchingBusy(Device& dev, BlockSource& disc, uint32_t frame, uint32_t frames) {
+    VirtualHost host{dev, nullptr};
+    ReadAheadRun run;
+    writePacket(host, {mmc::OP_READ_10, 0, 0, 0, uint8_t(frame >> 8), uint8_t(frame), 0, 0, uint8_t(frames)}, 0xFFFE);
+    for (int guard = 0; guard < 10000; ++guard) {
+        if (host.altStatus() & ata::ST_BSY) {
+            ++run.busy_waits;
+            host.source = &disc;
+            host.pump();  // core 0 delivers what's wanted
+            host.source = nullptr;
+            continue;
+        }
+        uint8_t st = host.reg(Reg::StatusCommand);
+        if (!(st & ata::ST_DRQ)) break;  // the status phase
+        // Core 0 fills the read-ahead while the host reads (if one was asked for)
+        ata::Fetch f;
+        if (dev.pendingFetch(f)) dev.fetchDone(f.id, disc.read(f.lba, f.buffer));
+        uint16_t count = uint16_t(host.reg(Reg::LbaMid) | host.reg(Reg::LbaHigh) << 8);
+        for (unsigned w = 0; w < count / 2u; ++w) {
+            uint16_t v = dev.read(Reg::Data);
+            run.data.push_back(uint8_t(v));
+            run.data.push_back(uint8_t(v >> 8));
+        }
+    }
+    return run;
+}
+
+}  // namespace
+
+TEST(atapi_read_ahead_keeps_the_next_sector_ready) {
+    GeneratedDisk disc(TEST_SECTORS);
+    Device dev(INFO);
+    VirtualHost host{dev, &disc};
+    host.clearAttention();
+    ReadAheadRun on = readWatchingBusy(dev, disc, 20, 2);
+    CHECK(on.data == expectedFrames(20, 2));
+    CHECK_EQ(on.busy_waits, 1u);  // the first sector only: each next one was fetched while the host read
+    // Off (console `A`): every sector under BSY, as before read-ahead
+    dev.setReadAhead(false);
+    ReadAheadRun off = readWatchingBusy(dev, disc, 20, 2);
+    CHECK(off.data == expectedFrames(20, 2));
+    CHECK_EQ(off.busy_waits, 8u);
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+}
+
+TEST(atapi_read_ahead_failure_comes_after_the_sector_before) {
+    // The card fails on the read's second sector, fetched ahead while the
+    // host takes the first: the first arrives whole, then MEDIUM ERROR.
+    class FailsAt : public BlockSource {
+    public:
+        explicit FailsAt(uint32_t bad) : bad_(bad) {}
+        uint32_t sectors() const override { return TEST_SECTORS; }
+        bool read(uint32_t lba, uint16_t words[256]) override {
+            if (lba == bad_) return false;
+            return GeneratedDisk(TEST_SECTORS).read(lba, words);
+        }
+    private:
+        uint32_t bad_;
+    };
+    FailsAt disc(4 * 30 + 1);
+    Device dev(INFO);
+    VirtualHost host{dev, &disc};
+    host.clearAttention();
+    std::vector<uint8_t> d;
+    uint8_t st = host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 30, 0, 0, 1}, d);
+    CHECK(st & ata::ST_ERR);
+    CHECK_EQ(host.reg(Reg::ErrorFeatures) >> 4, mmc::KEY_MEDIUM_ERROR);
+    std::vector<uint8_t> first = expectedFrames(30, 1);
+    first.resize(512);
+    CHECK(d == first);
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+}
+
+TEST(atapi_read_ahead_left_behind_by_a_reset_is_stale) {
+    GeneratedDisk disc(TEST_SECTORS);
+    Device dev(INFO);
+    VirtualHost host{dev, &disc};
+    host.clearAttention();
+    writePacket(host, {mmc::OP_READ_10, 0, 0, 0, 0, 40, 0, 0, 1}, 0xFFFE);
+    host.pump();  // the first sector: DRQ, and the read-ahead asked for
+    CHECK(host.altStatus() & ata::ST_DRQ);
+    ata::Fetch ahead;
+    CHECK(dev.pendingFetch(ahead));
+    CHECK_EQ(ahead.lba, 4u * 40 + 1);
+    host.command(atapi::CMD_DEVICE_RESET);
+    CHECK(host.waitNotBusy());
+    dev.fetchDone(ahead.id, true);  // core 0's late result: ignored
+    CHECK(!(host.altStatus() & ata::ST_DRQ));
+    std::vector<uint8_t> d;
+    host.clearAttention();
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 41, 0, 0, 1}, d), ata::ST_DRDY);
+    CHECK(d == expectedFrames(41, 1));
+}
+
 void runAtapiDeviceTests() {
     RUN(atapi_signature_after_power_on_and_reset);
     RUN(atapi_identify_device_is_aborted_with_the_signature);
@@ -707,4 +812,7 @@ void runAtapiDeviceTests() {
     RUN(atapi_offers_multiword_dma);
     RUN(atapi_dma_packets);
     RUN(atapi_dma_errors_and_resets_end_the_dma_command);
+    RUN(atapi_read_ahead_keeps_the_next_sector_ready);
+    RUN(atapi_read_ahead_failure_comes_after_the_sector_before);
+    RUN(atapi_read_ahead_left_behind_by_a_reset_is_stale);
 }

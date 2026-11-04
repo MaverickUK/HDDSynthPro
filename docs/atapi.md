@@ -2,6 +2,19 @@
 
 28 Oct 2026, planned. Branch `atapi-cdrom`.
 
+## A hard disk and a CD-ROM together: `bb48_hdcd` (4 Nov 2026, 0.30.0-dev.4, branch `hdd-cd`)
+
+**Host-tested; not yet on the bus** (the USB adapter was off USB that day). The board starts with it and reports both drives (`CONFIG device1=cdrom kind=cdrom disc=DOOM_SE.ISO frames=11431`, beside `ICL386MB.IMG` as device 0).
+- **Settings:** `device1 = cdrom` (the `cdrom` setting's disc) or a device1 name ending in `.ISO`. The disc follows the CD-ROM build's rules: the ISO; the test disc after console `T` or with `cdrom = none`; no disc if the file isn't there. Without such a `device1` the build serves what `bb48_drive` does, a second disk or folder included.
+- **How:** `hdcd::Device` (`src/hdcd_device.*`) holds an `ata::Device` as device 0 and an `atapi::Device` at position 1, and behaves as two devices on one cable: both take every register write and RESET#; the selected one answers reads, runs commands and drives INTRQ; DMA goes to whichever runs it. `atapi::Device` learned its position: it answers when DEV is 1, its fetches carry unit 1 (core 0 reads device 1's disc, as two drives does) and ids with the top bit set, so each result reaches the device that asked; DEVICE RESET leaves it selected. With a CD-ROM, early answers replace the data lane, as in the CD-ROM build.
+- **A build of its own** for now: every access takes one more branch (which device is selected), so `bb48_drive` stays the hard disk build, its core 1 code unchanged, until the bench says whether that branch costs anything. RAM: 8.9 KB more than `bb48_drive` (the CD-ROM device, its buffers and its code in RAM), which leaves less heap for a folder as device 1, but a folder and a CD-ROM can't both be device 1 anyway.
+- **Tests:** `test_hdcd.cpp` (a BIOS probe finding both, signatures after power-on, RESET# and SRST, interleaved reads from both with each fetch from its own disk, INTRQ following the selection, DEVICE RESET to the CD-ROM alone, EXECUTE DEVICE DIAGNOSTIC on both, a stale CD-ROM fetch never reaching the disk, DMA on either, and without a CD-ROM the hard disk build's two drives), and `drive_config`'s `device1IsCdrom`.
+- **For the bench:** through the USB adapter (both drives listed; `-m speed` on device 0 against `bb48_drive`, to price the branch; `-m cdrom` on device 1), then a retro PC booting from the disk with the CD-ROM driver finding device 1.
+
+## Read-ahead (0.30.0-dev.5)
+
+Disc reads now fetch the next 512-byte sector into a second buffer while the host takes the one before, as the hard disk does (`read_ahead`, console `A`): host-tested (`atapi_read_ahead_*`: one BSY wait for a two-frame read instead of eight; a read-ahead that fails reports MEDIUM ERROR after the sector before; one cut short by a reset is stale). Not yet measured: the 1.36 MB/s Windows read the Doom disc at (dev.3, no read-ahead) is the figure to beat.
+
 ## Status (3 Nov 2026, 0.29.0): the MVP is built, and reads on a retro PC
 
 The firmware side of slices C1 and C2: the `bb48_cdrom` build serves the test disc or an ISO over PIO, and `test/run_native_tests.sh` drives `atapi::Device` through whole PACKET exchanges.
@@ -160,7 +173,7 @@ A new pytest marker, `cdrom`, with tests that skip unless the board runs the `bb
 | Status after reset (DRDY clear for packet devices?) | Follow ATA/ATAPI-5 and the C0 trace; a host that sees the wrong status won't find the drive |
 
 **Questions for after this exploration:**
-- One binary with both a hard disk and a CD-ROM (devices 0 and 1), or a CD-ROM mode chosen in `HDDSYNTH.INI`?
+- One binary with both a hard disk and a CD-ROM (devices 0 and 1), or a CD-ROM mode chosen in `HDDSYNTH.INI`? **Both, in `bb48_hdcd`** (above): device 1 a CD-ROM from `HDDSYNTH.INI`. A CD-ROM as device 0 alone stays `bb48_cdrom`'s.
 - Swapping discs at run time from the console or the HDD Synth (UNIT ATTENTION, "medium may have changed", 06h/28h, and GET EVENT STATUS NOTIFICATION's media events).
 - Audio tracks: BIN/CUE images, PLAY AUDIO through the HDD Synth's speaker, READ CD for raw sectors.
 - The Amiga, which needs Kickstart 3.1.4 or later, or a third-party ATAPI driver, and a CD file system.

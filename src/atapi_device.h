@@ -18,8 +18,10 @@
 //
 // A disc read goes one 512-byte DRQ block per fetch, as the hard disk does:
 // CD frame n is sectors 4n to 4n+3 of the image, so ImageDisk serves an ISO
-// unchanged and the fast lane serves its blocks. No read-ahead yet: each
-// block is fetched under BSY once the host has read the one before.
+// unchanged and the fast lane serves its blocks. With read-ahead (on unless
+// console `A` or `read_ahead = off`), the next sector is fetched into the
+// other buffer while the host reads one, so it's usually in at once; off,
+// each is fetched under BSY once the host has read the one before.
 #pragma once
 
 #include <cstdint>
@@ -93,7 +95,7 @@ public:
     bool commandQueued() const { return command_queued_ || packet_queued_; }
     void runQueuedCommand();
 
-    void setReadAhead(bool) {}
+    void setReadAhead(bool on) { read_ahead_ = on; }
     void setWriteBehind(bool) {}
     bool dataOutHeld() const { return false; }
     void releaseDataOut() {}
@@ -155,7 +157,8 @@ private:
     void startDataIn(const uint16_t* words, uint16_t count);
     void sendBlock();           // the next DRQ block of a packet's reply or sector
     void finishDataIn();
-    void requestFetch();
+    void requestFetch(bool busy = true);  // busy: BSY until it's in
+    void deliverSector(bool ok);          // a fetched sector to the host, or its error
 
     IdentifyInfo info_;
     uint8_t position_;     // 0 or 1: which device it is
@@ -166,7 +169,7 @@ private:
     // read short, core 0 may still be filling the sector buffer for the stale
     // fetch. Bytes in bus order: byte 2n is word n's low byte, as on a
     // little-endian CPU.
-    uint16_t buffer_[ata::SECTOR_WORDS];
+    uint16_t sectors_[2][ata::SECTOR_WORDS];  // read-ahead fills one while the host reads the other
     uint16_t reply_[mmc::MAX_REPLY / 2];
     mmc::Disc disc_;
     mmc::State mmc_;
@@ -194,7 +197,7 @@ private:
     bool packet_queued_ = false;     // all in: BSY until runQueuedCommand()
     bool packet_command_ = false;    // the data-in belongs to a packet (blocks, interrupt reason)
     uint16_t limit_ = 0;             // the most bytes the host takes per DRQ block
-    const uint16_t* buf_ = nullptr;  // what's being sent: buffer_ or reply_
+    const uint16_t* buf_ = nullptr;  // what's being sent: one of sectors_, or reply_
     uint16_t buf_bytes_ = 0;         // its length in bytes
     uint16_t buf_pos_ = 0;           // ...sent so far
     uint16_t block_bytes_ = 0;       // the block being read
@@ -203,13 +206,20 @@ private:
 
     // Disc read in progress, in the image's 512-byte sectors
     bool reading_ = false;
-    uint32_t read_lba_ = 0;
-    uint32_t read_left_ = 0;
+    uint32_t read_lba_ = 0;   // the next sector to fetch
+    uint32_t read_left_ = 0;  // sectors not yet fetched
+    bool read_ahead_ = true;
+    // A read-ahead that finished while the host was still taking the sector
+    // before: it worked, or it failed, to hand over when that one's done.
+    bool ahead_ok_ = false;
+    bool ahead_failed_ = false;
     uint32_t command_lba_ = 0;
     uint16_t command_sectors_ = 0;
 
     bool fetch_pending_ = false;
     uint32_t fetch_id_ = 0;
+    uint32_t fetch_lba_ = 0;  // the sector it reads
+    uint8_t fetch_buf_ = 0;   // into sectors_[fetch_buf_]
 
     bool irq_pending_ = false;
     bool command_queued_ = false;

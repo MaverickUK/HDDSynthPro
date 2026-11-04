@@ -1,0 +1,43 @@
+# Next bench session (written 4 Nov 2026)
+
+Everything built on 4 Nov while nobody could replug the USB adapter, in one sitting. Branches: `merge-cdrom` (0.30.0-dev.3, CI green) and `hdd-cd` (0.30.0-dev.5, from it). Run from an administrator Git Bash on the Windows PC, in `host/`, with `export PYTHONUTF8=1 HDDPRO_DISK=PhysicalDrive1`. `runs/tools/` holds the helpers named below (git-ignored, on that PC).
+
+## 0. Bring the rig back
+
+- [ ] **Replug the USB adapter** (it dropped off USB on 4 Nov: its controller hung, no probing on the IDE side). If it misbehaves again (garbled names, a disk of the wrong size, double detections in most cycles), **restart the PC** before blaming the firmware; it has been declining for weeks.
+- [ ] Power-cycle the BB48 too: that clears the console's `T` (test disk) and `P l` (data lane) and unsticks the SD card if a warm restart left it stuck (SdFat code 23).
+- [ ] The board runs `bb48_drive` 0.30.0-dev.4 built with `RIG_WATCHDOG_MS=8000`, a rig-only build. Console `h` shows the READY line.
+- [ ] `git checkout hdd-cd` (it holds everything in `merge-cdrom` too). **Push it first**: on 4 Nov the SSH key stopped working mid-afternoon (`Permission denied (publickey)`), after `merge-cdrom` had been pushed, so `hdd-cd`'s commits are local only.
+
+## 1. PIO after the DMA fix (0.30.0-dev.3), on `bb48_drive`
+
+dev.3 changed early answers' tight loop (DMA now runs from its idle work). DMA was measured afterwards, PIO wasn't.
+
+- [ ] Console `T` (test disk), `P l` (lane), then `runs/tools/redetect.py` and `powershell -File runs/tools/usb_restart.ps1`: `pytest -s -m speed`. Expect about 1.54 MB/s reads, 80 IOPS, 1.68 MB/s writes (dev.2).
+- [ ] `P e` (early answers), the same: expect about 1.21 MB/s, 76 IOPS, 1.13 MB/s (dev.2).
+- [ ] Slices 3-4 on the lane: `pytest -s -m "slice3 or slice4"`.
+
+## 2. A hard disk and a CD-ROM: `bb48_hdcd`
+
+- [ ] `PIO_ENV=bb48_hdcd`, or flash it: `PLATFORMIO_BUILD_FLAGS=-DRIG_WATCHDOG_MS=8000 pio run -e bb48_hdcd -t upload`. READY ends `slice3 hdcd`.
+- [ ] Console `E device1 = cdrom`, `E mode = mdma2` (this adapter sends every CD-ROM packet by DMA), `T` (test disk and test disc), then `S`: `CONFIG device1=cdrom kind=cdrom disc=test disc frames=32768`.
+- [ ] Re-detect (`runs/tools/redetect.py`; with Windows still holding a CD from an earlier build, `redetect.py //./CdRom0`), then `usb_restart.ps1`. Windows should show the disk **and** `HDDSYNTH PRO CD-ROM` as a CD drive.
+- [ ] `pytest -s -m speed` (device 0, now in DMA): compare with `bb48_drive` in DMA on early answers, 8.84 MB/s reads, 1,000 IOPS, 12.48 MB/s writes. **This prices the extra branch per access**: if it's within noise, `bb48_hdcd` could become the only drive build.
+- [ ] `HDDPRO_CDROM_DEV=//./CdRom0 pytest -s -m cdrom` (device 1): every byte of the test disc. Compare its MB/s with dev.3's 2.42 MB/s, **the first measure of CD-ROM read-ahead** (dev.5).
+- [ ] Interleave both (a speed run on the disk while `-m cdrom` reads the disc, in two terminals): no errors, `bus_bad=0`.
+- [ ] `T` off: `ICL386MB.IMG` as C: and `DOOM_SE.ISO` on the CD. Windows mounts `DOOM_SE` (CDFS); read every file (dev.3: 27 files, 22.7 MB, 1.36 MB/s without read-ahead).
+
+## 3. A short soak
+
+- [ ] On `bb48_hdcd` with the CD-ROM in (test disk and disc): `HDDPRO_SOAK_MINUTES=60 HDDPRO_SOAK_TOLERATE_RESETS=1 HDDPRO_SOAK_IORDY_MAX_NS=2000 pytest -s -m slice6`.
+
+## 4. Retro PCs
+
+- [ ] **Every PC, every build:** note `dior_no_cs` in `s` and the `NOCS` lines (0.30.0-dev.2) with the controller type. ISA cards should show millions, PCI controllers 0. With enough machines, the drive could choose its bus program by itself.
+- [ ] **The Evesham on `bb48_hdcd`:** `device0 = ICL386MB.IMG`, `device1 = cdrom`, `cdrom = DOOM_SE.ISO`. Does the BIOS list a hard disk and a CD-ROM? MS-DOS 5 from C:, then a CD-ROM driver (`OAKCDROM.SYS`, MSCDEX) finding the drive as device 1, and Doom from D:. PIO there (`mode = auto`), as its DOS driver uses.
+- [ ] The folder drive's `CHECK.BAT` (two drives, still to do), and the data lane on another PC.
+
+## 5. Put the card back
+
+- [ ] `E device1 = none`, `E mode = auto` (and `E early_answers = on`, `E isa = off` if changed), `!`. Only `HDDSYNTH.INI` changes; never format the card.
+- [ ] Flash a normal build (without `RIG_WATCHDOG_MS`) before the board goes anywhere else.

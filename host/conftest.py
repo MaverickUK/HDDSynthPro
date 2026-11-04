@@ -65,6 +65,19 @@ def is_cdrom_build(drive) -> bool:
     return "cdrom" in drive.ready.split()
 
 
+def serves_cdrom(drive) -> bool:
+    """Whether the board has a CD-ROM drive: the CD-ROM build, or bb48_hdcd
+    with device 1 a CD-ROM (`device1 = cdrom`, docs/atapi.md). The hard disk's
+    tests still run on bb48_hdcd, against device 0."""
+    if is_cdrom_build(drive):
+        return True
+    if "hdcd" not in drive.ready.split():
+        return False
+    mark = drive.mark()
+    drive.command("S", "CONFIG seek_timing", timeout=10)  # the last CONFIG line
+    return any("kind=cdrom" in line for line in drive.lines_since(mark))
+
+
 @pytest.fixture
 def firmware_slice(drive) -> int:
     """Which build the board runs: 0 = listen only, 3 = the drive (slices 1-5).

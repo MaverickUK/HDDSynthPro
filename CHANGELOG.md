@@ -2,6 +2,19 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.5] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **CD-ROM read-ahead** (`bb48_cdrom` and `bb48_hdcd`): a disc read fetches the next 512-byte sector into a second buffer while the host takes the one before, as the hard disk does, so the next block is usually ready at once; `read_ahead = off` or console `A` turns it off, as for the disk. Host-tested (`atapi_read_ahead_keeps_the_next_sector_ready`: one BSY wait for a two-frame read, eight without; a failing read-ahead reports MEDIUM ERROR after the sector before; one cut short by a reset is stale). Not yet measured on the bus. +512 bytes of RAM.
+
+## [0.30.0-dev.4] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **`bb48_hdcd`: a hard disk as device 0 and a CD-ROM drive as device 1**, from one board. `device1 = cdrom` (serving the `cdrom` setting's disc) or a device1 name ending in `.ISO` makes device 1 a CD-ROM drive: the ISO, the test disc after console `T` or with `cdrom = none`, or no disc if the file isn't there. Otherwise the build serves what `bb48_drive` does. `hdcd::Device` (`src/hdcd_device.*`) behaves as two devices on one cable: both take every register write and RESET#, the selected one answers reads, runs commands and drives INTRQ, and DMA goes to whichever runs it. `atapi::Device` takes a position: at 1 it answers when DEV is 1, its fetches carry unit 1 and ids with the top bit set (so each result reaches the device that asked), and DEVICE RESET leaves it selected. With a CD-ROM, early answers replace the data lane. `CONFIG device1=cdrom kind=cdrom disc=... frames=...`; the READY line ends `slice3 hdcd`. Host tests: `test_hdcd.cpp` (nine cases), `test_config_device1_cdrom`. On the board: it starts and reports `ICL386MB.IMG` as device 0 and `DOOM_SE.ISO` as device 1; not yet on the bus (the USB adapter was off USB).
+- A build of its own for now, since every access takes one more branch: `bb48_drive`'s core 1 code is unchanged (its bus functions at the same addresses), and in the hard disk build `device1 = cdrom` or an ISO isn't served (`CONFIG device1 not used: ... needs the bb48_hdcd build`) rather than served as a hard disk. CI builds `bb48_hdcd` and runs `check_core1_ram.py` on it. RAM: 8.9 KB more than `bb48_drive`.
+- `bus_observer::begin` checks device 1's IDENTIFY PACKET DEVICE block when device 1 is the CD-ROM.
+- DMA simulation: bursts of a CD-ROM's lengths (4, 9, 18 and 256 words) in modes 0-2, every word within tE and held tF.
+
 ## [0.30.0-dev.3] - 2026-11-04 (branch `merge-cdrom`)
 
 ### Added

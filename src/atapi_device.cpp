@@ -36,6 +36,7 @@ CORE1_RAM void Device::resetToSignature(uint8_t device) {
     packet_command_ = false;
     dma_ = dma_burst_running_ = false;
     reading_ = false;
+    ahead_ok_ = ahead_failed_ = false;
     fetch_pending_ = false;  // a fetch still on core 0 becomes stale
     ++fetch_id_;
 }
@@ -138,6 +139,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         receiving_packet_ = false;
         dma_ = dma_burst_running_ = false;
         reading_ = false;
+        ahead_ok_ = ahead_failed_ = false;
         fetch_pending_ = false;
         ++fetch_id_;
     } else if (in_reset_) {
@@ -168,6 +170,7 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
     packet_command_ = false;
     dma_ = dma_burst_running_ = false;
     reading_ = false;
+    ahead_ok_ = ahead_failed_ = false;
     if (fetch_pending_) {
         fetch_pending_ = false;
         if (++fetch_id_ == 0) ++fetch_id_;
@@ -317,6 +320,7 @@ CORE1_RAM void Device::runPacket() {
             last_.lba = r.lba;
             last_.count = uint16_t(r.frames > 0xFFFF ? 0xFFFF : r.frames);
             reading_ = true;
+            ahead_ok_ = ahead_failed_ = false;
             read_lba_ = r.lba * SECTORS_PER_FRAME;
             read_left_ = r.frames * SECTORS_PER_FRAME;
             command_lba_ = read_lba_;
@@ -344,6 +348,7 @@ CORE1_RAM void Device::packetFail() {
     packet_command_ = false;
     dma_ = dma_burst_running_ = false;
     reading_ = false;
+    ahead_ok_ = ahead_failed_ = false;
     data_ = nullptr;
     uint8_t key = mmc_.sense.key;
     error_ = uint8_t(key << 4 | (key == mmc::KEY_ILLEGAL_REQUEST ? ER_ABRT : 0));
@@ -383,40 +388,58 @@ CORE1_RAM void Device::finishDataIn() {
     buf_pos_ = uint16_t(buf_pos_ + block_bytes_);
     if (buf_pos_ < buf_bytes_) {
         sendBlock();  // the host's byte count was smaller than the reply
+    } else if (reading_ && (ahead_ok_ || ahead_failed_)) {
+        bool ok = ahead_ok_;  // the next sector is in: on at once
+        ahead_ok_ = ahead_failed_ = false;
+        deliverSector(ok);
+    } else if (reading_ && fetch_pending_) {
+        status_ = ST_BSY | ST_DRDY;  // the read-ahead isn't in yet: wait for it
     } else if (reading_ && read_left_ > 0) {
-        requestFetch();
+        requestFetch();  // read-ahead off: the next sector, under BSY
     } else {
         reading_ = false;
         packetDone();
     }
 }
 
-CORE1_RAM void Device::requestFetch() {
+CORE1_RAM void Device::requestFetch(bool busy) {
+    if (busy) status_ = ST_BSY | ST_DRDY;
     fetch_pending_ = true;
     if (++fetch_id_ == 0) ++fetch_id_;
-    status_ = ST_BSY | ST_DRDY;
+    fetch_lba_ = read_lba_++;
+    --read_left_;
+    fetch_buf_ = buf_ == sectors_[0] ? 1 : 0;  // never the sector being sent
 }
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
-    fetch = Fetch{fetch_id_ | id_tag_, read_lba_, buffer_, false, false, command_sectors_, command_lba_, position_};
+    fetch = Fetch{fetch_id_ | id_tag_, fetch_lba_, sectors_[fetch_buf_], false, false, command_sectors_, command_lba_,
+                  position_};
     return true;
 }
 
 CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
     if (!fetch_pending_ || id != (fetch_id_ | id_tag_)) return;  // stale: a reset or a newer command
     fetch_pending_ = false;
+    if (data_) {  // a read-ahead, done while the host takes the sector before
+        ahead_ok_ = ok;
+        ahead_failed_ = !ok;
+        return;
+    }
+    deliverSector(ok);  // the host is waiting for it (BSY)
+}
+
+CORE1_RAM void Device::deliverSector(bool ok) {
     if (!ok) {
         mmc_.sense = mmc::SENSE_READ_ERROR;
         packetFail();
         return;
     }
-    ++read_lba_;
-    --read_left_;
-    buf_ = buffer_;
+    buf_ = sectors_[fetch_buf_];
     buf_bytes_ = uint16_t(ata::SECTOR_WORDS * 2);
     buf_pos_ = 0;
     sendBlock();
+    if (read_ahead_ && read_left_ > 0) requestFetch(false);  // no BSY: the host carries on reading
 }
 
 // ---- DMA -----------------------------------------------------------------------

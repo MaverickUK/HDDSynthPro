@@ -2,9 +2,9 @@
 read through the adapter. CD frame n is generated sectors 4n to 4n+3
 (hddproto/gen_disk.py), so every byte read can be checked.
 
-Not yet run on the rig. It needs the board on the CD-ROM build serving the
-test disc (`E cdrom = none` and `!`, or console `T`), and an adapter that
-passes ATAPI through (slice C0: unproven for the NS1081).
+It needs a CD-ROM drive serving the test disc (`E cdrom = none` and `!`, or
+console `T`): the CD-ROM build, or bb48_hdcd with `device1 = cdrom` (device 1).
+Through the Windows rig's adapter it passes in DMA (`mode = mdma2`; 0.30.0-dev.3).
 
 The disc: $HDDPRO_CDROM_DEV if set (e.g. /dev/rdisk5, or \\\\.\\CdRom0 on
 Windows, which lists CD-ROM drives apart from disks), else, on macOS, the
@@ -19,7 +19,7 @@ import time
 
 import pytest
 
-from conftest import is_cdrom_build, require_generated_disk
+from conftest import require_generated_disk, serves_cdrom
 from hddproto import gen_disk, trace
 from hddproto.host import make_host, pread
 
@@ -33,8 +33,9 @@ CHUNK_FRAMES = 32  # 64 KB a read
 
 @pytest.fixture(scope="module", autouse=True)
 def cdrom_build(drive):
-    if not is_cdrom_build(drive):
-        pytest.skip("needs the CD-ROM build: PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom")
+    if not serves_cdrom(drive):
+        pytest.skip("needs a CD-ROM drive: PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom, "
+                    "or bb48_hdcd with `device1 = cdrom`")
     require_generated_disk(drive)
 
 
