@@ -9,6 +9,8 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ### Tested
 - **The merge (dev.1) on the rig** (USB adapter, generated disk, the lane, PIO mode 3): `-m speed` as 2d.6 (1.54 MB/s reads, 80 IOPS, 1.68 MB/s writes, worst read 1,320 ns, Alternate Status), slices 3 and 4 pass. The hard disk build's core 1 bus functions are at 2d.6's addresses.
+- **A 60-minute soak of dev.2** (the lane, generated disk, full observer checks): 3.3 GB, no mismatches, 112,290 commands, no resets, 5.6 million sectors checked on the cable, 0 bad; worst read 1,330 ns (Alternate Status, as last night's).
+- **The CD-ROM build through the USB adapter** (first time; dev.2, the test disc): detected, but no CD-ROM drive for Windows. The adapter sends every PACKET with the DMA bit set (FEATURES 01h), though IDENTIFY PACKET DEVICE offers no DMA; the drive aborts it, as written, and the adapter polls for 17 s, resets it and starts again, every 20 s, never trying PIO. Not from the merge (the adapter decides before the drive answers anything but IDENTIFY). The fix would be PACKET in multiword DMA ([docs/atapi.md](docs/atapi.md)). Worst read 2,830 ns (Alternate Status), the CD build's known slow reads, now repeatable on the rig.
 
 ## [0.30.0-dev.1] - 2026-11-04 (branch `merge-cdrom`)
 
