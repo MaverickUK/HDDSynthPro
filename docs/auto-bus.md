@@ -27,7 +27,8 @@ Two kinds of host, and the lane is wrong for both:
 | Signal | What it shows | Known values |
 |---|---|---|
 | `dior_no_cs` (and the `NOCS` line, ms after RESET# release) | DIOR# with no chip select, while no DMA is offered (`bus_observer`): an ISA card passes every I/O read the PC makes | ICL 386: about 19.9 million in a session (0.27.0). USB adapter: 0. **Evesham, Pentium: not yet measured** (the counter came after) |
-| `iordy_ignored` (`NOIORDY` lines) | reads the host ended while IORDY was still low (`iordy_check.pio`): a host that didn't wait | Pentium (BIOS detection): above 0. Evesham, USB adapter: 0. **Over-counts under early answers** (the program lets IORDY go 40 ns after driving DD) |
+| `iordy_ignored` (`NOIORDY` lines) | reads the host ended while IORDY was still low (`iordy_check.pio`): a host that didn't wait | Pentium (BIOS detection): above 0. Evesham, USB adapter: 0. Under early answers it also counts reads whose data was already on DD when the strobe ended (the program lets IORDY go 40 ns after driving DD): the data was good, but the host still didn't wait, which is what the rule needs to know |
+| `iordy_slow` (with `iordy_max_ns`) | reads IORDY held over 400 ns (`iordy_timer.pio`) | On the lane, both waited through every long hold: the Evesham about 1,400 reads over 1,250 ns a benchmark, the USB adapter about 10 a speed run, `iordy_ignored` 0 on both. Under early answers most holds are shorter, so a long one is the test of whether a host waits |
 | `rd_t1_ns`, `rd_strobe_ns` (`bus_timing.pio`, when no DMA is offered) | each read's chip-select-to-strobe time and strobe length: compatible timing has a t1 of a cycle or two | Pentium, Windows 95's driver: t1 80 ns, strobes 175-195 ns |
 | `iordy_early` | reads that started before IORDY was low | most reads in PIO 3, harmlessly: not a signal by itself |
 
@@ -42,7 +43,7 @@ Two kinds of host, and the lane is wrong for both:
 Every power-on, and every RESET# and soft reset (SRST), starts in early answers, whatever happened before. **The drive moves to the lane only when all of these hold since the last reset:**
 
 1. **No ISA signature:** `dior_no_cs` hasn't moved. An ISA card shows it constantly (it passes every I/O read the PC makes, many per millisecond), so a quiet minute is strong evidence. The `NOCS` times recorded on ISA machines say how short this wait can be.
-2. **The host waits for IORDY on register reads:** at least N register reads (say 1,000) during which IORDY was held long enough to matter and the host's strobe outlasted it, and none it didn't wait for. This needs `iordy_check` fixed so it doesn't over-count under early answers: count a read only when the strobe ended before DD was driven, not before IORDY's release.
+2. **The host waits for IORDY:** no read it didn't wait for (`iordy_ignored` unchanged), **and** proof that it does wait: at least N reads (say 100) held longer than the host's own shortest strobe (`iordy_slow` counts holds over 400 ns; `rd_strobe_ns` gives the shortest strobe), every one waited for. Without that proof a host that ignores IORDY looks the same as one that waits, because under early answers most holds end before the host's strobe would anyway: the ISA card's 375-500 ns strobes outlast nearly every hold. The counters exist; the rule needs `iordy_slow` per reset rather than since `r`. (An earlier draft said `iordy_check` over-counted and needed fixing: the reads it counts beyond the bad ones are real cases of a host not waiting, so it's the right count.)
 3. **Past detection:** at least M data sectors served (say 1,000) since the reset, so the BIOS's detection and an operating system's driver start-up, which is when hosts re-identify in their slowest timing, have gone by.
 4. **No DMA offered:** with DMA offered the data goes by DMA anyway, and `dior_no_cs` and the timing probe aren't available.
 
@@ -65,9 +66,8 @@ Today switching means restarting the board. In `auto`, core 1 would swap block 0
 
 ## Cost
 
-- **The rule and the setting:** core 0 watches the counters it already has (`dior_no_cs`, the fixed `iordy_ignored`, sectors served) and asks core 1 to switch: about half a day, host-tested.
+- **The rule and the setting:** core 0 watches the counters it already has (`dior_no_cs`, `iordy_ignored`, `iordy_slow` and the shortest strobe, sectors served) and asks core 1 to switch: about half a day, host-tested.
 - **Switching programs live:** core 1's part, in `ide_bus.cpp`, with `pio_sim` tests of a switch between accesses and the USB adapter's slices 1-4 and `-m speed` while switching often (a debug flag that switches every second): about a day.
-- **The `iordy_check` fix:** a few instructions in `iordy_check.pio` or a change to how early answers release IORDY, with sim tests: a few hours.
 - **The machines:** each PC run in `auto` with the bus observer on, watching for `bus_bad`, `iordy_ignored` and switches back.
 
 ## What to record on each PC
@@ -81,6 +81,7 @@ For the design's numbers (how quickly an ISA card shows itself; whether any host
 | `dior_no_cs` and the `NOCS ... ms` line (or none) | the ISA signature, and how soon it shows |
 | `iordy_ignored` and any `NOIORDY` lines (when) | whether the host stopped waiting, and when |
 | `rd_t1_ns`, `rd_strobe_ns` (with `r` before each moment) | its timing at that moment: compatible or not |
-| `iordy_slow`, `iordy_max_ns`, `bus_sectors`, `bus_bad` | the usual health check |
+| `iordy_slow`, `iordy_max_ns` | reads held long: did the host wait through them? (with `iordy_ignored`) |
+| `bus_sectors`, `bus_bad` | the usual health check |
 
 Then, **on any PC that isn't an ISA machine,** `P l` (the lane) and boot again: does it find the drive, run the benchmark, show `iordy_ignored=0`? That says directly whether the rule would have been right. **Never `P l` on an ISA machine:** without the watchdog it may freeze.
