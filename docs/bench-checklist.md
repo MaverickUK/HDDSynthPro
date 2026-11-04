@@ -7,7 +7,7 @@ Everything built on 4 Nov while nobody could replug the USB adapter, in one sitt
 - [ ] **Replug the USB adapter** (it dropped off USB on 4 Nov: its controller hung, no probing on the IDE side). If it misbehaves again (garbled names, a disk of the wrong size, double detections in most cycles), **restart the PC** before blaming the firmware; it has been declining for weeks.
 - [ ] Power-cycle the BB48 too: that clears the console's `T` (test disk) and `P l` (data lane) and unsticks the SD card if a warm restart left it stuck (SdFat code 23).
 - [ ] The board runs `bb48_drive` 0.30.0-dev.4 built with `RIG_WATCHDOG_MS=8000`, a rig-only build. Console `h` shows the READY line.
-- [ ] `git checkout hdd-cd` (it holds everything in `merge-cdrom` too). **Push it first**: on 4 Nov the SSH key stopped working mid-afternoon (`Permission denied (publickey)`), after `merge-cdrom` had been pushed, so `hdd-cd`'s commits are local only.
+- [ ] `git checkout hdd-cd && git pull` (it holds everything in `merge-cdrom` too).
 
 ## 1. PIO after the DMA fix (0.30.0-dev.3), on `bb48_drive`
 
