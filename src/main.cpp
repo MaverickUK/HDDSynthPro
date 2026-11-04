@@ -256,6 +256,17 @@ constexpr bool C1_PROFILE = false;
 #ifndef CMD_PROFILE
 #define CMD_PROFILE 0
 #endif
+#if HDDPRO_CDROM || HDDPRO_HDCD
+// Console `M`: the CD-ROM's disc changed at run time (docs/atapi.md). Core 0
+// asks with a new sequence number and the disc's size (0: no disc); core 1
+// changes the device's disc once it's idle (atapi::Device::idle) and echoes
+// the number. Core 0 ejects first and swaps files only once core 1 has
+// confirmed, so no fetch for one disc is ever served from the next.
+static std::atomic<uint32_t> g_disc_seq{0};
+static std::atomic<uint32_t> g_disc_sectors{0};
+static std::atomic<uint32_t> g_disc_done{0};
+#endif
+
 #if CMD_PROFILE
 static volatile uint32_t g_cmd_run_max = 0;   // cycles
 static volatile uint32_t g_cmd_run_what = 0;  // command | packet << 8
@@ -688,6 +699,15 @@ CORE1_RAM void loop1() {
             }
             case 3:  // BSY for a while: waking from standby, or after a data-out block
                 busyTimers(dev);
+#if HDDPRO_CDROM || HDDPRO_HDCD
+                {  // a disc change from the console, between commands
+                    uint32_t seq = g_disc_seq.load(std::memory_order_acquire);
+                    if (seq != g_disc_done.load(std::memory_order_relaxed) && dev.discIdle()) {
+                        dev.changeDisc(g_disc_sectors.load(std::memory_order_relaxed));
+                        g_disc_done.store(seq, std::memory_order_release);
+                    }
+                }
+#endif
                 break;
             default: {  // RESET#, and console `V`
                 if (g_absent.load()) {
@@ -1039,6 +1059,93 @@ static void chooseDisk() {
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode and device 1: core 1 reads them
 #endif
 }
+
+#if HDDPRO_CDROM || HDDPRO_HDCD
+// Console `M`: a disc change, step by step from core 0's loop (serviceDiscChange).
+enum class DiscStep : uint8_t { None, Ejecting, Inserting };
+static DiscStep g_disc_step = DiscStep::None;
+static char g_disc_next[drive_config::MAX_NAME + 1];
+
+static void requestDisc(uint32_t sectors) {
+    g_disc_sectors.store(sectors, std::memory_order_relaxed);
+    g_disc_seq.fetch_add(1, std::memory_order_release);
+}
+
+// The disc named, as the CD-ROM's disk: `none` (no disc), `test` (the
+// generated test disc), or an ISO on the card, read-only. Returns its sectors,
+// 0 for none (or an ISO that can't be used, which it says why).
+static uint32_t openDisc(const char* name) {
+    const bool none = strcasecmp(name, "none") == 0, test = strcasecmp(name, "test") == 0;
+#if HDDPRO_CDROM
+    g_test_disk = false;
+    g_disk = &g_no_disc;
+    g_disk_name = "no disc";
+    const char* why = "";
+    if (test) {
+        g_disk = &g_overlay;  // read-only here, so the overlay stays empty
+        useTestDisk();
+    } else if (!none && useImage(name, why, true)) {
+        g_disk_name = "disc";
+    } else if (!none) {
+        Serial.printf("# DISC %s: %s\n", name, why);
+    }
+    return g_disk->sectors();
+#else
+    g_device1_disk = nullptr;
+    g_device1_disc = "no disc";
+    if (test) {
+        g_device1_disk = &g_test_disc;
+        g_device1_disc = "test disc";
+    } else if (!none) {
+        if (ImageFile* file = sd_card::openDevice1Image(name, Serial, true)) {
+            static ImageDisk disc(*file);  // always the same file object, reopened
+            g_device1_disk = &disc;
+            g_device1_disc = g_disc_next;
+        } else {
+            Serial.printf("# DISC %s: %s\n", name, sd_card::openError());
+        }
+    }
+    uint32_t sectors = g_device1_disk ? g_device1_disk->sectors() : 0;
+    g_device1_sectors.store(sectors, std::memory_order_relaxed);
+    return sectors;
+#endif
+}
+
+static void startDiscChange(const char* name) {
+#if HDDPRO_HDCD
+    if (!g_device1_cdrom) {
+        Serial.println("# DISC: no CD-ROM drive (device1 = cdrom gives one)");
+        return;
+    }
+#endif
+    if (g_disc_step != DiscStep::None) {
+        Serial.println("# DISC: a change is already under way");
+        return;
+    }
+    std::snprintf(g_disc_next, sizeof g_disc_next, "%s", name);
+    requestDisc(0);  // out first: core 1 confirms once nothing for the old disc is under way
+    g_disc_step = DiscStep::Ejecting;
+    Serial.printf("# DISC ejecting, then %s\n", g_disc_next);
+}
+
+static void serviceDiscChange() {
+    if (g_disc_step == DiscStep::None) return;
+    if (g_disc_done.load(std::memory_order_acquire) != g_disc_seq.load(std::memory_order_relaxed)) return;
+    if (g_disc_step == DiscStep::Ejecting) {
+        uint32_t sectors = openDisc(g_disc_next);
+        if (sectors) {
+            requestDisc(sectors);
+            g_disc_step = DiscStep::Inserting;
+            return;
+        }
+        Serial.println("DISC none");
+    } else {
+        Serial.printf("DISC %s frames=%lu\n", g_disc_next,
+                      (unsigned long)(g_disc_sectors.load(std::memory_order_relaxed) / atapi::SECTORS_PER_FRAME));
+    }
+    g_disc_step = DiscStep::None;
+}
+#endif
 
 // Console `E`: sets one setting in HDDSYNTH.INI from "key = value", keeping
 // the rest of the file and its comments (the defaults if there is no file).
@@ -1933,6 +2040,27 @@ static void handleConsole() {
             }
             continue;
         }
+#if HDDPRO_CDROM || HDDPRO_HDCD
+        static bool disc_line = false;  // `M`, then a disc's name and Enter
+        static char disc_buf[drive_config::MAX_NAME + 1];
+        static size_t disc_len = 0;
+        if (disc_line) {
+            if (c == '\r' || c == '\n') {
+                disc_line = false;
+                disc_buf[disc_len] = '\0';
+                char* name = disc_buf;
+                while (*name == ' ') ++name;
+                for (size_t n = strlen(name); n && name[n - 1] == ' '; --n) name[n - 1] = '\0';
+                if (*name)
+                    startDiscChange(name);
+                else
+                    Serial.println("# DISC: nothing changed");
+            } else if (disc_len + 1 < sizeof disc_buf) {
+                disc_buf[disc_len++] = char(c);
+            }
+            continue;
+        }
+#endif
         static bool bus_letter_next = false;  // `P` then e, l, i or 0
         if (bus_letter_next) {
             bus_letter_next = false;
@@ -1972,6 +2100,7 @@ static void handleConsole() {
                                "J serve the bench image or back (restarts), T serve the test disk or back (restarts), "
                                "L activity link, U link loopback test, V drive gone/back, W write-behind, O observer full/spot checks, "
                                "H seek timing on/off, P then e/l/i/0 bus program (restarts), "
+                               "M then a disc and Enter: the CD-ROM's disc (CD-ROM builds), "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -2068,6 +2197,15 @@ static void handleConsole() {
                     Serial.printf("# created %s with the defaults\n", drive_config::FILE_NAME);
                 }
                 break;
+            case 'M':  // the CD-ROM's disc: a name, then Enter
+#if HDDPRO_CDROM || HDDPRO_HDCD
+                disc_line = true;
+                disc_len = 0;
+                Serial.println("# type the disc: an ISO's name, test (the test disc) or none (eject), then Enter");
+#else
+                Serial.println("# M: no CD-ROM drive in this build");
+#endif
+                break;
             case 'E':  // set one setting in HDDSYNTH.INI: key = value, then Enter
                 edit_line = true;
                 edit_len = 0;
@@ -2150,6 +2288,9 @@ void loop() {
 #endif
 #if FIRMWARE_SLICE != 0
     serveFetches();
+#if HDDPRO_CDROM || HDDPRO_HDCD
+    serviceDiscChange();
+#endif
     iordy_timer::poll();
     bus_timing::poll();
     bus_timing::printPending(2);

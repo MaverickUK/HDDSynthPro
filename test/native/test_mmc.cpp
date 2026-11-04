@@ -257,6 +257,44 @@ TEST(mmc_get_event_status) {
     CHECK(fresh.unit_attention);
 }
 
+TEST(mmc_disc_changes) {
+    // Taken out: a removal event, then NOT READY; no unit attention
+    State st = ready();
+    Disc none{0};
+    discChanged(st, none);
+    Run r = run({OP_GET_EVENT_STATUS, 1, 0, 0, 0x10, 0, 0, 0, 8}, none, st);
+    CHECK_EQ(r.data[4], MEDIA_REMOVED);
+    CHECK_EQ(r.data[5], 0x00);  // no medium
+    r = run({OP_TEST_UNIT_READY}, none, st);
+    CHECK(r.reply.kind == Reply::Kind::Error);
+    CHECK_EQ(st.sense.key, KEY_NOT_READY);
+    CHECK_EQ(st.sense.asc, 0x3A);
+    // Another put in: a new-media event, and the next command a unit
+    // attention, medium may have changed (28h), once
+    Disc other{2000};
+    discChanged(st, other);
+    r = run({OP_GET_EVENT_STATUS, 1, 0, 0, 0x10, 0, 0, 0, 8}, other, st);  // exempt: no attention
+    CHECK_EQ(r.data[4], MEDIA_NEW);
+    CHECK_EQ(r.data[5], 0x02);
+    r = run({OP_READ_CAPACITY}, other, st);
+    CHECK(r.reply.kind == Reply::Kind::Error);
+    CHECK_EQ(st.sense.key, KEY_UNIT_ATTENTION);
+    CHECK_EQ(st.sense.asc, 0x28);
+    r = run({OP_READ_CAPACITY}, other, st);
+    CHECK(r.reply.kind == Reply::Kind::Data);
+    CHECK_EQ(be32(r.data, 0), 1999u);  // the new disc's last frame
+    // REQUEST SENSE reports a pending one as 28h too
+    discChanged(st, other);
+    r = run({OP_REQUEST_SENSE, 0, 0, 0, 18}, other, st);
+    CHECK_EQ(r.data[2], KEY_UNIT_ATTENTION);
+    CHECK_EQ(r.data[12], 0x28);
+    CHECK(!st.unit_attention);
+    // A reset after it reports power-on again (29h)
+    powerOn(st, other);
+    r = run({OP_TEST_UNIT_READY}, other, st);
+    CHECK_EQ(st.sense.asc, 0x29);
+}
+
 TEST(mmc_mode_sense) {
     State st = ready();
     Run r = run({OP_MODE_SENSE_10, 0, 0x2A, 0, 0, 0, 0, 0x00, 0xFF}, DISC, st);
@@ -308,6 +346,7 @@ void runMmcTests() {
     RUN(mmc_read_toc_sessions_and_full);
     RUN(mmc_get_configuration);
     RUN(mmc_get_event_status);
+    RUN(mmc_disc_changes);
     RUN(mmc_mode_sense);
     RUN(mmc_accepted_and_refused);
 }

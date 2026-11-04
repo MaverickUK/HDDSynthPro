@@ -197,9 +197,8 @@ CORE1_RAM Reply getEventStatus(const uint8_t* c, const Disc& disc, State& st, Ou
         out.u16(6);
         out.u8(0x04);  // a media event
         out.u8(MEDIA_CLASS);
-        bool fresh = st.media_event && disc.frames;
-        st.media_event = false;
-        out.u8(fresh ? 0x02 : 0x00);         // new media, or no change
+        out.u8(st.media_event);  // new media, removal, or no change
+        st.media_event = MEDIA_NO_CHANGE;
         out.u8(disc.frames ? 0x02 : 0x00);   // media present; the tray closed
         out.zeros(2);
     } else {
@@ -284,7 +283,19 @@ CORE1_RAM bool inRange(const Disc& disc, State& st, uint32_t lba, uint32_t frame
 CORE1_RAM void powerOn(State& state, const Disc& disc) {
     state.sense = SENSE_NONE;
     state.unit_attention = true;
-    state.media_event = disc.frames != 0;
+    state.attention = SENSE_POWER_ON;
+    state.media_event = disc.frames ? MEDIA_NEW : MEDIA_NO_CHANGE;
+}
+
+CORE1_RAM void discChanged(State& state, const Disc& disc) {
+    if (disc.frames) {
+        state.unit_attention = true;
+        state.attention = SENSE_MEDIUM_CHANGED;
+        state.media_event = MEDIA_NEW;
+    } else {
+        state.unit_attention = false;  // nothing to read: NOT READY says so
+        state.media_event = MEDIA_REMOVED;
+    }
 }
 
 CORE1_RAM void toMsf(uint32_t lba, uint8_t& m, uint8_t& s, uint8_t& f) {
@@ -309,14 +320,14 @@ CORE1_RAM Reply execute(const uint8_t* c, const Disc& disc, State& st, uint8_t* 
                             op == OP_GET_EVENT_STATUS;
     if (st.unit_attention && !attention_exempt) {
         st.unit_attention = false;
-        return error(st, SENSE_POWER_ON);
+        return error(st, st.attention);
     }
     Reply failed{};
     switch (op) {
         case OP_TEST_UNIT_READY:
             return disc.frames ? good(st) : error(st, SENSE_NO_MEDIUM);
         case OP_REQUEST_SENSE: {
-            Sense s = st.unit_attention ? SENSE_POWER_ON : st.sense;
+            Sense s = st.unit_attention ? st.attention : st.sense;
             st.unit_attention = false;
             out.u8(0x70);  // current error, fixed format
             out.u8(0);

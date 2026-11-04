@@ -789,6 +789,46 @@ TEST(atapi_read_ahead_left_behind_by_a_reset_is_stale) {
     CHECK(d == expectedFrames(41, 1));
 }
 
+TEST(atapi_changing_the_disc) {
+    GeneratedDisk disc(TEST_SECTORS);
+    Device dev(INFO);
+    VirtualHost host{dev, &disc};
+    host.clearAttention();
+    CHECK(dev.idle());
+    // Not mid-read: a fetch outstanding, then a block on its way to the host
+    host.source = nullptr;
+    writePacket(host, {mmc::OP_READ_10, 0, 0, 0, 0, 1, 0, 0, 1}, 0xFFFE);
+    CHECK(!dev.idle());
+    host.source = &disc;
+    host.pump();
+    CHECK(!dev.idle());  // DRQ: the host is reading
+    std::vector<uint8_t> d;
+    for (int guard = 0; guard < 100 && !(host.altStatus() & ata::ST_ERR) && !dev.idle(); ++guard) {
+        host.pump();
+        if (host.altStatus() & ata::ST_DRQ)
+            while (host.altStatus() & ata::ST_DRQ) dev.read(Reg::Data);
+        host.reg(Reg::StatusCommand);
+    }
+    CHECK(dev.idle());
+    // Taken out: NOT READY, medium not present
+    dev.changeDisc(0);
+    CHECK_EQ(dev.discFrames(), 0u);
+    CHECK(host.packet({mmc::OP_TEST_UNIT_READY}, d) & ata::ST_ERR);
+    CHECK_EQ(host.reg(Reg::ErrorFeatures) >> 4, mmc::KEY_NOT_READY);
+    // A bigger one put in: the unit attention once, then its frames, past the old end too
+    GeneratedDisk bigger(TEST_SECTORS * 2);
+    host.source = &bigger;
+    dev.changeDisc(TEST_SECTORS * 2);
+    CHECK(host.packet({mmc::OP_TEST_UNIT_READY}, d) & ata::ST_ERR);
+    CHECK_EQ(host.reg(Reg::ErrorFeatures) >> 4, mmc::KEY_UNIT_ATTENTION);
+    CHECK_EQ(dev.sense().asc, 0x28);
+    CHECK_EQ(host.packet({mmc::OP_READ_CAPACITY}, d), ata::ST_DRDY);
+    CHECK_EQ(uint32_t(d[0] << 24 | d[1] << 16 | d[2] << 8 | d[3]), 2047u);
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0x07, 0xFF, 0, 0, 1}, d), ata::ST_DRDY);
+    CHECK(d == expectedFrames(2047, 1));
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+}
+
 void runAtapiDeviceTests() {
     RUN(atapi_signature_after_power_on_and_reset);
     RUN(atapi_identify_device_is_aborted_with_the_signature);
@@ -815,4 +855,5 @@ void runAtapiDeviceTests() {
     RUN(atapi_read_ahead_keeps_the_next_sector_ready);
     RUN(atapi_read_ahead_failure_comes_after_the_sector_before);
     RUN(atapi_read_ahead_left_behind_by_a_reset_is_stale);
+    RUN(atapi_changing_the_disc);
 }

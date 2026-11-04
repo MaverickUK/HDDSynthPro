@@ -110,6 +110,13 @@ public:
     bool dmaBurstReady(ata::DmaBurst& burst);
     void dmaBurstDone();
 
+    // ---- The CD-ROM's disc (atapi::Device's) ---------------------------------
+
+    bool discIdle() const { return cd_on_ && cd_.idle(); }
+    void changeDisc(uint32_t total_sectors) {
+        if (cd_on_) cd_.changeDisc(total_sectors);
+    }
+
     // ---- The hard disk's alone ---------------------------------------------------
 
     __attribute__((always_inline)) bool waking() const { return hd_.waking(); }

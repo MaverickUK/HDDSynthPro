@@ -120,6 +120,21 @@ public:
     bool dmaBurstReady(ata::DmaBurst& burst);
     void dmaBurstDone();
 
+    // ---- Changing the disc ----------------------------------------------------
+
+    // Between commands, with nothing for the disc under way: no command
+    // running or queued, no packet coming in, no fetch outstanding. Only then
+    // may the disc change (changeDisc), so no fetch for one disc is ever served
+    // from the next. A reset ends anything under way, so it comes soon.
+    bool discIdle() const { return idle(); }  // the name hdcd::Device gives it
+    bool idle() const {
+        return commands_started_ == commands_completed_ && !command_queued_ && !packet_queued_ &&
+               !receiving_packet_ && !fetch_pending_ && !data_ && !(status_ & ata::ST_BSY);
+    }
+    // Core 1, when idle(): the disc is now `total_sectors` long (0: none),
+    // which the host learns as a real drive tells it (mmc::discChanged).
+    void changeDisc(uint32_t total_sectors);
+
     // ---- Not offered: standby -------------------------------------------------
 
     bool waking() const { return false; }

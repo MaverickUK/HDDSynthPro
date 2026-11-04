@@ -58,6 +58,12 @@ constexpr Sense SENSE_BAD_LBA{KEY_ILLEGAL_REQUEST, 0x21, 0x00};     // logical b
 constexpr Sense SENSE_BAD_FIELD{KEY_ILLEGAL_REQUEST, 0x24, 0x00};   // invalid field in the packet
 constexpr Sense SENSE_NO_SAVING{KEY_ILLEGAL_REQUEST, 0x39, 0x00};   // saving parameters not supported
 constexpr Sense SENSE_POWER_ON{KEY_UNIT_ATTENTION, 0x29, 0x00};     // power on, reset or bus device reset
+constexpr Sense SENSE_MEDIUM_CHANGED{KEY_UNIT_ATTENTION, 0x28, 0x00};  // not ready to ready: medium may have changed
+
+// GET EVENT STATUS NOTIFICATION's media events.
+constexpr uint8_t MEDIA_NO_CHANGE = 0x00;
+constexpr uint8_t MEDIA_NEW = 0x02;
+constexpr uint8_t MEDIA_REMOVED = 0x03;
 
 // The disc in the drive: `frames` 2,048-byte frames, or 0 for no disc.
 struct Disc {
@@ -67,13 +73,18 @@ struct Disc {
 // What the drive remembers between packets.
 struct State {
     Sense sense = SENSE_NONE;        // the last command's, for REQUEST SENSE
-    bool unit_attention = false;     // the next command (not INQUIRY or REQUEST SENSE) reports power-on
-    bool media_event = false;        // GET EVENT STATUS NOTIFICATION reports "new media" once
+    bool unit_attention = false;     // the next command (not INQUIRY or REQUEST SENSE) reports `attention`
+    Sense attention = SENSE_POWER_ON;
+    uint8_t media_event = MEDIA_NO_CHANGE;  // GET EVENT STATUS NOTIFICATION reports it once
 };
 
 // The drive after power-on or a hardware reset: a unit attention to report,
 // and a new-media event if there's a disc.
 void powerOn(State& state, const Disc& disc);
+// A disc put in or taken out (`disc` as it is now): a disc put in raises a
+// unit attention (medium may have changed) and a new-media event; one taken
+// out a removal event, and commands then find no medium, as on a real drive.
+void discChanged(State& state, const Disc& disc);
 
 // What the device does with a packet.
 struct Reply {

@@ -442,6 +442,14 @@ CORE1_RAM void Device::deliverSector(bool ok) {
     if (read_ahead_ && read_left_ > 0) requestFetch(false);  // no BSY: the host carries on reading
 }
 
+// ---- Changing the disc ------------------------------------------------------------
+
+CORE1_RAM void Device::changeDisc(uint32_t total_sectors) {
+    info_.total_sectors = total_sectors;
+    disc_.frames = total_sectors / SECTORS_PER_FRAME;
+    mmc::discChanged(mmc_, disc_);
+}
+
 // ---- DMA -----------------------------------------------------------------------
 
 CORE1_RAM bool Device::dmaBurstReady(DmaBurst& burst) {

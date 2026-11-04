@@ -2,6 +2,11 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.7] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **Changing the CD-ROM's disc at run time:** console `M`, then an ISO's name, `test` (the test disc) or `none` (eject), and Enter, in `bb48_cdrom` and `bb48_hdcd`, until a restart. The host sees a real tray's behaviour: a media-removal event and NOT READY while it's out, then a new-media event and a unit attention, medium may have changed (28h; `mmc::discChanged`, `State::attention`). Core 0 ejects first and swaps files only once core 1 has taken the eject, which it does only when the device is idle (`atapi::Device::idle`), so no fetch for one disc is served from the next. Host tests: `mmc_disc_changes`, `atapi_changing_the_disc`, `hdcd_changing_the_disc_leaves_the_disk_alone`. On the board (no host on the bus): swaps between `DOOM_SE.ISO`, the test disc, none and a missing file, in both builds. Not yet seen by Windows or MSCDEX. The hard disk build is unchanged (its core 1 code at the same addresses).
+
 ## [0.30.0-dev.6] - 2026-11-04 (branch `hdd-cd`)
 
 From a review of everything since 0.28.0 (`main`), before the next bench session.

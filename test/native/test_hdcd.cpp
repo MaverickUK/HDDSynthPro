@@ -488,6 +488,28 @@ TEST(hdcd_resets_select_device_0) {
     CHECK_EQ(host.signature(), 0xEB14);
 }
 
+TEST(hdcd_changing_the_disc_leaves_the_disk_alone) {
+    Device dev(DISK, nullptr, &DISC);
+    GeneratedDisk disk(DISK.total_sectors);
+    DiscSource disc;
+    Host host{dev, {&disk, &disc}};
+    std::vector<uint8_t> d;
+    host.packet({mmc::OP_TEST_UNIT_READY}, d);
+    CHECK(dev.discIdle());
+    dev.changeDisc(0);
+    CHECK_EQ(dev.cdrom().discFrames(), 0u);
+    CHECK(host.packet({mmc::OP_TEST_UNIT_READY}, d) & ata::ST_ERR);  // no disc
+    dev.changeDisc(DISC.total_sectors);
+    CHECK(host.packet({mmc::OP_TEST_UNIT_READY}, d) & ata::ST_ERR);  // medium may have changed
+    CHECK_EQ(host.packet({mmc::OP_TEST_UNIT_READY}, d), ata::ST_DRDY);
+    std::vector<uint16_t> words;
+    CHECK_EQ(host.readSectors(9, 1, words), ata::ST_DRDY | ata::ST_DSC);  // the disk never noticed
+    CHECK(words == diskWords(9, 1));
+    // No CD-ROM: nothing to change
+    Device none(DISK, nullptr, nullptr);
+    CHECK(!none.discIdle());
+}
+
 void runHdcdTests() {
     RUN(hdcd_each_device_shows_its_signature);
     RUN(hdcd_a_bios_probe_finds_a_disk_and_a_cdrom);
@@ -500,4 +522,5 @@ void runHdcdTests() {
     RUN(hdcd_execute_device_diagnostic_runs_on_both);
     RUN(hdcd_selecting_the_disk_while_the_cdrom_is_busy);
     RUN(hdcd_resets_select_device_0);
+    RUN(hdcd_changing_the_disc_leaves_the_disk_alone);
 }

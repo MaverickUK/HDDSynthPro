@@ -15,6 +15,10 @@
 
 Disc reads now fetch the next 512-byte sector into a second buffer while the host takes the one before, as the hard disk does (`read_ahead`, console `A`): host-tested (`atapi_read_ahead_*`: one BSY wait for a two-frame read instead of eight; a read-ahead that fails reports MEDIUM ERROR after the sector before; one cut short by a reset is stale). Not yet measured: the 1.36 MB/s Windows read the Doom disc at (dev.3, no read-ahead) is the figure to beat.
 
+## Changing discs (0.30.0-dev.7)
+
+Console `M`, then a disc and Enter, in both CD-ROM builds: an ISO on the card, `test` (the generated test disc) or `none` (eject), until a restart (`HDDSYNTH.INI` isn't changed). The host sees what a real drive's tray would show: a media-removal event (GET EVENT STATUS NOTIFICATION) and NOT READY while it's out, then a new-media event and a unit attention, medium may have changed (28h), on its next command. Core 0 ejects first and waits for core 1 to take the eject, which it does only once the device is idle (no command running, no fetch outstanding); only then does it swap the file and insert the new disc, so no fetch for one disc is ever served from the next. Host-tested (`mmc_disc_changes`, `atapi_changing_the_disc`, `hdcd_changing_the_disc_leaves_the_disk_alone`); on the board, swaps between `DOOM_SE.ISO`, the test disc, none and a missing file report as they should (`DISC DOOM_SE.ISO frames=11431`). Not yet seen by a host: whether Windows and a DOS driver (MSCDEX) notice the new disc is for the bench. Next: the HDD Synth's buttons, and a list of discs to step through for multi-disc games.
+
 ## The CD build's slow reads: what the code says (4 Nov 2026, 0.30.0-dev.6)
 
 On the rig the CD-ROM build held Alternate Status reads up to 2.8-3.6 µs (the hard disk build, on the same early answers: about 1.3 µs at worst in DMA, 2.1 µs in a PIO speed run), and on the Evesham about 19,500 reads a session past 1,250 ns, worst 1,960 ns, where the hard disk build had none. Read from the code, without the bus:
@@ -182,7 +186,7 @@ A new pytest marker, `cdrom`, with tests that skip unless the board runs the `bb
 
 **Questions for after this exploration:**
 - One binary with both a hard disk and a CD-ROM (devices 0 and 1), or a CD-ROM mode chosen in `HDDSYNTH.INI`? **Both, in `bb48_hdcd`** (above): device 1 a CD-ROM from `HDDSYNTH.INI`. A CD-ROM as device 0 alone stays `bb48_cdrom`'s.
-- Swapping discs at run time from the console or the HDD Synth (UNIT ATTENTION, "medium may have changed", 06h/28h, and GET EVENT STATUS NOTIFICATION's media events).
+- Swapping discs at run time from the console or the HDD Synth (UNIT ATTENTION, "medium may have changed", 06h/28h, and GET EVENT STATUS NOTIFICATION's media events). **From the console since 0.30.0-dev.7** (above); the HDD Synth to come.
 - Audio tracks: BIN/CUE images, PLAY AUDIO through the HDD Synth's speaker, READ CD for raw sectors.
 - The Amiga, which needs Kickstart 3.1.4 or later, or a third-party ATAPI driver, and a CD file system.
 
