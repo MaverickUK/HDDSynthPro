@@ -74,6 +74,7 @@ It detected and booted as on early answers, and ran two drives (device 1 an imag
   - a data read with no block (no hang, DD not left driven, the next block aligned);
   - a chip select with no strobe.
 - **On the rig:** `-m speed` and slices 1-4 on the built-in disk, with the bus observer checking sectors on the cable.
+- **Soak (3-4 Nov 2026, 0.29.0-2d.6):** 400 minutes on the USB adapter, built-in disk, PIO mode 3, the bus observer on full checks: 248,542 reads and 134,848 writes (18.6 GB), no mismatches, 642,672 commands, no resets, 102.8 million data words answered by the lane, 31.9 million sectors checked on the cable, 0 bad, 0 gaps, nothing dropped. The worst read was 1,340 ns, Alternate Status (the race [below](#status-reads-over-1250-ns-investigated-3-nov-2026-2d6)), so it ran with `HDDPRO_SOAK_IORDY_MAX_NS=2000`; the first try, at the default 1,250, stopped on a 1,310 ns read with the data clean.
 
 ## Status reads over 1,250 ns (investigated 3 Nov 2026, 2d.6)
 

@@ -4,6 +4,9 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased] (branch `two-drives`)
 
+### Tested
+- **The data lane soaked 400 minutes** on the USB adapter (2d.6, built-in disk, PIO mode 3, full observer checks, 3-4 Nov): 18.6 GB, no mismatches, 642,672 commands, no resets, 31.9 million sectors checked on the cable, 0 bad. Worst read 1,340 ns, Alternate Status ([docs/data-lane.md](docs/data-lane.md)).
+
 ## [0.29.0-2d.6] - 2026-11-03 (branch `two-drives`)
 
 ### Added
