@@ -870,16 +870,20 @@ static BlockSource* openCdDisc(const char* name, const char*& why) {
         return iso.sectors() ? &iso : nullptr;
     }
     static char text[cue_sheet::MAX_TEXT];
-    static cue_sheet::Sheet sheet;  // its BIN's name, which the open file keeps
     size_t len = 0;
     bool truncated = false;
     if (!sd_card::readFileStart(name, text, sizeof text, len, truncated, why, Serial)) return nullptr;
     if (truncated)  // a long sheet: up to its last whole line
         while (len && text[len - 1] != '\n') --len;
-    if (!cue_sheet::parse(text, len, sheet)) {
-        why = sheet.error;
+    cue_sheet::Sheet parsed;
+    if (!cue_sheet::parse(text, len, parsed)) {
+        why = parsed.error;
         return nullptr;
     }
+    // Kept only now: the card code holds on to the open BIN's name (to reopen
+    // it after the card comes back), and a sheet that failed mustn't blank it.
+    static cue_sheet::Sheet sheet;
+    sheet = parsed;
     ImageFile* file = open(sheet.file, Serial, true);
     if (!file) {
         static char bin_why[cue_sheet::MAX_FILE_NAME + 24];

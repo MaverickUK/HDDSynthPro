@@ -85,6 +85,9 @@ TEST(test_cue_details) {
     CHECK_EQ(cue_sheet::frames(s.track, 2352ull * 1000), 850u);
     CHECK(parse("FILE \"games/x.bin\" BINARY\nTRACK 01 MODE1/2352\nINDEX 01 00:00:00\n", s));
     CHECK_STR(s.file, "x.bin");
+    // An index number without its leading zero, as some tools write it.
+    CHECK(parse("FILE x.bin BINARY\nTRACK 1 MODE1/2352\nINDEX 1 00:00:30\n", s));
+    CHECK_EQ(s.track.first_frame, 30u);
     // PREGAP isn't in the file, so it changes nothing.
     CHECK(parse("FILE x.bin BINARY\nTRACK 01 MODE1/2352\nPREGAP 00:02:00\nINDEX 01 00:00:00\n", s));
     CHECK_EQ(s.track.first_frame, 0u);

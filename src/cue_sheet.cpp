@@ -1,6 +1,7 @@
 #include "cue_sheet.h"
 
 #include <cctype>
+#include <cstdlib>
 #include <cstring>
 
 namespace cue_sheet {
@@ -161,7 +162,7 @@ bool parse(const char* text, size_t len, Sheet& out) {
                 out.error = "an INDEX line it can't read";
                 return false;
             }
-            if (in_track1 && same(number, "01")) {
+            if (in_track1 && std::strtoul(number, nullptr, 10) == 1) {  // "01", or "1" as some tools write it
                 out.track.first_frame = at;
             } else if (after_track1 && !out.track.end_frame) {
                 out.track.end_frame = at;  // the next track's first index (its pregap, if it has one)
