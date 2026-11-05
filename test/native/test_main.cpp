@@ -422,6 +422,7 @@ void runImagePartsTests();
 void runCueSheetTests();
 void runMediaWatchTests();
 void runCardRetryTests();
+void runCommandHistoryTests();
 void runWelcomeDiskTests();
 void runSeekTimingTests();
 void runTwoDrivesTests();
@@ -463,6 +464,7 @@ int main() {
     runCueSheetTests();
     runMediaWatchTests();
     runCardRetryTests();
+    runCommandHistoryTests();
     runWelcomeDiskTests();
     runSeekTimingTests();
     runTwoDrivesTests();

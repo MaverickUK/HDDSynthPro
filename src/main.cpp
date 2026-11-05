@@ -61,6 +61,8 @@
 #include "ide_dma.h"
 #include "iocs16.h"
 #include "bus_timing.h"
+#include "command_history.h"
+#include "mmc.h"
 #include <hardware/structs/m33.h>
 #include "iordy_timer.h"
 #include "sd_card.h"
@@ -1692,7 +1694,12 @@ static uint32_t g_release_ms = 0;
 static uint64_t g_no_cs_at_release = 0;
 static bool g_no_cs_reported = false;
 
+// The last few commands, for the NOIORDY line: which one an unwaited read
+// fell in or followed (iordy_timer reports those separately).
+static CommandHistory g_commands;
+
 static void noteActivity(const TraceEvent& e) {
+    g_commands.note(e);
     if (e.kind == TraceKind::ResetRelease) {
         g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
         g_release_ms = millis();
@@ -1876,15 +1883,31 @@ static void printNoChipSelect() {
 
 // A NOIORDY line when the host ends reads without waiting for IORDY, at most
 // once a second: such a host reads garbage whenever core 1 is slower than its
-// strobe (iordy_check.pio).
+// strobe (iordy_check.pio). It names the command the last one fell in or
+// followed, its device, and how long after it started (and, if it had
+// finished, after its DONE): to tell a block's first word, after a fetch,
+// from the rest (docs/atapi.md, the Evesham's CD reads). The times are when
+// core 0 collected the report, within a loop pass of the read (up to about
+// 0.5 ms behind it while it stores a sector).
 static void printIgnoredIordy() {
     static uint32_t shown = 0, last_ms = 0;
     uint32_t n = iordy_timer::ignoredReads();
     if (n == shown || millis() - last_ms < 1000) return;
-    char line[96];
-    int len = std::snprintf(line, sizeof line, "NOIORDY %lu reads=%lu last=%s: the host didn't wait for IORDY\n",
-                            (unsigned long)time_us_32(), (unsigned long)n, iordy_timer::ignoredRegister());
-    if (printLine(line, size_t(len))) {
+    char context[64] = "";
+    uint32_t at = iordy_timer::ignoredAtUs();
+    if (const CommandHistory::Entry* c = g_commands.at(at)) {
+        const char* name = c->command == 0xA0 ? mmc::name(c->packet) : commandName(c->command);
+        int k = std::snprintf(context, sizeof context, " after=%s%s +%luus", name, c->unit ? " d1" : "",
+                              (unsigned long)(at - c->start_us));
+        if (c->ended && int32_t(at - c->end_us) >= 0 && k > 0 && size_t(k) < sizeof context)
+            std::snprintf(context + k, sizeof context - size_t(k), " done+%luus", (unsigned long)(at - c->end_us));
+    }
+    char line[176];
+    int len = std::snprintf(line, sizeof line,
+                            "NOIORDY %lu reads=%lu data=%lu last=%s%s: the host didn't wait for IORDY\n",
+                            (unsigned long)at, (unsigned long)n, (unsigned long)iordy_timer::ignoredDataReads(),
+                            iordy_timer::ignoredRegister(), context);
+    if (len > 0 && printLine(line, size_t(len) < sizeof line ? size_t(len) : sizeof line - 1)) {
         shown = n;
         last_ms = millis();
     }
@@ -1945,8 +1968,11 @@ static void printStats() {
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
                   iordy_timer::earlyRegister());
-    Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
-                  iordy_timer::ignoredRegister());
+    Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s iordy_ignored_data=%lu", (unsigned long)iordy_timer::ignoredReads(),
+                  iordy_timer::ignoredRegister(), (unsigned long)iordy_timer::ignoredDataReads());
+    Serial.printf(" iordy_data_slow=%lu/%lu/%lu/%lu iordy_data_max_ns=%lu", (unsigned long)iordy_timer::dataSlowReads(0),
+                  (unsigned long)iordy_timer::dataSlowReads(1), (unsigned long)iordy_timer::dataSlowReads(2),
+                  (unsigned long)iordy_timer::dataSlowReads(3), (unsigned long)iordy_timer::dataMaxNs());
     static uint32_t s_passes_then, s_ms_then;
     uint32_t passes = g_c1_passes, ms = millis();  // stays 0 without C1_PROFILE: nothing printed
     if (passes != s_passes_then && ms != s_ms_then)

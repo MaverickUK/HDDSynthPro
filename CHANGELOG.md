@@ -2,6 +2,14 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.13] - 2026-11-05 (branch `hdd-cd`)
+
+### Added
+- **Measurements for the Evesham's unwaited CD data reads** ([docs/atapi.md](docs/atapi.md#the-eveshams-unwaited-cd-data-reads-4-nov-2026)), core 0 only:
+  - `NOIORDY` lines name the command the last unwaited read fell in or followed, its device, and how long after it started and, if it had finished, after its DONE: `NOIORDY t reads=N data=N last=DATA after=READ(10) d1 +1840us`. `data=` counts the data register's. `src/command_history.h` (pure, `test_command_history.cpp`) keeps the last 16 commands from the CMD/DONE events, so a report collected after the next command started still finds the right one.
+  - `s` adds `iordy_ignored_data` and, for the data register alone, its reads held past 400 ns by how long (`iordy_data_slow=` up to 700 ns / 1,000 / 1,250 / longer) and the worst (`iordy_data_max_ns`): how late core 1 answers data words, apart from the status polls that dominate `iordy_max_ns`.
+- Every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.12 (only the linker's veneers moved), and `check_core1_ram.py` passes. **Not yet run on the board.**
+
 ## [0.30.0-dev.12] - 2026-11-05 (branch `hdd-cd`)
 
 ### Changed
