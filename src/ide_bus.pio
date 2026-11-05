@@ -79,6 +79,100 @@ public not_read:
     jmp x-- write
     jmp armed
 
+; ---- The data lane (`early_answers = off`, `isa = off`: the default bus) -------
+;
+; As ide_bus, but data register reads never reach core 1: a second state
+; machine in this block, ide_data_in, answers them from its TX FIFO, which an
+; RP2350 DMA channel keeps filled from the sector buffer (ide_bus.cpp, as
+; ide_dma_read is fed in multiword DMA). Core 1 starts the channel when a
+; data-in block begins (IDENTIFY, each sector), before the host can see DRQ,
+; and catches the device up once per block rather than once per word. So a
+; data read is answered within about 100 ns of DIOR# falling whatever core 1
+; is doing, and core 1, no longer swamped by data words, answers the status
+; reads between blocks promptly. Register reads and every write, the data
+; register's included, are served as ide_bus serves them.
+;
+; At the strobe the program reads the address (Y = 16, the data register's:
+; DA2-0 = 0, CS0# low, CS1# high, set by the C side). A data read raises IRQ 4
+; for ide_data_in, which drives DD; this program releases IORDY 40 ns later,
+; as ide_bus does after driving a register's value, and releases DD when
+; DIOR# rises. Both programs write the block's shared pin directions; only one
+; drives DD in any access. IORDY is pulled low at the chip select as ide_bus
+; does, and on every pass while selected: nothing else releases it here, since
+; ide_bus and ide_data_in fill the block's 32 instructions and leave no room
+; for iordy_watchdog. `isa = on` (ISA cards, which need the watchdog) keeps
+; ide_bus; `early_answers = on` keeps ide_bus_early.
+;
+; Pin mapping as ide_bus; autopush at 32.
+
+.program ide_bus_data
+.side_set 1 opt pindirs
+public not_read:                    ; from `armed`: OSR holds the inverted sample's top
+    out null, 2                     ; LED, DIOR#
+    out x, 1                        ; DIOW# asserted?
+    jmp !x armed                    ; no strobe yet
+public write:
+    wait 1 gpio 27          side 0  ; release IORDY; wait for DIOW# to rise
+    in pins, 23                     ; DD, DA, CS#, LED, DIOR#: the data 5 ns after
+    in null, 9              side 1  ; DIOW# (and up) as 0; autopush. IORDY low again,
+                                    ; and held while the RX FIFO is full
+public armed:
+    mov osr, ~pins          side 1  ; a chip select is asserted: IORDY low; sample,
+                                    ; inverted (asserted = 1)
+    out null, 19                    ; drop DD0-15, DA0-2
+    out x, 2                        ; x = CS0#/CS1# asserted
+    jmp !x idle                     ; chip select gone without a strobe
+    jmp pin not_read                ; DIOR# high (read from the pin, unsynchronised)
+public read:
+    mov osr, pins                   ; which register
+    out null, 16                    ; drop DD0-15
+    out x, 5                        ; x = DA2-0, CS0#, CS1#
+    jmp x!=y regread
+    irq set 4               [7]     ; the data register: ide_data_in drives the next
+                                    ; word (within 3 cycles); let it settle 40 ns, as
+                                    ; regread does, before IORDY rises
+    jmp tail                        ; (the jump here, not in regread: a register read,
+                                    ; core 1's, is the one with no time to spare)
+regread:
+    in pins, 32                     ; which register (autopush: core 1 looks it up)
+    pull block                      ; its value
+    out pins, 16                    ; onto DD0-15 (still inputs)
+    out pindirs, 16         [7]     ; drive DD0-15 (bits 16-31: all ones, or none for a
+                                    ; register that isn't the drive's), then let them
+                                    ; settle, as ide_bus does
+tail:
+    wait 1 jmppin           side 0  ; release IORDY; hold the data until DIOR# rises
+    mov pindirs, null               ; release DD0-15, whichever program drove them
+.wrap_target
+public idle:
+    mov osr, ~pins          side 0  ; release IORDY; sample, inverted (asserted = 1)
+    out null, 19                    ; drop DD0-15, DA0-2
+    out x, 2                        ; x = CS0#/CS1# asserted
+    jmp x-- armed
+.wrap
+
+; The data lane's second state machine: data register reads, from its TX
+; FIFO. Each FIFO word is a data word in both halves (DMA writes 16 bits,
+; which the bus replicates); `out pins, 16` takes the low half. The word is
+; pulled before the read, so it's there to drive at once. It drives DD only
+; when ide_bus_data has seen a data read (IRQ 4) and leaves the release to it,
+; when DIOR# rises; then it waits for that before taking the next word, so
+; once the block's last word has been read it takes the spare word the DMA
+; channel adds, and an empty FIFO with the channel idle tells core 1 the host
+; has read the whole block. Core 1 restarts it (empty FIFO, IRQ 4 clear)
+; before each block.
+;
+; Pin mapping: OUT_BASE = GPIO4 (DD0), 16 pins; wait gpio 26 = DIOR#.
+
+.program ide_data_in
+.wrap_target
+    pull block                      ; the next word
+    wait 1 irq 4                    ; a data register read has begun (clears the flag)
+    out pins, 16                    ; the word onto DD0-15
+    mov pindirs, ~null              ; drive them
+    wait 1 gpio 26                  ; DIOR# rises: the host has the word
+.wrap
+
 ; ---- Early answers (HDDSYNTH.INI `early_answers = on`, docs/no-iordy.md) -------
 ;
 ; As ide_bus, but core 1 is asked for a register's value at the chip select,

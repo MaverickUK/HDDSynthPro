@@ -2,6 +2,255 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.13] - 2026-11-05 (branch `hdd-cd`)
+
+### Added
+- **Measurements for the Evesham's unwaited CD data reads** ([docs/atapi.md](docs/atapi.md#the-eveshams-unwaited-cd-data-reads-4-nov-2026)), core 0 only:
+  - `NOIORDY` lines name the command the last unwaited read fell in or followed, its device, and how long after it started and, if it had finished, after its DONE: `NOIORDY t reads=N data=N last=DATA after=READ(10) d1 +1840us`. `data=` counts the data register's. `src/command_history.h` (pure, `test_command_history.cpp`) keeps the last 16 commands from the CMD/DONE events, so a report collected after the next command started still finds the right one.
+  - `s` adds `iordy_ignored_data` and, for the data register alone, its reads held past 400 ns by how long (`iordy_data_slow=` up to 700 ns / 1,000 / 1,250 / longer) and the worst (`iordy_data_max_ns`): how late core 1 answers data words, apart from the status polls that dominate `iordy_max_ns`.
+- Every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.12 (only the linker's veneers moved), and `check_core1_ram.py` passes. **Not yet run on the board.**
+
+## [0.30.0-dev.12] - 2026-11-05 (branch `hdd-cd`)
+
+### Changed
+- **dev.11's card retry is host-tested.** What to do when device 1's read, write or sync fails (retry once, after restarting the card; only while the card isn't lost or changed; reopen device 1's file first, and only at the same size) and how to restart the card (as device 0's image read would with an image on it, any card that answers CMD0 without one, nothing while lost or changed) moved from `sd_card.cpp` to `src/card_retry.h`: header-only templates over the card's operations, with no SdFat or SDK code, so `test_card_retry.cpp` drives them with a fake card (17 tests). Behaviour is unchanged. Core 0 only: every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.11 (only the linker's veneers are in a different order), and `check_core1_ram.py` passes. **Not yet run on the board** (nor is dev.11).
+
+## [0.30.0-dev.11] - 2026-11-05 (branch `hdd-cd`)
+
+From the Evesham session (dev.10, "Tested on a retro PC"). Core 0 only: every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.10 (only literal-pool words differ, the addresses of core 0's variables), and `check_core1_ram.py` passes. Built and host-tested; **not yet run on the board.**
+
+### Fixed
+- **Device 1 gets over a card that stopped answering.** Its image's reads and writes (a CD-ROM's ISO or BIN, or a second hard disk's image in `bb48_hdcd`) went through SdFat's file layer with no retry, so after one card dropout every read failed until the drive restarted: on the Evesham every read of a BIN failed with MEDIUM ERROR, and then `M DOOM_SE.ISO` said `not found`. Now a device 1 read, write or sync that fails is retried once after restarting the card (`device1Attempt`, `restartCard` in `sd_card.cpp`), with device 0's checks: with device 0's image on the card, its watch marks the card lost and `reattach()` brings it back only if it's the same card and image; with none (the test disk), any card that answers CMD0. Device 1's file is closed before every restart and reopened by name at its next read, only if it's still the same size. While device 0's card is lost or changed, device 1's reads fail at once, as device 0's do. A folder's reads aren't retried.
+- **`S` and `M` wake a card that has gone silent.** SdFat keeps its volume after a card is pulled, so `S` printed `SD ok ... size_mb=0 image=none bench=none config=none` with the card in (as it did twice on the Evesham), and `M` couldn't find files that were there. Both now ask the card for its size first (CMD9, a few hundred microseconds), and restart it if it doesn't answer: `SD restarted: it had stopped answering`, or `SD error: the card doesn't answer, and couldn't be restarted`. So does reading a CUE sheet.
+- **CARD lines for a loss and return between two looks.** `printCardChanges()` printed only when the card's state differed when it looked, so a dropout recovered by the retry within one pass printed nothing (two on the Evesham). It now also compares the loss and restart counts: `CARD lost and back NAME: it stopped answering and was restarted (N in all)`, and, with device 0 not on the card, `CARD restarted: it stopped answering (N in all)`. `s` gains `card_restarts`.
+
+### Found (from the session's logs; no change)
+- **Why the card dropped out.** The first dropout is explained: the card was moved to the Mac and back while the board ran, and nothing read the card until the Evesham booted, so SdFat still held the old volume and the card had woken in SD mode (`S`: `size_mb=0`). The first read of C: failed, and `attempt()` restarted it (`card_lost=1`). That's the design working, but `S` and `M` didn't notice (fixed above). The second came during Doom; the likeliest moment is a WRITE SECTORS to `C:\DOOMDATA` that took 174 ms (at 459 s; the others took under 20 ms), long enough for a write that failed, a restart and the retry, though a slow card write can take that long by itself. The third left the card silent between 23:13 and the power cycle: the CUE sheet and the BIN's directory entry were read (from the card: the board had never read them before), then the BIN's first data read failed within 150-200 µs, too fast for a card that is busy (SdFat's timeouts are hundreds of milliseconds) and as fast as one that doesn't drive MISO at all. So the card stopped responding in SPI mode, from a reset or the socket's contacts after it was reseated, not from anything the BIN's reads asked of it; after a power cycle the same reads worked. With dev.11 each dropout prints a timed CARD line. A bench check: pull and reseat the card with the board running, then `-m card` and a CD-ROM read.
+- **The Evesham's unwaited CD data reads:** see [docs/atapi.md](docs/atapi.md#the-eveshams-unwaited-cd-data-reads-4-nov-2026).
+
+## [0.30.0-dev.10] - 2026-11-04 (branch `hdd-cd`)
+
+### Fixed
+- **`bb48_hdcd` with a CD-ROM as device 1 runs on `ide_bus`, not early answers.** On the bench (USB adapter, Windows) early answers never got past the adapter's power-on probe: its register check (A5/5A/AA/55 written to Sector Count and LBA Low/Mid/High, then read back) recorded LBA High as 00 every time (11,879 times in 75 s) and no read-back, every Status read was held 1.7-2.4 µs, and the adapter retried for good, never offered USB a disk and dropped off USB (a replug after a long spell of it). With or without DMA offered; the hard disk alone (`device1 = none`) on early answers and `bb48_drive` were detected as before. Why is still open (the trace is kept for it). Console `P e` still picks early answers, to reproduce it; `S` says which program runs.
+
+### Tested on the bench (4 Nov, the USB adapter on Windows)
+- **PIO speed after dev.3's DMA fix:** the data lane 1.54 MB/s reads, 1.68 writes; early answers 1.21 and 1.13; as before. Slices 3-4 pass on the lane.
+- **`bb48_hdcd` on `ide_bus`, `mode = mdma2`, a CD-ROM as device 1:** Windows shows both drives (the disk, and the CD-ROM as D:). The disk in MDMA 2: 9.02 MB/s reads, 1,142 random 4 KB reads a second, 13.25 MB/s writes (as `bb48_drive`). The CD-ROM's 64 MB test disc, every byte checked: 3.42 MB/s with read-ahead (the CD-ROM build without it: 2.42). Both at once: the disk 4.16/5.16 MB/s, the CD-ROM read without errors. Console `M` disc changes seen by Windows as they happen (`DOOM_SE.ISO` mounted as CDFS, ejected, mounted again), and every file on it read through Windows (22.7 MB).
+- **`bb48_hdcd` soaked 60 minutes** (dev.10, `ide_bus`, MDMA 2, the test disk as device 0 with the bus observer's full checks, the CD-ROM's test disc read throughout): 1,981 MB written and read back with no mismatches, 139,009 commands (68,354 DMA), 11,976,335 sectors checked on the cable, 0 bad, 0 gaps, none dropped; the CD-ROM read 4.4 GB without an error. Worst read 3,280 ns (Alternate Status, the CD-ROM's known slow reads, [docs/atapi.md](docs/atapi.md)), so it ran with `HDDPRO_SOAK_IORDY_MAX_NS=4000`; at the default 2,000 it stopped after 5 minutes, with the data clean. An earlier try stopped after 10 minutes on two packets the CD-ROM refused with ILLEGAL REQUEST (opcodes it doesn't handle, which Windows sends now and then, as a real drive would answer): the soak now counts those instead of failing.
+- **The adapter hangs when a CD-ROM vanishes under it, it seems:** every time the board was flashed, restarted or taken off the bus (console `V`) while the adapter had a CD-ROM as device 1, the adapter went silent (no bus accesses, gone from USB) until it was unplugged and plugged back in; with hard disks alone, flashes and re-detections worked all evening. So `bench_session.py`'s flash-then-re-detect can't run `bb48_hdcd` steps with a CD-ROM unattended: after a flash, replug the adapter by hand. (A retro PC restarts with the drive, so it shouldn't meet this.)
+- `host/bench_session.py`: the soak (`--only hdcd-soak`) reads the CD-ROM throughout, and the background reader loads the test disc first and wraps at its end.
+- Without DMA offered (`mode = auto`) the adapter's TEST UNIT READY (a PACKET with the DMA bit set) is refused and it resets and re-detects for good: `bb48_hdcd` with a CD-ROM needs `mode = mdma2` on this adapter, as the CD-ROM build does.
+
+### Tested on a retro PC (4 Nov, evening, the Evesham: Athlon XP 2000+, PCI IDE, Windows 98 startup floppy)
+`bb48_hdcd` dev.10, a normal build: `device0 = ICL386MB.IMG` (PIO 3, geometry 756/13/51 from its partition table), `device1 = cdrom`, `cdrom = DOOM_SE.ISO`, `mode = auto`, `early_answers = on`, `isa = off`, so `ide_bus`. Logs: `host/runs/retro-20261104-{225907,231130,232103}-evesham-hdcd*.log`.
+- **Both drives found, on the primary channel** (the PC's own optical drive on the secondary). From the floppy, `OAKCDROM.SYS` and MSCDEX made the CD-ROM D: and C: was the image's MS-DOS 5 disk; `DIR` listed both.
+- **Doom from the CD, its saves on C:** (`C:\DOOMDATA`): 3,361 commands (3,079 READ(10) from the CD, 237 READ SECTORS and 27 WRITE SECTORS on C:, 18 TEST UNIT READY), **every one with good status**; 5,360 sectors checked on the cable, `bus_bad=0`; no `STUCK`, `BUSERR` or `NOCS` (`dior_no_cs=0`, a PCI controller).
+- **The host didn't wait for IORDY on 26 CD data reads** (`NOIORDY ... last=DATA`, each just after a READ(10), in its data phase); none on the hard disk's reads (0 at the DOS prompt). The game ran, so they were answered in time, but `ide_bus` doesn't promise that. On the CD-ROM build (early answers) this PC had 107 the same way (3 Nov).
+- **The CD's slow status reads:** 16,746 reads held past 400 ns during Doom, worst 3,590 ns (Alternate Status, the driver polling between packets), 2,418 by the DOS prompt (worst 3,160 ns). The host waited for every one (`iordy_ignored` counts none on Status). The known slow reads ([docs/atapi.md](docs/atapi.md)); step 2b of the bench checklist profiles them.
+- **Disc changes under MSCDEX** (console `M`): to `none`, `DIR D:` gave `CDR101: Not ready`; to the test disc, the next command got UNIT ATTENTION (medium may have changed), MSCDEX re-read the TOC and sector 16 and said `CDR103: CDROM not High Sierra or ISO-9660 format`, so it noticed the change rather than listing from its cache; to `DOOMBIN.CUE`, the same unit attention, then `DIR D:` and `DIR D:\DOOMCD` listed Doom's files.
+- **BIN/CUE works on the board, on a retro PC:** `DOOMBIN.CUE`/`.BIN` (from `tools/iso_to_bincue.py DOOM_SE.ISO --audio 30`: MODE1/2352, then a silent audio track) read as `DOOMBIN.BIN, track 1 of 2 (2352-byte frames from byte 16), 11431 frames`, and served `DOOM_SE`'s files, no errors.
+- **Found: the SD card dropped out several times during the session** and a disc change then failed. The card had been put back in while the board ran, and `S` twice reported `size_mb=0 image=none bench=none config=none` with the card in, recovering on its own in between (`card_lost=2 card_back=2`). Device 0 carried on (its reads go through `attempt()`, which restarts the card after a failed read); **device 1's reads go through SdFat's file layer with no retry**, so after a dropout every BIN read failed (MEDIUM ERROR, 3/xx, in 150-200 µs, MSCDEX resetting the CD-ROM and retrying) and `M DOOM_SE.ISO` gave `not found`. Unplugging the BB48 cleared it, and the BIN then read cleanly. Also, **no `CARD` line was printed for those dropouts**: `printCardChanges()` compares the state when it looks, so a loss and recovery between two looks goes unreported. Both to fix.
+
+### Changed
+- `scripts/retro_log.py` sends `M disc` lines with their Enter, as it does `E` lines (it sent `M` lines without one, so the drive waited at its disc prompt and took the next character typed as part of the name).
+
+## [0.30.0-dev.9] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **BIN/CUE images for the CD-ROM drive** ([docs/atapi.md](docs/atapi.md#bincue-images-0300-dev9)): `cdrom = NAME.CUE`, `device1 = NAME.CUE` or console `M NAME.CUE` serves the CUE sheet's first track, if it is data, from the BIN it names: MODE1/2048, MODE1/2352, MODE2/2352 (XA form 1) or MODE2/2336, each frame's 2,048 data bytes read out of the raw ones. The data track ends where the next track in its file starts, so a mixed-mode game serves its data without its music (no audio tracks: the drive has no audio output); an audio CD is refused with the reason. `src/cue_sheet.*` (pure, `test_cue_sheet.cpp`) reads the first 1.5 KB of the sheet and maps the drive's sectors into the BIN (`RawTrackDisk`); `sd_card::readFileStart` reads the sheet (only reads). Core 0 only: the hard disk build's core 1 functions are at the same addresses and sizes; the CD-ROM builds use about 1.7 KB more RAM (`bb48_hdcd` 94.0%). The BIN's frames aren't 512-byte aligned, so it's read through SdFat's file layer, not the extent map. **Not yet tried on the board.**
+- **A design for the drive choosing its own bus program** ([docs/auto-bus.md](docs/auto-bus.md)): `bus = auto`, early answers after every reset, the data lane once the host has shown no ISA signature (`dior_no_cs`), proved it waits for IORDY (reads held past its own strobe, none ignored) and got past detection, and back at the next reset or the first read it didn't wait for; switching block 0's program live; what's still unknown (a host changing timing without a reset), and what to record on each PC for it. Design only.
+- **Found reviewing it:** a CUE sheet that failed to parse could blank the name of the BIN still open from the disc before (the card code keeps it, to reopen the file when a card comes back); it's now parsed into a copy and kept only on success. `INDEX 1` (no leading zero, as some tools write it) is read as `INDEX 01`.
+- **`tools/iso_to_bincue.py`:** a BIN/CUE from an ISO to test with (MODE1 or `--mode2`, `--audio N` for a silent audio track after it; EDC/ECC left as zeros, which the drive never reads). Its four kinds read back through `RawTrackDisk` identical to the ISO.
+
+## [0.30.0-dev.8] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **A candidate fix for the CD-ROM build's slow reads, off by default:** `-DEARLY_POLL_FIRST_NS=1000` makes early answers' tight loop wait up to that long after a command is queued for the host's next access (its first status poll), answer it (BSY), and only then run the command, so a long packet holds the host's second poll, which comes later, rather than its first. For the bench to measure with `CMD_PROFILE` ([docs/bench-checklist.md](docs/bench-checklist.md)); compiled and checked (`check_core1_ram.py`), not yet run on hardware. Normal builds are unchanged.
+
+- **Release notes for 0.30.0** (`docs/release-notes/v0.30.0.md`, for the people flashing it), and CI's release uses `docs/release-notes/vX.Y.Z.md` when there is one (GitHub's generated notes otherwise) and publishes the CD-ROM and hard disk + CD-ROM UF2s too (`hddsynthpro-bb48-cdrom-...`, `hddsynthpro-bb48-hdcd-...`).
+
+- **The register table's design brought up to date** ([docs/no-iordy.md](docs/no-iordy.md)): today's PIO block map (every block nearly full), where the table program would fit (DD's drivers in block 0, write capture in block 1, IORDY's diagnostics off), BSY after a command across blocks (`irq next`, two tables), and why it might end slow reads on every host and the ISA/PCI split with them.
+
+- **A design for the HDD Synth's CD-ROM screen and disc swapping** ([docs/hddsynth-cdrom-display-brief.md](docs/hddsynth-cdrom-display-brief.md)): activity link protocol version 3, with known answers for both sides' tests, the synth's screens, HDDSynthPro's work, and the owner's decisions. Design only.
+- **`host/bench_session.py`:** runs a bench session's rig steps by itself (docs/bench-checklist.md): flashes each build, sets the console up (settings, test disk, bus program), re-detects, runs the speed, slice and CD-ROM tests, changes discs while Windows watches, and writes a summary beside the last figures; restores the settings it changed.
+- **Mock-ups of those screens** in the brief, drawn with the synth's own font and FDDSynthPro's layouts (`docs/oled-cdrom/`, from `tools/oled_mockups/render_cdrom.py`): the CD-ROM's home screen reading, seeking, idle, with no disc and with no link; the disc picker; ejecting, loading and a refused load; a laser trace; both drives at once. Protocol v3's `$HDL` gains each disc's frames (the picker's sizes), and `bb48_hdcd` sends `$HDD` for its hard disk too (the drives screen).
+
+### Fixed
+- Compiler warnings in the builds that don't use everything `main.cpp` holds (`chooseDevice1` in the CD-ROM build, `restart` in the listen build), and a device 1 note that could be cut short.
+
+## [0.30.0-dev.7] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **Changing the CD-ROM's disc at run time:** console `M`, then an ISO's name, `test` (the test disc) or `none` (eject), and Enter, in `bb48_cdrom` and `bb48_hdcd`, until a restart. The host sees a real tray's behaviour: a media-removal event and NOT READY while it's out, then a new-media event and a unit attention, medium may have changed (28h; `mmc::discChanged`, `State::attention`). Core 0 ejects first and swaps files only once core 1 has taken the eject, which it does only when the device is idle (`atapi::Device::idle`), so no fetch for one disc is served from the next. Host tests: `mmc_disc_changes`, `atapi_changing_the_disc`, `hdcd_changing_the_disc_leaves_the_disk_alone`. On the board (no host on the bus): swaps between `DOOM_SE.ISO`, the test disc, none and a missing file, in both builds. Not yet seen by Windows or MSCDEX. The hard disk build is unchanged (its core 1 code at the same addresses).
+
+## [0.30.0-dev.6] - 2026-11-04 (branch `hdd-cd`)
+
+From a review of everything since 0.28.0 (`main`), before the next bench session.
+
+### Fixed
+- **`bb48_hdcd`: a device could act on what the other was selected for.** A device ignores register writes while it's busy, so with the host selecting the disk while the CD-ROM fetched, the CD-ROM still thought itself selected: the wrapper routed the disk's Status reads to it, and the CD-ROM could take the disk's next command (in a host test, an IDENTIFY DEVICE meant for the disk returned the CD-ROM's IDENTIFY PACKET DEVICE). `hdcd::Device` now keeps the Device register itself, from every write (and 0 after RESET#, SRST and EXECUTE DEVICE DIAGNOSTIC), routes by it, and gives both devices the register again before each command. Host tests: `hdcd_selecting_the_disk_while_the_cdrom_is_busy` (failed five ways before), `hdcd_resets_select_device_0`.
+- **A CD-ROM's ISO marked read-only didn't open** (`can't open`), in both CD-ROM builds: images open for writing. Discs now open read-only (`sd_card::openImage`'s and `openDevice1Image`'s `read_only`), so an ISO copied off a CD with its read-only attribute works. A hard disk's image still opens for writing or not at all, since device 0's writes can reach the card's sectors directly.
+- **Not a bug, but a measurement for the bench:** `-DCMD_PROFILE=1` (off in normal builds) adds `cmd_run_max_ns` and `cmd_run_max` to `s`, the longest time core 1 spent on a command while the host's next access waited, to tell whether the CD-ROM build's slow reads (up to 3.6 µs on the rig) come from running each packet in early answers' tight loop or from early answers itself. Read from the code: not flash (no function core 1 reaches loads from it), not the bus code's size ([docs/atapi.md](docs/atapi.md)).
+- **The welcome disk's README** lists every setting (it lacked `early_answers`, `iordy`, `geometry` and `cdrom`), the CD-ROM options for `device1`, and a new "which settings for your computer" table, as does `docs/settings.md`; the sample `HDDSYNTH.INI` gains `cdrom` and the CD-ROM option in `device1`'s comment.
+- **Device 1 could be device 0's own image** (`device1 = DOS.IMG` beside `device0 = DOS.IMG`, or naming `HDDSYNTH.IMG` when device 0 had fallen back to it): the PC would see one filesystem as two disks, and writes through either would corrupt it. Refused now: `CONFIG device1 not used: NAME: device 0 serves it already` (seen on the board).
+
+## [0.30.0-dev.5] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **CD-ROM read-ahead** (`bb48_cdrom` and `bb48_hdcd`): a disc read fetches the next 512-byte sector into a second buffer while the host takes the one before, as the hard disk does, so the next block is usually ready at once; `read_ahead = off` or console `A` turns it off, as for the disk. Host-tested (`atapi_read_ahead_keeps_the_next_sector_ready`: one BSY wait for a two-frame read, eight without; a failing read-ahead reports MEDIUM ERROR after the sector before; one cut short by a reset is stale). Not yet measured on the bus. +512 bytes of RAM.
+
+## [0.30.0-dev.4] - 2026-11-04 (branch `hdd-cd`)
+
+### Added
+- **`bb48_hdcd`: a hard disk as device 0 and a CD-ROM drive as device 1**, from one board. `device1 = cdrom` (serving the `cdrom` setting's disc) or a device1 name ending in `.ISO` makes device 1 a CD-ROM drive: the ISO, the test disc after console `T` or with `cdrom = none`, or no disc if the file isn't there. Otherwise the build serves what `bb48_drive` does. `hdcd::Device` (`src/hdcd_device.*`) behaves as two devices on one cable: both take every register write and RESET#, the selected one answers reads, runs commands and drives INTRQ, and DMA goes to whichever runs it. `atapi::Device` takes a position: at 1 it answers when DEV is 1, its fetches carry unit 1 and ids with the top bit set (so each result reaches the device that asked), and DEVICE RESET leaves it selected. With a CD-ROM, early answers replace the data lane. `CONFIG device1=cdrom kind=cdrom disc=... frames=...`; the READY line ends `slice3 hdcd`. Host tests: `test_hdcd.cpp` (nine cases), `test_config_device1_cdrom`. On the board: it starts and reports `ICL386MB.IMG` as device 0 and `DOOM_SE.ISO` as device 1; not yet on the bus (the USB adapter was off USB).
+- A build of its own for now, since every access takes one more branch: `bb48_drive`'s core 1 code is unchanged (its bus functions at the same addresses), and in the hard disk build `device1 = cdrom` or an ISO isn't served (`CONFIG device1 not used: ... needs the bb48_hdcd build`) rather than served as a hard disk. CI builds `bb48_hdcd` and runs `check_core1_ram.py` on it. RAM: 8.9 KB more than `bb48_drive`.
+- `bus_observer::begin` checks device 1's IDENTIFY PACKET DEVICE block when device 1 is the CD-ROM.
+- DMA simulation: bursts of a CD-ROM's lengths (4, 9, 18 and 256 words) in modes 0-2, every word within tE and held tF.
+
+## [0.30.0-dev.3] - 2026-11-04 (branch `merge-cdrom`)
+
+### Added
+- **The CD-ROM build moves PACKET's data by multiword DMA** when it's offered (by the same settings as the hard disk: `mode = mdma0-2`, or `dma = on` with `mode = auto`, and DMARQ wired). IDENTIFY PACKET DEVICE offers modes 0 to 2 (word 49 bit 8, word 63), SET FEATURES selects one, and a PACKET with its DMA bit takes the packet by PIO, then sends each block as an `ide_dma` burst (a reply whole, a disc read a 512-byte sector per burst), with no byte count limit and one interrupt, at the status phase. Not offered, the DMA bit is still refused (ABRT). Host tests: `atapi_offers_multiword_dma`, `atapi_dma_packets`, `atapi_dma_errors_and_resets_end_the_dma_command`.
+- **On the rig** (the Windows rig's adapter, which sends every packet by DMA and so found no CD-ROM drive before): Windows 11 lists `HDDSYNTH PRO CD-ROM USB Device` as D:. `-m cdrom` passes: the whole 64 MB test disc read and checked byte for byte (2.42 MB/s) and random reads, 103,103 sectors checked on the cable by the bus observer, 0 bad, from 31 million DMA words. With the card's `DOOM_SE.ISO`, Windows mounts the CDFS volume `DOOM_SE` and all 27 files (22.7 MB) read without an error (1.36 MB/s: the card over SPI, and no read-ahead yet). Its polling (GET EVENT STATUS NOTIFICATION, once a second) completes in 25 us.
+
+### Fixed
+- **Multiword DMA under early answers** (the default bus program since 0.27.0) **took about 12 s per 64 KB read**: the tight bus loop never served DMA, and the main loop's DMA step waited for the bus to be quiet for 10 ms (`EARLY_BUS_ONLY_US`), which in DMA it is between every burst, since the host waits for DMARQ instead of polling. The tight loop's idle work now runs DMA as well. On the rig (hard disk build, MDMA 2, early answers): reads 8.84 MB/s, 1,000 random 4 KB reads a second, writes 12.48 MB/s, worst read 1,140 ns (0.18.1 on `ide_bus`: 7.70, 1,100, 13.9). Unseen until now because DMA is off by default and the retro PCs ran PIO; found by the CD-ROM build, which always runs early answers. The hard disk's core 1 bus functions are where they were; `loop1` grew by 92 bytes.
+- **Not yet benchmarked in PIO after this change** (`-m speed` on the lane and early answers): the USB adapter dropped off USB when the board went back from the CD-ROM build to the hard disk's (below), and needs replugging.
+
+### Rig
+- The adapter went off USB altogether after the switch back from the CD-ROM build (no USB device, no probing on the IDE side: its controller hung), and only a replug or a PC restart will bring it back (restarting its root hub needs a reboot). Its USB serial number has come through in about 25 garbled variants over the weeks, so this is its decline as much as the switch. Earlier the same day one switch back went cleanly.
+
+## [0.30.0-dev.2] - 2026-11-04 (branch `merge-cdrom`)
+
+### Added
+- **`dior_no_cs` in `s`, and a `NOCS` line:** DIOR# strobes with no chip select while the drive offers no DMA (`n/a` while it does). An ISA card passes every I/O read the PC makes to the cable this way (the ICL 386: 19.9 million in a session, which the bus observer counted as DMA words); a PCI controller or a USB adapter shouldn't strobe at all outside the drive's addresses. `NOCS <ms> ms after RESET# release` says how soon the first came after each release (or boot). Evidence for choosing the bus program by itself one day (the lane on PCI hosts, `ide_bus` on ISA ones); [docs/retro-test.md](docs/retro-test.md) asks for it on every PC. Core 0 only. On the rig: 0 through the USB adapter, over a speed run.
+
+### Tested
+- **The merge (dev.1) on the rig** (USB adapter, generated disk, the lane, PIO mode 3): `-m speed` as 2d.6 (1.54 MB/s reads, 80 IOPS, 1.68 MB/s writes, worst read 1,320 ns, Alternate Status), slices 3 and 4 pass. The hard disk build's core 1 bus functions are at 2d.6's addresses.
+- **A 60-minute soak of dev.2** (the lane, generated disk, full observer checks): 3.3 GB, no mismatches, 112,290 commands, no resets, 5.6 million sectors checked on the cable, 0 bad; worst read 1,330 ns (Alternate Status, as last night's).
+- **The CD-ROM build through the USB adapter** (first time; dev.2, the test disc): detected, but no CD-ROM drive for Windows. The adapter sends every PACKET with the DMA bit set (FEATURES 01h), though IDENTIFY PACKET DEVICE offers no DMA; the drive aborts it, as written, and the adapter polls for 17 s, resets it and starts again, every 20 s, never trying PIO. Not from the merge (the adapter decides before the drive answers anything but IDENTIFY). The fix would be PACKET in multiword DMA ([docs/atapi.md](docs/atapi.md)). Worst read 2,830 ns (Alternate Status), the CD build's known slow reads, now repeatable on the rig.
+
+## [0.30.0-dev.1] - 2026-11-04 (branch `merge-cdrom`)
+
+`two-drives` (0.29.0-2d.6) and `atapi-cdrom` (0.29.0) merged: one codebase with the data lane, two drives and the CD-ROM build. Their entries follow, each under its own branch.
+
+### Changed
+- **The bus code takes `DriveDevice`** (atapi-cdrom's per-build alias) throughout, the data lane's functions included; `atapi::Device` has every call the lane makes, so both builds compile it.
+- **The CD-ROM build runs early answers where the settings would pick the data lane** (`CONFIG the CD-ROM build runs early answers, not the data lane`): the lane was written and tested for the hard disk's 256-word blocks, the CD-ROM proven on early answers and `ide_bus`. `isa = on` still gives `ide_bus`.
+- **The CD-ROM build has one drive**, the CD-ROM as device 0: `device1` is the hard disk build's. Its notes read `CONFIG cdrom not used`, the hard disk's `CONFIG device0 not used`.
+- `HDDSYNTH.INI` has `device0`, `device1` and `cdrom`; `image` is still device0's old name.
+
+### Fixed
+- **A trace clash the merge would have made:** two-drives marked device 1's `CMD` in bit 31 of the event, atapi-cdrom put the packet's opcode in bits 24-31, so a READ(12) (A8h) would have printed as device 1's. The unit now has its own byte, in the padding after the event's kind (still 16 bytes, now checked by a `static_assert`; `config.h` said 12, which the padding never allowed); a host test holds READ(12) to device 0.
+
+## Branch `two-drives`, unreleased
+
+### Tested
+- **The data lane soaked 400 minutes** on the USB adapter (2d.6, built-in disk, PIO mode 3, full observer checks, 3-4 Nov): 18.6 GB, no mismatches, 642,672 commands, no resets, 31.9 million sectors checked on the cable, 0 bad. Worst read 1,340 ns, Alternate Status ([docs/data-lane.md](docs/data-lane.md)).
+
+## [0.29.0-2d.6] - 2026-11-03 (branch `two-drives`)
+
+### Added
+- Console `P` then `e`, `l`, `i` or `0`: the bus program (early answers, the data lane, `ide_bus`, or the settings') until a power cycle, whatever `HDDSYNTH.INI` says, kept in watchdog scratch 1 across the restart it triggers. For comparing programs on the rig with no card, or without editing the file.
+
+### Fixed
+- **The bus observer didn't check image data on the lane:** image checks were switched on with `early_answers` only. They are on now whenever `isa` is off (early answers or the lane), and off with `isa = on` even if `early_answers` is on (the ISA card's DIOR# with no chip select looks like data). On the rig, 16 MB read from `HDDSYNTH.IMG` on the lane: 5,805 sectors checked on the cable, 0 bad, no reads over 1,250 ns, 1.51 MB/s.
+- With `RIG_WATCHDOG_MS`, the console's restarts (`!`, `J`, `T`, `P`) didn't happen: `watchdog_reboot` arms the watchdog and returns, and `loop()` went on feeding it. They now wait for the reset.
+- The folder drive (2d.5) seen on the board: the test folder listed (its 32 KB list didn't fit, so half was taken) and read through the USB adapter, byte for byte as far as the adapter shows it ([docs/two-drives.md](docs/two-drives.md)).
+
+## [0.29.0-2d.5] - 2026-11-03 (branch `two-drives`)
+
+### Fixed
+- **The board didn't start with a folder as device 1** (found on the ICL 386, below). Arduino-Pico's libstdc++ is built without exceptions, so `new (std::nothrow)` doesn't return nullptr when memory runs out: the `bad_alloc` it throws inside becomes `abort()`, and core 0 halts, USB with it. `chooseDevice1()` asked for 32 KB for the folder's list first, with 35,848 bytes free in all but not in one piece, so the board halted before it could try half. It now uses `malloc`, which returns nullptr, and halves as intended. Found on the rig with a build that printed each step (it stopped at the allocation); on the host, nothrow `new` does return nullptr, so `make_folder_img` never showed it. **Not yet seen working on the board:** the rig's card stopped answering after a restart (ACMD41 times out until it's power-cycled), so the folder wasn't listed again.
+
+### Added
+- `RIG_WATCHDOG_MS` (build flag, rig only): the hardware watchdog, fed by core 0's loop, so a build that halts restarts by itself and can be flashed again over USB, for work on the rig with nobody to replug it. Not for releases: console `K` and `I` block core 0 longer than it allows.
+
+## 0.29.0-2d.4 on the retro PCs, 3 Nov evening
+
+0.29.0-2d.4 on the ICL 386 and the Evesham, 3 Nov evening ([docs/retro-test.md](docs/retro-test.md#results-3-nov-2026-evening)). No firmware change.
+- **The data lane on the Evesham:** it boots and runs HDDBENCH cleanly, reads 2.18 MB/s and writes 1.98 (early answers: 1.78 and 1.24). But about 1,400 Status reads a benchmark were held past ATA's 1,250 ns (worst 1,540), and the bus observer doesn't check data on the lane.
+- **Two drives:** both PCs' BIOSes find device 1 without DASP#. An image as D: passed FDISK, FORMAT and `FC /B` on the 386 (`isa = on`) and `FC /B` on the Evesham (on the lane), with no failed commands.
+- **Found: the board doesn't start with a folder as device 1** (`device1 = GAMES`): no USB serial port at power-up, every time, while the same folder lays out cleanly on the host. Fixed in 2d.5.
+
+### Added
+- `host/hddproto/test_folder.py`: a test folder for the folder drive, its files' contents following from their names, with `CHECK.BAT` for the retro PC (copies D: to `C:\HDDTEST` and compares each file) and a check of the copies on the Mac afterwards; `test_test_folder.py`.
+
+## [0.29.0-2d.4] - 2026-11-03 (branch `data-lane`)
+
+### Added
+- **The data lane** ([docs/data-lane.md](docs/data-lane.md)): with `early_answers` and `isa` both off, data register reads are answered by PIO and DMA, without core 1. `ide_bus_data` (`ide_bus` with an address check at the strobe) hands each data read to `ide_data_in`, a second state machine in the same block whose FIFO (joined, 8 deep) a DMA channel fills from the device's block; the pair fill the block's 32 instructions. Core 1 starts the channel before the host can see DRQ, moves the device on as soon as the channel has queued the block's last word (STATUS still shows the block's DRQ, and INTRQ waits, until the host has read it), and starts the next block when `ide_data_in` takes the spare word the channel adds after each block. On the USB adapter (built-in disk, PIO mode 3): sequential reads 1.54 MB/s (`ide_bus` 1.38-1.41, early answers 1.18), random reads 80 a second, writes 1.65 MB/s; about 10 reads over 1,250 ns in a `-m speed` run, against about 50,000 with early answers. `s` shows `bus=` (which program serves the bus), and with the lane `lane_blocks` and `lane_switch_max_ns`.
+- `pio_sim`: several state machines in one block (`PioBlock`), WAIT on an IRQ flag, and a DMA channel's model (`DmaToTx`); `test_data_lane_sim.py` (92 tests).
+
+### Fixed
+- **A command written while the host polled STATUS back to back could be left queued for good** (STATUS then read BSY forever): core 1's loop reached its command check only when the bus program's FIFO was empty. It now runs a queued command as soon as it has served the access. Found with the lane, which made each answer a little slower; `ide_bus` had the same weakness.
+
+### Changed
+- `early_answers` keeps its default (on) for now: the lane is chosen with `early_answers = off`. With the lane there's no IORDY watchdog (no room), so ISA cards need `isa = on`, and hosts that ignore IORDY on register reads still need `early_answers = on`.
+- `-m timing` skips on the lane (console `D` can't delay reads core 1 doesn't answer). The raw trace doesn't show data reads on the lane.
+
+## [0.29.0-2d.3] - 2026-11-03 (branch `two-drives`)
+
+### Changed
+- **The settings are `device0` and `device1`**, ATA's own names for the two drives on a cable, in place of `image` and `slave` (`drive_config`). `image` still works, as `device0`'s old name, so settings files from 0.28.0 and earlier need no change; if a file has both, `device0` counts, with a warning. Console `E` treats the two names as one setting and rewrites an `image` line as `device0` in place, keeping its comment. `C` and the welcome disk's sample write `device0 = HDDSYNTH.IMG` and `device1 = none`.
+- `S` prints `CONFIG ... device0=...`, `CONFIG device0 not used: ...`, `CONFIG device1=... kind=... sectors=...` and `CONFIG device1 not used: ...`; `s` shows `device1=` and `device1_sectors=`.
+- Device 1's IDENTIFY: model `HDDSYNTH PRO D1`, serial `HSP-000001-D1`.
+- `test/run_native_tests.sh` runs from Git Bash on Windows (MinGW g++, e.g. WinLibs): `python` for the welcome text, and UBSan in trap mode, since MinGW has no sanitizer runtimes (CI still runs ASan and UBSan). `scripts/rig.sh` passes it the Python it chose.
+
+- **Going back to 0.28.0 or earlier** after `E` has rewritten a settings file: those releases don't know `device0`, warn `unknown key 'device0'` and serve `HDDSYNTH.IMG`. Put an `image =` line back for them.
+
+### Tested
+- On the rig (Windows, the JMicron-ID adapter, the built-in disk, PIO mode 3, early answers on), with no device 1: `-m speed` on 0.29.0-2d.2 against 0.28.0, the same day: sequential reads 1.18 MB/s on both, writes 1.06 MB/s against 1.08, 74.9 random 4 KB reads a second on both. The worst read (2,140 ns against 2,130, STATUS) is the same on both.
+- **The USB adapter shows device 1** (its bridge is a JMicron JM20337): at each detection it sends IDENTIFY and SET FEATURES to both devices, and once its USB connection restarts (`pnputil /restart-device`; it reports its units only when it enumerates) Windows lists device 1 as a second disk (`USBSTOR\...&1`, named `HDDSYNTH PRO D`: the adapter keeps a short product name). Device 0 on the built-in disk and device 1 on `HDDBENCH.IMG`, 300 rounds of reads from device 0 interleaved with writes and read-backs on device 1: 13,158 and 15,534 sectors, 0 mismatches; the bus observer checked 13,456 of device 0's sectors on the cable, 0 bad, and no read went without IORDY.
+- **The adapter's garbled names are its own fault:** after six re-detections with device 1 off, Windows had blank and ` P` names and a corrupted USB serial (`980220290922`) while the bus observer checked all 28 IDENTIFY blocks on the cable, 0 bad. A USB restart alone doesn't make it read IDENTIFY again (it keeps what it read at its last detection). Unplugging it cleared it for a few minutes; a PC restart didn't.
+- **Early answers hold reads past ATA's 1,250 ns, a lot:** on 0.28.0 and on this branch alike, about 50,000 reads per `-m speed` run (mostly STATUS, median 1,350 ns, the worst 2,140), and 158,000 in slice 1's 20 detections (up to 3,670 ns), timed from DIOR# falling to IORDY's release. With `early_answers = off`: the worst read in traffic 1,160 ns, and reads 1.38 MB/s, writes 1.76, 78.4 random reads a second. Detection still has a few over 1,250 ns in normal mode (slice 1: 32 on this branch, worst 1,390 ns; 33 on 0.28.0, worst 1,580 ns; mostly Device register and STATUS reads around IDENTIFY), so slice 1 fails its IORDY check either way. Not from this branch; what to do about early answers is open.
+
+## [0.29.0-2d.2] - 2026-11-02 (branch `two-drives`)
+
+### Added
+- Device 1's commands are marked in the trace: their `CMD` lines end in `d1` (`trace_format`, bit 31 of the event; `host/hddproto/trace.py` reads it as `Command.unit`). Device 0's lines are unchanged.
+
+### Changed
+- The folder drive's partition is whole tracks, to the disk's end, as FDISK makes them: mtools refused one that wasn't. CI checks a folder image with `fsck.fat`, `mtools` and pyfatfs on each push to the branch, and reports a failing tool's output as an annotation.
+
+## [0.29.0-2d.1] - 2026-11-02 (branch `two-drives`)
+
+An experiment: two drives on one cable, and a folder on the card as a drive ([docs/two-drives.md](docs/two-drives.md)). **Not yet tried on hardware**: built and host-tested overnight with the rig unplugged.
+
+### Added
+- **Device 1 (slave)**: `slave = NAME` in `HDDSYNTH.INI` gives the drive a second unit, so a retro PC sees two hard disks. `ata::Device` keeps each unit's identity, geometry, IDENTIFY block, standby and write cache, and swaps the selected unit's status, error and interrupt into place when the host changes the Device register's DEV bit. One command runs at a time on a cable, so the command engine, sector buffers, read-ahead, write-behind and DMA are shared; each `Fetch` carries its unit, and core 0 serves it from that unit's disk. Every per-access path is the one-drive code: the only new work on core 1 is at a Device register write. Both units reset together (the signature, diagnostics 01h); EXECUTE DEVICE DIAGNOSTIC selects device 0. The slave's IDENTIFY: model `HDDSYNTH PRO S`, serial `HSP-000001-S`, its own size and geometry (from its image's partition table), the master's transfer modes. With no `slave`, device 0 answers for an absent device 1 as before.
+- **A folder as device 1, read-only** (`src/folder_disk.*`, host-tested): `slave = GAMES` serves the card's folder `GAMES` (and its subfolders) as a FAT16 volume laid out at start-up. Each file and folder gets one run of clusters in listing order, so the FAT is computed, not stored, and every sector is made when it's read: the partition table, boot record, FATs and folders from the list, files' sectors from the files on the card through one open file kept between reads. 8.3 names are made from the long names as Windows makes them (`LONGFI~1.TXT`); hidden and system entries and dot-files are left out. 32 bytes of RAM per entry, on the heap, up to `cfg::FOLDER_MAX_ENTRIES` (1,024) while leaving 16 KB of heap; the root holds 511; FAT16 stops at 2 GB (32 KB clusters). A folder that doesn't fit is served cut short, with a `CONFIG` line saying why. Writes fail with ABRT (DOS: a write fault); nothing on the card is written. Files are read-only in their attributes too.
+- **A second image as device 1** (`slave = DATA.IMG`): through SdFat's file layer only (no extent map, no card watch), so the master's proven image path is untouched.
+- Console: `S` prints `CONFIG slave=... kind=folder|image sectors=...`, the folder's entries, cluster size and whether it was cut short, or `CONFIG slave not used: ...`; `s` shows `slave=` and `slave_sectors=`.
+- The bus observer checks IDENTIFY blocks against either unit's.
+- Tests: `test_two_drives.cpp` (13: per-unit status, error, interrupt, geometry, standby, resets, a BIOS probe of both units, read-only refusals, the lone master unchanged); `test_folder_disk.cpp` (9: short names, volumes read back through a small FAT16 reader that follows the MBR, boot record, folders and FAT chains, cluster sizes up to 32 KB, the 2 GB budget, the entry and root caps, and the folder as device 1 through ATA commands); the `slave` setting; IDENTIFY of either unit. `make_folder_img` writes the volume for a real directory, and `scripts/check_folder_img.py` compares it, file by file, through pyfatfs; CI also runs `fsck.fat` and `mtools` on one.
+
+### Not yet known
+- Whether retro BIOSes see the slave without DASP#/PDIAG# (the BB48 has neither; PCB rev 0.4 adds them).
+- Core 1's read timing with this build, one drive or two: `-m speed` and slices 1-4 first.
+## Branch `atapi-cdrom`, unreleased
+
+No firmware change: 0.29.0 on its first hardware, and a checker for DOS.
+
+### Added
+- **`CDCHECK.COM` on the test ISO** (`tools/cdcheck/cdcheck.asm`, NASM): checks every file on DOS, through the CD-ROM driver and MSCDEX, by size and CRC-32 against a table `hddproto.test_iso` builds into it. It reads the names DOS sees back from a first build of the disc (`iso9660_files`, `dos_names`), since `hdiutil` keeps long ISO 9660 names DOS can't open; those files are left out and counted. `CDCHECK /R` repeats until a key. Tested in DOSBox-X: the disc passes, a copy with one byte changed fails with ERRORLEVEL 1.
+
+### Tested
+- **The Evesham (Athlon XP 2000+), 3 Nov:** its BIOS lists the drive as an ATAPI device and tries to boot from it (READ(10), NOT READY with no disc). From a Windows 98 startup floppy (`OAKCDROM.SYS`, MSCDEX) the drive is D:; with `HDDSYNTH.ISO` (the test ISO), `DIR` lists it and `CDCHECK` passes all 13 files (216 READ(10) commands, none failed). The driver probes device 1 and correctly finds nothing (LBA High reads 00h after DEVICE RESET to it); its E: was the PC's own optical drive. It asks READ SUB-CHANNEL (42h) and gets ILLEGAL REQUEST, harmlessly. **A real disc**, `DOOM_SE.ISO` (22 MB): Doom runs from the CD in its `-cdrom` mode, its settings and saves in `C:\DOOMDATA` on the floppy's RAM drive (C: with no hard disk): 2,474 READ(10), none failed. 107 data reads didn't wait for IORDY (as the hard disk build's 247 on this PC on 31 Oct; early answers cover them), none with the test disc. **Reads past 1,250 ns:** about 19,500 over the session, worst 1,960 ns (Alternate Status), with `iordy_ignored=0`: the host waited for every one, but they're over ATA's limit. The hard disk build on early answers had none on this PC, so the CD build costs core 1 more per access somewhere; not yet found.
+
+## [0.29.0] - 2026-11-03 (branch `atapi-cdrom`)
+
+**Exploratory (branch `atapi-cdrom`), host-tested only; not yet on hardware.** A first CD-ROM drive: the MVP of [docs/atapi.md](docs/atapi.md)'s slices C1 and C2, a data disc over PIO. No audio, no DMA, no disc changes. The hard disk build is unchanged by it: its core 1 code is the same, instruction for instruction and address for address, as 0.28.0's (only the calls into flash for one-offs and the addresses of data moved, by 0x40 bytes, which keeps every word in its SRAM bank).
+
+### Added
+- **The `bb48_cdrom` build** (`-DHDDPRO_CDROM=1`): the drive as an ATAPI CD-ROM drive. `atapi::Device` (`src/atapi_device.*`) takes `ata::Device`'s place behind the same interface, picked per build by `src/drive_device.h`'s `DriveDevice`, so `ide_bus` and `loop1` are written once. It has the packet device's reset signature (14h/EBh), aborts IDENTIFY DEVICE with it, answers IDENTIFY PACKET DEVICE and DEVICE RESET, and runs PACKET in PIO: the 12-byte packet, data blocks of up to the host's byte count with an interrupt each, then the status phase; errors are CHECK CONDITION with the sense key in the Error register.
+- **The packet commands** (`src/mmc.*`, pure C++): TEST UNIT READY, REQUEST SENSE, INQUIRY, START STOP UNIT, PREVENT ALLOW MEDIUM REMOVAL, READ CAPACITY, READ(10), READ(12), SEEK(10), VERIFY(10), READ TOC (formats 0, 1 and 2, LBA or MSF), GET CONFIGURATION (the CD-ROM profile), GET EVENT STATUS NOTIFICATION (polled, media events), MODE SENSE(6) and (10) (pages 01h and 2Ah) and SET CD SPEED. A unit attention after power-on and each hardware reset, as a real drive gives.
+- **A disc read is one 512-byte DRQ block per sector fetched**: CD frame n is sectors 4n to 4n+3 of the image, so `ImageDisk` serves an ISO unchanged, and the fetch mailbox and core 1's fast lane carry the blocks. No read-ahead yet.
+- **`cdrom = NAME.ISO`** in `HDDSYNTH.INI` (`HDDSYNTH.ISO` by default; the hard disk build ignores it): the ISO to serve, or `none` (or console `T`) for the generated test disc, CD frame n being generated sectors 4n to 4n+3. No ISO: an empty drive. `CONFIG cdrom=... serving=... frames=...`.
+- The trace names a packet: `CMD <t> a0 READ_10 <frame> <frames>`. The READY line ends `slice3 cdrom`, and the hard disk's rig tests skip on that build. A first rig test, `-m cdrom` (`host/tests/test_cdrom.py`: the test disc read whole and at random), not yet run.
+- CI builds `bb48_cdrom` and runs `check_core1_ram.py` on it; it isn't part of a release.
+- **For the bench:** `hddproto/test_iso.py` builds a test ISO whose files can all be checked once mounted (checked here by mounting it with `hdiutil`), and `test_cdrom_iso.py` checks them on the disc the drive serves. `hddproto/packets.py` lists the ATAPI exchanges in a raw trace and the opcodes the CD-ROM build doesn't handle, for slice C0's recording of a real drive. docs/atapi.md has the bench steps. Host tests for awkward hosts: a byte count limit of 0 or odd, polling with interrupts off, a host giving up mid-block or mid-packet, a stale fetch after a reset, reads past a block.
+
 ## [0.28.0] - 2026-10-31
 
 **Not yet tried on hardware** (built while the rig was out of reach); host-tested only. On the same firmware, 0.27.0's automatic geometry booted the ICL 386's MS-DOS 5 image on the Evesham with its BIOS on auto and only `image =` set (7,476 sectors checked on the cable, 0 bad; core 1 released IORDY 43,490 times, harmlessly). And the ICL 386 booted MS-DOS 5 and ran games on all defaults, early answers with `isa = off`: core 1's IORDY release (0.27.0) took over from `iordy_watchdog.pio`, 44,002 times in the session. There the bus observer flagged 11 of 3,667 sectors falsely: the ISA card strobes DIOR# with no chip select (19.9 million times), which it counts as DMA words, losing its place in the sectors.

@@ -8,6 +8,7 @@
 #include <Arduino.h>
 
 #include "block_source.h"
+#include "folder_disk.h"
 #include "media_watch.h"
 
 namespace sd_card {
@@ -22,7 +23,10 @@ void printInfo(Print& out);
 // Mounts the card and opens image `name` if it is there. Returns the image,
 // or nullptr (no card, no image, or an error, written to `log`).
 // Closes any image opened before. `name` must outlive the open image.
-ImageFile* openImage(const char* name, Print& log);
+// `read_only`: opened for reading only, for a CD-ROM's disc, which is never
+// written, so an ISO with the read-only attribute (as files copied off a CD
+// often have) opens too. A hard disk's image opens for writing, or not at all.
+ImageFile* openImage(const char* name, Print& log, bool read_only = false);
 // Why the last openImage() returned nullptr: "no card", "not found" or "can't open".
 const char* openError();
 
@@ -58,6 +62,29 @@ bool createImage(const char* name, uint32_t sectors, Print& out);
 // A read or write that fails is retried once after restarting the card, so a
 // card pulled and put back while the drive was idle costs nothing.
 const media_watch::Watch& media();
+// Times the card was started again after it stopped answering (device 0's or
+// device 1's reads, or `S` and `M` finding it silent): CARD lines and `s`.
+uint32_t restarts();
+// Device 1's disk (docs/two-drives.md), kept apart from the image above so
+// device 0's proven path is untouched: a second image through SdFat's
+// file layer only (no extent map), or a folder, read-only. An image read or
+// write that fails is retried once after restarting the card, with the same
+// checks as device 0's (the same card and image); while device 0's card is
+// lost or changed they fail at once. A folder's reads aren't retried.
+// Reads the first `size` bytes of file `name` (a CD's CUE sheet) into `buf`:
+// `truncated` if there's more. Only reads. False, with `why`, if it can't.
+bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& truncated, const char*& why,
+                   Print& log);
+// Whether `name`, in the card's root folder, is a folder.
+bool isFolder(const char* name);
+// Opens image `name` for device 1, or returns nullptr (with openError()).
+// `read_only` as for openImage: a CD-ROM's disc (bb48_hdcd).
+ImageFile* openDevice1Image(const char* name, Print& log, bool read_only = false);
+// Folder `name`'s files and subfolders, for folder_disk::Volume: listed in
+// the card's own order, hidden and system entries and names starting with
+// a dot left out. A file is read through one open file, kept between reads.
+folder_disk::FolderSource& folderSource(const char* name);
+
 // Core 0's loop: while the card is lost, looks for it coming back (a CMD0
 // every media_watch::PROBE_MS, under a millisecond); while a different card
 // is in, checks that it still is. Restarting a card that answers takes tens

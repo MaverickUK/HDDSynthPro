@@ -9,7 +9,9 @@ built. Modelled:
   - OUT and IN shifting right, PUSH/PULL with blocking, and joined or 4-deep FIFOs;
   - WAIT on gpio/pin/jmppin, JMP conditions including pin;
   - MOV from STATUS, as the RX FIFO level test (EXECCTRL STATUS_SEL = RX);
-  - IRQ set and clear (not wait), into `irq_flags`.
+  - IRQ set and clear, and WAIT on an IRQ flag (this block's), in `irq_flags`;
+  - several state machines in one block (PioBlock): shared pin outputs,
+    directions and IRQ flags.
 Anything else raises NotImplementedError rather than guessing.
 
 Pins use the sample layout of src/bus_sample.h throughout: bit n is GPIO
@@ -202,8 +204,16 @@ class PioSim:
                 bit = index
             elif source == 3:    # relative to JMP_PIN (PIO v1)
                 bit = self.jmp_pin + index
-            else:
-                raise NotImplementedError("wait irq")
+            else:                # IRQ flag: WAIT 1 clears it as it proceeds
+                if index & 0x18:
+                    raise NotImplementedError("wait irq: a relative or other block's index")
+                flag = 1 << (index & 7)
+                if bool(self.irq_flags & flag) != bool(polarity):
+                    return False  # stall
+                if polarity:
+                    self.irq_flags &= ~flag
+                self._advance()
+                return True
             if ((pins >> bit) & 1) != polarity:
                 return False  # stall
             self._advance()
@@ -351,3 +361,86 @@ def run(sim: PioSim, wave, duration_ps: int, drain_every_cycles: int | None = 1)
         words.extend(sim.rx_fifo)
         sim.rx_fifo.clear()
     return words
+
+
+class PioBlock:
+    """State machines in one PIO block, stepped together: each cycle they all
+    see the same pins, outputs, directions and IRQ flags, as they stood at the
+    start of the cycle. A pin two of them write in the same cycle takes the
+    higher-numbered one's value, as on the RP2350; an IRQ flag set in one
+    cycle is seen by a WAIT in the next.
+
+    It stands in for a single PioSim where the host model expects one (the
+    first state machine's FIFOs, and the block's pins): `sms[0]` is the one
+    core 1 talks to. `on_cycle`, if set, runs at the start of each cycle (a
+    DMA channel's model, say)."""
+
+    def __init__(self, *sms: PioSim):
+        self.sms = list(sms)
+        self.pin_out = 0
+        self.pindirs = 0
+        self.irq_flags = 0
+        self.on_cycle = None
+        self.cycle = 0
+
+    # The first state machine's view, for the host model and its core 1.
+    @property
+    def bypass_mask(self) -> int:
+        return self.sms[0].bypass_mask
+
+    @property
+    def rx_fifo(self) -> list[int]:
+        return self.sms[0].rx_fifo
+
+    @property
+    def tx_fifo(self) -> list[int]:
+        return self.sms[0].tx_fifo
+
+    @property
+    def tx_depth(self) -> int:
+        return self.sms[0].tx_depth
+
+    def step(self, pins: int):
+        if self.on_cycle:
+            self.on_cycle(self)
+        outs, dirs, irq = self.pin_out, self.pindirs, self.irq_flags
+        new_outs, new_dirs, sets, clears = outs, dirs, 0, 0
+        for sm in self.sms:
+            sm.pin_out, sm.pindirs, sm.irq_flags = outs, dirs, irq
+            sm.step(pins)
+            out_changed, dir_changed = sm.pin_out ^ outs, sm.pindirs ^ dirs
+            new_outs = (new_outs & ~out_changed) | (sm.pin_out & out_changed)
+            new_dirs = (new_dirs & ~dir_changed) | (sm.pindirs & dir_changed)
+            sets |= sm.irq_flags & ~irq
+            clears |= irq & ~sm.irq_flags
+        self.pin_out, self.pindirs = new_outs & MASK32, new_dirs & MASK32
+        self.irq_flags = (irq | sets) & ~clears & 0xFF
+        self.cycle += 1
+
+
+class DmaToTx:
+    """A DMA channel moving 16-bit words into a state machine's TX FIFO, paced
+    by its DREQ: a word whenever the FIFO has room, `latency` cycles after the
+    room appeared. A 16-bit write to a FIFO register reaches it in both halves
+    of the word, as the bus replicates narrow writes."""
+
+    def __init__(self, sm: PioSim, words: list[int], latency: int = 3):
+        self.sm = sm
+        self.words = list(words)
+        self.latency = latency
+        self._wait = latency
+
+    @property
+    def busy(self) -> bool:
+        return bool(self.words)
+
+    def __call__(self, _block=None):
+        if not self.words or len(self.sm.tx_fifo) >= self.sm.tx_depth:
+            self._wait = self.latency
+            return
+        if self._wait:
+            self._wait -= 1
+            return
+        w = self.words.pop(0) & 0xFFFF
+        self.sm.tx_fifo.append((w << 16) | w)
+        self._wait = 0  # back to back while there's room, as a channel streams

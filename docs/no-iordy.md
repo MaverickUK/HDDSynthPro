@@ -84,6 +84,35 @@ Separate from IORDY, and found the same evening: a 16-bit ISA IDE card may need 
 - **In the simulator first** ([pcb-bom.md](pcb-bom.md)'s open question 3): `pio_sim` with a DMA model for the two-channel lookup, and an `ide_host_model` that never waits for IORDY, at PIO mode 0's minimum timings. Status after a command, and after SRST, must show BSY within 400 ns.
 - **On the rig**: the USB adapter waits for IORDY, so a rig test can't prove a host that doesn't. `iordy = off` on the rig shows the table path works (and `iordy_check` would show the adapter never needed to wait); the proof is the retro PC.
 
+## Fitting it in (reviewed 4 Nov 2026, 0.30.0-dev.8)
+
+The design above was written before the data lane, IOCS16#, `bus_timing`, `iordy_check` and multiword DMA took their places in the three PIO blocks. Today:
+
+| Block | Holds | Instructions (of 32) |
+|---|---|---|
+| 0 | the bus program: `ide_bus` 23 (+ `iordy_watchdog` 7 with `isa`), `ide_bus_early` 32, `ide_bus_noiordy` 32, or the lane, `ide_bus_data` 27 + `ide_data_in` 5 | 30 / 32 / 32 / 32 |
+| 1 | the diagnostics: `iordy_timer` 16, `iordy_check` 5, `bus_observer` 8 | 29 |
+| 2 | `ide_dma` (`ide_dma_read` 17 + `ide_dma_write` 15) when DMA is offered; else `iocs16` 6 + `bus_timing` 22 | 32 / 28 |
+
+Every block is nearly full, so the table program can't simply be added. What decides where things can go:
+- **Whatever drives DD must be in one block.** A GPIO is driven by one PIO block at a time (its function select), and switching it per access is far too slow (`ide_dma` hands DD over once per burst). So the register answers and the data stream (point 3 above) share block 0, as the lane's `ide_bus_data` and `ide_data_in` already do.
+- **Anything that only reads pins can go anywhere:** every block sees every input. Write capture (DIOW#: DD and the address, to core 1, and data words by DMA to the sector buffer) needs no output, so it can leave block 0.
+- **IORDY is never held in this mode**, so the IORDY diagnostics (`iordy_timer`, `iordy_check`) have nothing to measure, and the ISA watchdog nothing to release.
+
+So, in the table mode:
+
+| Block | Holds |
+|---|---|
+| 0 | the table program: on a chip select, push the entry's address for the two-channel DMA lookup, put the word on DD at DIOR#, release DD; and `ide_data_in` (5) for the data register, as the lane has it. Budget: the lane's 27 less IORDY's handling and the write path, plus the lookup's 3-4 instructions and the BSY switch's 2-3 |
+| 1 | write capture (about 6-8) and `bus_observer` (8); `iordy_timer` and `iordy_check` off |
+| 2 | `ide_dma` when DMA is offered, else `iocs16` and `bus_timing`, as now |
+
+**BSY after a command, across blocks.** Write capture now sits in block 1, but the STATUS entry is read in block 0. Two tables, normal and busy (STATUS and ALTSTATUS reading 80h), with the table program's Y choosing the base: write capture sees a Command write (or SRST) and signals block 0 with **`irq next`** (the RP2350's PIO can set a flag in a neighbouring block), and the table program switches to the busy table until core 1, having caught up, switches it back. No CPU on the path, so BSY is there within the 400 ns ATA allows. *To confirm first: `irq next`/`irq prev` in the RP2350 datasheet and pioasm, and in `pio_sim` (which runs one block, or several in one `PioBlock`, today).*
+
+**DMA channels:** the lookup's two, the data stream's one, writes to the sector buffer one, `bus_observer` one, `ide_dma` one: six of sixteen.
+
+**Why it may be worth more than the hosts that don't wait.** Every bus program today makes some host wait on core 1: early answers holds about 50,000 reads a speed run past ATA's 1,250 ns through the USB adapter, the lane about 1,400 Status reads a benchmark on the Evesham, and the CD-ROM build up to 3.6 µs. With the table, no read waits on core 1 at all, so IORDY is never held: no slow reads, on any host. And with IORDY never held, the ISA cards' stall (a chip select with no strobe) can't happen either, so one program could serve ISA and PCI alike, and the `isa`/`early_answers` choice, and auto-detecting it (`dior_no_cs`), would go. *The open question:* whether a table answer, about 100 ns from the chip select, is in time for the shortest strobes seen (the PIIX's compatible timing: chip select and strobe together, strobes of 175-195 ns). Measure that strobe with `bus_timing` first, as the Pentium section above asks.
+
 ## Cost
 
 About 3-4 days: the PIO program and its DMA chain (1 day), core 1 keeping the table and the BSY handover (1 day), the simulator's DMA model and a no-IORDY host model (1 day), the rig and the retro PC (an evening or two). The programs fit: `ide_bus`'s block is free when the no-IORDY program replaces it, and the RP2350 has DMA channels to spare (this needs 3-4).

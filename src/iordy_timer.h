@@ -36,6 +36,21 @@ const char* earlyRegister();
 // such read's register.
 uint32_t ignoredReads();
 const char* ignoredRegister();
+// Of those, the data register's (a PCI controller may time its data port
+// apart from the other registers, and ignore IORDY there: the Evesham's CD
+// reads, docs/atapi.md), and when core 0 collected the last one's report
+// (time_us_32(), within a loop pass of the read).
+uint32_t ignoredDataReads();
+uint32_t ignoredAtUs();
+
+// The data register's reads held past the threshold, by how long: up to
+// 700 ns, 1,000, 1,250 (ATA's limit), and longer; and the longest. How late
+// core 1 answers data words, apart from the status polls that dominate the
+// figures above.
+constexpr int DATA_BUCKETS = 4;
+constexpr uint32_t DATA_BUCKET_EDGES_NS[DATA_BUCKETS - 1] = {700, 1000, 1250};
+uint32_t dataSlowReads(int bucket);
+uint32_t dataMaxNs();
 // The reads held past ATA's limit (cfg::IORDY_LIMIT_NS), one at a time, for
 // a SLOWREAD line each: how long, which register, and when core 0 collected
 // the report. The last few are kept; older ones are dropped if nobody takes them.

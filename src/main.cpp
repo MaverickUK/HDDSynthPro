@@ -1,13 +1,18 @@
 // HDDSynthPro IDE drive emulator prototype.
 //
-// Two builds (FIRMWARE_SLICE, set in platformio.ini):
+// Four builds (FIRMWARE_SLICE, HDDPRO_CDROM and HDDPRO_HDCD, in platformio.ini):
 //   bb48        slice 0, listen only: core 1 drains the PIO listener and
 //               records every bus access. Every pin stays an input.
 //   bb48_drive  slices 1-3, the drive: core 1 serves the bus (ide_bus) and
 //               runs the ATA device; core 0 fetches sectors for it from
 //               the SD card's image, the welcome disk or the test disk.
 //               Commands are traced; raw accesses on request (console `t`).
-// In both, core 1 records events into the trace ring and core 0 owns USB
+//   bb48_cdrom  the drive as a CD-ROM drive (docs/atapi.md, exploratory):
+//               the same, with atapi::Device serving an ISO from the card,
+//               the generated test disc, or no disc.
+//   bb48_hdcd   the hard disk drive as bb48_drive, and with `device1 = cdrom`
+//               a CD-ROM drive as device 1 (hdcd::Device, exploratory).
+// In all, core 1 records events into the trace ring and core 0 owns USB
 // serial: it prints the trace and runs the console.
 #include <Arduino.h>
 
@@ -15,10 +20,12 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"
+#include "drive_device.h"  // HDDPRO_CDROM
 #include "short_test.h"
 #include "spsc_ring.h"
 #include "trace_format.h"
@@ -40,7 +47,13 @@
 #include "seek_timing.h"
 #include "sentence.h"
 #include "ata_device.h"
+#if HDDPRO_CDROM
+#include "atapi_device.h"
+#elif HDDPRO_HDCD
+#include "hdcd_device.h"
+#endif
 #include "block_source.h"
+#include "cue_sheet.h"
 #include "bus_observer.h"
 #include <hardware/watchdog.h>
 #include "fetch_mailbox.h"
@@ -48,6 +61,8 @@
 #include "ide_dma.h"
 #include "iocs16.h"
 #include "bus_timing.h"
+#include "command_history.h"
+#include "mmc.h"
 #include <hardware/structs/m33.h>
 #include "iordy_timer.h"
 #include "sd_card.h"
@@ -163,6 +178,9 @@ static SharedFlag g_command_active{false};
 // Core 1 starts first, so it waits for it: IDENTIFY reports the real size.
 // The PIO mode to offer (HDDSYNTH.INI's `mode`) is set before it.
 static std::atomic<uint32_t> g_disk_sectors{0};
+#if HDDPRO_CDROM
+static std::atomic<bool> g_disk_chosen{false};  // the CD-ROM build: a drive with no disc has 0 sectors
+#endif
 static std::atomic<uint8_t> g_pio_mode{0};
 static std::atomic<uint8_t> g_mdma_mode{NO_DMA};       // set by core 1 at start-up (setup1)
 static std::atomic<uint8_t> g_mode_asked{0};            // HDDSYNTH.INI's mode, for core 1
@@ -172,14 +190,42 @@ static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: aut
 // HDDSYNTH.INI's geometry for core 1, packed (cylinders << 16 | heads << 8 |
 // sectors), or 0 for auto; stored with the disk's size (geometryFor).
 static std::atomic<uint32_t> g_geometry{0};
+// Device 1 (docs/two-drives.md): its disk's size (0: no device 1) and default
+// geometry, packed as g_geometry is. Core 0 sets both at boot, before the
+// device 0's size, which core 1 waits for.
+static std::atomic<uint32_t> g_device1_sectors{0};
+static std::atomic<uint32_t> g_device1_geometry{0};
+#if HDDPRO_HDCD
+// The bb48_hdcd build: device 1 is the CD-ROM drive (g_device1_sectors is then
+// its disc's, 0 for none). A plain bool: core 0 sets it before publishing
+// g_disk_sectors (release), and core 1 reads it only after waiting for that
+// (acquire); an atomic's load could be called out of line, from flash.
+static bool g_device1_cdrom = false;
+#endif
 static bool g_geometry_trimmed = false;  // the cylinders were cut to fit the disk (CONFIG says so)
 static const char* g_geometry_from = "auto";  // "set", "partition table" or "auto" (the default), for CONFIG
 
 // What IDENTIFY says: the device's, and the bus observer's to check it by.
 __attribute__((always_inline)) static inline IdentifyInfo driveIdentity() {
     uint32_t g = g_geometry.load(std::memory_order_relaxed);
-    return IdentifyInfo{"HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
+    return IdentifyInfo{HDDPRO_CDROM ? "HDDSYNTH PRO CD-ROM" : "HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
                         g_disk_sectors.load(std::memory_order_acquire),
+                        g_pio_mode.load(std::memory_order_relaxed),
+                        g_mdma_mode.load(std::memory_order_relaxed),
+                        Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}};
+}
+
+// Device 1's identity: its own model, serial and size, device 0's modes.
+__attribute__((always_inline)) static inline IdentifyInfo device1Identity() {
+    uint32_t g = g_device1_geometry.load(std::memory_order_relaxed);
+#if HDDPRO_HDCD
+    const bool cdrom = g_device1_cdrom;
+    return IdentifyInfo{cdrom ? "HDDSYNTH PRO CD-ROM" : "HDDSYNTH PRO D1", cdrom ? "HSP-000001-CD" : "HSP-000001-D1",
+                        FIRMWARE_VERSION,
+#else
+    return IdentifyInfo{"HDDSYNTH PRO D1", "HSP-000001-D1", FIRMWARE_VERSION,
+#endif
+                        g_device1_sectors.load(std::memory_order_relaxed),
                         g_pio_mode.load(std::memory_order_relaxed),
                         g_mdma_mode.load(std::memory_order_relaxed),
                         Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}};
@@ -204,6 +250,30 @@ static bool dmarqWired() {
 // (non-early) mode, reads ran past ATA's 1,250 ns IORDY limit through the USB
 // adapter (0.23.x-0.26.2: up to 3,570 ns, and the adapter never saw DRQ).
 constexpr bool C1_PROFILE = false;
+
+// The longest time core 1 spent on a command (the device's own work and its
+// trace: a CD-ROM packet's reply is built there) while the host's next access
+// waited, and which command and packet it was, for `s` (`cmd_run_max_ns`,
+// `cmd_run_max`). A bench diagnostic, built in only with -DCMD_PROFILE=1
+// (docs/bench-checklist.md), so the normal builds' core 1 code stays as measured.
+#ifndef CMD_PROFILE
+#define CMD_PROFILE 0
+#endif
+#if HDDPRO_CDROM || HDDPRO_HDCD
+// Console `M`: the CD-ROM's disc changed at run time (docs/atapi.md). Core 0
+// asks with a new sequence number and the disc's size (0: no disc); core 1
+// changes the device's disc once it's idle (atapi::Device::idle) and echoes
+// the number. Core 0 ejects first and swaps files only once core 1 has
+// confirmed, so no fetch for one disc is ever served from the next.
+static std::atomic<uint32_t> g_disc_seq{0};
+static std::atomic<uint32_t> g_disc_sectors{0};
+static std::atomic<uint32_t> g_disc_done{0};
+#endif
+
+#if CMD_PROFILE
+static volatile uint32_t g_cmd_run_max = 0;   // cycles
+static volatile uint32_t g_cmd_run_what = 0;  // command | packet << 8
+#endif
 
 // Core 1's longest loop passes, in cycles (DWT CYCCNT), by what the pass did,
 // for console `s` (`c1_gap_ns`): a pass that takes long is a register read
@@ -250,16 +320,30 @@ void setup1() {
     }
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
+#if HDDPRO_CDROM
+    while (!g_disk_chosen.load(std::memory_order_acquire)) tight_loop_contents();  // no disc: 0 sectors
+#else
     while (g_disk_sectors.load(std::memory_order_acquire) == 0) tight_loop_contents();
+#endif
     ide_bus::begin(g_isa.load(), g_early.load(), g_iordy.load());
     busSwitchesOn();
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
+    // Both builds by the same settings (`mode`, `dma`): the CD-ROM drive moves
+    // PACKET's data by DMA when offered (0.30.0-dev.3).
     g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
                                                     g_dmarq_wired.load(), g_dma_auto.load()),
                       std::memory_order_relaxed);
     iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
-    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity());
+    const IdentifyInfo device1 = device1Identity();
+#if HDDPRO_HDCD
+    const bool cdrom1 = g_device1_cdrom;  // a CD-ROM, disc or none
+    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                        device1.total_sectors || cdrom1 ? &device1 : nullptr, cdrom1);
+#else
+    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                        device1.total_sectors ? &device1 : nullptr);
+#endif
     // The third PIO block: multiword DMA if it's offered, otherwise IOCS16#
     // for ISA cards (which never use DMA). Neither fits beside the others.
     if (g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA)
@@ -280,7 +364,7 @@ void setup1() {
 // A burst that ended goes back to the device; a new one starts when the
 // device has a sector (or buffer) for it; and when the command is over, done
 // or cut short (RESET#, SRST, a new command, an error), ide_dma tidies up.
-CORE1_RAM static void serviceDma(ata::Device& dev) {
+CORE1_RAM static void serviceDma(DriveDevice& dev) {
     if (ide_dma::burstRunning()) {
         if (!ide_dma::burstDone()) {
             if (!dev.dmaCommand()) ide_dma::endCommand();  // cut short mid-burst
@@ -298,7 +382,7 @@ CORE1_RAM static void serviceDma(ata::Device& dev) {
 }
 
 // Posts the device's fetch to core 0, once per fetch.
-CORE1_RAM static void postFetch(ata::Device& dev, uint32_t& posted_fetch) {
+CORE1_RAM static void postFetch(DriveDevice& dev, uint32_t& posted_fetch) {
     uint32_t id = dev.pendingFetchId();
     if (id == 0 || id == posted_fetch) return;  // the common case, without a call
     ata::Fetch fetch;
@@ -308,7 +392,7 @@ CORE1_RAM static void postFetch(ata::Device& dev, uint32_t& posted_fetch) {
 // BSY for a while: waking from standby, or after a data-out block. Step 3 of
 // loop1, and early_answers' tight bus loop runs it too, since the host may
 // poll status throughout the hold and the loop never goes quiet to return.
-CORE1_RAM static void busyTimers(ata::Device& dev) {
+CORE1_RAM static void busyTimers(DriveDevice& dev) {
     static uint32_t wake_start_us = 0;  // 0: not timing a wake
     static uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
     if (!dev.dataOutHeld()) {
@@ -331,8 +415,14 @@ CORE1_RAM static void busyTimers(ata::Device& dev) {
 
 CORE1_RAM static void recordBus(uint32_t sample) { record(TraceKind::Bus, sample); }
 
-CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
-    record(commandStartEvent(t_us, c.command, c.lba, c.count));
+CORE1_RAM static void recordCommandStart(uint32_t t_us, const DriveCommandInfo& c) {
+#if HDDPRO_CDROM
+    record(commandStartEvent(t_us, c.command, c.lba, c.count, c.packet));
+#elif HDDPRO_HDCD
+    record(commandStartEvent(t_us, c.command, c.lba, c.count, c.packet, c.unit));
+#else
+    record(commandStartEvent(t_us, c.command, c.lba, c.count, 0, c.unit));
+#endif
 }
 
 // early_answers: a queued command, run from the tight bus loop (ide_bus::
@@ -349,7 +439,7 @@ static uint32_t g_early_command_start_us = 0;
 // adapter's back-to-back reads, 0.27.0).
 static uint32_t g_done_recorded = 0;
 
-CORE1_RAM static void recordDone(ata::Device& dev) {
+CORE1_RAM static void recordDone(DriveDevice& dev) {
     if (dev.commandsCompleted() == g_done_recorded) return;
     g_done_recorded = dev.commandsCompleted();
     if (g_done_recorded == dev.commandsStarted()) g_command_active.store(false);
@@ -357,13 +447,39 @@ CORE1_RAM static void recordDone(ata::Device& dev) {
     record(commandEndEvent(t, dev.lastCommand().command, dev.status(), dev.error(), t - g_early_command_start_us));
 }
 
-// The tight loop's idle work: the BSY timers, and DONE for a command just completed.
-CORE1_RAM static void earlyIdle(ata::Device& dev) {
+// The tight loop's idle work: the BSY timers, DONE for a command just
+// completed, and a DMA command's bursts. In DMA the host waits for DMARQ
+// instead of polling, so the bus goes quiet and the main loop's step 1 came
+// only after EARLY_BUS_ONLY_US: a 64 KB READ DMA took 12 s (0.30.0-dev.3).
+CORE1_RAM static void earlyIdle(DriveDevice& dev) {
     busyTimers(dev);
     recordDone(dev);
+    if (dev.dmaCommand() || ide_dma::active()) serviceDma(dev);
 }
 
-CORE1_RAM static void runCommandEarly(ata::Device& dev) {
+// CMD_PROFILE's bookkeeping: `start` is when the command's handling began.
+CORE1_RAM static inline void noteCommandTime(DriveDevice& dev, uint32_t start) {
+#if CMD_PROFILE
+    uint32_t t = m33_hw->dwt_cyccnt - start;
+    if (t > g_cmd_run_max) {
+        g_cmd_run_max = t;
+        const DriveCommandInfo& c = dev.lastCommand();
+#if HDDPRO_CDROM || HDDPRO_HDCD
+        g_cmd_run_what = uint32_t(c.command) | uint32_t(c.packet) << 8;
+#else
+        g_cmd_run_what = c.command;
+#endif
+    }
+#else
+    (void)dev;
+    (void)start;
+#endif
+}
+
+CORE1_RAM static void runCommandEarly(DriveDevice& dev) {
+#if CMD_PROFILE
+    const uint32_t profile_start = m33_hw->dwt_cyccnt;
+#endif
     recordDone(dev);  // the last command's DONE before this one's CMD
     dev.setReadAhead(g_read_ahead.load());
     dev.setWriteBehind(g_write_behind.load());
@@ -377,6 +493,9 @@ CORE1_RAM static void runCommandEarly(ata::Device& dev) {
         g_command_starts.fetch_add(1, std::memory_order_relaxed);
         g_command_active.store(true);
     }
+#if CMD_PROFILE
+    noteCommandTime(dev, profile_start);
+#endif
 }
 
 // Console `V`: the drive goes silent, as if unplugged, while core 0 holds
@@ -387,7 +506,7 @@ CORE1_RAM static void runCommandEarly(ata::Device& dev) {
 // check_core1_ram.py's one-offs).
 static SharedFlag g_absent{false};
 
-__attribute__((noinline)) static void stayAbsent(ata::Device& dev) {
+__attribute__((noinline)) static void stayAbsent(DriveDevice& dev) {
     dev.hardReset(true);
     ide_bus::stop();
     ide_dma::endCommand();
@@ -404,17 +523,29 @@ CORE1_RAM void loop1() {
     // served back to back, and only when it is empty does core 1 do one small
     // bookkeeping step before looking again. So a read waits for one step at
     // most; iordy_timer.pio measures how long the host actually waits.
-    static ata::Device dev(driveIdentity());
+#if HDDPRO_CDROM
+    static DriveDevice dev(driveIdentity());  // one drive: the CD-ROM is device 0
+#elif HDDPRO_HDCD
+    static const IdentifyInfo device1 = device1Identity();
+    static const bool cdrom1 = g_device1_cdrom;
+    static DriveDevice dev(driveIdentity(), !cdrom1 && device1.total_sectors ? &device1 : nullptr,
+                           cdrom1 ? &device1 : nullptr);
+#else
+    static const IdentifyInfo device1 = device1Identity();
+    static DriveDevice dev(driveIdentity(), device1.total_sectors ? &device1 : nullptr);
+#endif
     uint32_t started = dev.commandsStarted();
     g_done_recorded = dev.commandsCompleted();
     uint32_t command_start_us = 0;
-    ata::CommandInfo start_info{};  // the command whose CMD line is still to record
+    DriveCommandInfo start_info{};  // the command whose CMD line is still to record
     bool start_unrecorded = false;
     bool quiet = false;  // a command just started: bookkeeping waits (COMMAND_QUIET_US)
     uint32_t posted_fetch = 0;
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
     dev.hardReset(reset_low);
     const bool early = g_early.load();  // ide_bus_early's samples (early_answers)
+    const bool data_lane = ide_bus::dataLaneOn();  // data reads never reach core 1 (docs/data-lane.md)
+    unsigned served_with_command = 0;  // accesses served since a command was queued
     uint32_t last_access_cycles = 0;  // core 1's cycle counter: core-local, unlike the timer behind the APB bridge
     const uint32_t bus_only_cycles = g_bus_only_cycles;
     ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
@@ -448,7 +579,14 @@ CORE1_RAM void loop1() {
                 ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
                                        runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
             }
-            continue;
+            // Back to the bus, but with a command queued only for a few accesses:
+            // the host polls STATUS straight after a command and gets BSY at once,
+            // and if the polls came back to back, before core 1 found the FIFO
+            // empty, the command would otherwise never run (STATUS at BSY for good:
+            // the data lane, 0.29.0-2d.4). Running it at once instead held the
+            // first poll for the whole command (IDENTIFY: 3 us).
+            if (!dev.commandQueued()) continue;
+            if (++served_with_command < cfg::COMMAND_POLLS_FIRST) continue;  // cleared when it runs
         }
         if (early) ide_bus::checkIordyStall();  // IORDY held with no strobe: let it go
         pass_kind = GAP_LANE;
@@ -456,7 +594,13 @@ CORE1_RAM void loop1() {
         // between. Not while the raw trace or the debug delay is on.
         const uint16_t* next;
         uint16_t left;
-        if (dev.dataInRemaining(next, left)) {
+        if (data_lane) {
+            // The data lane serves data reads itself: while a block is on it,
+            // wait for its end there (posting the read-ahead and taking its
+            // result), so the next sector is ready when the host's status read
+            // comes. A flag test otherwise: this runs on every idle pass.
+            if (ide_bus::lane_busy && ide_bus::serveLane(dev, reset_low, g_mailbox, posted_fetch)) continue;
+        } else if (dev.dataInRemaining(next, left)) {
             if (g_fast_lane.load() && !g_trace_bus.load() && !ide_bus::dataReadDelayed()) {
                 if (early ? ide_bus::serveDataInEarly(dev, reset_low, g_mailbox, posted_fetch)
                           : ide_bus::serveDataIn(dev, reset_low, g_mailbox, posted_fetch))
@@ -473,10 +617,17 @@ CORE1_RAM void loop1() {
                 recordCommandStart(command_start_us, start_info);
                 start_unrecorded = false;
             }
+            served_with_command = 0;
+#if CMD_PROFILE
+            const uint32_t profile_start = m33_hw->dwt_cyccnt;
+#endif
             dev.setReadAhead(g_read_ahead.load());
             dev.setWriteBehind(g_write_behind.load());
             dev.runQueuedCommand();
-            ide_bus::updateIntrq(dev);
+            ide_bus::syncDataLane(dev);  // IDENTIFY's block onto the lane, then INTRQ
+#if CMD_PROFILE
+            noteCommandTime(dev, profile_start);
+#endif
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
             if (early)
@@ -545,12 +696,21 @@ CORE1_RAM void loop1() {
                 FetchResult result;
                 if (g_mailbox.takeResult(result)) {
                     dev.fetchDone(result.id, result.ok);
-                    ide_bus::updateIntrq(dev);
+                    ide_bus::syncDataLane(dev);  // a sector's block onto the lane, then INTRQ
                 }
                 break;
             }
             case 3:  // BSY for a while: waking from standby, or after a data-out block
                 busyTimers(dev);
+#if HDDPRO_CDROM || HDDPRO_HDCD
+                {  // a disc change from the console, between commands
+                    uint32_t seq = g_disc_seq.load(std::memory_order_acquire);
+                    if (seq != g_disc_done.load(std::memory_order_relaxed) && dev.discIdle()) {
+                        dev.changeDisc(g_disc_sectors.load(std::memory_order_relaxed));
+                        g_disc_done.store(seq, std::memory_order_release);
+                    }
+                }
+#endif
                 break;
             default: {  // RESET#, and console `V`
                 if (g_absent.load()) {
@@ -587,7 +747,7 @@ CORE1_RAM void loop1() {
 
 // Core 0's share of the drive: move the sectors core 1 asks for. The disk is
 // an image on the SD card (slice 5) if there is one to serve (chooseDisk()),
-// else the welcome disk, or the generated test disk with `image = none` or
+// else the welcome disk, or the generated test disk with `device0 = none` or
 // console `T`. Both keep writes in the one RAM overlay, until a restart.
 static const welcome_disk::File WELCOME_FILES[] = {
     {"README.TXT", welcome_text::README, welcome_text::README_SIZE},
@@ -599,6 +759,25 @@ static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_overlay(g_welcome);
 static BlockSource* g_disk = &g_overlay;
 static const char* g_disk_name = "welcome";
 static bool g_test_disk = false;  // the generated disk: the bus observer can check its data
+
+// Device 1's disk (`device1` in HDDSYNTH.INI, docs/two-drives.md), or nullptr:
+// a second image, or a folder served read-only.
+static BlockSource* g_device1_disk = nullptr;
+static const char* g_device1_kind = "none";  // "none", "image" or "folder"
+static char g_device1_note[112] = "";         // why the device1 configured isn't served
+static folder_disk::Volume g_folder;
+static FolderDisk g_folder_disk(g_folder);
+static uint16_t g_folder_capacity = 0;  // entries the folder's list has room for
+
+#if HDDPRO_CDROM
+// The CD-ROM build with no ISO to serve: a drive with no disc in it.
+class EmptyDrive : public BlockSource {
+public:
+    uint32_t sectors() const override { return 0; }
+    bool read(uint32_t, uint16_t[256]) override { return false; }
+};
+static EmptyDrive g_no_disc;
+#endif
 
 // The BB48's LED as the drive's activity light, like a hard disk's: lit while
 // a command runs, and for at least LED_MIN_MS after any command starts. The
@@ -629,6 +808,16 @@ static bool benchRequested() { return watchdog_hw->scratch[0] == BENCH_MAGIC; }
 // card, in the same register (so `T` and `J` undo each other).
 static constexpr uint32_t TEST_DISK_MAGIC = 0x48444454;  // "HDDT"
 static bool testDiskRequested() { return watchdog_hw->scratch[0] == TEST_DISK_MAGIC; }
+// Console `P`: a bus program after the restart it triggers, whatever
+// HDDSYNTH.INI says, until a power cycle (watchdog scratch 1): `e` early
+// answers, `l` the data lane, `i` ide_bus (as `isa = on`), `0` the settings'.
+// For the rig, to compare programs with no card or without editing the file.
+static constexpr uint32_t BUS_MAGIC = 0x48445000;  // "HDP", then the program's letter
+static char busRequested() {
+    uint32_t v = watchdog_hw->scratch[1];
+    char c = char(v & 0xff);
+    return (v & 0xffffff00) == BUS_MAGIC && (c == 'e' || c == 'l' || c == 'i') ? c : 0;
+}
 
 // The generated test disk instead of the welcome disk, under the RAM overlay.
 static void useTestDisk() {
@@ -646,8 +835,8 @@ static char g_image_note[96] = "";            // why the configured image isn't
 
 // Opens image `name` as the disk. False, with sd_card::openError() or
 // "empty" as the reason in `why`, if it can't be used.
-static bool useImage(const char* name, const char*& why) {
-    ImageFile* file = sd_card::openImage(name, Serial);
+[[maybe_unused]] static bool useImage(const char* name, const char*& why, bool read_only = false) {
+    ImageFile* file = sd_card::openImage(name, Serial, read_only);
     if (!file) {
         why = sd_card::openError();
         return false;
@@ -662,9 +851,167 @@ static bool useImage(const char* name, const char*& why) {
     return true;
 }
 
+#if HDDPRO_CDROM || HDDPRO_HDCD
+// A CD-ROM's disc from the card, read-only: an ISO as it is, or a CUE
+// sheet's data track from its BIN (cue_sheet.h). Device 0's image slot in the
+// CD-ROM build, device 1's in bb48_hdcd. nullptr if it can't be used, with why.
+static BlockSource* openCdDisc(const char* name, const char*& why) {
+#if HDDPRO_CDROM
+    auto open = sd_card::openImage;
+#else
+    auto open = sd_card::openDevice1Image;
+#endif
+    if (!cue_sheet::isCueName(name)) {
+        ImageFile* file = open(name, Serial, true);
+        if (!file) {
+            why = sd_card::openError();
+            return nullptr;
+        }
+        static ImageDisk iso(*file);  // always the same file object, reopened
+        if (!iso.sectors()) why = "empty";
+        return iso.sectors() ? &iso : nullptr;
+    }
+    static char text[cue_sheet::MAX_TEXT];
+    size_t len = 0;
+    bool truncated = false;
+    if (!sd_card::readFileStart(name, text, sizeof text, len, truncated, why, Serial)) return nullptr;
+    if (truncated)  // a long sheet: up to its last whole line
+        while (len && text[len - 1] != '\n') --len;
+    cue_sheet::Sheet parsed;
+    if (!cue_sheet::parse(text, len, parsed)) {
+        why = parsed.error;
+        return nullptr;
+    }
+    // Kept only now: the card code holds on to the open BIN's name (to reopen
+    // it after the card comes back), and a sheet that failed mustn't blank it.
+    static cue_sheet::Sheet sheet;
+    sheet = parsed;
+    ImageFile* file = open(sheet.file, Serial, true);
+    if (!file) {
+        static char bin_why[cue_sheet::MAX_FILE_NAME + 24];
+        std::snprintf(bin_why, sizeof bin_why, "%s %s", sheet.file, sd_card::openError());
+        why = bin_why;
+        return nullptr;
+    }
+    static RawTrackDisk raw(*file);
+    raw.setTrack(sheet.track);
+    if (!raw.sectors()) {
+        why = "its data track is empty";
+        return nullptr;
+    }
+    Serial.printf("# %s: %s, track 1 of %u%s (%lu-byte frames from byte %lu), %lu frames\n", name, sheet.file,
+                  unsigned(sheet.tracks), truncated ? "+" : "", (unsigned long)sheet.track.stride, (unsigned long)sheet.track.data_offset,
+                  (unsigned long)(raw.sectors() / atapi::SECTORS_PER_FRAME));
+    return &raw;
+}
+#endif
+
+// The geometry an image's partition table was made with, packed as
+// g_geometry is, or 0 (then 16 x 63).
+static uint32_t partitionGeometry(BlockSource& disk) {
+    static uint16_t sector0[256];  // bus order: as bytes, as on disk
+    if (!disk.read(0, sector0)) return 0;
+    Geometry geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), disk.sectors());
+    if (!geo.cylinders) return 0;
+    return uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track;
+}
+
+#if HDDPRO_HDCD
+// The bb48_hdcd build's CD-ROM drive as device 1 (`device1 = cdrom`, or an
+// ISO): its disc, as the CD-ROM build chooses one. The generated test disc
+// after console `T` or with `cdrom = none` (read-only, so the disk's RAM
+// overlay isn't shared); else the ISO; else a drive with no disc in it.
+static GeneratedDisk g_test_disc;
+static const char* g_device1_disc = "no disc";
+
+static void chooseCdrom1() {
+    g_device1_cdrom = true;
+    g_device1_kind = "cdrom";
+    const char* name = drive_config::device1Disc(g_config);
+    if (testDiskRequested() || (sd_card::mounted() && !drive_config::servesDisc(g_config))) {
+        g_device1_disk = &g_test_disc;
+        g_device1_disc = "test disc";
+    } else if (!sd_card::mounted()) {
+        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: no card", name);
+    } else {
+        const char* why = "";
+        if ((g_device1_disk = openCdDisc(name, why)))
+            g_device1_disc = name;
+        else
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: %s", name, why);
+    }
+    g_device1_sectors.store(g_device1_disk ? g_device1_disk->sectors() : 0, std::memory_order_relaxed);
+}
+#endif
+
+// Device 1's disk, from `device1` (docs/two-drives.md): a folder, laid out as
+// a read-only FAT16 volume, or an image. Not with the test or bench disk
+// asked for from the console, which are for the rig's tests.
+[[maybe_unused]] static void chooseDevice1() {  // not in the CD-ROM build, one drive
+    if (drive_config::device1IsCdrom(g_config)) {
+#if HDDPRO_HDCD
+        chooseCdrom1();
+#else
+        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: a CD-ROM needs bb48_hdcd", g_config.device1);
+#endif
+        return;
+    }
+    if (!drive_config::hasDevice1(g_config) || !sd_card::mounted() || testDiskRequested() || benchRequested())
+        return;
+    const char* name = g_config.device1;
+    if (sd_card::isFolder(name)) {
+        // The list on the heap, only when a folder is served: as long as RAM
+        // allows, leaving cfg::FOLDER_HEAP_LEFT for whatever allocates later.
+        // malloc, not new (std::nothrow): Arduino-Pico's libstdc++ is built
+        // without exceptions, so a nothrow new that runs out aborts (the board
+        // never started with a folder, 3 Nov 2026). An Entry needs no constructor.
+        uint16_t capacity = cfg::FOLDER_MAX_ENTRIES;
+        folder_disk::Entry* entries = nullptr;
+        while (capacity >= 64) {
+            entries = static_cast<folder_disk::Entry*>(std::malloc(capacity * sizeof(folder_disk::Entry)));
+            if (entries && rp2040.getFreeHeap() >= int(cfg::FOLDER_HEAP_LEFT)) break;
+            std::free(entries);
+            entries = nullptr;
+            capacity /= 2;
+        }
+        if (!entries) {
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: no RAM for its list", name);
+            return;
+        }
+        if (!g_folder.build(sd_card::folderSource(name), entries, capacity, name)) {
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: can't list it, or nothing fits", name);
+            std::free(entries);
+            return;
+        }
+        g_folder_capacity = capacity;
+        g_device1_disk = &g_folder_disk;
+        g_device1_kind = "folder";
+    } else if (strcasecmp(name, g_image_name) == 0) {
+        // The image device 0 serves (named, or fallen back to): the PC would see
+        // one filesystem as two disks, and writes through either would corrupt it.
+        std::snprintf(g_device1_note, sizeof g_device1_note, "%s: device 0 serves it already", name);
+        return;
+    } else {
+        ImageFile* file = sd_card::openDevice1Image(name, Serial);
+        if (!file) {
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: %s", name, sd_card::openError());
+            return;
+        }
+        static ImageDisk image(*file);
+        if (image.sectors() == 0) {
+            std::snprintf(g_device1_note, sizeof g_device1_note, "%s: empty", name);
+            return;
+        }
+        g_device1_disk = &image;
+        g_device1_kind = "image";
+        g_device1_geometry.store(partitionGeometry(image), std::memory_order_relaxed);
+    }
+    g_device1_sectors.store(g_device1_disk->sectors(), std::memory_order_relaxed);
+}
+
 // The disk: the test disk after console `T`, or HDDBENCH.IMG after `J`; else
 // the image HDDSYNTH.INI names (HDDSYNTH.IMG by default), or the test disk
-// for `image = none`; else HDDSYNTH.IMG; else the welcome disk.
+// for `device0 = none`; else HDDSYNTH.IMG; else the welcome disk.
 static void chooseDisk() {
     uint32_t start = millis();
     drive_config::defaults(g_config);
@@ -676,6 +1023,24 @@ static void chooseDisk() {
         g_config_state = truncated ? "truncated" : "present";
     }
     const char* why = "";
+#if HDDPRO_CDROM
+    // The CD-ROM build: the test disc after console `T` or with `cdrom = none`;
+    // else the ISO HDDSYNTH.INI names (HDDSYNTH.ISO by default); else no disc.
+    g_disk = &g_no_disc;
+    g_disk_name = "no disc";
+    if (testDiskRequested() || (sd_card::mounted() && !drive_config::servesDisc(g_config))) {
+        g_disk = &g_overlay;  // read-only here, so the overlay stays empty
+        useTestDisk();
+    } else if (sd_card::mounted()) {
+        if (BlockSource* disc = openCdDisc(g_config.cdrom, why)) {  // a disc: read-only
+            g_disk = disc;
+            g_image_name = g_config.cdrom;
+            g_disk_name = "disc";
+        } else {
+            std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.cdrom, why);
+        }
+    }
+#else
     if (testDiskRequested()) {
         useTestDisk();  // the card, if any, left alone
     } else if (!sd_card::mounted()) {
@@ -683,15 +1048,16 @@ static void chooseDisk() {
     } else if (benchRequested()) {
         if (useImage(sd_card::BENCH_IMAGE_NAME, why)) g_disk_name = "bench";
     } else if (!drive_config::servesImage(g_config)) {
-        useTestDisk();  // image = none: the card left alone
-    } else if (useImage(g_config.image, why)) {
+        useTestDisk();  // device0 = none: the card left alone
+    } else if (useImage(g_config.device0, why)) {
         g_disk_name = "image";
     } else {
-        std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.image, why);
-        if (strcasecmp(g_config.image, drive_config::DEFAULT_IMAGE) != 0 &&
+        std::snprintf(g_image_note, sizeof g_image_note, "%s: %s", g_config.device0, why);
+        if (strcasecmp(g_config.device0, drive_config::DEFAULT_IMAGE) != 0 &&
             useImage(drive_config::DEFAULT_IMAGE, why))
             g_disk_name = "image";
     }
+#endif
     g_disk_ms = millis() - start;
     g_pio_mode.store(drive_config::pioModeOffered(g_config.mode), std::memory_order_relaxed);
     g_mode_asked.store(uint8_t(g_config.mode), std::memory_order_relaxed);  // core 1 decides DMA from it
@@ -704,6 +1070,17 @@ static void chooseDisk() {
     // isa = on keeps its own program (no early answers, iordy_watchdog.pio):
     // the one the ICL 386 was proven on
     g_early.store(g_config.early_answers && !g_config.isa);
+    switch (busRequested()) {  // console `P`
+        case 'e': g_isa.store(false); g_early.store(true); break;
+        case 'l': g_isa.store(false); g_early.store(false); break;
+        case 'i': g_isa.store(true); g_early.store(false); break;
+        default: break;
+    }
+#if HDDPRO_CDROM
+    // The CD-ROM drive was proven on early answers and ide_bus, not on the data
+    // lane (written for the hard disk's 256-word blocks): early answers instead.
+    if (!g_isa.load() && !g_early.load()) g_early.store(true);
+#endif
     g_iordy.store(g_config.iordy);
     // The geometry setting, for the image only (the welcome and generated disks
     // lay theirs out for the default), its cylinders cut to fit if it's bigger
@@ -724,10 +1101,116 @@ static void chooseDisk() {
     }
     g_geometry.store(geo.cylinders ? uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track : 0,
                      std::memory_order_relaxed);
-    // A host that ignores IORDY reads whatever is on the bus: check image data on the cable too.
-    bus_observer::setImageChecks(g_config.early_answers && !g_test_disk);
+    // A host that ignores IORDY reads whatever is on the bus: check image data
+    // on the cable too, with early answers and on the data lane. Not with
+    // `isa = on`: the ISA card that needs it strobes DIOR# with no chip select,
+    // which the observer takes for data.
+    bus_observer::setImageChecks(!g_isa.load() && !g_test_disk);
+#if HDDPRO_CDROM
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
+    g_disk_chosen.store(true, std::memory_order_release);
+#else
+    chooseDevice1();  // two drives are the hard disk build's
+#if HDDPRO_HDCD
+    // A CD-ROM as device 1 runs on ide_bus (as console `P i`): on early
+    // answers the USB adapter's register check after RESET# never passed, so
+    // it never detected the drive and dropped off USB (4 Nov, 0.30.0-dev.10).
+    // Console `P e` still picks early answers, to reproduce it.
+    if (g_device1_cdrom && busRequested() != 'e') {
+        g_isa.store(true);
+        g_early.store(false);
+    }
+#endif
+    g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode and device 1: core 1 reads them
+#endif
 }
+
+#if HDDPRO_CDROM || HDDPRO_HDCD
+// Console `M`: a disc change, step by step from core 0's loop (serviceDiscChange).
+enum class DiscStep : uint8_t { None, Ejecting, Inserting };
+static DiscStep g_disc_step = DiscStep::None;
+static char g_disc_next[drive_config::MAX_NAME + 1];
+
+static void requestDisc(uint32_t sectors) {
+    g_disc_sectors.store(sectors, std::memory_order_relaxed);
+    g_disc_seq.fetch_add(1, std::memory_order_release);
+}
+
+// The disc named, as the CD-ROM's disk: `none` (no disc), `test` (the
+// generated test disc), or an ISO on the card, read-only. Returns its sectors,
+// 0 for none (or an ISO that can't be used, which it says why).
+static uint32_t openDisc(const char* name) {
+    const bool none = strcasecmp(name, "none") == 0, test = strcasecmp(name, "test") == 0;
+#if HDDPRO_CDROM
+    g_test_disk = false;
+    g_disk = &g_no_disc;
+    g_disk_name = "no disc";
+    const char* why = "";
+    if (test) {
+        g_disk = &g_overlay;  // read-only here, so the overlay stays empty
+        useTestDisk();
+    } else if (BlockSource* disc = none ? nullptr : openCdDisc(name, why)) {
+        g_disk = disc;
+        g_image_name = name;
+        g_disk_name = "disc";
+    } else if (!none) {
+        Serial.printf("# DISC %s: %s\n", name, why);
+    }
+    return g_disk->sectors();
+#else
+    g_device1_disk = nullptr;
+    g_device1_disc = "no disc";
+    if (test) {
+        g_device1_disk = &g_test_disc;
+        g_device1_disc = "test disc";
+    } else if (!none) {
+        const char* why = "";
+        if ((g_device1_disk = openCdDisc(name, why)))
+            g_device1_disc = g_disc_next;
+        else
+            Serial.printf("# DISC %s: %s\n", name, why);
+    }
+    uint32_t sectors = g_device1_disk ? g_device1_disk->sectors() : 0;
+    g_device1_sectors.store(sectors, std::memory_order_relaxed);
+    return sectors;
+#endif
+}
+
+static void startDiscChange(const char* name) {
+#if HDDPRO_HDCD
+    if (!g_device1_cdrom) {
+        Serial.println("# DISC: no CD-ROM drive (device1 = cdrom gives one)");
+        return;
+    }
+#endif
+    if (g_disc_step != DiscStep::None) {
+        Serial.println("# DISC: a change is already under way");
+        return;
+    }
+    std::snprintf(g_disc_next, sizeof g_disc_next, "%s", name);
+    requestDisc(0);  // out first: core 1 confirms once nothing for the old disc is under way
+    g_disc_step = DiscStep::Ejecting;
+    Serial.printf("# DISC ejecting, then %s\n", g_disc_next);
+}
+
+static void serviceDiscChange() {
+    if (g_disc_step == DiscStep::None) return;
+    if (g_disc_done.load(std::memory_order_acquire) != g_disc_seq.load(std::memory_order_relaxed)) return;
+    if (g_disc_step == DiscStep::Ejecting) {
+        uint32_t sectors = openDisc(g_disc_next);
+        if (sectors) {
+            requestDisc(sectors);
+            g_disc_step = DiscStep::Inserting;
+            return;
+        }
+        Serial.println("DISC none");
+    } else {
+        Serial.printf("DISC %s frames=%lu\n", g_disc_next,
+                      (unsigned long)(g_disc_sectors.load(std::memory_order_relaxed) / atapi::SECTORS_PER_FRAME));
+    }
+    g_disc_step = DiscStep::None;
+}
+#endif
 
 // Console `E`: sets one setting in HDDSYNTH.INI from "key = value", keeping
 // the rest of the file and its comments (the defaults if there is no file).
@@ -741,7 +1224,7 @@ static void editConfig(const char* line) {
         for (size_t n = strlen(value); n && (value[n - 1] == ' ' || value[n - 1] == '\t'); --n) value[n - 1] = '\0';
     }
     if (!key[0] || !value[0]) {
-        Serial.println("# E: nothing changed; type key = value, e.g. image = GAMES.IMG");
+        Serial.println("# E: nothing changed; type key = value, e.g. device0 = GAMES.IMG");
         return;
     }
     static char text[drive_config::MAX_FILE], edited[drive_config::MAX_FILE];
@@ -782,17 +1265,51 @@ static void printConfig() {
     uint8_t mdma = g_mdma_mode.load();
     char mdma_text[8] = "none";
     if (mdma != NO_DMA) std::snprintf(mdma_text, sizeof mdma_text, "%u", unsigned(mdma));
-    Serial.printf("CONFIG file=%s image=%s mode=%s mode_used=%s pio_offered=%u mdma_offered=%s serving=%s contiguous=%s extents=%u parts=%u\n",
+    Serial.printf("CONFIG file=%s device0=%s mode=%s mode_used=%s pio_offered=%u mdma_offered=%s serving=%s contiguous=%s extents=%u parts=%u\n",
                   g_config_state,
-                  g_config.image, drive_config::modeName(g_config.mode), drive_config::modeName(used),
+                  g_config.device0, drive_config::modeName(g_config.mode), drive_config::modeName(used),
                   unsigned(g_pio_mode.load()), mdma_text, g_image_name,
                   sd_card::imageContiguous() ? "yes" : "no", sd_card::imageExtents(), sd_card::imageParts());
-    if (g_image_note[0]) Serial.printf("CONFIG image not used: %s\n", g_image_note);
+#if HDDPRO_CDROM
+    if (g_image_note[0]) Serial.printf("CONFIG cdrom not used: %s\n", g_image_note);
+    Serial.printf("CONFIG cdrom=%s serving=%s frames=%lu\n", g_config.cdrom, g_disk_name,
+                  (unsigned long)(g_disk->sectors() / atapi::SECTORS_PER_FRAME));
+#else
+    if (g_image_note[0]) Serial.printf("CONFIG device0 not used: %s\n", g_image_note);
+#if HDDPRO_HDCD
+    if (g_device1_cdrom)
+        Serial.printf("CONFIG device1=%s kind=cdrom disc=%s frames=%lu\n", g_config.device1, g_device1_disc,
+                      (unsigned long)(g_device1_sectors.load() / atapi::SECTORS_PER_FRAME));
+#endif
+    if (g_device1_disk && g_device1_kind[0] != 'c') {
+        Serial.printf("CONFIG device1=%s kind=%s sectors=%lu\n", g_config.device1, g_device1_kind,
+                      (unsigned long)g_device1_disk->sectors());
+        if (g_device1_disk == &g_folder_disk) {
+            static const char* why[] = {"", ": too many entries", ": the root folder is full", ": over 2 GB"};
+            Serial.printf("CONFIG folder entries=%u/%u cluster_bytes=%lu read_only=yes%s%s\n",
+                          unsigned(g_folder.count()), unsigned(g_folder_capacity),
+                          (unsigned long)g_folder.clusterBytes(),
+                          g_folder.truncated() == folder_disk::Truncated::No ? "" : " cut_short",
+                          why[int(g_folder.truncated())]);
+        }
+    } else if (g_device1_note[0]) {
+        Serial.printf("CONFIG device1 not used: %s\n", g_device1_note);
+    }
+#endif
     Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s early_answers=%s iordy=%s\n",
                   g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
                   drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa),
                   drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy));
+    if (busRequested())
+        Serial.printf("CONFIG bus program set from the console (P%c) until a power cycle\n", busRequested());
+#if HDDPRO_CDROM
+    if (!g_isa.load()) Serial.println("CONFIG the CD-ROM build runs early answers, not the data lane");
+#elif HDDPRO_HDCD
+    if (g_device1_cdrom)
+        Serial.println(g_early.load() ? "CONFIG with a CD-ROM as device 1 on early answers (console P e): the USB adapter can't detect it"
+                                      : "CONFIG with a CD-ROM as device 1, ide_bus");
+#endif
     {
         Geometry g = startGeometry(driveIdentity());
         Serial.printf("CONFIG geometry=%u/%u/%u (%s)%s\n", unsigned(g.cylinders), unsigned(g.heads),
@@ -1167,21 +1684,41 @@ static struct {
 constexpr uint32_t IDENTIFY_CHECK_MS = 10000;
 static uint32_t g_identify_check_until_ms = 30000;
 
+// What kind of host bus the drive is on, as evidence for choosing a bus
+// program by itself one day: an ISA card passes every I/O read the PC makes
+// to the cable as DIOR# with no chip select (the ICL 386: 19.9 million in a
+// session), where a PCI controller or a USB adapter strobes only for the
+// drive. The bus observer counts them as DMA words, which they can only be
+// when the drive offers DMA. Counted from each RESET# release (or boot).
+static uint32_t g_release_ms = 0;
+static uint64_t g_no_cs_at_release = 0;
+static bool g_no_cs_reported = false;
+
+// The last few commands, for the NOIORDY line: which one an unwaited read
+// fell in or followed (iordy_timer reports those separately).
+static CommandHistory g_commands;
+
 static void noteActivity(const TraceEvent& e) {
-    if (e.kind == TraceKind::ResetRelease) g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
+    g_commands.note(e);
+    if (e.kind == TraceKind::ResetRelease) {
+        g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
+        g_release_ms = millis();
+        g_no_cs_at_release = bus_observer::dmaWords();
+        g_no_cs_reported = false;
+    }
     uint8_t command = uint8_t(e.extra);
     if (!activity::isMediaCommand(command)) return;
     if (e.kind == TraceKind::CommandStart) {
         g_last_command.command = command;
         g_last_command.lba = e.pins;
-        g_last_command.count = e.extra >> 8;
+        g_last_command.count = commandCount(e);
         activity_link::Op op = activity_link::opOf(command);
         bool seek_only = (command >= 0x10 && command <= 0x1F) || (command >= 0x70 && command <= 0x7F);
         if (op != activity_link::Op::None)
             g_link_op = op;  // its head target goes from serveFetches(), with its first sector
         else
-            postHeadTarget(e.pins, seek_only ? 0 : (e.extra >> 8), op, time_us_64());  // verify or seek
-        g_activity.onCommand(e.time_us, e.pins, seek_only ? 0 : (e.extra >> 8));
+            postHeadTarget(e.pins, seek_only ? 0 : commandCount(e), op, time_us_64());  // verify or seek
+        g_activity.onCommand(e.time_us, e.pins, seek_only ? 0 : commandCount(e));
     } else if (e.kind == TraceKind::CommandEnd) {
         g_activity.onCommandEnd(e.time_us);
     }
@@ -1219,10 +1756,12 @@ static void serveFetches() {
     ata::Fetch fetch;
     while (g_held_count < HELD_MAX && g_mailbox.takeRequest(fetch)) {
         uint64_t now = time_us_64();  // the command's time starts before the card's
-        bool ok = fetch.store ? g_disk->write(fetch.lba, fetch.buffer)
+        BlockSource* disk = fetch.unit ? g_device1_disk : g_disk;  // device 1's, or device 0's
+        bool ok = !disk ? false
+                  : fetch.store ? disk->write(fetch.lba, fetch.buffer)
                   : fetch.flush ? true  // FLUSH CACHE: nothing to move
-                                : g_disk->read(fetch.lba, fetch.buffer);
-        if (ok && fetch.flush) ok = g_disk->flush();
+                                : disk->read(fetch.lba, fetch.buffer);
+        if (ok && fetch.flush) ok = disk->flush();
         if (ok && !fetch.store && !fetch.flush) bus_observer::expect(fetch.lba, fetch.buffer);  // before core 1 can send it
         uint64_t ready = now;
         if (fetch.store || !fetch.flush) {  // a sector read or written
@@ -1291,40 +1830,84 @@ static bool printLine(const char* line, size_t n) {
 
 #if FIRMWARE_SLICE != 0
 // A CARD line when the card the image is on is pulled out, comes back, or a
-// different card (or the image changed) comes back, which isn't served.
+// different card (or the image changed) comes back, which isn't served; and
+// when the card stopped answering and was restarted between two looks here
+// (counted, so a loss and return within one pass isn't missed: 4 Nov, two
+// went unreported on the Evesham).
 static void printCardChanges() {
     static media_watch::State shown = sd_card::media().state();
+    static uint32_t shown_losses = sd_card::media().losses(), shown_restarts = sd_card::restarts();
     const media_watch::Watch& card = sd_card::media();
-    if (card.state() == shown) return;
+    const uint32_t losses = card.losses(), restarts = sd_card::restarts();
+    const bool moved = losses != shown_losses || restarts != shown_restarts;
+    if (card.state() == shown && !moved) return;
     char line[160];
     int n;
     switch (card.state()) {
         case media_watch::State::Present:
-            n = std::snprintf(line, sizeof line, "CARD back %s\n", g_image_name);
+            n = card.state() == shown
+                    ? std::snprintf(line, sizeof line, "CARD lost and back %s: it stopped answering and was restarted (%lu in all)\n",
+                                    g_image_name, (unsigned long)restarts)
+                    : std::snprintf(line, sizeof line, "CARD back %s\n", g_image_name);
             break;
         case media_watch::State::Changed:
             n = std::snprintf(line, sizeof line,
                               "CARD changed: %s; not served (eject the disk on the computer, then restart the drive)\n",
                               card.why());
             break;
+        case media_watch::State::None:  // device 0 isn't on the card: device 1's disk, `S` or `M` restarted it
+            n = std::snprintf(line, sizeof line, "CARD restarted: it stopped answering (%lu in all)\n",
+                              (unsigned long)restarts);
+            break;
         default:
             n = std::snprintf(line, sizeof line, "CARD lost: the image's reads and writes fail until it's back\n");
             break;
     }
-    if (printLine(line, size_t(n))) shown = card.state();
+    if (printLine(line, size_t(n))) {
+        shown = card.state();
+        shown_losses = losses;
+        shown_restarts = restarts;
+    }
+}
+
+// A NOCS line the first time after each RESET# release (or boot) that the host
+// strobes DIOR# with no chip select, while the drive offers no DMA: how soon
+// an ISA host shows itself (g_release_ms above).
+static void printNoChipSelect() {
+    if (g_no_cs_reported || g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA) return;
+    if (bus_observer::dmaWords() == g_no_cs_at_release) return;
+    g_no_cs_reported = true;
+    Serial.printf("NOCS %lu ms after RESET# release: DIOR# with no chip select (an ISA card?)\n",
+                  (unsigned long)(millis() - g_release_ms));
 }
 
 // A NOIORDY line when the host ends reads without waiting for IORDY, at most
 // once a second: such a host reads garbage whenever core 1 is slower than its
-// strobe (iordy_check.pio).
+// strobe (iordy_check.pio). It names the command the last one fell in or
+// followed, its device, and how long after it started (and, if it had
+// finished, after its DONE): to tell a block's first word, after a fetch,
+// from the rest (docs/atapi.md, the Evesham's CD reads). The times are when
+// core 0 collected the report, within a loop pass of the read (up to about
+// 0.5 ms behind it while it stores a sector).
 static void printIgnoredIordy() {
     static uint32_t shown = 0, last_ms = 0;
     uint32_t n = iordy_timer::ignoredReads();
     if (n == shown || millis() - last_ms < 1000) return;
-    char line[96];
-    int len = std::snprintf(line, sizeof line, "NOIORDY %lu reads=%lu last=%s: the host didn't wait for IORDY\n",
-                            (unsigned long)time_us_32(), (unsigned long)n, iordy_timer::ignoredRegister());
-    if (printLine(line, size_t(len))) {
+    char context[64] = "";
+    uint32_t at = iordy_timer::ignoredAtUs();
+    if (const CommandHistory::Entry* c = g_commands.at(at)) {
+        const char* name = c->command == 0xA0 ? mmc::name(c->packet) : commandName(c->command);
+        int k = std::snprintf(context, sizeof context, " after=%s%s +%luus", name, c->unit ? " d1" : "",
+                              (unsigned long)(at - c->start_us));
+        if (c->ended && int32_t(at - c->end_us) >= 0 && k > 0 && size_t(k) < sizeof context)
+            std::snprintf(context + k, sizeof context - size_t(k), " done+%luus", (unsigned long)(at - c->end_us));
+    }
+    char line[176];
+    int len = std::snprintf(line, sizeof line,
+                            "NOIORDY %lu reads=%lu data=%lu last=%s%s: the host didn't wait for IORDY\n",
+                            (unsigned long)at, (unsigned long)n, (unsigned long)iordy_timer::ignoredDataReads(),
+                            iordy_timer::ignoredRegister(), context);
+    if (len > 0 && printLine(line, size_t(len) < sizeof line ? size_t(len) : sizeof line - 1)) {
         shown = n;
         last_ms = millis();
     }
@@ -1349,7 +1932,7 @@ static void printSlowReads() {
 #endif
 
 static void printReady() {
-    Serial.printf("READY HDDSynthPro %s slice%d\n", FIRMWARE_VERSION, FIRMWARE_SLICE);
+    Serial.printf("READY HDDSynthPro %s slice%d%s\n", FIRMWARE_VERSION, FIRMWARE_SLICE, HDDPRO_CDROM ? " cdrom" : HDDPRO_HDCD ? " hdcd" : "");
 }
 
 // Current level of every bus line: a wiring check. With the adapter powered
@@ -1385,8 +1968,11 @@ static void printStats() {
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
                   iordy_timer::earlyRegister());
-    Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
-                  iordy_timer::ignoredRegister());
+    Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s iordy_ignored_data=%lu", (unsigned long)iordy_timer::ignoredReads(),
+                  iordy_timer::ignoredRegister(), (unsigned long)iordy_timer::ignoredDataReads());
+    Serial.printf(" iordy_data_slow=%lu/%lu/%lu/%lu iordy_data_max_ns=%lu", (unsigned long)iordy_timer::dataSlowReads(0),
+                  (unsigned long)iordy_timer::dataSlowReads(1), (unsigned long)iordy_timer::dataSlowReads(2),
+                  (unsigned long)iordy_timer::dataSlowReads(3), (unsigned long)iordy_timer::dataMaxNs());
     static uint32_t s_passes_then, s_ms_then;
     uint32_t passes = g_c1_passes, ms = millis();  // stays 0 without C1_PROFILE: nothing printed
     if (passes != s_passes_then && ms != s_ms_then)
@@ -1401,7 +1987,14 @@ static void printStats() {
                   (unsigned long)g_bench_pio, (unsigned long)g_bench_ram, (unsigned long)g_bench_sio);
     Serial.printf(" c1_bench_ram_per1000=nop:%lu,pio:%lu", (unsigned long)g_bench_nop_ram, (unsigned long)g_bench_pio_ram);
     s_passes_then = passes, s_ms_then = ms;
-    Serial.printf(" iordy_stall_released=%lu", (unsigned long)ide_bus::iordyStallReleases());
+    Serial.printf(" bus=%s iordy_stall_released=%lu", ide_bus::busName(), (unsigned long)ide_bus::iordyStallReleases());
+    if (ide_bus::dataLaneOn())
+        Serial.printf(" lane_blocks=%lu lane_switch_max_ns=%lu", (unsigned long)ide_bus::laneSwitches(),
+                      (unsigned long)ide_bus::laneSwitchMaxNs());
+    {
+        char early_profile[900];
+        if (ide_bus::formatEarlyProfile(early_profile, sizeof early_profile)) Serial.print(early_profile);
+    }
     Serial.printf(" intrq_rises=%lu commands=%lu", (unsigned long)ide_bus::intrqRises(),
                   (unsigned long)g_command_starts.load());
     if (C1_PROFILE) Serial.print(" c1_gap_ns=");
@@ -1417,6 +2010,12 @@ static void printStats() {
                   (unsigned long)bus_observer::sectorsChecked(), (unsigned long)bus_observer::sectorsBad(),
                   (unsigned long)bus_observer::sectorsSkipped(), (unsigned long)bus_observer::gaps(),
                   (unsigned long long)bus_observer::dmaWords());
+    // The same words, as the ISA signature (printNoChipSelect): only while the
+    // drive offers no DMA, since otherwise they may be DMA.
+    if (g_mdma_mode.load(std::memory_order_relaxed) == NO_DMA)
+        Serial.printf(" dior_no_cs=%llu", (unsigned long long)bus_observer::dmaWords());
+    else
+        Serial.print(" dior_no_cs=n/a");
     Serial.printf(" bus_ring_max=%lu/%lu bus_dropped=%llu bus_lost=%lu bus_checks=%s",
                   (unsigned long)bus_observer::ringMax(), (unsigned long)bus_observer::ringSize(),
                   (unsigned long long)bus_observer::dropped(), (unsigned long)bus_observer::lost(),
@@ -1427,14 +2026,24 @@ static void printStats() {
                   (unsigned long)bus_observer::expectMissed());
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
+#if CMD_PROFILE
+    {
+        uint32_t what = g_cmd_run_what;  // command, and a packet's opcode
+        Serial.printf(" cmd_run_max_ns=%lu cmd_run_max=%02x/%02x",
+                      (unsigned long)(uint64_t(g_cmd_run_max) * 1000000000ull / clock_get_hz(clk_sys)),
+                      unsigned(what & 0xFF), unsigned((what >> 8) & 0xFF));
+    }
+#endif
     Serial.printf(" clk_sys_mhz=%lu clk_peri_mhz=%lu", (unsigned long)(clock_get_hz(clk_sys) / 1000000),
                   (unsigned long)(clock_get_hz(clk_peri) / 1000000));
     Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
                   (unsigned long)g_disk_ms);
     Serial.printf(" image_name=%s config=%s", g_image_name, g_config_state);
+    Serial.printf(" device1=%s device1_sectors=%lu", g_device1_kind,
+                  (unsigned long)(g_device1_disk ? g_device1_disk->sectors() : 0));
     const media_watch::Watch& card = sd_card::media();
-    Serial.printf(" card=%s card_lost=%lu card_back=%lu", media_watch::stateName(card.state()),
-                  (unsigned long)card.losses(), (unsigned long)card.returns());
+    Serial.printf(" card=%s card_lost=%lu card_back=%lu card_restarts=%lu", media_watch::stateName(card.state()),
+                  (unsigned long)card.losses(), (unsigned long)card.returns(), (unsigned long)sd_card::restarts());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
@@ -1512,6 +2121,14 @@ static void runShortTest() {
     rp2040.reboot();
 }
 
+// Restarts the board, keeping the watchdog scratch registers (J, T, P). Waits
+// for the reset rather than returning, so nothing feeds the watchdog meanwhile
+// (with RIG_WATCHDOG_MS, loop() would put the restart off for good).
+[[maybe_unused]] static void restart() {  // the console's, not in the listen build
+    watchdog_reboot(0, 0, 10);
+    for (;;) tight_loop_contents();
+}
+
 static void handleConsole() {
     while (Serial.available()) {
         int c = Serial.read();
@@ -1529,6 +2146,42 @@ static void handleConsole() {
                 edit_buf[edit_len++] = char(c);
             }
             continue;
+        }
+#if HDDPRO_CDROM || HDDPRO_HDCD
+        static bool disc_line = false;  // `M`, then a disc's name and Enter
+        static char disc_buf[drive_config::MAX_NAME + 1];
+        static size_t disc_len = 0;
+        if (disc_line) {
+            if (c == '\r' || c == '\n') {
+                disc_line = false;
+                disc_buf[disc_len] = '\0';
+                char* name = disc_buf;
+                while (*name == ' ') ++name;
+                for (size_t n = strlen(name); n && name[n - 1] == ' '; --n) name[n - 1] = '\0';
+                if (*name)
+                    startDiscChange(name);
+                else
+                    Serial.println("# DISC: nothing changed");
+            } else if (disc_len + 1 < sizeof disc_buf) {
+                disc_buf[disc_len++] = char(c);
+            }
+            continue;
+        }
+#endif
+        static bool bus_letter_next = false;  // `P` then e, l, i or 0
+        if (bus_letter_next) {
+            bus_letter_next = false;
+            if (c == 'e' || c == 'l' || c == 'i' || c == '0') {
+                watchdog_hw->scratch[1] = c == '0' ? 0 : BUS_MAGIC | uint32_t(c);
+                Serial.printf("# restarting with %s\n", c == 'e'   ? "early answers"
+                                                        : c == 'l' ? "the data lane"
+                                                        : c == 'i' ? "ide_bus"
+                                                                   : "the settings' bus program");
+                Serial.flush();
+                delay(50);
+                restart();
+                continue;
+            }
         }
         static bool delay_digit_next = false;  // `D` then a digit
         if (delay_digit_next) {
@@ -1553,7 +2206,8 @@ static void handleConsole() {
                                "I create SD image, K create bench image, "
                                "J serve the bench image or back (restarts), T serve the test disk or back (restarts), "
                                "L activity link, U link loopback test, V drive gone/back, W write-behind, O observer full/spot checks, "
-                               "H seek timing on/off, "
+                               "H seek timing on/off, P then e/l/i/0 bus program (restarts), "
+                               "M then a disc and Enter: the CD-ROM's disc (CD-ROM builds), "
                                "x short test (cable unplugged), "
                                "b reboot to bootloader");
 #endif
@@ -1584,12 +2238,18 @@ static void handleConsole() {
 #endif
 #if FIRMWARE_SLICE != 0
             case 'r':
+#if CMD_PROFILE
+                g_cmd_run_max = 0;
+#endif
                 iordy_timer::reset();
                 bus_timing::reset();
                 for (auto& g : g_c1_gap) g = 0;
                 bus_observer::resetCounts();
+                ide_bus::resetEarlyProfile();
+                ide_bus::resetLaneStats();
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
+            case 'P': bus_letter_next = true; break;  // a bus program until a power cycle
             case 'U': startLoopback(); break;  // the link's loopback test
             case 'V': setAbsent(!g_absent.load(), ""); break;  // the drive gone from the bus, or back
             case 'H':  // seek timing off or on, until a restart (to benchmark)
@@ -1644,16 +2304,25 @@ static void handleConsole() {
                     Serial.printf("# created %s with the defaults\n", drive_config::FILE_NAME);
                 }
                 break;
+            case 'M':  // the CD-ROM's disc: a name, then Enter
+#if HDDPRO_CDROM || HDDPRO_HDCD
+                disc_line = true;
+                disc_len = 0;
+                Serial.println("# type the disc: an ISO's name, test (the test disc) or none (eject), then Enter");
+#else
+                Serial.println("# M: no CD-ROM drive in this build");
+#endif
+                break;
             case 'E':  // set one setting in HDDSYNTH.INI: key = value, then Enter
                 edit_line = true;
                 edit_len = 0;
-                Serial.println("# type key = value (e.g. image = GAMES.IMG or seek_timing = voice97), then Enter");
+                Serial.println("# type key = value (e.g. device0 = GAMES.IMG or seek_timing = voice97), then Enter");
                 break;
             case '!':  // restart, to apply HDDSYNTH.INI (keeps a `J` or `T` choice)
                 Serial.println("# restarting");
                 Serial.flush();
                 delay(50);
-                watchdog_reboot(0, 0, 10);
+                restart();
                 break;
             case 'I': sd_card::createImage(sd_card::IMAGE_NAME, gen_disk::DEFAULT_SECTORS, Serial); break;
             case 'K': sd_card::createImage(sd_card::BENCH_IMAGE_NAME, gen_disk::DEFAULT_SECTORS, Serial); break;
@@ -1663,7 +2332,7 @@ static void handleConsole() {
                 Serial.printf("# restarting to serve %s\n", bench ? sd_card::BENCH_IMAGE_NAME : sd_card::IMAGE_NAME);
                 Serial.flush();
                 delay(50);
-                watchdog_reboot(0, 0, 10);
+                restart();
                 break;
             }
             case 'T': {  // serve the test disk after a restart, or back (replug the adapter afterwards)
@@ -1672,7 +2341,7 @@ static void handleConsole() {
                 Serial.printf("# restarting to serve %s\n", test ? "the test disk" : "the card's image or the welcome disk");
                 Serial.flush();
                 delay(50);
-                watchdog_reboot(0, 0, 10);
+                restart();
                 break;
             }
 #endif
@@ -1710,17 +2379,31 @@ void setup() {
     chooseDisk();
     beginSeekTiming();
 #endif
+#ifdef RIG_WATCHDOG_MS
+    // Rig only, for unattended work (PLATFORMIO_BUILD_FLAGS=-DRIG_WATCHDOG_MS=8000):
+    // if core 0 halts (a hard fault, an abort), the board restarts and can be
+    // flashed over USB again, with no replug. Not in releases: console K and
+    // I, which make an image, block core 0 for longer than this.
+    watchdog_enable(RIG_WATCHDOG_MS, true);
+#endif
     printReady();
 }
 
 void loop() {
+#ifdef RIG_WATCHDOG_MS
+    watchdog_update();
+#endif
 #if FIRMWARE_SLICE != 0
     serveFetches();
+#if HDDPRO_CDROM || HDDPRO_HDCD
+    serviceDiscChange();
+#endif
     iordy_timer::poll();
     bus_timing::poll();
     bus_timing::printPending(2);
     printSlowReads();
     printIgnoredIordy();
+    printNoChipSelect();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.
     bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0, serveFetches);
     updateLed();

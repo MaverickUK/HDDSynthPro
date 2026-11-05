@@ -56,7 +56,9 @@ public:
     explicit Checker(uint32_t disk_sectors) : disk_sectors_(disk_sectors) {}
 
     // The drive's IDENTIFY block, to check IDENTIFY reads against. Copied.
-    void setIdentify(const uint16_t words[256]);
+    // `unit` 1: device 1's, with two drives (docs/two-drives.md); a block is
+    // checked against whichever of the two it matches better.
+    void setIdentify(const uint16_t words[256], unsigned unit = 0);
 
     // A sector just served from an image, in bus order: the next data block
     // on the bus should be it (or a later one). Copied.
@@ -118,8 +120,11 @@ private:
     Mismatch compare(uint32_t lba, const uint16_t* want) const;
 
     uint32_t disk_sectors_;
-    uint16_t identify_[256];
-    bool have_identify_ = false;
+    uint16_t identify_[2][256];
+    bool have_identify_[2] = {false, false};
+    // Compares the block with unit `unit`'s IDENTIFY: the stable words that
+    // match, and the mismatch.
+    unsigned compareIdentify(unsigned unit, Mismatch& m) const;
     uint32_t identify_checked_ = 0, identify_bad_ = 0;
     uint16_t words_[256];
     unsigned count_ = 0;

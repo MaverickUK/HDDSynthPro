@@ -3,8 +3,10 @@
 // per line, `#` starts a comment; any editor will do (Notepad's CRLF line
 // endings and UTF-8 byte-order mark are fine).
 //
-//   image = HDDSYNTH.IMG   # the disk image, in the card's root folder; none: the built-in disk
-//   mode = auto            # auto, or a transfer mode such as pio0
+//   device0 = HDDSYNTH.IMG # device 0's disk image, in the card's root folder; none: the built-in disk
+//                          # (`image`, its old name, still works)
+//   device1 = GAMES        # a second drive, device 1: an image or a folder (read-only); none by default
+//   mode = auto           # auto, or a transfer mode such as pio0
 //   dma = off              # whether auto may offer multiword DMA (where DMARQ is wired)
 //   write_behind = on      # acknowledge a write while it's stored (faster)
 //   read_ahead = on        # fetch the next sector while the host reads this one
@@ -14,6 +16,7 @@
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
 //   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
+//   cdrom = HDDSYNTH.ISO   # the CD-ROM builds: the disc, an ISO or a CUE sheet; none: the test disc
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -32,9 +35,12 @@ namespace drive_config {
 
 constexpr const char* FILE_NAME = "HDDSYNTH.INI";
 constexpr const char* DEFAULT_IMAGE = "HDDSYNTH.IMG";
-// `image = none`: no image, the built-in 64 MB test disk (writes kept in RAM
+// `device0 = none`: no image, the built-in 64 MB test disk (writes kept in RAM
 // until a restart), whose data the bus observer can check on the cable.
 constexpr const char* NO_IMAGE = "none";
+// The CD-ROM build's disc (docs/atapi.md): an ISO or a CUE sheet (with its BIN) in the root folder, or
+// `cdrom = none` for the generated test disc. No such file: no disc in the drive.
+constexpr const char* DEFAULT_CDROM = "HDDSYNTH.ISO";
 constexpr size_t MAX_FILE = 4096;      // longer files are read this far, with a warning
 constexpr size_t MAX_NAME = 64;        // an image name, without the NUL
 constexpr size_t MAX_WARNINGS = 4;
@@ -98,7 +104,14 @@ constexpr bool DEFAULT_EARLY_ANSWERS = true;
 constexpr bool DEFAULT_IORDY = true;
 
 struct Config {
-    char image[MAX_NAME + 1];
+    // `device0 = NAME`: device 0's disk image. Its old name, `image`, still
+    // works; if a file has both, device0 counts.
+    char device0[MAX_NAME + 1];
+    // `device1 = NAME`: a second drive, device 1 (docs/two-drives.md), an image
+    // file or a folder in the card's root folder (served read-only); empty (or
+    // `none`): no device 1, as before.
+    char device1[MAX_NAME + 1];
+    char cdrom[MAX_NAME + 1];  // the CD-ROM build's disc; the hard disk build ignores it
     Mode mode = Mode::Auto;
     bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
@@ -123,14 +136,24 @@ void parse(const char* text, size_t len, Config& out);
 // The defaults, as parse("") gives them.
 void defaults(Config& out);
 
-// False for `image = none` (any case): serve the built-in disk, not an image.
+// False for `device0 = none` (any case): serve the built-in disk, not an image.
 bool servesImage(const Config& c);
+// True if `device1` names a disk for device 1.
+bool hasDevice1(const Config& c);
+// False for `cdrom = none`: the CD-ROM build serves the test disc.
+bool servesDisc(const Config& c);
+// True if device 1 is to be a CD-ROM drive (the bb48_hdcd build): `device1 =
+// cdrom` (the `cdrom` setting's disc), or a device1 name ending in .ISO or .CUE.
+bool device1IsCdrom(const Config& c);
+// That drive's disc: the ISO device1 names, or `cdrom`'s (which may be `none`).
+const char* device1Disc(const Config& c);
 
 // `text` with `key` set to `value`, into `out` (NUL-terminated): the line
 // setting it is replaced in place, keeping its comment, or a new line is
 // added at the end. Comments, other lines and the line endings in use are
-// kept. Returns the new length, or 0 if `out` is too small or `key` is not
-// a known key (isKey).
+// kept. An old name counts as its key (`image` as `device0`), either way
+// round, and a line using it is rewritten with the new name. Returns the
+// new length, or 0 if `out` is too small or `key` is not a known key (isKey).
 size_t setKey(const char* text, size_t len, const char* key, const char* value, char* out, size_t size);
 
 // The file a `C` console command creates: the defaults, commented.

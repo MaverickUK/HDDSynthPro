@@ -22,7 +22,7 @@ case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) PYTHON="${PYTHON:-python}"; VENV_BIN=Scripts ;;  # Windows
     *)                    PYTHON="${PYTHON:-python3}"; VENV_BIN=bin ;;
 esac
-export PYTHONUTF8=1  # logs as UTF-8 on Windows too
+export PYTHON PYTHONUTF8=1  # test/run_native_tests.sh uses the same Python; logs as UTF-8 on Windows too
 PIO="${PIO:-$(command -v pio || ls "$HOME"/.platformio-venv/bin/pio "$HOME"/.platformio/penv/Scripts/pio.exe 2>/dev/null | head -1 || true)}"
 VENV=host/.venv
 

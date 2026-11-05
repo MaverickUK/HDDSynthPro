@@ -3,6 +3,7 @@
 #include <cstdio>
 
 #include "bus_sample.h"
+#include "mmc.h"
 
 static bool sameAccess(const TraceEvent& a, const TraceEvent& b) {
     return a.kind == TraceKind::Bus && b.kind == TraceKind::Bus &&
@@ -44,6 +45,8 @@ const char* commandName(uint8_t command) {
         case 0x90: return "EXEC_DIAGNOSTIC";
         case 0xEC: return "IDENTIFY";
         case 0xA1: return "IDENTIFY_PACKET";
+        case 0xA0: return "PACKET";
+        case 0x08: return "DEVICE_RESET";
         case 0xEF: return "SET_FEATURES";
         case 0x91: return "INIT_PARAMS";
         case 0xC6: return "SET_MULTIPLE";
@@ -104,9 +107,10 @@ size_t formatRun(const TraceRun& run, char* buf, size_t size) {
             break;
         case TraceKind::CommandStart: {
             uint8_t command = uint8_t(e.extra);
-            n = std::snprintf(buf, size, "CMD %lu %02x %s %lu %lu\n", (unsigned long)e.time_us,
-                              (unsigned)command, commandName(command), (unsigned long)e.pins,
-                              (unsigned long)(e.extra >> 8));
+            const char* name = command == 0xA0 ? mmc::name(uint8_t(e.extra >> 24)) : commandName(command);
+            n = std::snprintf(buf, size, "CMD %lu %02x %s %lu %lu%s\n", (unsigned long)e.time_us,
+                              (unsigned)command, name, (unsigned long)e.pins,
+                              (unsigned long)commandCount(e), e.unit ? " d1" : "");
             break;
         }
         case TraceKind::CommandEnd:

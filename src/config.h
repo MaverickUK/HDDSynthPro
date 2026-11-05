@@ -93,9 +93,14 @@ constexpr uint32_t SD_SPI_MHZ = 25;
 // at once after IDENTIFY and SET FEATURES) never waits behind one. Without it
 // that poll was held 1.29-1.39 us (ATA allows 1.25).
 constexpr uint32_t COMMAND_QUIET_US = 4;
+// With a command queued, core 1 answers at most this many accesses already
+// waiting (the host's first status polls, BSY at once) before it runs the
+// command. Bounded, so back-to-back polls can't keep a command queued for good
+// (0.29.0-2d.4); not 0, or the first poll waits for the whole command.
+constexpr unsigned COMMAND_POLLS_FIRST = 8;
 
 // Trace ring between core 1 (producer) and core 0 (consumer):
-// 8192 events x 12 bytes = 96 KB.
+// 8192 events x 16 bytes = 128 KB (12 bytes of data, padded).
 constexpr size_t TRACE_RING_EVENTS = 8192;
 
 // The listen build's capture window (console `w`): with no drive answering,
@@ -127,6 +132,12 @@ constexpr uint32_t LED_MIN_MS = 25;
 // The RAM overlay on the generated disk (block_source.h): how many distinct
 // sectors can be written, at 512 bytes each.
 constexpr size_t RAM_DISK_SECTORS = 512;
+
+// A folder served as device 1 (docs/two-drives.md): the most files and
+// folders its list holds, 32 bytes each, on the heap. Fewer if RAM is short
+// (halved until it fits); a bigger folder is served cut short, with a warning.
+constexpr uint16_t FOLDER_MAX_ENTRIES = 1024;
+constexpr uint32_t FOLDER_HEAP_LEFT = 16 * 1024;  // heap kept free after the list
 
 // The IORDY timer (iordy_timer.pio) counts and times reads that IORDY holds
 // longer than this. ATA's limit is 1250 ns (tB).

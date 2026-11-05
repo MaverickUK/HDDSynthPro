@@ -1,8 +1,10 @@
 #include "sd_card.h"
 
 #include <SPI.h>
+#include <cstdio>
 #include <SdFat.h>
 
+#include "card_retry.h"
 #include "config.h"
 #include "drive_config.h"
 #include "image_parts.h"
@@ -51,6 +53,14 @@ static bool startCard() {
     return s_sd.begin(config);
 }
 
+// Device 1's open image (openDevice1Image), declared here because restarting
+// the card closes it too; it's reopened by name at its next read or write.
+static FsFile s_device1_image;
+// Times the card was started again after it stopped answering, from any
+// path: device 0's reads (reattach), device 1's, or `S` and `M` finding it
+// silent. printCardChanges() prints a CARD line for each.
+static uint32_t s_restarts = 0;
+
 // Mounts the card's volume, unless it already is.
 static bool mount(Print& out) {
     if (s_sd.fatType()) return true;
@@ -69,8 +79,10 @@ static const char* imageState(const char* name) {
     return s_sd.exists(name) ? "present" : "none";
 }
 
+static bool wakeIfSilent(Print& out);  // below, with the card watch
+
 void printInfo(Print& out) {
-    if (!mount(out)) return;
+    if (!mount(out) || !wakeIfSilent(out)) return;
     uint32_t sectors = s_sd.card()->sectorCount();
     out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s\n", cardType(s_sd.card()->type()),
                (unsigned long)(sectors / 2048), fsType(s_sd.fatType()),
@@ -82,6 +94,7 @@ void printInfo(Print& out) {
 
 static media_watch::Watch s_watch;
 static const char* s_served_name = nullptr;  // the image being served, kept while the card is out
+static oflag_t s_image_flags = O_RDWR;  // how it was opened: reopened the same way (read-only for a disc)
 // A split image (image_parts.h): its parts, all of the image's sectors, its
 // size in bytes (media_watch's identity), and why it couldn't be served.
 static unsigned s_parts = 1;
@@ -131,11 +144,12 @@ static bool reattach(uint32_t now) {
     // The card is idle now and accepts no writes, so nothing SdFat still has
     // cached from before can reach it as the file is closed.
     s_image.close();
+    s_device1_image.close();  // reopened by name at its next read (device1Attempt)
     if (!startCard()) {
         s_watch.cameBackWithout("can't mount", now);
         return false;
     }
-    if (!s_image.open(s_served_name, O_RDWR)) {
+    if (!s_image.open(s_served_name, s_image_flags)) {
         s_watch.cameBackWithout(s_sd.exists(s_served_name) ? "can't open" : "image not found", now);
         return false;
     }
@@ -146,6 +160,7 @@ static bool reattach(uint32_t now) {
     } else if (!identify(id)) {
         s_watch.cameBackWithout("can't read the card's ID", now);
     } else if (s_watch.cameBack(id, now) == media_watch::State::Present) {
+        ++s_restarts;
         return true;
     }
     s_image.close();
@@ -166,6 +181,44 @@ static bool attempt(Op op) {
     s_watch.failed(millis());  // the retry failed too
     return false;
 }
+
+// The card's operations, for card_retry's decisions (card_retry.h).
+struct SdCardOps {
+    uint32_t now() { return millis(); }
+    bool answers() { return cardAnswers(); }
+    bool start() { return startCard(); }
+    bool reattach(uint32_t now) { return ::sd_card::reattach(now); }
+    void closeDevice1() { s_device1_image.close(); }
+    bool reopenDevice1();  // below, with device 1's image
+    void countRestart() { ++s_restarts; }
+};
+static SdCardOps s_card_ops;
+
+// The card stopped answering on a path other than device 0's image reads
+// (device 1's disk, `S`, `M`): restarts it (card_retry::restart).
+static bool restartCard() { return card_retry::restart(s_watch, s_card_ops); }
+
+// Whether the mounted card has stopped answering: SdFat still has its volume,
+// but the card doesn't give its size. So it was pulled out, or put back while
+// the drive ran (it then wakes in SD mode, not SPI), with no image read since
+// to notice. Asks the card (CMD9), a few hundred microseconds.
+static bool cardSilent() {
+    return s_sd.fatType() && s_sd.card()->sectorCount() == 0;
+}
+
+// Restarts the card if it has stopped answering; for `S` and `M`, before they
+// look for files. False if it's silent and couldn't be restarted.
+static bool wakeIfSilent(Print& out) {
+    if (!cardSilent()) return true;
+    if (restartCard()) {
+        out.println("SD restarted: it had stopped answering");
+        return true;
+    }
+    out.println("SD error: the card doesn't answer, and couldn't be restarted");
+    return false;
+}
+
+uint32_t restarts() { return s_restarts; }
 
 const media_watch::Watch& media() { return s_watch; }
 
@@ -371,7 +424,7 @@ public:
 };
 static SdImageFile s_image_file;
 
-ImageFile* openImage(const char* name, Print& log) {
+ImageFile* openImage(const char* name, Print& log, bool read_only) {
     if (s_image.isOpen()) s_image.close();
     s_open_name = nullptr;
     s_watch = media_watch::Watch();
@@ -383,7 +436,8 @@ ImageFile* openImage(const char* name, Print& log) {
         s_open_error = "not found";
         return nullptr;
     }
-    if (!s_image.open(name, O_RDWR)) {
+    s_image_flags = read_only ? O_RDONLY : O_RDWR;
+    if (!s_image.open(name, s_image_flags)) {
         s_open_error = "can't open";
         log.printf("SD error: can't open %s\n", name);
         return nullptr;
@@ -514,6 +568,176 @@ bool createImage(const char* name, uint32_t sectors, Print& out) {
     out.printf("# created %s, %lu sectors; reboot the drive to use it\n", name,
                (unsigned long)sectors);
     return true;
+}
+
+// ---- Device 1's disk ----------------------------------------------------------
+
+bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& truncated, const char*& why,
+                   Print& log) {
+    len = 0;
+    truncated = false;
+    if (!mount(log) || !wakeIfSilent(log)) {
+        why = "no card";
+        return false;
+    }
+    FsFile f;
+    if (!f.open(name, O_RDONLY)) {
+        why = s_sd.exists(name) ? "can't open" : "not found";
+        return false;
+    }
+    int n = f.read(buf, size);
+    truncated = n >= 0 && uint64_t(n) < f.fileSize();
+    f.close();
+    if (n < 0) {
+        why = "can't read";
+        return false;
+    }
+    len = size_t(n);
+    return true;
+}
+
+bool isFolder(const char* name) {
+    FsFile f;
+    if (!s_sd.fatType() || !f.open(name, O_RDONLY)) return false;
+    bool dir = f.isDir();
+    f.close();
+    return dir;
+}
+
+// Device 1's image: its name and how it was opened, to reopen it after the
+// card restarts (s_device1_image is declared above, with startCard).
+static char s_device1_name[drive_config::MAX_NAME + 1] = "";
+static oflag_t s_device1_flags = O_RDONLY;
+
+// A device 1 read, write or sync, through SdFat's file layer, retried once
+// after restarting the card if it fails (card_retry::device1Attempt).
+template <typename Op>
+static bool device1Attempt(Op&& op) {
+    return card_retry::device1Attempt(s_watch, s_card_ops, op);
+}
+
+// SdFat's file layer, for device 1's image: seek, then read or write.
+class Device1ImageFile : public ImageFile {
+public:
+    uint64_t size() const override { return size_; }
+    bool readAt(uint64_t offset, void* data, size_t bytes) override {
+        return device1Attempt(
+            [&] { return s_device1_image.seekSet(offset) && s_device1_image.read(data, bytes) == int(bytes); });
+    }
+    bool writeAt(uint64_t offset, const void* data, size_t bytes) override {
+        return device1Attempt(
+            [&] { return s_device1_image.seekSet(offset) && s_device1_image.write(data, bytes) == bytes; });
+    }
+    bool sync() override {
+        return device1Attempt([] { return s_device1_image.sync(); });
+    }
+    uint64_t size_ = 0;  // as opened: a reopened file must still be this size
+};
+static Device1ImageFile s_device1_image_file;
+
+bool SdCardOps::reopenDevice1() {
+    return card_retry::reopen(s_device1_image, s_device1_name, s_device1_flags, s_device1_image_file.size_);
+}
+
+ImageFile* openDevice1Image(const char* name, Print& log, bool read_only) {
+    if (s_device1_image.isOpen()) s_device1_image.close();
+    s_device1_name[0] = '\0';
+    if (!mount(log) || !wakeIfSilent(log)) {
+        s_open_error = "no card";
+        return nullptr;
+    }
+    if (!s_sd.exists(name)) {
+        s_open_error = "not found";
+        return nullptr;
+    }
+    if (!s_device1_image.open(name, read_only ? O_RDONLY : O_RDWR)) {
+        s_open_error = "can't open";
+        log.printf("SD error: can't open %s\n", name);
+        return nullptr;
+    }
+    std::snprintf(s_device1_name, sizeof s_device1_name, "%s", name);
+    s_device1_flags = read_only ? O_RDONLY : O_RDWR;
+    s_device1_image_file.size_ = s_device1_image.fileSize();
+    return &s_device1_image_file;
+}
+
+// The folder served for device 1. Entries are found again by their index in
+// their folder (FsFile::dirIndex), opening each folder from the served one
+// down, so nothing but that index is kept for them.
+class SdFolderSource : public folder_disk::FolderSource {
+public:
+    void serve(const char* name) {
+        name_ = name;
+        close();
+    }
+
+    bool list(uint16_t folder, const folder_disk::Entry* entries, Adder& add) override {
+        FsFile dir;
+        if (!openEntry(folder, entries, dir) || !dir.isDir()) return false;
+        FsFile f;
+        char name[256];
+        while (f.openNext(&dir, O_RDONLY)) {
+            folder_disk::Item item{};
+            f.getName(name, sizeof name);
+            bool skip = name[0] == '.' || f.isHidden() || f.isSystem();
+            if (!skip) {
+                item.name = name;
+                item.dir = f.isDir();
+                item.size = item.dir ? 0 : f.fileSize();
+                f.getModifyDateTime(&item.date, &item.time);
+                item.locator = f.dirIndex();
+            }
+            f.close();
+            if (!skip && !add.add(item)) break;
+        }
+        return true;
+    }
+
+    bool read(uint16_t entry, const folder_disk::Entry* entries, uint32_t offset, uint8_t* out,
+              uint32_t bytes) override {
+        if (entry != open_entry_ || !file_.isOpen()) {
+            close();
+            if (!openEntry(entry, entries, file_)) return false;
+            open_entry_ = entry;
+        }
+        return file_.seekSet(offset) && file_.read(out, bytes) == int(bytes);
+    }
+
+private:
+    void close() {
+        if (file_.isOpen()) file_.close();
+        open_entry_ = folder_disk::ROOT;
+    }
+
+    // Opens `entry` (ROOT: the folder served) into `out`, by its folders' indexes.
+    bool openEntry(uint16_t entry, const folder_disk::Entry* entries, FsFile& out) {
+        uint32_t path[16];  // indexes from the served folder down; folders nest less deeply than this
+        unsigned depth = 0;
+        for (uint16_t e = entry; e != folder_disk::ROOT; e = entries[e].parent) {
+            if (depth == 16) return false;
+            path[depth++] = entries[e].locator;
+        }
+        FsFile at;
+        if (!at.open(name_, O_RDONLY)) return false;
+        while (depth > 0) {
+            FsFile next;
+            if (!next.open(&at, path[--depth], O_RDONLY)) return false;
+            at.close();
+            at = next;
+        }
+        out = at;
+        return true;
+    }
+
+    const char* name_ = "";
+    FsFile file_;
+    uint16_t open_entry_ = folder_disk::ROOT;
+};
+static SdFolderSource s_folder;
+
+folder_disk::FolderSource& folderSource(const char* name) {
+    s_folder.serve(name);
+    return s_folder;
 }
 
 }  // namespace sd_card

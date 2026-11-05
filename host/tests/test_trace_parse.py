@@ -61,6 +61,23 @@ def test_parse_commands():
     assert "IDENTIFY x1" in trace.summary(t)
 
 
+def test_parse_device_1_commands():
+    # Two drives: device 1's CMD lines end in d1 (docs/two-drives.md).
+    t = trace.parse(["CMD 100 ec IDENTIFY 0 0 d1", "DONE 300 ec 58 00 200",
+                     "CMD 400 20 READ_SECTORS 7 1", "DONE 500 20 50 00 100"])
+    assert [(c.name, c.unit) for c in t.commands] == [("IDENTIFY", 1), ("READ_SECTORS", 0)]
+    assert t.commands[0].ok and t.commands[1].ok
+
+
+def test_parse_packet_commands():
+    # The CD-ROM build: PACKET named by its packet, lba and count in frames
+    t = trace.parse(["CMD 100 a0 READ_10 16 4", "DONE 900 a0 40 00 800",
+                     "CMD 1000 a0 TEST_UNIT_READY 0 0", "DONE 1100 a0 41 60 100"])
+    read, tur = t.commands
+    assert (read.command, read.name, read.lba, read.count, read.ok) == (0xA0, "READ_10", 16, 4, True)
+    assert tur.name == "TEST_UNIT_READY" and not tur.ok and tur.error == 0x60
+
+
 def test_activity_lines_and_time_in_states():
     t = trace.parse([
         "MARK 1000",

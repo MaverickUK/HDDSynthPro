@@ -164,5 +164,7 @@ All on core 0. Core 1 and the bus timing are untouched.
 
 ## Later
 
+- **Protocol version 3, designed (4 Nov 2026):** the CD-ROM on the HDD Synth's OLED, FDDSynthPro-style, and discs swapped from the synth: per-drive activity (`$HDU`), the disc (`$HDD`), the CD-ROM's position (`$HDP`), the disc list (`$HDL`) and requests from the synth (`$HDQ`, answered by `$HDR`), for the synth's next hardware revision, which gives the link pins of its own: [hddsynth-cdrom-display-brief.md](hddsynth-cdrom-display-brief.md).
+
 - More sounds from the same link: separate read and write samples (the `op` field), seek sizes, spin-down and spin-up from the drive's STANDBY and wake.
 - A reply from the synth on GPIO 1 (link up, which pack, volume), if it turns out to be useful.

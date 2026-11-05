@@ -5,7 +5,7 @@ name: Build and test
 
 on:
   push:
-    branches: [main]
+    branches: [main, two-drives, merge-cdrom, hdd-cd]
     tags: ['v*']
   pull_request:
 
@@ -27,11 +27,45 @@ jobs:
       - run: pip install platformio -r host/requirements.txt
 
       # Builds first: it installs pioasm, which the PIO simulator tests use.
-      - run: pio run -e bb48 -e bb48_drive
+      - run: pio run -e bb48 -e bb48_drive -e bb48_cdrom -e bb48_hdcd
       - name: Core 1 runs only from RAM
-        run: python3 scripts/check_core1_ram.py
+        run: |
+          python3 scripts/check_core1_ram.py
+          python3 scripts/check_core1_ram.py .pio/build/bb48_cdrom/firmware.elf
+          python3 scripts/check_core1_ram.py .pio/build/bb48_hdcd/firmware.elf
       - name: C++ unit tests
         run: test/run_native_tests.sh
+      - name: Folder drive image, checked by fsck.fat, mtools and pyfatfs
+        shell: bash
+        run: |
+          set -o pipefail
+          sudo apt-get install -y -q dosfstools mtools > /dev/null
+          pip install -q pyfatfs "setuptools<81"  # pyfatfs's fs package still imports pkg_resources
+          mkdir -p "/tmp/folder/Sub Folder/Deeper Still" /tmp/folder/Empty
+          cp -r docs /tmp/folder/Docs
+          cp src/*.cpp "/tmp/folder/Sub Folder/"
+          cp src/*.h "/tmp/folder/Sub Folder/Deeper Still/"
+          head -c 5000001 /dev/urandom > /tmp/folder/random.bin
+          : > /tmp/folder/empty.txt
+          # Each check runs even if one before it failed; a failing one's
+          # output becomes an annotation on the run, readable without logs.
+          failed=0
+          check() {
+            local name="$1"; shift
+            if "$@" > /tmp/check.out 2>&1; then
+              tail -20 /tmp/check.out
+            else
+              cat /tmp/check.out
+              echo "::error title=$name failed::$(head -c 3000 /tmp/check.out | sed -e ':a;N;$!ba' -e 's/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
+              failed=1
+            fi
+          }
+          check make_folder_img .pio/native-tests/make_folder_img /tmp/folder /tmp/folder.img
+          dd if=/tmp/folder.img of=/tmp/partition.img bs=512 skip=63 status=none
+          check fsck.fat fsck.fat -n -v /tmp/partition.img
+          check mtools mdir -i /tmp/partition.img -/ ::
+          check pyfatfs python3 scripts/check_folder_img.py /tmp/folder /tmp/folder.img
+          exit $failed
       - name: Simulator and parser tests
         working-directory: host
         run: pytest -m sim
@@ -56,6 +90,9 @@ jobs:
           mkdir dist
           cp .pio/build/bb48/firmware.uf2 "dist/hddsynthpro-bb48-listen-v${{ steps.version.outputs.version }}.uf2"
           cp .pio/build/bb48_drive/firmware.uf2 "dist/hddsynthpro-bb48-drive-v${{ steps.version.outputs.version }}.uf2"
+          # Exploratory (docs/atapi.md): a CD-ROM drive, and a hard disk with a CD-ROM as device 1
+          cp .pio/build/bb48_cdrom/firmware.uf2 "dist/hddsynthpro-bb48-cdrom-v${{ steps.version.outputs.version }}.uf2"
+          cp .pio/build/bb48_hdcd/firmware.uf2 "dist/hddsynthpro-bb48-hdcd-v${{ steps.version.outputs.version }}.uf2"
       - uses: actions/upload-artifact@v7
         with:
           name: firmware-v${{ steps.version.outputs.version }}
@@ -69,6 +106,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7  # for the release notes
       - uses: actions/download-artifact@v8
         with:
           name: firmware-v${{ needs.build.outputs.version }}
@@ -77,7 +115,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # docs/release-notes/vX.Y.Z.md if there is one, else GitHub's notes from the commits
+          notes="docs/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then notes_arg=(--notes-file "$notes"); else notes_arg=(--generate-notes); fi
           gh release create "${GITHUB_REF_NAME}" dist/*.uf2 \
             --repo "${GITHUB_REPOSITORY}" \
             --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+            "${notes_arg[@]}"

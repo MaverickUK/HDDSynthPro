@@ -22,19 +22,17 @@ static bool identifyWordIsStable(unsigned i) {
     return (i >= 10 && i <= 19) || (i >= 23 && i <= 46) || i == 60 || i == 61;
 }
 
-void Checker::setIdentify(const uint16_t words[256]) {
-    for (unsigned i = 0; i < 256; ++i) identify_[i] = words[i];
-    have_identify_ = true;
+void Checker::setIdentify(const uint16_t words[256], unsigned unit) {
+    for (unsigned i = 0; i < 256; ++i) identify_[unit][i] = words[i];
+    have_identify_[unit] = true;
 }
 
-bool Checker::checkIdentify(bool& is_identify) {
-    is_identify = false;
-    if (!have_identify_) return false;
-    Mismatch m{IDENTIFY_LBA, 0, 0, 0, 0, 0, 0};
+unsigned Checker::compareIdentify(unsigned unit, Mismatch& m) const {
+    m = Mismatch{IDENTIFY_LBA, 0, 0, 0, 0, 0, 0};
     unsigned matches = 0;
     for (unsigned i = 0; i < 256; ++i) {
         if (!identifyWordIsStable(i)) continue;
-        uint16_t want = identify_[i];
+        uint16_t want = identify_[unit][i];
         uint16_t seen = words_[i];
         if (seen == want) {
             if (want != 0 && want != 0x2020) ++matches;  // zeros and padding prove nothing: text has spaces
@@ -48,6 +46,22 @@ bool Checker::checkIdentify(bool& is_identify) {
         ++m.bad_words;
         m.bits_lost = uint16_t(m.bits_lost + popcount16(want & ~seen));
         m.bits_gained = uint16_t(m.bits_gained + popcount16(seen & ~want));
+    }
+    return matches;
+}
+
+bool Checker::checkIdentify(bool& is_identify) {
+    is_identify = false;
+    Mismatch m{};
+    unsigned matches = 0;
+    for (unsigned unit = 0; unit < 2; ++unit) {
+        if (!have_identify_[unit]) continue;
+        Mismatch mu;
+        unsigned n = compareIdentify(unit, mu);
+        if (n > matches) {
+            matches = n;
+            m = mu;
+        }
     }
     if (matches < IDENTIFY_MIN_MATCHES) return false;
     is_identify = true;

@@ -1,0 +1,98 @@
+# Next bench session (written 4 Nov 2026)
+
+## First: dev.11-13 on the board (written 5 Nov)
+
+0.30.0-dev.11 to dev.13 (`CHANGELOG.md`; dev.12 only moved the retry logic to `card_retry.h` and tested it; dev.13 adds NOIORDY measurements) are built and host-tested only. Flash a normal `bb48_hdcd` and, with the Evesham settings (`device1 = cdrom`):
+- [ ] `s` shows `card_restarts=0`; `S` as before.
+- [ ] **A card that went silent:** with the board running and nothing reading, pull the card and put it back. `S`: `SD restarted: it had stopped answering`, then the usual `SD ok ... size_mb=30436`. The `CARD` line for it (`CARD lost and back ...`).
+- [ ] **Device 1 gets over it:** pull and reseat the card again, then read the CD (`DIR D:` on the Evesham, or `M DOOMBIN.CUE` and Windows reading the disc on the rig). It should list, after one `CARD lost and back` line, with no MEDIUM ERROR.
+- [ ] Device 0 the same: pull and reseat, then `DIR C:`.
+- [ ] `-m speed` on `bb48_drive` (core 1's code didn't move, but the variables behind it did).
+- [ ] **On the Evesham, dev.13's NOIORDY measurements** (logged by `scripts/retro_log.py`): `r`, Doom from the CD as on 4 Nov, then `s`. Note `iordy_ignored_data`, `iordy_data_slow`, `iordy_data_max_ns`, and each `NOIORDY` line's `after=` and `+...us` ([atapi.md](atapi.md#the-eveshams-unwaited-cd-data-reads-4-nov-2026) says how to read them). Then the same with console `A` (read-ahead off), and compare.
+
+
+## Next: the Evesham with a hard disk and a CD-ROM (prepared 4 Nov, late)
+
+The BB48 is ready for it, whichever computer its USB goes to (the settings are on the card):
+- **The build:** a normal `bb48_hdcd` 0.30.0-dev.10, without `RIG_WATCHDOG_MS`. The READY line ends `slice3 hdcd`.
+- **Device 0:** `ICL386MB.IMG` (MS-DOS 5), PIO mode 3. `S` shows `geometry=756/13/51 (partition table)`.
+- **Device 1:** a CD-ROM with `DOOM_SE.ISO` in it (`frames=11431`).
+- **`HDDSYNTH.INI`:** `device0 = ICL386MB.IMG`, `device1 = cdrom`, `cdrom = DOOM_SE.ISO`, `mode = auto`, `early_answers = on`, `isa = off`.
+- **No console `T` or `P`** is set: `S` shows `serving=ICL386MB.IMG`.
+- **The bus program:** `ide_bus`, which `bb48_hdcd` picks with a CD-ROM as device 1 (`CONFIG with a CD-ROM as device 1, ide_bus`). The Evesham waited for IORDY on every read on the data lane (`iordy_ignored=0`), so `ide_bus` should suit it.
+- **The observer:** it checks the image's data on the cable (`bus_image=on`).
+
+**From the Mac:** plug the BB48's USB in first, then run `python3 scripts/retro_log.py evesham-hdcd` from the repo (`host/requirements.txt` installed; `HDDPRO_PORT=/dev/cu.usbmodem...` if it doesn't find the board). Send `h` and `S`, and check the lines above. Then follow the power order in [retro-test.md](retro-test.md#2-connecting-the-power-order-rule).
+
+1. [x] **The cable** on the Evesham's primary channel. Its own optical drive is on the other channel; it was E: last time.
+2. [x] **The BIOS,** primary master and slave on Auto: does it list a hard disk and `HDDSYNTH PRO CD-ROM`? Put the floppy first in the boot order: the BIOS tries to boot from the CD (NOT READY last time, with no disc). Here, then at the DOS prompt and after Doom (`r` before each), record the [auto-bus table](auto-bus.md#what-to-record-on-each-pc): `bus`, `dior_no_cs` and the `NOCS` line, `iordy_ignored` and any `NOIORDY` lines, `iordy_slow`, `iordy_max_ns`, `rd_t1_ns`, `rd_strobe_ns`; plus `bus_sectors`/`bus_bad`.
+3. [x] **Boot the Windows 98 startup floppy.** MS-DOS 5 on the image has no CD-ROM driver, but the floppy loads `OAKCDROM.SYS` and MSCDEX. C: should be the image's disk, the RAM drive the next letter, then the CD-ROM: the driver's lines name its letter. Does `DIR C:` list MS-DOS 5's files, and `DIR` on the CD `DOOM_SE`'s?
+4. [x] **Doom from the CD:** `MD C:\DOOMDATA` (on the image this time, so its saves stay), then on the CD's drive `CD \DOOMCD`, `SETUP`, `DOOM`. Play a level. Afterwards `s`: no failed commands but the expected refusals (READ SUB-CHANNEL 42h gets ILLEGAL REQUEST), `bus_bad=0`, no `STUCK`.
+5. [x] **Optional, a disc change:** with MSCDEX loaded, `DIR` the CD, console `M` then `test` and Enter, `DIR` again (does MSCDEX notice the test disc?), then `M DOOM_SE.ISO` back.
+> **Done on the evening of 4 Nov (results in `CHANGELOG.md`, dev.10, "Tested on a retro PC"):** steps 1-5 passed: both drives found, Doom from the CD with its saves on C:, every command good, `bus_bad=0`; MSCDEX noticed every disc change, and the BIN/CUE (`DOOMBIN.CUE`, now on the card) served Doom's files. The BIOS snapshot of the auto-bus table was missed (the console wasn't open); the DOS prompt's and Doom's are in the CHANGELOG. **The SD card dropped out** after it was put back with the board running, and device 1 doesn't recover from that: if a disc change gives `not found` or CD reads fail with MEDIUM ERROR, `S` shows `size_mb=0`; unplug the BB48 (Evesham off first). The board is left set up for step 6 (`device1 = cdrom`, `DOOM_SE.ISO`).
+>
+> **Step 6, next time:** booted from the floppy, `MD C:\CDROM`, `COPY A:\OAKCDROM.SYS C:\CDROM`, `COPY %RAMD%:\MSCDEX.EXE C:\CDROM` (the floppy unpacks MSCDEX to its RAM drive). Add `DEVICE=C:\CDROM\OAKCDROM.SYS /D:MSCD001` to `C:\CONFIG.SYS` and `C:\CDROM\MSCDEX.EXE /D:MSCD001` to the end of `C:\AUTOEXEC.BAT` (`C:\DOS\EDIT`). Floppy out, restart. If MSCDEX (2.25, Windows 98's) says "Incorrect DOS version": `SETVER C:\CDROM\MSCDEX.EXE 7.10` (with `DEVICE=C:\DOS\SETVER.EXE` in `CONFIG.SYS`) and restart. Too few drive letters: `LASTDRIVE=Z`.
+
+6. [ ] **Optional:** boot MS-DOS 5 from C: with the CD-ROM driver. Copy `OAKCDROM.SYS` and `MSCDEX.EXE` from the floppy's boot (the RAM drive holds MSCDEX) to C:, and add them to `CONFIG.SYS`/`AUTOEXEC.BAT` (a version check may need `SETVER`).
+
+**If the BIOS doesn't find the drives,** console `P e` (early answers, which restarts): the program the Evesham ran each drive on alone. Early answers failed only the USB adapter's register check, with a CD-ROM as device 1. Record which one worked. `P 0` goes back to the settings'.
+
+**Afterwards:** `E device1 = none`, then `!`. Leave `cdrom = DOOM_SE.ISO`: it only matters with `device1 = cdrom`. Results go in `CHANGELOG.md` (the dev.10 entry, or the next), [atapi.md](atapi.md) and the release notes, whose `bb48_hdcd` line says it isn't yet tried on a retro PC.
+
+> **After the evening of 4 Nov (0.30.0-dev.10):** steps 1 and 2 are done except BIN/CUE (results in `CHANGELOG.md`, dev.10): `bb48_hdcd` passed everything on `ide_bus`, which it now uses with a CD-ROM as device 1. Still to do:
+>
+> 1. ~~**The soak.**~~ Done (4 Nov, 21:29): an hour clean, see the CHANGELOG (dev.10). The board is set up for it (`bb48_hdcd` dev.10 with `RIG_WATCHDOG_MS`, the test disk, `device1 = cdrom`, `mode = mdma2`). **Don't flash or restart it**: replug only the USB adapter, wait for disk 1 and D: in Windows, then `python bench_session.py --only hdcd-soak --as-is --cd-dev //./D:`. The adapter hangs whenever a CD-ROM vanishes under it (a flash, a restart, console `V`), so with a CD-ROM in, set the board up first, then replug the adapter, then run with `--as-is`.
+> 2. **BIN/CUE** (step 2's item): `tools/iso_to_bincue.py` on `DOOM_SE.ISO`, copy the BIN and CUE to the card, then console `M DOOM_SE.CUE` and compare D:'s files with the ISO's.
+> 3. Optional: step 2b's profiles (`--from cd-profile`): the CD-ROM build as device 0 flashes and re-detects too, so expect a replug after each flash.
+
+Everything built on 4 Nov while nobody could replug the USB adapter, in one sitting. Branches: `merge-cdrom` (0.30.0-dev.3, CI green) and `hdd-cd` (0.30.0-dev.8, from it; everything below is on it). Run from an administrator Git Bash on the Windows PC, in `host/`, with `export PYTHONUTF8=1 HDDPRO_DISK=PhysicalDrive1`. `runs/tools/` holds the helpers named below (git-ignored, on that PC).
+
+**Steps 1, 2 and 2b run by themselves:** after step 0, `python bench_session.py` in `host/` flashes each build, sets the console up, re-detects, runs the tests and prints a summary beside the figures below (`--list` for the steps, `--only`/`--from` to pick, `--dry-run` to see the plan; results in `runs/bench-<time>/summary.md`). It restores `device1` and `mode` at the end. What stays by hand: the replug, MSCDEX and the retro PCs, the soak (`--only hdcd-soak` runs it), step 5's flash.
+
+## 0. Bring the rig back
+
+- [ ] **Replug the USB adapter** (it dropped off USB on 4 Nov: its controller hung, no probing on the IDE side). If it misbehaves again (garbled names, a disk of the wrong size, double detections in most cycles), **restart the PC** before blaming the firmware; it has been declining for weeks.
+- [ ] Power-cycle the BB48 too: that clears the console's `T` (test disk) and `P l` (data lane) and unsticks the SD card if a warm restart left it stuck (SdFat code 23).
+- [ ] The board runs `bb48_drive` 0.30.0-dev.7 built with `RIG_WATCHDOG_MS=8000`, a rig-only build. Console `h` shows the READY line.
+- [ ] `git checkout hdd-cd && git pull` (it holds everything in `merge-cdrom` too).
+
+## 1. PIO after the DMA fix (0.30.0-dev.3), on `bb48_drive`
+
+dev.3 changed early answers' tight loop (DMA now runs from its idle work). DMA was measured afterwards, PIO wasn't.
+
+- [ ] Console `T` (test disk), `P l` (lane), then `runs/tools/redetect.py` and `powershell -File runs/tools/usb_restart.ps1`: `pytest -s -m speed`. Expect about 1.54 MB/s reads, 80 IOPS, 1.68 MB/s writes (dev.2).
+- [ ] `P e` (early answers), the same: expect about 1.21 MB/s, 76 IOPS, 1.13 MB/s (dev.2).
+- [ ] Slices 3-4 on the lane: `pytest -s -m "slice3 or slice4"`.
+
+## 2. A hard disk and a CD-ROM: `bb48_hdcd`
+
+- [ ] `PIO_ENV=bb48_hdcd`, or flash it: `PLATFORMIO_BUILD_FLAGS=-DRIG_WATCHDOG_MS=8000 pio run -e bb48_hdcd -t upload`. READY ends `slice3 hdcd`.
+- [ ] Console `E device1 = cdrom`, `E mode = mdma2` (this adapter sends every CD-ROM packet by DMA), `T` (test disk and test disc), then `S`: `CONFIG device1=cdrom kind=cdrom disc=test disc frames=32768`.
+- [ ] Re-detect (`runs/tools/redetect.py`; with Windows still holding a CD from an earlier build, `redetect.py //./CdRom0`), then `usb_restart.ps1`. Windows should show the disk **and** `HDDSYNTH PRO CD-ROM` as a CD drive.
+- [ ] `pytest -s -m speed` (device 0, now in DMA): compare with `bb48_drive` in DMA on early answers, 8.84 MB/s reads, 1,000 IOPS, 12.48 MB/s writes. **This prices the extra branch per access**: if it's within noise, `bb48_hdcd` could become the only drive build.
+- [ ] `HDDPRO_CDROM_DEV=//./CdRom0 pytest -s -m cdrom` (device 1): every byte of the test disc. Compare its MB/s with dev.3's 2.42 MB/s, **the first measure of CD-ROM read-ahead** (dev.5).
+- [ ] Interleave both (a speed run on the disk while `-m cdrom` reads the disc, in two terminals): no errors, `bus_bad=0`.
+- [ ] Disc changes (console `M`, dev.7): with Windows showing the CD drive, `M none` (Windows should show it empty), `M DOOM_SE.ISO` (Windows should mount `DOOM_SE` without a restart), `M test`. Then on the Evesham, in DOS with MSCDEX: `DIR D:`, `M test`, `DIR D:` again (does MSCDEX notice?).
+- [ ] **BIN/CUE (dev.9):** on the PC, `python tools/iso_to_bincue.py DOOM_SE.ISO --audio 30 --out DOOMBIN` and copy `DOOMBIN.BIN` and `DOOMBIN.CUE` to the card's root folder. `M DOOMBIN.CUE`: a `# DOOMBIN.CUE: DOOMBIN.BIN, track 1 of 2 ...` line and `DISC DOOMBIN.CUE frames=11431` (the ISO's, not the audio's). Windows mounts it as `DOOM_SE`; reading `//./CdRom0` whole should match `DOOM_SE.ISO`'s SHA-256. Note its MB/s against the ISO's (the BIN is read through SdFat's file layer).
+- [ ] `T` off: `ICL386MB.IMG` as C: and `DOOM_SE.ISO` on the CD. Windows mounts `DOOM_SE` (CDFS); read every file (dev.3: 27 files, 22.7 MB, 1.36 MB/s without read-ahead).
+
+## 2b. The CD-ROM build's slow reads ([atapi.md](atapi.md#the-cd-builds-slow-reads-what-the-code-says-4-nov-2026-0300-dev6))
+
+- [ ] Flash `bb48_cdrom` with `PLATFORMIO_BUILD_FLAGS="-DRIG_WATCHDOG_MS=8000 -DCMD_PROFILE=1"`, `E mode = mdma2`, `T`, re-detect. `r`, then `HDDPRO_CDROM_DEV=//./CdRom0 pytest -s -m cdrom`, then `s`: note `iordy_max_ns`, `iordy_slow`, `cmd_run_max_ns` and `cmd_run_max` (command/packet).
+- [ ] The same with `P i` (`ide_bus`), then `P e` back. Which program has the fewest reads past 1,250 ns, and does `cmd_run_max_ns` account for them?
+- [ ] If `cmd_run_max_ns` is well over 1 µs, try the candidate fix: build with `-DEARLY_POLL_FIRST_NS=1000` added (the host's first poll answered, BSY, before the packet runs), early answers, the same run. Fewer reads past 1,250 ns, and no errors? Then it can become the default.
+
+## 3. A short soak
+
+- [ ] On `bb48_hdcd` with the CD-ROM in (test disk and disc): `HDDPRO_SOAK_MINUTES=60 HDDPRO_SOAK_TOLERATE_RESETS=1 HDDPRO_SOAK_IORDY_MAX_NS=2000 pytest -s -m slice6`.
+
+## 4. Retro PCs
+
+- [ ] **Every PC, every build:** the table in [auto-bus.md](auto-bus.md#what-to-record-on-each-pc), the evidence for the drive choosing its own bus program. At three moments (the BIOS has found the drive, the DOS prompt, after a benchmark; `r` before each): `bus`, `dior_no_cs` and the `NOCS` line, `iordy_ignored` and any `NOIORDY` lines, `iordy_slow` and `iordy_max_ns`, `rd_t1_ns`, `rd_strobe_ns`, with the controller type. ISA cards should show millions, PCI controllers 0. On a PC that isn't an ISA machine, `P l` and boot again: found, benchmark run, `iordy_ignored=0`? **Never `P l` on an ISA machine.**
+- [ ] **The Evesham on `bb48_hdcd`:** `device0 = ICL386MB.IMG`, `device1 = cdrom`, `cdrom = DOOM_SE.ISO`. Does the BIOS list a hard disk and a CD-ROM? MS-DOS 5 from C:, then a CD-ROM driver (`OAKCDROM.SYS`, MSCDEX) finding the drive as device 1, and Doom from D:. PIO there (`mode = auto`), as its DOS driver uses.
+- [ ] The folder drive's `CHECK.BAT` (two drives, still to do), and the data lane on another PC.
+
+## 5. Put the card back
+
+- [ ] `E device1 = none`, `E mode = auto` (and `E early_answers = on`, `E isa = off` if changed), `!`. Only `HDDSYNTH.INI` changes; never format the card.
+- [ ] Flash a normal build (without `RIG_WATCHDOG_MS`) before the board goes anywhere else.

@@ -41,6 +41,7 @@ class Command:
     lba: int
     count: int
     status: int | None = None   # None: not completed (yet)
+    unit: int = 0               # 1: device 1's (two drives: a trailing "d1")
     error: int | None = None
     duration_us: int | None = None
 
@@ -119,9 +120,9 @@ def parse(lines: list[str]) -> Trace:
             if kind == "SLOWREAD" and len(parts) == 4:
                 t.slow_reads.append((int(parts[1]), parts[2], int(parts[3])))
                 continue
-            if kind == "CMD" and len(parts) == 6:
+            if kind == "CMD" and (len(parts) == 6 or (len(parts) == 7 and parts[6] == "d1")):
                 t.commands.append(Command(int(parts[1]), int(parts[2], 16), parts[3],
-                                          int(parts[4]), int(parts[5])))
+                                          int(parts[4]), int(parts[5]), unit=1 if len(parts) == 7 else 0))
                 continue
             if kind == "DONE" and len(parts) == 6:
                 command = int(parts[2], 16)
