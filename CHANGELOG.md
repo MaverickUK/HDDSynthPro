@@ -2,6 +2,11 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.30.0-dev.12] - 2026-11-05 (branch `hdd-cd`)
+
+### Changed
+- **dev.11's card retry is host-tested.** What to do when device 1's read, write or sync fails (retry once, after restarting the card; only while the card isn't lost or changed; reopen device 1's file first, and only at the same size) and how to restart the card (as device 0's image read would with an image on it, any card that answers CMD0 without one, nothing while lost or changed) moved from `sd_card.cpp` to `src/card_retry.h`: header-only templates over the card's operations, with no SdFat or SDK code, so `test_card_retry.cpp` drives them with a fake card (17 tests). Behaviour is unchanged. Core 0 only: every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.11 (only the linker's veneers are in a different order), and `check_core1_ram.py` passes. **Not yet run on the board** (nor is dev.11).
+
 ## [0.30.0-dev.11] - 2026-11-05 (branch `hdd-cd`)
 
 From the Evesham session (dev.10, "Tested on a retro PC"). Core 0 only: every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.10 (only literal-pool words differ, the addresses of core 0's variables), and `check_core1_ram.py` passes. Built and host-tested; **not yet run on the board.**

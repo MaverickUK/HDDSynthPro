@@ -1,8 +1,8 @@
 # Next bench session (written 4 Nov 2026)
 
-## First: dev.11's card fixes on the board (written 5 Nov, overnight)
+## First: dev.11-12's card fixes on the board (written 5 Nov)
 
-0.30.0-dev.11 (`CHANGELOG.md`) is built and host-tested only. Flash a normal `bb48_hdcd` and, with the Evesham settings (`device1 = cdrom`):
+0.30.0-dev.11 and dev.12 (`CHANGELOG.md`; dev.12 only moved the retry logic to `card_retry.h` and tested it) are built and host-tested only. Flash a normal `bb48_hdcd` and, with the Evesham settings (`device1 = cdrom`):
 - [ ] `s` shows `card_restarts=0`; `S` as before.
 - [ ] **A card that went silent:** with the board running and nothing reading, pull the card and put it back. `S`: `SD restarted: it had stopped answering`, then the usual `SD ok ... size_mb=30436`. The `CARD` line for it (`CARD lost and back ...`).
 - [ ] **Device 1 gets over it:** pull and reseat the card again, then read the CD (`DIR D:` on the Evesham, or `M DOOMBIN.CUE` and Windows reading the disc on the rig). It should list, after one `CARD lost and back` line, with no MEDIUM ERROR.

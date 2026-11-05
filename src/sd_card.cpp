@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <SdFat.h>
 
+#include "card_retry.h"
 #include "config.h"
 #include "drive_config.h"
 #include "image_parts.h"
@@ -181,27 +182,21 @@ static bool attempt(Op op) {
     return false;
 }
 
+// The card's operations, for card_retry's decisions (card_retry.h).
+struct SdCardOps {
+    uint32_t now() { return millis(); }
+    bool answers() { return cardAnswers(); }
+    bool start() { return startCard(); }
+    bool reattach(uint32_t now) { return ::sd_card::reattach(now); }
+    void closeDevice1() { s_device1_image.close(); }
+    bool reopenDevice1();  // below, with device 1's image
+    void countRestart() { ++s_restarts; }
+};
+static SdCardOps s_card_ops;
+
 // The card stopped answering on a path other than device 0's image reads
-// (device 1's disk, `S`, `M`): restarts it. With device 0's image on the card,
-// as an image read would (the same card and image only); with none, there's
-// nothing to identify the card by, so any card that answers is started. True
-// if the card is usable again.
-static bool restartCard() {
-    uint32_t now = millis();
-    switch (s_watch.state()) {
-        case media_watch::State::Present:
-            s_watch.failed(now);
-            return reattach(now);
-        case media_watch::State::None:
-            if (!cardAnswers()) return false;  // no card: under a millisecond, not SdFat's 2 s
-            s_device1_image.close();  // after CMD0: the card takes no writes from it now
-            if (!startCard()) return false;
-            ++s_restarts;
-            return true;
-        default:  // lost or changed: serviceMedia() looks for the right card
-            return false;
-    }
-}
+// (device 1's disk, `S`, `M`): restarts it (card_retry::restart).
+static bool restartCard() { return card_retry::restart(s_watch, s_card_ops); }
 
 // Whether the mounted card has stopped answering: SdFat still has its volume,
 // but the card doesn't give its size. So it was pulled out, or put back while
@@ -613,20 +608,12 @@ bool isFolder(const char* name) {
 // card restarts (s_device1_image is declared above, with startCard).
 static char s_device1_name[drive_config::MAX_NAME + 1] = "";
 static oflag_t s_device1_flags = O_RDONLY;
-static bool reopenDevice1();  // below, after the file
 
-// A device 1 read, write or sync, through SdFat's file layer. One that fails
-// is retried once after restarting the card (restartCard: the same checks as
-// device 0's), so a card that stopped answering for a moment costs one slow
-// read rather than every read until the drive restarts (seen on the Evesham,
-// 4 Nov: every read of a BIN failed after a card dropout). While device 0's
-// card is lost or changed they fail at once, as device 0's do.
+// A device 1 read, write or sync, through SdFat's file layer, retried once
+// after restarting the card if it fails (card_retry::device1Attempt).
 template <typename Op>
-static bool device1Attempt(Op op) {
-    if (!s_watch.usable() || !reopenDevice1()) return false;
-    if (op()) return true;
-    if (!restartCard() || !reopenDevice1()) return false;
-    return op();
+static bool device1Attempt(Op&& op) {
+    return card_retry::device1Attempt(s_watch, s_card_ops, op);
 }
 
 // SdFat's file layer, for device 1's image: seek, then read or write.
@@ -648,14 +635,8 @@ public:
 };
 static Device1ImageFile s_device1_image_file;
 
-// Reopens device 1's image after a restart closed it: only the same file at
-// the same size, so a different card's file of that name isn't served as it.
-static bool reopenDevice1() {
-    if (s_device1_image.isOpen()) return true;
-    if (!s_device1_name[0] || !s_device1_image.open(s_device1_name, s_device1_flags)) return false;
-    if (s_device1_image.fileSize() == s_device1_image_file.size_) return true;
-    s_device1_image.close();
-    return false;
+bool SdCardOps::reopenDevice1() {
+    return card_retry::reopen(s_device1_image, s_device1_name, s_device1_flags, s_device1_image_file.size_);
 }
 
 ImageFile* openDevice1Image(const char* name, Print& log, bool read_only) {
