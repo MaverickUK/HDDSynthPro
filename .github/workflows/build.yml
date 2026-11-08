@@ -5,7 +5,7 @@ name: Build and test
 
 on:
   push:
-    branches: [main, two-drives, merge-cdrom, hdd-cd]
+    branches: ['**']  # every branch, so a new one needs no edit here
     tags: ['v*']
   pull_request:
 
