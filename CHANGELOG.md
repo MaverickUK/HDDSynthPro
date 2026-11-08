@@ -2,6 +2,12 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.31.0-sdio.4] - 2026-11-08 (branch `sdio`)
+
+### Fixed
+- **sdio.3's driver broke every multi-sector write** (found on the board, the first speed test): the driver's own `isBusy()` asks `status()`, inside writes and inside `syncDevice()`, so sdio.3's "end the transfer first" ended each write mid-stream (and `syncDevice()` called itself). Every other 128-sector WRITE DMA failed, took about 6 s, and was saved by the card restart and retry (`CARD lost and back`, 102 times in 10 minutes; `STUCK` lines); the data stayed right. Now the driver's own checks use `cardStatus()` (CMD13 as it stands) and only `status()`, for callers outside it, ends the transfer first.
+- **On the PCB after the fix:** 20 of 20 `S` lookups; `-m speed` by DMA from the card: reads 6.32 MB/s, 688 random 4 KB reads a second, writes 5.83 MB/s, no `CARD` or `STUCK` lines; two whole-image write-and-verify passes (6.4-6.9 MB/s writing, 5.9 reading), 0 bad.
+
 ## [0.31.0-sdio.3] - 2026-11-08 (branch `sdio`)
 
 ### Changed

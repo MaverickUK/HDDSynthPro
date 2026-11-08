@@ -259,6 +259,7 @@ class Card : public SdCardInterface {
   //----------------------------------------------------------------------------
   bool cardAcmd(uint32_t rca, CmdRsp_t cmdRsp, uint32_t arg);
   bool cardCommand(CmdRsp_t cmd, uint32_t arg, void* rsp = nullptr);
+  uint32_t cardStatus();  // HDDSynthPro: CMD13 as it stands, for the driver's own checks
   void pioConfig(float clkDiv);
   void pioEnd();
   bool pioInit();

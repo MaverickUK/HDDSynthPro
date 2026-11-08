@@ -498,7 +498,9 @@ uint32_t Card::errorData() const { return m_cardRsp; }
 uint32_t Card::errorLine() const { return m_errorLine; }
 //------------------------------------------------------------------------------
 bool Card::isBusy() {
-  return gpio_get(m_dat0Pin) ? false : !(status() & CARD_STATUS_READY_FOR_DATA);
+  // HDDSynthPro: cardStatus(), not status(): this runs inside writes and
+  // syncDevice(), where ending the transfer first would break them.
+  return gpio_get(m_dat0Pin) ? false : !(cardStatus() & CARD_STATUS_READY_FOR_DATA);
 }
 //------------------------------------------------------------------------------
 void Card::pioConfig(float clkDiv) {
@@ -852,12 +854,19 @@ bool Card::readStop() {
 }
 //------------------------------------------------------------------------------
 uint32_t Card::status() {
-  // HDDSynthPro: end a read or write in progress first (CMD12). The driver
-  // takes the next sector of an open read without a command, so after a CMD13
-  // in the middle the library's returned other sectors' data, CRC good.
+  // HDDSynthPro: for callers outside the driver, end a read or write in
+  // progress first (CMD12). The driver takes the next sector of an open read
+  // without a command, so after a CMD13 in the middle the library's returned
+  // other sectors' data, CRC good. The driver's own checks (isBusy, inside
+  // writes and syncDevice) use cardStatus(), which doesn't: ending the
+  // transfer there broke every multi-sector write (sdio.3 on the board).
   if (!syncDevice()) {
     return CARD_STATUS_ERROR;
   }
+  return cardStatus();
+}
+//------------------------------------------------------------------------------
+uint32_t Card::cardStatus() {
   return cardCommand(CMD13_R1, m_rca) ? m_cardRsp : CARD_STATUS_ERROR;
 }
 //------------------------------------------------------------------------------
