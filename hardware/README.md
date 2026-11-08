@@ -2,12 +2,12 @@
 
 The KiCad project for the HDDSynthPro board: an RP2350B that acts as an IDE drive. The microcontroller and its support parts (core regulator, crystal, flash, USB) are on the board, following Raspberry Pi's RP2350 minimal design; rev 0.1 used a Pimoroni PGA2350 module instead. The design and the reasons for it are in [docs/pcb.html](../docs/pcb.html); open it in a browser.
 
-Status: **rev 0.4, placed, not yet routed** (8 Nov 2026, branch `pcb-rev04`). Rev 0.3 (ordered 28 Oct) is in `production/` and in git history (commit 4fee041). What rev 0.4 adds, and why: [docs/pcb-rev04.md](../docs/pcb-rev04.md).
+Status: **rev 0.4, autorouted, not reviewed** (8 Nov 2026, branch `pcb-rev04`). Rev 0.3 (ordered 28 Oct) is in `production/` and in git history (commit 4fee041). What rev 0.4 adds, and why: [docs/pcb-rev04.md](../docs/pcb-rev04.md).
 
 ## Rev 0.4: where it stands
 
-- **Done:** the schematic (ERC: 0 errors, 0 warnings; `check_netlist.py` passes, and was checked to fail on a wrong pin), the Molex footprint, and the placement: every part placed, DRC finds no overlaps or shorts, only the unrouted connections and rev 0.3's two expected USB-C silkscreen warnings.
-- **Next: routing,** on the Mac where Freerouting is set up (below, *Routing*): `tools/autoroute.py`, then DRC with `--schematic-parity`. Expect the router to need help with the 44-pin header's 40 links to J5 (short, side by side) and with the long power runs from the Molex header and the 44-pin connector to VB.
+- **Done:** the schematic (ERC: 0 errors, 0 warnings; `check_netlist.py` passes, and was checked to fail on a wrong pin), the Molex footprint, the placement, and a first routing (Freerouting 2.5.0 on Windows, 7.5 minutes; then `tools/widen_power.py`). DRC with `--schematic-parity`: 0 unconnected pads, 0 differences from the schematic, only rev 0.3's two expected USB-C silkscreen warnings.
+- **Next: VB, the 5 V supply.** Freerouting ignores the Power class's 0.6 mm: `widen_power.py` widens what the clearances allow, but VB still has about 55 mm at 0.2 mm (along the bottom edge, past J5's last pins, from the 44-pin connector's D7) and 17 mm at 0.15 mm, about 0.3 ohm on the Molex and 44-pin paths: some 70 mV at 200 mA before the AMS1117, which needs about 4.4 V. Lay VB's runs from D6 and D7 to the regulator by hand, wide, and lock them (as `layout_pcb.py` does for USB), then route again. Also worth a look: SD_VDD (0.2-0.4 mm), and the chip side's detours, as on rev 0.3.
 - **Before ordering:** a day with rev 0.3 ([pcb-bringup.md](../docs/pcb-bringup.md)) to choose the series resistors and confirm SDIO; check J8's and J9's footprints against real parts (no LCSC part found for J8); pull pin 20 (the key) out of J7, or use a header without it; check J7's rotation in JLCPCB's preview (its `FT Rotation Offset` is copied from the 40-pin header's, unchecked).
 - **Not yet updated for rev 0.4:** [docs/pcb.html](../docs/pcb.html), the interactive design page, and `tools/jlcpcb.py`'s `JLC_FIX` table.
 
@@ -77,13 +77,15 @@ What to look at when reviewing it:
 - **The chip side is autorouter-shaped**: some runs take detours, partly on the bottom layer. Mode 0 timing doesn't mind, but shorter runs, especially for DIOR#/DIOW#/IORDY, would be better.
 - **Ground return**: signals that change layer don't have a GND via beside them; the inner GND plane is under everything, which covers most of it.
 
-To route again after moving parts (it keeps existing traces, so delete the ones you want rerouted): get the Freerouting jar and a Java 25 runtime (Eclipse Temurin), then
+To route again after moving parts (it keeps existing traces, so delete the ones you want rerouted): get the Freerouting jar and a Java 25 runtime (Eclipse Temurin; on Windows `winget install EclipseAdoptium.Temurin.25.JRE`), then
 
 ```sh
 FREEROUTING=freerouting-2.5.0.jar JAVA=.../bin/java \
   /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 tools/autoroute.py
 kicad-cli pcb drc --refill-zones --save-board --schematic-parity hddsynthpro.kicad_pcb
 ```
+
+Then `tools/widen_power.py` (KiCad's Python, `kicad-cli` on `PATH`) widens VB to 0.6 mm and SD_VDD to 0.4 mm wherever the clearances allow, stepping each segment down until DRC is clean: Freerouting doesn't keep the Power class's width.
 
 The logo (19.4 × 16 mm, bottom middle of the front) is the board-only footprint `LOGO_HDDSynthPro`: dark pixels of `media/HDDSynthProWide3.png` as silkscreen, strokes widened to about 0.15 mm so they print. `tools/layout_pcb.py --silkscreen hddsynthpro.kicad_pcb` redoes the logo and labels on the routed board without touching the traces; `--fields` copies the schematic's fields (LCSC numbers, offsets) onto it.
 
