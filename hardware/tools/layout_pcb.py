@@ -287,6 +287,21 @@ USB_TRACKS = [
 USB_VIAS = [("USB_DM", 157.75, 109.15), ("USB_DM", 158.95, 109.6), ("USB_DP", 158.25, 110.0), ("USB_DP", 157.05, 110.3),
             ("VBUS_USB", 155.55, 108.95), ("VBUS_USB", 160.45, 108.95), ("VBUS_USB", 158.0, 110.6),
             ("VBUS_USB", 163.6, 108.95), ("GND", 158.0, 114.75)]
+# VB, the 5 V supply after the diode-OR (rev 0.4): its two long branches laid 0.6 mm wide and
+# locked before routing, since Freerouting doesn't keep the Power class's width (on the first
+# routing they were 0.2 mm). D6 (Molex) comes up the right side at x 184.3 to the AMS1117's
+# input, and D7 (44-pin) along the bottom edge, left of H4, to join it. The run along the top
+# (D5, D1, C1, D2) stays the router's: fixed there, it crowded the PSRAM and flash's QSPI lines
+# off the board, and widen_power.py takes it to 0.3 mm or more. Board coordinates: (layer, points).
+VB_TRACKS = [
+    ("F.Cu", [(179.85, 126.3), (179.85, 128.15)]),                      # AMS1117 pin 3 (input)
+    ("F.Cu", [(183.0, 154.8), (184.3, 156.1), (184.3, 156.9)]),         # D6's cathode (Molex)
+    ("B.Cu", [(184.3, 156.9), (184.3, 129.3), (183.15, 128.15), (179.85, 128.15)]),
+    ("F.Cu", [(104.8, 165.15), (104.8, 166.6)]),                        # D7's cathode (44-pin)
+    ("B.Cu", [(104.8, 166.6), (106.8, 168.6), (182.6, 168.6), (184.0, 167.2), (184.0, 157.2),
+              (184.3, 156.9)]),
+]
+VB_VIAS = [(179.85, 128.15), (184.3, 156.9), (104.8, 166.6)]
 # The Mk5's M3 holes, relative to its top left corner: 9.76 mm in from the left, 13.97 from the right.
 HOLES = [(X0 + 9.76, Y0 + 4.09), (X0 + 86.36, Y0 + 4.09), (X0 + 9.76, Y0 + 65.81), (X0 + 86.36, Y0 + 65.81)]
 LOGO = (151.0, 161.2)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
@@ -536,6 +551,24 @@ def core_copper(board):
             board.Add(tr)
     for netname, x, y in USB_VIAS:
         via(netname, x, y)
+    for layer, pts in VB_TRACKS:
+        for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+            tr = pcbnew.PCB_TRACK(board)
+            tr.SetStart(pcbnew.VECTOR2I_MM(x0, y0))
+            tr.SetEnd(pcbnew.VECTOR2I_MM(x1, y1))
+            tr.SetWidth(mm(0.6))
+            tr.SetLayer(pcbnew.F_Cu if layer == "F.Cu" else pcbnew.B_Cu)
+            tr.SetNet(net("VB"))
+            tr.SetLocked(True)
+            board.Add(tr)
+    for x, y in VB_VIAS:  # the Power class's via
+        v = pcbnew.PCB_VIA(board)
+        v.SetPosition(pcbnew.VECTOR2I_MM(x, y))
+        v.SetWidth(mm(0.8))
+        v.SetDrill(mm(0.4))
+        v.SetNet(net("VB"))
+        v.SetLocked(True)
+        board.Add(v)
 
     for netname, pads, (vx, vy) in SUPPLY_VIAS:
         for px, py in pads:
