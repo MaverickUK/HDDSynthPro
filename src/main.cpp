@@ -304,6 +304,37 @@ static uint32_t g_bus_only_cycles;  // cfg::EARLY_BUS_ONLY_US in core 1's cycles
 static const char* const GAP_NAMES[GAP_KINDS] = {"-", "access", "lane", "command", "busonly",
                                                   "step0", "step1", "step2", "step3", "step4"};
 
+// The diagnostics the PIO plan has room for (iordy_timer, bus_observer):
+// started by core 1 at start-up, and by core 0 again when the PCB's card
+// gives back the PIO block it borrowed for a card operation.
+static void startDiagnostics() {
+    if (g_pio_plan.iordy_timer) iordy_timer::begin(cfg::IORDY_REPORT_NS);
+    if (g_pio_plan.bus_observer) {
+        const IdentifyInfo device1 = device1Identity();
+#if HDDPRO_HDCD
+        const bool cdrom1 = g_device1_cdrom;  // a CD-ROM, disc or none
+        bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                            device1.total_sectors || cdrom1 ? &device1 : nullptr, cdrom1);
+#else
+        bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                            device1.total_sectors ? &device1 : nullptr);
+#endif
+    }
+}
+
+// The PCB's card borrowing the diagnostics' PIO block (sd_card::setPioLender):
+// core 0, for a console card operation while the test disk is served. Waits
+// for core 1 to have shared out the blocks, so the card never races it.
+static bool lendDiagnostics() {
+    for (uint32_t start = millis(); !g_pio_planned.load(std::memory_order_acquire);)
+        if (millis() - start > 2000) return false;
+    if (!g_pio_plan.iordy_timer || !g_pio_plan.bus_observer) return false;  // they don't have a block of their own
+    iordy_timer::end();
+    bus_observer::end();
+    return true;
+}
+static void reclaimDiagnostics() { startDiagnostics(); }
+
 void setup1() {
     m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 1's own cycle counter, for g_c1_gap
     m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
@@ -343,18 +374,7 @@ void setup1() {
     // (pio_plan.h): the card's SDIO takes one on the PCB build.
     const bool dma = g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA;
     g_pio_plan = pio_plan::choose(sd_card::sdio(), dma, g_isa.load());
-    if (g_pio_plan.iordy_timer) iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
-    if (g_pio_plan.bus_observer) {
-        const IdentifyInfo device1 = device1Identity();
-#if HDDPRO_HDCD
-        const bool cdrom1 = g_device1_cdrom;  // a CD-ROM, disc or none
-        bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
-                            device1.total_sectors || cdrom1 ? &device1 : nullptr, cdrom1);
-#else
-        bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
-                            device1.total_sectors ? &device1 : nullptr);
-#endif
-    }
+    startDiagnostics();  // here, so these never race to claim a PIO
     // Multiword DMA if it's offered, otherwise IOCS16# for ISA cards (which
     // never use DMA).
     if (g_pio_plan.ide_dma) ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
@@ -2402,6 +2422,9 @@ void setup() {
     gpio_init(cfg::PIN_BOARD_LED);
     gpio_set_dir(cfg::PIN_BOARD_LED, true);
     beginLink();
+#if FIRMWARE_SLICE != 0
+    sd_card::setPioLender(lendDiagnostics, reclaimDiagnostics);  // before chooseDisk shares out the blocks
+#endif
     chooseDisk();
     beginSeekTiming();
 #endif
@@ -2437,6 +2460,12 @@ void loop() {
     serviceLinkRx();
     serviceAbsence();
     checkStuck();
+    if (sd_card::wantsSdioRestart()) {
+        Serial.println("SD: a card was put back; restarting to run it over SDIO");
+        Serial.flush();
+        delay(50);
+        restart();  // keeps `J` or `T`
+    }
     sd_card::serviceMedia();
     printCardChanges();
 

@@ -27,6 +27,7 @@ static const char* s_early_register = "-";
 // iordy_check.pio: reads the host ended while IORDY was still low.
 static PIO s_check_pio;
 static uint s_check_sm;
+static uint s_offset, s_check_offset;  // where the programs went, for end()
 static uint32_t s_ignored = 0;
 static const char* s_ignored_register = "-";
 static uint32_t s_ignored_data = 0;
@@ -64,6 +65,7 @@ void begin(uint32_t threshold_ns) {
         cfg::PIN_IORDY - cfg::PIN_DD0 + 1, true);
     hard_assert(ok);
 
+    s_offset = offset;
     pio_sm_config c = iordy_timer_program_get_default_config(offset);
     sm_config_set_in_pins(&c, cfg::PIN_DD0);
     sm_config_set_in_shift(&c, true, false, 32);  // `in` shifts right: new bits on top
@@ -85,6 +87,7 @@ void begin(uint32_t threshold_ns) {
         &iordy_check_program, &s_check_pio, &s_check_sm, &offset, cfg::PIN_DD0,
         cfg::PIN_IORDY - cfg::PIN_DD0 + 1, true);
     hard_assert(ok);
+    s_check_offset = offset;
     pio_sm_config k = iordy_check_program_get_default_config(offset);
     sm_config_set_in_pins(&k, cfg::PIN_DD0);
     sm_config_set_jmp_pin(&k, cfg::PIN_IORDY);
@@ -145,6 +148,16 @@ void poll() {
     }
     if (s_reset_requested.exchange(false, std::memory_order_relaxed)) reset();
 }
+
+void end() {
+    if (!s_started.exchange(false, std::memory_order_acq_rel)) return;
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    pio_sm_set_enabled(s_check_pio, s_check_sm, false);
+    pio_remove_program_and_unclaim_sm(&iordy_timer_program, s_pio, s_sm, s_offset);
+    pio_remove_program_and_unclaim_sm(&iordy_check_program, s_check_pio, s_check_sm, s_check_offset);
+}
+
+bool running() { return s_started.load(std::memory_order_acquire); }
 
 uint32_t ignoredReads() { return s_ignored; }
 const char* ignoredRegister() { return s_ignored_register; }

@@ -27,6 +27,18 @@ void printInfo(Print& out);
 const char* busName();
 bool sdio();
 void sharePio();
+// The PCB build: with nothing on the card served (the test disk), sharePio()
+// ends SDIO and its block goes to the diagnostics ("sdio-idle"). A card
+// operation (S, E, C, I, K...) then calls `lend` to have the diagnostics stop
+// and free the block, runs over SDIO, and calls `reclaim` to start them again.
+// Set before sharePio(); without them the card stays on SDIO.
+void setPioLender(bool (*lend)(), void (*reclaim)());
+// The PCB build, running the card over SPI because it didn't start over SDIO
+// at boot: true once that card has been taken out and one put back. A card
+// put back has been power-cycled, so it starts over SDIO, but only at boot
+// (its PIO block went to something else): the caller restarts the drive.
+// Until then nothing sends the card the SPI CMD0 that would end that.
+bool wantsSdioRestart();
 
 // Mounts the card and opens image `name` if it is there. Returns the image,
 // or nullptr (no card, no image, or an error, written to `log`).

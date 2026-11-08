@@ -18,6 +18,12 @@ void begin(uint32_t threshold_ns);
 // Collects the reports so far. Call often from core 0.
 void poll();
 
+// Stops both programs and frees their state machines and instructions, so
+// another user can have the PIO block (the PCB's card borrowing it for SDIO);
+// begin() starts them again. The counts are kept. Core 0 only.
+void end();
+bool running();
+
 // Reads held longer than the threshold since the last reset, and the longest:
 // how long, which register it read (e.g. "STATUS"), and when core 0 collected
 // its report (time_us_32(), shortly after the read).

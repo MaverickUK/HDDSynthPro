@@ -59,6 +59,18 @@ static bool s_booting = true;
 static bool s_sdio_refused = false;
 // The PCB's card detect switch: low with a card in.
 static bool cardDetected() { return !gpio_get(cfg::PIN_SD_CD); }
+// Running over SPI after SDIO was refused, the card was taken out: a card put
+// back is in SD mode and starts over SDIO after a restart, so nothing may send
+// it the SPI CMD0 that would put it back in SPI mode (wantsSdioRestart()).
+static bool s_out_since_refused = false;
+// No image on the card is served (the test disk), so SDIO was ended at boot
+// and its PIO block went to the diagnostics; the card waits in SD mode. A
+// card operation borrows the block (s_lend stops the diagnostics), starts
+// SDIO, and gives it back when done (giveBack).
+static bool s_parked = false;
+static bool s_borrowed = false;
+static bool (*s_lend)() = nullptr;
+static void (*s_reclaim)() = nullptr;
 #endif
 
 // Starts the card and mounts its volume (a fresh volume: whatever SdFat had
@@ -78,6 +90,7 @@ static bool startCard() {
         s_sdio_allowed = false;
         s_sdio_refused = true;
     }
+    if (s_out_since_refused) return false;  // keep it out of SPI mode: the drive restarts for SDIO
 #endif
     return startSpi();
 }
@@ -93,6 +106,23 @@ static uint32_t s_restarts = 0;
 // Mounts the card's volume, unless it already is.
 static bool mount(Print& out) {
     if (s_sd.fatType()) return true;
+#if SD_SDIO
+    if (s_parked) {
+        if (!s_lend || !s_lend()) {
+            out.println("SD error: the card's PIO block couldn't be borrowed");
+            return false;
+        }
+        if (s_sd.begin(SdioConfig(cfg::PIN_SD_CLK, cfg::PIN_SD_CMD, cfg::PIN_SD_DAT0, cfg::SD_SDIO_CLKDIV))) {
+            s_borrowed = true;
+            return true;
+        }
+        out.printf("SD error: no card, or no FAT volume on it (code %u, data %u)\n",
+                   unsigned(s_sd.sdErrorCode()), unsigned(s_sd.sdErrorData()));
+        s_sd.end();
+        s_reclaim();
+        return false;
+    }
+#endif
     if (!startCard()) {
         out.printf("SD error: no card, or no FAT volume on it (code %u, data %u)\n",
                    unsigned(s_sd.sdErrorCode()), unsigned(s_sd.sdErrorData()));
@@ -100,6 +130,21 @@ static bool mount(Print& out) {
     }
     return true;
 }
+
+// Ends a borrowed SDIO session (mount() while parked) and gives the PIO block
+// back to the diagnostics. Every public function that may mount the card
+// holds a Lend for its duration.
+static void giveBack() {
+#if SD_SDIO
+    if (!s_borrowed) return;
+    s_sd.end();
+    s_borrowed = false;
+    s_reclaim();
+#endif
+}
+struct Lend {
+    ~Lend() { giveBack(); }
+};
 
 // "open" (being served), "present" or "none".
 static const char* imageState(const char* name) {
@@ -110,6 +155,7 @@ static const char* imageState(const char* name) {
 static bool wakeIfSilent(Print& out);  // below, with the card watch
 
 void printInfo(Print& out) {
+    Lend lend;
     if (!mount(out) || !wakeIfSilent(out)) return;
     uint32_t sectors = s_sd.card()->sectorCount();
     out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s bus=%s\n", cardType(s_sd.card()->type()),
@@ -123,13 +169,53 @@ void printInfo(Print& out) {
 #endif
 }
 
-const char* busName() { return s_on_sdio ? "sdio" : "spi"; }
+const char* busName() {
+#if SD_SDIO
+    if (s_parked) return "sdio-idle";
+#endif
+    return s_on_sdio ? "sdio" : "spi";
+}
+
+void setPioLender(bool (*lend)(), void (*reclaim)()) {
+#if SD_SDIO
+    s_lend = lend;
+    s_reclaim = reclaim;
+#else
+    (void)lend;
+    (void)reclaim;
+#endif
+}
+
+bool wantsSdioRestart() {
+#if SD_SDIO
+    if (!s_sdio_refused) return false;
+    if (!cardDetected()) {
+        s_out_since_refused = true;
+        return false;
+    }
+    return s_out_since_refused;
+#else
+    return false;
+#endif
+}
 bool sdio() { return s_on_sdio; }
+
+static bool s_folder_served = false;
 
 void sharePio() {
 #if SD_SDIO
     s_booting = false;
-    if (!s_on_sdio) s_sdio_allowed = false;  // its block went to something else
+    if (!s_on_sdio) {
+        s_sdio_allowed = false;  // its block went to something else
+        return;
+    }
+    // Nothing on the card served (the test disk, or the welcome disk with no
+    // image): park the card, so the diagnostics get its block.
+    if (!s_image.isOpen() && !s_device1_image.isOpen() && !s_folder_served && s_lend && s_reclaim) {
+        s_sd.end();
+        s_on_sdio = false;
+        s_parked = true;
+    }
 #endif
 }
 
@@ -157,6 +243,7 @@ static bool cardAnswers() {
     // Never an SPI CMD0 for a card served over SDIO: it would leave the card
     // in SPI mode. The PCB has card detect; starting the card says the rest.
     if (s_sdio_allowed) return cardDetected();
+    if (s_out_since_refused) return false;  // no SPI CMD0 for a card that could run over SDIO
 #endif
     SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
     digitalWrite(cfg::PIN_SD_DAT3, HIGH);
@@ -538,9 +625,29 @@ unsigned imageExtents() { return unsigned(s_extent_count); }
 
 unsigned imageParts() { return s_parts; }
 
-bool configExists() { return s_sd.fatType() && s_sd.exists(drive_config::FILE_NAME); }
+// Prints nothing: for card operations whose caller reports the outcome itself.
+class NullPrint : public Print {
+public:
+    size_t write(uint8_t) override { return 1; }
+};
 
-bool mounted() { return s_sd.fatType() != 0; }
+bool configExists() {
+#if SD_SDIO
+    if (s_parked) {  // the card is in but idle: borrow it to look (`C` must never take "parked" for "missing")
+        Lend lend;
+        NullPrint quiet;
+        return mount(quiet) && s_sd.exists(drive_config::FILE_NAME);
+    }
+#endif
+    return s_sd.fatType() && s_sd.exists(drive_config::FILE_NAME);
+}
+
+bool mounted() {
+#if SD_SDIO
+    if (s_parked) return true;  // mounted at boot, idle since: mount() borrows it again
+#endif
+    return s_sd.fatType() != 0;
+}
 
 static bool readConfigOnce(char* buf, size_t size, size_t& len, bool& truncated) {
     len = 0;
@@ -559,6 +666,7 @@ static bool readConfigOnce(char* buf, size_t size, size_t& len, bool& truncated)
 // was pulled and put back unnoticed, reads failed too, and console E took
 // the file for missing and rewrote it from the defaults (2026-10-31).
 bool readConfig(char* buf, size_t size, size_t& len, bool& truncated, Print& log) {
+    Lend lend;
     if (!mount(log)) return false;
     if (readConfigOnce(buf, size, len, truncated)) return true;
     if (!s_sd.exists(drive_config::FILE_NAME) && s_sd.sdErrorCode() == 0) return false;  // simply not there
@@ -579,6 +687,7 @@ static bool writeConfigOnce(const char* text, size_t len) {
 // put back while the drive was idle, which nothing noticed (2026-10-31: the
 // write failed until a restart), or have stopped answering for a moment.
 bool writeConfig(const char* text, size_t len, Print& out) {
+    Lend lend;
     if (!mount(out)) return false;
     if (writeConfigOnce(text, len)) return true;
     unsigned code = unsigned(s_sd.sdErrorCode()), data = unsigned(s_sd.sdErrorData());
@@ -595,6 +704,7 @@ bool writeConfig(const char* text, size_t len, Print& out) {
 }
 
 bool createImage(const char* name, uint32_t sectors, Print& out) {
+    Lend lend;
     if (!mount(out)) return false;
     if (s_sd.exists(name)) {
         out.printf("# %s already exists: left as it is\n", name);
@@ -639,6 +749,7 @@ bool createImage(const char* name, uint32_t sectors, Print& out) {
 
 bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& truncated, const char*& why,
                    Print& log) {
+    Lend lend;
     len = 0;
     truncated = false;
     if (!mount(log) || !wakeIfSilent(log)) {
@@ -801,6 +912,7 @@ private:
 static SdFolderSource s_folder;
 
 folder_disk::FolderSource& folderSource(const char* name) {
+    s_folder_served = true;
     s_folder.serve(name);
     return s_folder;
 }
