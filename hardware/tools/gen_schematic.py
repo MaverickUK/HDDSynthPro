@@ -26,8 +26,8 @@ HW = HERE.parent
 KICAD_SHARE = Path(os.environ.get("KICAD_SHARE", "/Applications/KiCad/KiCad.app/Contents/SharedSupport"))
 PROJECT = "hddsynthpro"
 SCH_VERSION = 20250114  # KiCad 9 format; KiCad 10 opens it
-DATE = "2026-10-27"
-REV = "0.3"
+DATE = "2026-11-08"
+REV = "0.4"
 STUB = 2.54
 POWER_NETS = {"GND": "power:GND", "+3V3": "power:+3V3"}
 
@@ -394,6 +394,7 @@ FT_FIELDS = {
     "PinSocket_1x04_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
     "PinHeader_1x03_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
     "IDC-Header_2x20_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
+    "PinHeader_2x22_P2.00mm_Vertical": [("FT Rotation Offset", "-90")],  # as the 2x20 (unchecked)
     "SOT-223-3_TabPin2": [("FT Position Offset", "-0.18,0")],
     "USB_C_Receptacle_HRO_TYPE-C-31-M-12": [("FT Position Offset", "0,0.111")],
     "microSD_TF-PUSH": [("FT Position Offset", "0,0.15")],
@@ -429,6 +430,18 @@ LCSC = {
     "SW1": "C318884", "SW2": "C318884",
     "U1": "C42415655", **{r: "C15298" for r in _refs("U", 2, 3, 5, 6)}, "U4": "C2687116", "U7": "C97521",
     "U8": "C6186", "Y1": "C20625731",
+    # Rev 0.4 (docs/pcb-rev04.md). Checked at LCSC on 2026-11-08, except the basic passives,
+    # which are JLCPCB's usual ones. J8 (Molex disk power) and J9 (CD audio) have no LCSC part
+    # yet: through-hole, fitted by hand.
+    **{r: "C17168" for r in _refs("R", *range(23, 44))},          # 0R 0402 (bus series footprints)
+    **{r: "C25744" for r in _refs("R", 44, 45, 46, 47)},           # 10k 0402
+    "R48": "C25900",                                               # 4.7k 0402
+    **{r: "C11702" for r in _refs("R", 49, 50, 51, 52)},           # 1k 0402
+    "C30": "C1525", "C31": "C52923",                               # 100nF, 1uF 0402
+    **{r: "C15195" for r in _refs("C", 32, 33, 34, 35)},           # 10nF 0402
+    "C36": "C15850", "C37": "C15850",                              # 10uF 0805
+    "D6": "C2480", "D7": "C2480", "F2": "C19193043", "F3": "C19193043",
+    "J7": "C5371836", "Q1": "C15127", "U9": "C5333729",
 }
 
 
@@ -441,9 +454,9 @@ R0402 = "Resistor_SMD:R_0402_1005Metric"
 
 
 def power_sheet(sh):
-    sh.note("USB-C (power and flashing), the 5 V header and 5 V from the HDD Synth on the link socket,\n"
-            "diode-ORed into VB; an AMS1117 makes 3V3 from it.\n"
-            "Never connect the IDE adapter's 5 V (Molex) to this board: the boards share ground only.", 20, 20, 1.6)
+    sh.note("USB-C (power and flashing), the 5 V header, 5 V from the HDD Synth on the link socket,\n"
+            "a PC's disk power plug and the 44-pin IDE connector's 5 V, diode-ORed into VB;\n"
+            "an AMS1117 makes 3V3 from it.", 20, 20, 1.6)
     usb = {"A1": "GND", "A12": "GND", "B1": "GND", "B12": "GND", "SH": "GND",
            "A4": "VBUS_USB", "A9": "VBUS_USB", "B4": "VBUS_USB", "B9": "VBUS_USB",
            "A5": "CC1", "B5": "CC2", "A6": "USB_DP", "B6": "USB_DP", "A7": "USB_DM", "B7": "USB_DM",
@@ -467,6 +480,20 @@ def power_sheet(sh):
     sh.part("Device:D_Schottky", "D5", "SS14", 213.36, 101.6, {"2": "5V_LINK", "1": "VB"}, "Diode_SMD:D_SMA")
     sh.note("D1/D2/D5: diode-OR of USB, the 5 V header and the link socket's\n"
             "pin 1 (5 V from the HDD Synth); also reverse-polarity protection.\nVB is about 4.6 V.", 200.66, 111.76)
+
+    # Rev 0.4: power from inside a retro PC (docs/pcb-rev04.md, item 8)
+    sh.part("Connector_Generic:Conn_01x04", "J8", "Disk power", 50.8, 167.64,
+            {"1": None, "2": "GND", "3": "GND", "4": "5V_MOLEX_IN"},
+            "HDDSynthPro:Molex_8981_1x04_P5.08mm_Vertical", fields=[("MPN", "Molex 8981 style, 4 pins, 5.08 mm")])
+    sh.note("J8: a PC power supply's disk (Molex) plug. Pin 1 +12 V\n(not used), 2-3 GND, 4 +5 V.", 38.1, 182.88)
+    sh.part("Device:Polyfuse", "F2", "500mA", 99.06, 167.64, {"1": "5V_MOLEX_IN", "2": "5V_MOLEX"},
+            "Fuse:Fuse_1206_3216Metric")
+    sh.part("Device:D_Schottky", "D6", "SS14", 213.36, 167.64, {"2": "5V_MOLEX", "1": "VB"}, "Diode_SMD:D_SMA")
+    sh.part("Device:Polyfuse", "F3", "500mA", 99.06, 152.4, {"1": "5V_IDE44", "2": "5V_IDE44_F"},
+            "Fuse:Fuse_1206_3216Metric")
+    sh.part("Device:D_Schottky", "D7", "SS14", 213.36, 152.4, {"2": "5V_IDE44_F", "1": "VB"}, "Diode_SMD:D_SMA")
+    sh.note("D6/D7: the Molex plug and the 44-pin IDE connector's +5 V\n(pins 41-42, from an Amiga or a laptop) "
+            "into VB, each through\na polyfuse: any mix of inputs can be connected at once.", 200.66, 177.8)
     sh.c("C1", "10uF", 254.0, 71.12, "VB", "GND", C0805)
     sh.flag("VB", 271.78, 63.5)
     sh.flag("GND", 287.02, 63.5)
@@ -491,7 +518,8 @@ def power_sheet(sh):
 def mcu_sheet(sh):
     sh.note("RP2350B with Raspberry Pi's minimal-design support circuit (\"Hardware design with RP2350\"):\n"
             "core regulator, 12 MHz crystal, 16 MB QSPI flash, USB. GPIO numbers as in src/config.h;\n"
-            "GP3, GP31, GP40 and GP41 are new on this board.", 20, 20, 1.6)
+            "Rev 0.4 adds GP2 (IOCS16#), GP32/33/42 (DASP#, PDIAG#, CSEL), GP43 (the microSD's power),\n"
+            "GP44/45 (CD audio) and GP47 (the PSRAM's chip select). GP46 is spare.", 20, 20, 1.6)
     power = {"IOVDD": "+3V3", "ADC_AVDD": "+3V3", "USB_OTP_VDD": "+3V3", "QSPI_IOVDD": "+3V3", "VREG_VIN": "+3V3",
              "DVDD": "+1V1", "VREG_FB": "+1V1", "VREG_AVDD": "VREG_AVDD", "VREG_LX": "VREG_LX",
              "VREG_PGND": "GND", "GND": "GND", "XIN": "XIN", "XOUT": "XOUT", "RUN": "RUN",
@@ -501,7 +529,10 @@ def mcu_sheet(sh):
     gp = {g: None for g in range(48)}
     gp.update({0: "LINK_TX", 1: "LINK_RX", 3: "DMACK_N", 25: "LED", 26: "DIOR_N", 27: "DIOW_N", 28: "IORDY",
                29: "INTRQ", 30: "RESET_N", 31: "DMARQ", 34: "SD_CLK", 35: "SD_CMD", 36: "SD_DAT0", 37: "SD_DAT1",
-               38: "SD_DAT2", 39: "SD_DAT3", 40: "SD_CD", 41: "BUS_EN_N", 23: "CS0_N", 24: "CS1_N"})
+               38: "SD_DAT2", 39: "SD_DAT3", 40: "SD_CD", 41: "BUS_EN_N", 23: "CS0_N", 24: "CS1_N",
+               # rev 0.4 (docs/pcb-rev04.md); 46 stays spare
+               2: "IOCS16_N", 32: "DASP_N", 33: "PDIAG_N", 42: "CSEL", 43: "SD_PWR_N", 44: "AUDIO_L",
+               45: "AUDIO_R", 47: "PSRAM_CS_N"})
     gp.update({4 + i: f"DD{i}" for i in range(16)})
     gp.update({20 + i: f"DA{i}" for i in range(3)})
     pins = {}
@@ -546,6 +577,14 @@ def mcu_sheet(sh):
     sh.r("R18", "10k", 116.84, 116.84, "+3V3", "QSPI_SS", R0402)
     sh.r("R19", "1k", 132.08, 116.84, "QSPI_SS", "BOOTSEL", R0402)
     sh.r("R20", "1k", 132.08, 142.24, "RUN", "RUN_BTN")
+    # Rev 0.4: 8 MB QSPI PSRAM on the flash's lines, its chip select on GP47 (XIP CS1)
+    sh.part("Memory_RAM:APS6404L-3SQRx-SN", "U9", "APS6404L-3SQR-SN", 342.9, 251.46,
+            {"1": "PSRAM_CS_N", "2": "QSPI_SD1", "3": "QSPI_SD2", "4": "GND", "5": "QSPI_SD0", "6": "QSPI_SCLK",
+             "7": "QSPI_SD3", "8": "+3V3"}, "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
+    sh.c("C30", "100nF", 370.84, 251.46, "+3V3", "GND", C0402)
+    sh.r("R47", "10k", 386.08, 251.46, "+3V3", "PSRAM_CS_N", R0402)
+    sh.note("PSRAM (rev 0.4): shares the flash's QSPI lines;\nCS on GP47, pulled up (10k).", 322.58, 271.78)
+
     sh.note("Flash CS pulled up (10k). BOOTSEL pulls QSPI_SS low through 1k;\n"
             "RESET pulls RUN low through 1k (RUN has its own pull-up).", 99.06, 157.48)
 
@@ -577,9 +616,12 @@ IDE_PINS = {  # signal -> 40-pin IDE header pin
     **{f"DD{i}": p for i, p in enumerate([17, 15, 13, 11, 9, 7, 5, 3, 4, 6, 8, 10, 12, 14, 16, 18])},
     "DA0": 35, "DA1": 33, "DA2": 36, "CS0_N": 37, "CS1_N": 38, "DIOR_N": 25, "DIOW_N": 23,
     "IORDY": 27, "INTRQ": 31, "RESET_N": 1, "DMARQ": 21, "DMACK_N": 29,
+    "CSEL": 28, "IOCS16_N": 32, "PDIAG_N": 34, "DASP_N": 39,  # rev 0.4
 }
 IDE_GND = [2, 19, 22, 24, 26, 30, 40]
-IDE_NC = [20, 28, 32, 34, 39]
+IDE_NC = [20]  # the key
+# Rev 0.4's series-resistor footprints (0R fitted), between the RP2350B and the bus switches.
+SERIES_R = [f"DD{i}" for i in range(16)] + ["DA0", "DA1", "DA2", "CS0_N", "CS1_N"]
 
 
 def ide_sheet(sh):
@@ -594,19 +636,35 @@ def ide_sheet(sh):
         ("U3", 120.65, 157.48, {8: "DD11", 7: "DD3", 6: "DD12", 5: "DD2", 4: "DD13", 3: "DD1", 2: "DD14", 1: "DD0"}),
         ("U5", 205.74, 88.9, {8: "DD15", 7: "DMARQ", 6: ("DIOW_N_SW", "DIOW_N"), 5: ("DIOR_N_SW", "DIOR_N"),
                               4: "IORDY", 3: "DMACK_N", 2: "INTRQ", 1: "DA1"}),
-        ("U6", 205.74, 157.48, {8: "DA0", 7: "DA2", 6: "CS0_N", 5: "CS1_N"}),
+        # rev 0.4: the four spare channels, in the header's order (28, 32, 34, 39 -> 1, 2, 3, 4)
+        ("U6", 205.74, 157.48, {8: "DA0", 7: "DA2", 6: "CS0_N", 5: "CS1_N",
+                                4: "DASP_N", 3: "PDIAG_N", 2: "IOCS16_N", 1: "CSEL"}),
     ]
     for ref, x, y, channels in switches:
         nets = {"20": "+3V3", "10": "GND", "19": "BUS_EN_N"}
         for k in range(1, 9):
             sig = channels.get(k)
+            if sig in SERIES_R:
+                sig = (sig + "_SW", sig)
             a, b = sig if isinstance(sig, tuple) else (sig, sig)
             nets[str(k + 1)] = a
             nets[str(19 - k)] = None if b is None else "IDE_" + b
         sh.part("HDDSynthPro:SN74CB3T3245", ref, "SN74CB3T3245PWR", x, y, nets,
                 "Package_SO:TSSOP-20_4.4x6.5mm_P0.65mm")
     sh.note("Channels follow the IDE header's pin order (see the comment in gen_schematic.py).\n"
-            "U6 channels 1-4 are spare. GP31 (DMARQ) and GP3 (DMACK#) are reserved for DMA.", 104.14, 200.66)
+            "U6 channels 1-4 carry rev 0.4's CSEL, IOCS16#, PDIAG# and DASP#.", 104.14, 200.66)
+
+    # Rev 0.4: series-resistor footprints (0R fitted; values chosen on rev 0.3's bus), GPIO side
+    for i, sig in enumerate(SERIES_R):
+        sh.r(f"R{23 + i}", "0", 25.4 + 12.7 * (i % 11), 228.6 + 20.32 * (i // 11), sig, sig + "_SW", R0402)
+    sh.note("R23-R43 (rev 0.4): series footprints on DD0-15, DA0-2, CS0# and CS1#, fitted with 0R;\n"
+            "values (22-33R) chosen on the bus. The strobes already have 33R (R14, R15).", 20.32, 215.9)
+    # DASP#, PDIAG# and CSEL: ATA's device-side pull-ups, on the RP2350B's side of the switch.
+    # IOCS16# needs none: the host pulls it up.
+    for i, (ref, sig) in enumerate([("R44", "CSEL"), ("R45", "PDIAG_N"), ("R46", "DASP_N")]):
+        sh.r(ref, "10k", 175.26 + 12.7 * i, 228.6, "+3V3", sig, R0402)
+    sh.note("R44-R46: 10k pull-ups on CSEL, PDIAG# and DASP# (open drain).\n"
+            "IOCS16# (open drain) is pulled up by the host.", 170.18, 246.38)
 
     sh.r("R14", "33", 66.04, 182.88, "DIOR_N", "DIOR_N_SW")
     sh.r("R15", "33", 81.28, 182.88, "DIOW_N", "DIOW_N_SW")
@@ -628,26 +686,67 @@ def ide_sheet(sh):
     j5.update({str(p): None for p in IDE_NC})
     sh.part("Connector_Generic:Conn_02x20_Odd_Even", "J5", "IDE", 289.56, 152.4, j5,
             "Connector_IDC:IDC-Header_2x20_P2.54mm_Vertical")
-    sh.note("IDE 40-pin, shrouded and keyed (pin 20 removed).\nNot connected: 20 key, 28 CSEL, 32 IOCS16#,\n"
-            "34 PDIAG#, 39 DASP#.", 274.32, 190.5)
+    sh.note("IDE 40-pin, shrouded and keyed (pin 20 removed).", 274.32, 190.5)
+
+    # Rev 0.4: the 2.5-inch drives' 44-pin connector, in parallel: pins 1-40 as J5,
+    # 41-42 +5 V from the host (logic, motor) into VB (Power sheet), 43 GND, 44 not connected.
+    j7 = dict(j5)
+    j7.update({"41": "5V_IDE44", "42": "5V_IDE44", "43": "GND", "44": None})
+    sh.part("Connector_Generic:Conn_02x22_Odd_Even", "J7", "IDE 44", 365.76, 152.4, j7,
+            "Connector_PinHeader_2.00mm:PinHeader_2x22_P2.00mm_Vertical")
+    sh.note("IDE 44-pin (2 mm, 2.5-inch drives: Amiga 1200, laptops), in parallel with J5.\n"
+            "41-42 +5 V from the host, 43 GND. Pin 20 (the key) not fitted.\n"
+            "Connect a host to J5 or J7, never both.", 335.28, 200.66)
 
 
 def sd_sheet(sh):
     sh.note("microSD: SPI now, 4-bit SDIO later. CLK, CMD and DAT0 on SPI0's SCK, TX and RX; DAT3 is the SPI\n"
             "chip select; DAT0-3 on consecutive GPIOs (36-39), as PIO SDIO needs.", 20, 20, 1.6)
     sh.part("Connector:Micro_SD_Card_Det1", "J4", "microSD", 228.6, 111.76,
-            {"1": "SD_DAT2", "2": "SD_DAT3", "3": "SD_CMD", "4": "+3V3", "5": "SD_CLK", "6": "GND",
+            {"1": "SD_DAT2", "2": "SD_DAT3", "3": "SD_CMD", "4": "SD_VDD", "5": "SD_CLK", "6": "GND",
              "7": "SD_DAT0", "8": "SD_DAT1", "9": "SD_CD", "SH": "GND"},
             "HDDSynthPro:microSD_TF-PUSH", fields=[("MPN", "TF PUSH (generic push-push)")])
     sh.note("Card detect (GP40): pin 9, pulled up by R12. On these sockets it usually\n"
             "meets the grounded shell when a card is in (reads low): check on the first board.", 205.74, 132.08)
     for i, (ref, net) in enumerate([("R7", "SD_CMD"), ("R8", "SD_DAT0"), ("R9", "SD_DAT1"),
                                     ("R10", "SD_DAT2"), ("R11", "SD_DAT3"), ("R12", "SD_CD")]):
-        sh.r(ref, "10k", 63.5 + 17.78 * i, 99.06, "+3V3", net)
-    sh.note("Pull-ups, close to the socket. CLK needs none.", 58.42, 116.84)
+        sh.r(ref, "10k", 63.5 + 17.78 * i, 99.06, "+3V3" if net == "SD_CD" else "SD_VDD", net)
+    sh.note("Pull-ups, close to the socket. CLK needs none. CMD and DAT0-3 from the card's\n"
+            "switched supply, so an unpowered card isn't fed through them; card detect\n"
+            "from 3V3 (the switch is in the socket).", 58.42, 116.84)
+
+    # Rev 0.4: the card's power switch (docs/pcb-rev04.md, item 3)
+    sh.part("Transistor_FET:AO3401A", "Q1", "AO3401A", 167.64, 160.02,
+            {"1": "SD_PWR_N", "2": "+3V3", "3": "SD_VDD"}, "Package_TO_SOT_SMD:SOT-23")
+    sh.r("R48", "4.7k", 147.32, 175.26, "SD_PWR_N", "GND", R0402)
+    sh.note("Q1: the card's 3.3 V, on unless GP43 drives the gate high. R48 pulls it\n"
+            "down (on) for firmware that doesn't know it: 4.7k, under the 8.2k that\n"
+            "RP2350 erratum E9 asks of an external pull-down. Cutting the power\n"
+            "takes a card out of SPI mode and resets one that's stuck.", 132.08, 187.96)
     sh.c("C2", "10uF", 81.28, 149.86, "+3V3", "GND", C0805)
-    sh.c("C3", "100nF", 99.06, 149.86)
-    sh.note("At the socket's VDD.", 76.2, 162.56)
+    sh.c("C3", "100nF", 99.06, 149.86, "SD_VDD", "GND")
+    sh.c("C31", "1uF", 116.84, 149.86, "SD_VDD", "GND", C0402)
+    sh.note("C2 on 3V3 at Q1's source; C3 and C31 at the socket's VDD,\n"
+            "small so switching on doesn't pull 3V3 down.", 76.2, 162.56)
+    sh.flag("SD_VDD", 203.2, 152.4)
+
+
+def audio_sheet(sh):
+    sh.note("CD audio out (rev 0.4, docs/pcb-rev04.md item 6): PWM on GP44 and GP45 (slice 10 A and B),\n"
+            "each through two RC stages (1k, 10 nF: about 16 kHz) and a 10 uF DC block, to a 4-pin header\n"
+            "in CD-ROM drives' order for the sound card's CD input. No PIO needed.", 20, 20, 1.6)
+    for side, (gpio, r1, r2, c1, c2, c3, y) in {"L": ("AUDIO_L", "R49", "R50", "C32", "C33", "C36", 76.2),
+                                               "R": ("AUDIO_R", "R51", "R52", "C34", "C35", "C37", 127.0)}.items():
+        sh.part("Device:R", r1, "1k", 63.5, y, {"1": gpio, "2": f"AUD_{side}1"}, R0402)
+        sh.c(c1, "10nF", 78.74, y, f"AUD_{side}1", "GND", C0402)
+        sh.part("Device:R", r2, "1k", 93.98, y, {"1": f"AUD_{side}1", "2": f"AUD_{side}2"}, R0402)
+        sh.c(c2, "10nF", 109.22, y, f"AUD_{side}2", "GND", C0402)
+        sh.c(c3, "10uF", 129.54, y, f"AUD_{side}2", f"AUD_{side}_OUT", C0805)  # ceramic: no polarity
+    sh.part("Connector_Generic:Conn_01x04", "J9", "CD audio", 190.5, 101.6,
+            {"1": "AUD_L_OUT", "2": "GND", "3": "GND", "4": "AUD_R_OUT"},
+            "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical")
+    sh.note("J9: left, ground, ground, right, as CD-ROM drives' audio header.\n"
+            "Check against a real drive's cable before ordering.", 170.18, 121.92)
 
 
 # ---------------------------------------------------------------- output
@@ -709,7 +808,7 @@ def root_sheet(project):
                                         [S("path"), f"/{project.root_uuid}", [S("page"), str(sh.page)]]]]])
         x += w + 30.48
     note = ("HDDSynthPro: an RP2350B that acts as an IDE hard disk.\n"
-            "Pages: power and USB; the RP2350 with the activity link and LEDs; the IDE bus switches and header; the microSD socket.\n"
+            "Pages: power and USB; the RP2350 with the activity link, LEDs and PSRAM; the IDE bus switches and headers; the microSD socket; CD audio.\n"
             "Nets cross pages through global labels. The GPIO map must agree with src/config.h and docs/wiring.md:\n"
             "run hardware/tools/check_netlist.py after editing.")
     items.append([S("text"), note, [S("exclude_from_sim"), S("no")], at(30.48, 30.48),
@@ -787,7 +886,8 @@ def write_project(project):
 def main():
     project = Project()
     builders = [("Power and USB", "power.kicad_sch", power_sheet), ("RP2350", "mcu.kicad_sch", mcu_sheet),
-                ("IDE bus", "ide.kicad_sch", ide_sheet), ("microSD", "sd.kicad_sch", sd_sheet)]
+                ("IDE bus", "ide.kicad_sch", ide_sheet), ("microSD", "sd.kicad_sch", sd_sheet),
+                ("CD audio", "audio.kicad_sch", audio_sheet)]
     for page, (name, file, build) in enumerate(builders, start=2):
         build(project.sheet(name, file, page))
 

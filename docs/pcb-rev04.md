@@ -1,47 +1,109 @@
 # PCB rev 0.4: what to add
 
-Rev 0.3 (the `hardware/` KiCad project, sent for manufacture on 28 Oct 2026) is the minimum that runs today's firmware: the IDE bus behind four SN74CB3T3245 bus switches, DMARQ and DMACK#, microSD wired for SDIO with card detect, the activity link, USB-C and the 5 V inputs. [pcb-bom.md](pcb-bom.md) holds the fuller design targets and their reasons; this page lists what rev 0.4 should add so the rest is a firmware change later, in priority order, with what the rig has taught since.
+Rev 0.3 (the `hardware/` KiCad project, sent for manufacture on 28 Oct 2026) is the minimum that runs today's firmware: the IDE bus behind four SN74CB3T3245 bus switches, DMARQ and DMACK#, microSD wired for SDIO with card detect, the activity link, USB-C and the 5 V inputs. [pcb-bom.md](pcb-bom.md) holds the fuller design targets and their reasons.
 
-GPIO numbers are suggestions from rev 0.3's free pins: **2** (the only free pin in the bus program's GPIO 0-31 window), **32, 33, 42-47**. Whatever is chosen goes into `src/config.h` first, and `hardware/tools/check_netlist.py` checks the board against it.
+This page is rev 0.4's plan. It was first written on 29 Oct, and revised on 8 Nov with what the retro PCs, the Amiga, the DMA soaks and the CD-ROM drive have taught since. GPIOs go into `src/config.h` first, and `hardware/tools/check_netlist.py` checks the board against it.
 
-## 1. The IDE signals rev 0.3 leaves unconnected (must)
+**Freeze the layout only after a day with rev 0.3** ([pcb-bringup.md](pcb-bringup.md)). Three of its results decide parts of rev 0.4:
+- **SDIO on the board's short traces** (it failed on the rig's hand-wired leads): if it works, the microSD wiring stays as it is.
+- **The bus switches:** BUS_EN#, and the DMARQ test after it.
+- **Signal quality on the bus,** which picks the series resistors' values (4).
 
-Rev 0.3 has four spare bus-switch channels (U6 A1-A4/B1-B4): exactly enough.
+## The pin map
 
-| IDE pin | Signal | Unlocks | GPIO | Notes |
-|---|---|---|---|---|
-| 39 | DASP# | Sharing the cable with a real drive, as device 0 or device 1; the PC case's disk light | 32 | Open drain. At power-up device 1 asserts it to say it's there |
-| 34 | PDIAG# / CBLID | The two devices' reset handshake; Ultra DMA 3+ detects an 80-wire cable on it | 33 | Open drain. Device 1 reports its diagnostics to device 0 on it |
-| 28 | CSEL | Cable select: device 0 or device 1 by the cable's connector | 42 | Read at reset |
-| 32 | IOCS16# | ISA-era hosts (286, 386, many 486 ISA cards) that use it to choose 16-bit data cycles | **2** | Must answer within tens of ns of the chip select, as IORDY does, so from the bus program's PIO, inside its window. Or decode it in logic (CS0# low and DA2-0 = 000), freeing GPIO 2 ([pcb-bom.md](pcb-bom.md), section 4) |
+Rev 0.3's free GPIOs were 2, 32, 33 and 42-47. Rev 0.4 uses all but one:
 
-Without DASP# and PDIAG#, sharing a cable is unsafe, not just unsupported: a real device 0 that doesn't see device 1 may answer the absent device 1's register reads, and so would fight our drive on the bus (and the reverse). Today the rule is one drive per cable, ours as device 0.
+| GPIO | Signal | Item |
+|---|---|---|
+| 2 | IOCS16# (IDE pin 32) | 1 |
+| 32 | DASP# (IDE pin 39) | 5 |
+| 33 | PDIAG# (IDE pin 34) | 5 |
+| 42 | CSEL (IDE pin 28) | 5 |
+| 43 | SD_PWR# (the card's power switch, low = on) | 3 |
+| 44 | AUDIO_L (PWM slice 10 A) | 6 |
+| 45 | AUDIO_R (PWM slice 10 B) | 6 |
+| 46 | spare, unconnected | |
+| 47 | PSRAM_CS# (XIP chip select 1) | 7 |
 
-## 2. PSRAM (strongly recommended)
+The four IDE lines take rev 0.3's four spare bus-switch channels (U6, channels 1-4). After rev 0.4, a new signal needs an I/O expander, as the HDD Synth Mk5 has.
 
-An 8 MB QSPI PSRAM on the RP2350's second memory chip select, **GPIO 47** (its options are 0, 8, 19 and 47; only 47 is free). About a dollar. It unlocks a read cache (the card is now the limit: about 1.8 MB/s over SPI, where multiword DMA alone reaches 5 MB/s from RAM), write-back caching, and a RAM disk far larger than today's 256 KB. A write-back cache needs a decision about power loss ([pcb-bom.md](pcb-bom.md), open question 6).
+## 1. IOCS16# (must; proven)
 
-## 3. The microSD card
+The ICL 386's ISA card needed it (0.20.0): without it, every 16-bit data read reached the drive as two 8-bit reads, of the data register and then the error register, so each word's high byte was wrong. `iocs16.pio` pulls it low while the data register is addressed, from the bus program's GPIO window: **GPIO 2**, the only free pin in it. It's open drain, and the host pulls it up, so no resistor. It shares `ide_dma`'s PIO block and runs only when DMA isn't offered; ISA machines never use DMA, so that costs nothing. The idea of decoding it in logic (CS0# low and DA2-0 = 000) isn't needed.
 
-- **Prove SDIO before committing the layout.** On the rig (29 Oct 2026) SDIO was unreliable on the hand-wired leads: at 25 MHz directory lookups failed, at 12.5 MHz a write dropped the card ([pio-allocation.md](pio-allocation.md)). Rev 0.3's short traces should fix that; test SDIO on the first rev 0.3 boards before rev 0.4's layout is frozen, and keep the 10 kΩ pull-ups on CMD and DAT0-3.
-- **A card power switch:** a small P-FET or load switch on the card's 3.3 V, from a spare GPIO (43). A card left in SPI mode stays there until power is cut, and a card that locks up can only be reset that way. With it, the firmware can move the card from SPI to SDIO without a reinsertion and recover a stuck card.
+## 2. A 44-pin 2.5-inch connector (must; new)
 
-## 4. Signal integrity for faster modes (cheap insurance)
+A 2 mm 2x22 header beside the 40-pin one, in parallel on the same nets: pins 1-40 as the 40-pin header (20 is the key), 41 and 42 +5 V from the host (logic and motor), 43 GND, 44 not connected.
 
-**Footprints for series resistors on DD0-15** (0402, fitted with 0 Ω). Rev 0.3 has 33 Ω only on DIOR# and DIOW# (R14, R15). Ultra DMA above mode 2 is sensitive to reflections, and ATA recommends 22-33 Ω at the drive; with footprints they can be fitted if needed, and cost nothing if not.
+The Amiga 1200's IDE port is 44-pin (2.5-inch drives), and the A1200 still doesn't boot from the drive. The best guess is the 30 cm cable and the breadboard's 10-15 cm of wiring: Gayle's address and chip selects are only valid before the strobe, and change as it starts. A board that plugs into the A1200 with a short 44-pin cable removes that question, and takes its power from pins 41 and 42 (item 8). Laptops and the Atari Falcon use the same connector.
 
-## 5. A debug header (cheap insurance)
+Only one of the two connectors may go to a host at a time (the silkscreen says so).
 
-A 2.54 mm header with a few spare GPIOs (44-46, and 32/33 if they aren't used above) and ground. The open timing questions (write-behind's slow reads on the card) need core 1 to mark events on pins for a logic analyser, alongside DIOR#, IORDY and INTRQ; a header makes that a clip-on job.
+## 3. A power switch for the microSD card (must)
 
-## 6. Nice to have
+A P-channel MOSFET (AO3401A) on the card's 3.3 V, its gate on **GPIO 43**:
+- **Pulled down by 4.7 kΩ,** so the card is powered unless the firmware drives the gate high: today's firmware works unchanged. 4.7 kΩ is under the 8.2 kΩ that RP2350 erratum E9 asks of an external pull-down (internal pull-downs stay banned).
+- **Why it's a must now:** a card left in SPI mode stays there until its power is cut, so moving to SDIO needs a power cycle (29 Oct). And a warm restart has left the card stuck (SdFat code 23), cleared only by power-cycling the board.
+- **The card's pull-ups (CMD, DAT0-3) move to the switched rail,** so an unpowered card isn't fed through them. Card detect's pull-up stays on 3.3 V: the switch is in the socket, not the card.
+- **Inrush:** the 10 µF bulk stays on the 3.3 V side; the card's side has 1 µF and 100 nF, so turning it on doesn't pull 3.3 V down.
+- **Firmware, before switching off:** set the card's pins to inputs (or low), or the card is powered through its pins.
 
-- **Power from a retro PC:** a 4-pin Molex or floppy (Berg) input, diode-ORed like rev 0.3's other inputs, so the board can live inside the PC. (The 44-pin 2.5-inch connector's power pins are another route: [pcb-bom.md](pcb-bom.md), section 4.)
-- **A user button or 2-way DIP switch:** device 0 or 1, or the image, chosen without a console. `HDDSYNTH.INI` can do both, so this is convenience.
+## 4. Series resistors on the bus inputs and data lines (must; footprints, fitted with 0 Ω)
+
+0402 footprints on **DD0-15, CS0#, CS1# and DA0-2**, between the RP2350B and the bus switches, as rev 0.3 has 33 Ω on DIOR# and DIOW# (R14, R15). Fitted with 0 Ω; values chosen on rev 0.3's bus (ATA's 22-33 Ω is the starting point).
+
+What's been seen since:
+- **The DMA soak (29 Oct):** all 16 DD lines rising together settled later than the host's strobe edge, and stronger drive (8 mA, fast slew) made it worse. Damping, not drive strength, is the lever.
+- **The Amiga:** its chip selects and address lines change as the strobe starts, where ringing does most harm.
+
+## 5. DASP#, PDIAG# and CSEL (must)
+
+| IDE pin | Signal | GPIO | On the board |
+|---|---|---|---|
+| 39 | DASP# | 32 | 10 kΩ pull-up (ATA's device 0 pull-up); open drain |
+| 34 | PDIAG# / CBLID | 33 | 10 kΩ pull-up; open drain |
+| 28 | CSEL | 42 | 10 kΩ pull-up (ATA's device pull-up); the host grounds it for device 0 |
+
+The pull-ups are on the RP2350B's side of the bus switch, to 3.3 V.
+
+**Why, now:** both retro PCs' BIOSes found our device 1 without DASP#, because our board answers for both devices, so emulating two drives doesn't need these lines. They're needed to **share the cable with a real drive**, and the CD-ROM work makes that the likely set-up: the PC's own hard disk as device 0 and our CD-ROM as device 1. Without DASP# and PDIAG#, sharing is unsafe: a real device 0 that doesn't see device 1 may answer device 1's register reads, and fight our drive on the bus. CSEL picks device 0 or 1 by the cable's connector.
+
+DASP# also lights the PC case's disk light. The host's LED resistor (from 5 V) sinks through the bus switch into the GPIO: drive it at 12 mA.
+
+## 6. CD audio out (should; new)
+
+A 4-pin header in CD-ROM drives' order (left, ground, ground, right), to the sound card's CD input, as real drives have. BIN/CUE images' audio tracks are left out today because the drive has no audio output; mixed-mode games play their music from them.
+- **PWM on GPIO 44 and 45,** one PWM slice, each through a two-stage RC filter (1 kΩ and 10 nF, twice: about 16 kHz) and a 10 µF DC-blocking capacitor.
+- **Why PWM, not an I2S DAC:** a DAC needs a PIO state machine, and the three PIO blocks are full ([pio-allocation.md](pio-allocation.md)). PWM needs none: 10 bits at about 195 kHz from the 200 MHz clock, with the 3.3 V rail's noise in it. Good enough for game music; a DAC is for a later board with an expander.
+- **Firmware:** the MMC audio commands (PLAY AUDIO, READ SUB-CHANNEL's position, PAUSE/RESUME), and the BIN's audio frames streamed to PWM by DMA. A project of its own; the footprints are cheap now.
+- **Check the header against a real CD-ROM drive's audio cable** before ordering: the footprint is a plain 2.54 mm 1x4.
+
+## 7. PSRAM (should)
+
+8 MB QSPI PSRAM (APS6404L-3SQR, SOIC-8) on the RP2350's second chip select, **GPIO 47** (its options are 0, 8, 19 and 47; only 47 is free), sharing the flash's QSPI lines, with a 10 kΩ pull-up on its chip select. About a dollar.
+
+It unlocks a read cache (over SPI the card gives about 1.8 MB/s, where multiword DMA alone reaches 7.7 MB/s from RAM), write-back caching, and a RAM disk far larger than today's. Uses found since: a read cache for the CD-ROM, buffers for two drives, a folder disk's tables. A write-back cache needs a decision about power loss ([pcb-bom.md](pcb-bom.md), open question 6).
+
+## 8. Power from a retro PC (should)
+
+A CD-ROM drive lives in a 5.25-inch bay, so the board will live inside the PC, where every retro test so far was powered from a laptop's USB.
+- **A Molex disk-power header** (5.08 mm, 4 pins: +12 V, GND, GND, +5 V; +12 V not connected), through a 500 mA polyfuse and a Schottky into VB, diode-ORed as rev 0.3's other inputs.
+- **The 44-pin connector's +5 V** (pins 41 and 42), the same way.
+
+With the diodes, the board can take power from several inputs at once, USB included, without feeding one into another. Rev 0.3's note "never connect the IDE adapter's 5 V to this board" was about a direct connection; it doesn't apply to a diode-ORed input.
+
+## Dropped since 29 Oct
+
+- **The debug header:** USB-C carries the console, and has been enough for every measurement (core 1's profiles print in `s`). GPIO 46 stays spare.
+- **A user button or DIP switch:** disc changes come from the HDD Synth over the activity link (`$HDM`, its OLED screens: `tools/oled_mockups`), and `HDDSYNTH.INI` picks device 0 or 1.
+
+## No hardware needed
+
+What the retro PCs taught that firmware covers: IORDY on ISA cards that assert chip selects without a strobe (the 23 µs release), INTRQ on ISA cards with no pull-down (driven low), choosing the bus program by itself (`dior_no_cs`, [auto-bus.md](auto-bus.md)), and the USB adapter's hangs (a rig problem).
 
 ## Already right in rev 0.3 (keep)
 
-- **DMARQ on GPIO 31 and DMACK# on GPIO 3**, inside the bus program's window. Multiword DMA works on the rig on those pins (0.16.2: reads 3.8 times PIO mode 3, writes 5.5 times). The firmware tests DMARQ at start-up with a pull-up against the host's pull-down (0.16.4), so on a board the bus switches must be on (BUS_EN#, GPIO 41) before that test.
+- **DMARQ on GPIO 31 and DMACK# on GPIO 3**, inside the bus program's window. Multiword DMA mode 2 works on the rig on those pins: 7.7 MB/s reads, 13.9 MB/s writes, 10-hour soak clean (0.17.1). The firmware tests DMARQ at start-up with a pull-up against the host's pull-down (0.16.4), so the bus switches must be on (BUS_EN#, GPIO 41) before that test.
 - **The bus switches with Ioff**: they isolate the bus when the board is unpowered, so the BB48's power-order rule goes away.
 - **SD card detect on GPIO 40**: the re-mount code (0.13.0) can use it instead of probing.
 - **DAT0-3 on consecutive GPIOs (36-39)**, as PIO SDIO needs, and CLK/CMD on 34/35.
@@ -49,3 +111,7 @@ A 2.54 mm header with a few spare GPIOs (44-46, and 32/33 if they aren't used ab
 ## Firmware for rev 0.3 itself
 
 Done in 0.16.6: the firmware drives **BUS_EN# (GPIO 41) low** once the bus pins are set up, so JP1 can stay open, and `p` reads **SD_CD (GPIO 40)**. The first day with the board: [pcb-bringup.md](pcb-bringup.md).
+
+## The design files (8 Nov, started)
+
+Rev 0.4 is generated as rev 0.3 was: `hardware/tools/gen_schematic.py` writes the schematic, `layout_pcb.py` places the parts, `autoroute.py` routes them with Freerouting, and `check_netlist.py` checks the result against `src/config.h`. Progress and what's left: [hardware/README.md](../hardware/README.md).

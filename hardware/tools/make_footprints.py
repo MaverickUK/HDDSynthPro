@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Writes the two footprints KiCad's libraries don't have, into HDDSynthPro.pretty.
+"""Writes the footprints KiCad's libraries don't have, into HDDSynthPro.pretty.
 
-Usage: python3 hardware/tools/make_footprints.py path/to/RPI-RP2350A-MINIMAL_R4-S1.kicad_pcb
+Usage: python3 hardware/tools/make_footprints.py [path/to/RPI-RP2350A-MINIMAL_R4-S1.kicad_pcb]
+(without Raspberry Pi's board, only the footprints drawn here: the microSD socket and the Molex header)
 
 - C_0402_1005Metric_RPi_Wide: Raspberry Pi's wide-pad 0402, for the two capacitors
   either side of the VREG_LX strip in their regulator layout.
@@ -14,6 +15,10 @@ Usage: python3 hardware/tools/make_footprints.py path/to/RPI-RP2350A-MINIMAL_R4-
   JLCPCB's own footprint (2026-10-27). Contacts 1-8 in the standard microSD
   order, 9 card detect, SH the four shell tabs, two 1.2 mm locating holes.
   The card goes in from the +y edge.
+- Molex_8981_1x04_P5.08mm_Vertical: a PC disk-power header (rev 0.4), Molex 8981 style:
+  four pins on 5.08 mm, the housing's two chamfered corners drawn on the +y side
+  (the keyed side). Pin 1 is +12 V. Check the drill and outline against the part
+  chosen before ordering: KiCad has no footprint for it.
 """
 import sys
 import uuid
@@ -127,10 +132,42 @@ def tf_push():
     return name
 
 
+def molex_8981():
+    name = "Molex_8981_1x04_P5.08mm_Vertical"
+    fp = header(name, "PC disk-drive power header, Molex 8981 style (e.g. Molex 15-24-4041), 4 pins, 5.08 mm, "
+                      "vertical. Pin 1 +12 V, 2-3 GND, 4 +5 V. Chamfered corners on the +y side.",
+                "Molex 8981 disk power 5.08mm")
+    fp += [[S("property"), "Reference", "REF**", [S("at"), 7.62, -5.0, 0], [S("layer"), "F.SilkS"], u(name, "ref"), fx()],
+           [S("property"), "Value", name, [S("at"), 7.62, 5.6, 0], [S("layer"), "F.Fab"], u(name, "val"), fx(0.8, 0.12)],
+           [S("attr"), S("through_hole")]]
+    # Housing about 21.3 x 7.6 mm round the pins (pin 1 at the origin), its +y corners chamfered.
+    x0, x1, y0, y1, c = -2.97, 18.21, -3.8, 3.8, 1.6
+
+    def outline(layer, grow, w):
+        pts = [(x0 - grow, y0 - grow), (x1 + grow, y0 - grow), (x1 + grow, y1 + grow - c),
+               (x1 + grow - c, y1 + grow), (x0 - grow + c, y1 + grow), (x0 - grow, y1 + grow - c)]
+        return [S("fp_poly"), [S("pts")] + [[S("xy"), round(x, 3), round(y, 3)] for x, y in pts],
+                [S("stroke"), [S("width"), w], [S("type"), S("solid")]], [S("fill"), S("no")],
+                [S("layer"), layer], u(name, layer)]
+
+    fp += [outline("F.Fab", 0, 0.1), outline("F.SilkS", 0.11, 0.12), outline("F.CrtYd", 0.5, 0.05)]
+    fp.append([S("fp_text"), S("user"), "${REFERENCE}", [S("at"), 7.62, 0, 0], [S("layer"), "F.Fab"], u(name, "rt"), fx()])
+    for n in range(4):
+        fp.append([S("pad"), str(n + 1), S("thru_hole"), S("rect" if n == 0 else "circle"), [S("at"), round(5.08 * n, 2), 0],
+                   [S("size"), 3.0, 3.0], [S("drill"), 1.8], [S("layers"), "*.Cu", "*.Mask"],
+                   [S("remove_unused_layers"), S("no")], u(name, "pad", n + 1)])
+    fp.append([S("embedded_fonts"), S("no")])
+    (PRETTY / f"{name}.kicad_mod").write_text(dump(fp) + "\n")
+    return name
+
+
 def main():
+    if len(sys.argv) == 1:
+        print("wrote", tf_push(), "and", molex_8981())
+        return
     if len(sys.argv) != 2:
         sys.exit(__doc__)
-    print("wrote", inductor(sys.argv[1]), wide_0402(sys.argv[1]), "and", tf_push())
+    print("wrote", inductor(sys.argv[1]), wide_0402(sys.argv[1]), tf_push(), "and", molex_8981())
 
 
 if __name__ == "__main__":

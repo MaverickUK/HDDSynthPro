@@ -57,6 +57,21 @@ constexpr uint32_t IORDY_STALL_US = 23;
 constexpr unsigned PIN_SD_CD = 40;
 constexpr unsigned PIN_BUS_EN_N = 41;
 
+// PCB rev 0.4 (docs/pcb-rev04.md; not used by the firmware yet, unconnected
+// on rev 0.3 and the BB48). DASP#, PDIAG# and CSEL go through the bus
+// switches like the rest of the bus, with 10k pull-ups on the RP2350's side:
+// DASP# and PDIAG# open drain, CSEL read at reset (low = device 0). SD_PWR#
+// is the microSD's power switch, pulled down on the board, so the card is
+// powered unless the firmware drives it high. AUDIO_L/R are CD audio by PWM
+// (slice 10 A and B). PSRAM_CS# is the QSPI PSRAM's chip select (XIP CS1).
+constexpr unsigned PIN_DASP_N = 32;
+constexpr unsigned PIN_PDIAG_N = 33;
+constexpr unsigned PIN_CSEL = 42;
+constexpr unsigned PIN_SD_PWR_N = 43;
+constexpr unsigned PIN_AUDIO_L = 44;
+constexpr unsigned PIN_AUDIO_R = 45;
+constexpr unsigned PIN_PSRAM_CS_N = 47;
+
 // Whether `mode = auto` offers multiword DMA where DMARQ is wired is the
 // `dma` setting in HDDSYNTH.INI (drive_config::DEFAULT_DMA: off until DMA has
 // had a soak). Never offered without DMARQ, whatever it says.

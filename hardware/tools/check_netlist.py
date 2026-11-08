@@ -24,11 +24,11 @@ REPO = HW.parent
 # The ATA 40-pin header (drive's view).
 IDE_PIN = {**{f"DD{i}": p for i, p in enumerate([17, 15, 13, 11, 9, 7, 5, 3, 4, 6, 8, 10, 12, 14, 16, 18])},
            "DA0": 35, "DA1": 33, "DA2": 36, "CS0#": 37, "CS1#": 38, "DIOR#": 25, "DIOW#": 23,
-           "IORDY": 27, "INTRQ": 31, "RESET#": 1, "DMARQ": 21, "DMACK#": 29}
+           "IORDY": 27, "INTRQ": 31, "RESET#": 1, "DMARQ": 21, "DMACK#": 29,
+           "CSEL": 28, "IOCS16#": 32, "PDIAG#": 34, "DASP#": 39}
 IDE_GND = [2, 19, 22, 24, 26, 30, 40]
-
-# Pins this board adds that config.h doesn't have yet.
-BOARD_ONLY = {"DMARQ": 31, "DMACK#": 3, "SD_CD": 40, "BUS_EN#": 41, "LINK_TX": 0, "LINK_RX": 1}
+# Rev 0.4's open-drain and read-at-reset lines, with ATA's device pull-ups (IOCS16#: the host's)
+IDE_PULLED_UP = ["CSEL", "PDIAG#", "DASP#"]
 
 
 def config_gpios():
@@ -39,9 +39,14 @@ def config_gpios():
     g.update({"CS0#": c["PIN_CS0_N"], "CS1#": c["PIN_CS1_N"], "DIOR#": c["PIN_DIOR_N"], "DIOW#": c["PIN_DIOW_N"],
               "IORDY": c["PIN_IORDY"], "INTRQ": c["PIN_INTRQ"], "RESET#": c["PIN_RESET_N"],
               "LED": c["PIN_BOARD_LED"], "SD_CLK": c["PIN_SD_CLK"], "SD_CMD": c["PIN_SD_CMD"],
-              "SD_DAT0": c["PIN_SD_DAT0"], "SD_DAT3": c["PIN_SD_DAT3"]})
+              "SD_DAT0": c["PIN_SD_DAT0"], "SD_DAT3": c["PIN_SD_DAT3"],
+              "DMARQ": c["PIN_DMARQ"], "DMACK#": c["PIN_DMACK_N"], "IOCS16#": c["PIN_IOCS16_N"],
+              "SD_CD": c["PIN_SD_CD"], "BUS_EN#": c["PIN_BUS_EN_N"],
+              "LINK_TX": c["PIN_LINK_TX"], "LINK_RX": c["PIN_LINK_RX"],
+              "DASP#": c["PIN_DASP_N"], "PDIAG#": c["PIN_PDIAG_N"], "CSEL": c["PIN_CSEL"],
+              "SD_PWR#": c["PIN_SD_PWR_N"], "AUDIO_L": c["PIN_AUDIO_L"], "AUDIO_R": c["PIN_AUDIO_R"],
+              "PSRAM_CS#": c["PIN_PSRAM_CS_N"]})
     g["SD_DAT1"], g["SD_DAT2"] = g["SD_DAT0"] + 1, g["SD_DAT0"] + 2
-    g.update(BOARD_ONLY)
     return g
 
 
@@ -103,6 +108,32 @@ def ohms(v):
     if not m:
         return float("inf")
     return float(m.group(1)) * {"": 1, "k": 1e3, "K": 1e3, "m": 1e6, "M": 1e6}[m.group(2)]
+
+
+def reaches_vb(nl, net):
+    """True if a net reaches VB through a Schottky (anode on it), with an optional series fuse."""
+    nets = {net}
+    for r, p in nl.nodes.get(net, []):
+        if nl.lib[r] == "Device:Polyfuse":
+            nets.add(nl.net_of.get((r, "2" if p == "1" else "1")))
+    return any(nl.lib[r] == "Device:D_Schottky" and p == "2" and (nl.net_of.get((r, "1")) or "").split("/")[-1] == "VB"
+               for n in nets for r, p in nl.nodes.get(n, []))
+
+
+def reaches(nl, start, target):
+    """True if `target` (ref, pin) is reachable from net `start` through two-pin R and C parts."""
+    seen, frontier = {start}, [start]
+    while frontier:
+        net = frontier.pop()
+        for r, p in nl.nodes.get(net, []):
+            if (r, p) == target:
+                return True
+            if nl.lib[r] in ("Device:R", "Device:C"):
+                other = nl.net_of.get((r, "2" if p == "1" else "1"))
+                if other and other not in seen and other != "GND":
+                    seen.add(other)
+                    frontier.append(other)
+    return False
 
 
 def check_rp2350_support(nl, u1):
@@ -208,6 +239,29 @@ def main():
     for pin in IDE_GND:
         if nl.net_of.get((j_ide, str(pin))) != "GND":
             errors.append(f"IDE pin {pin} is not on GND")
+    for sig in IDE_PULLED_UP:
+        if not any(nl.lib[r] == "Device:R" and ohms(nl.value[r]) >= 4700
+                   and "+3V3" in (nl.net_of.get((r, "1")), nl.net_of.get((r, "2"))) for r, _ in reach(sig)):
+            errors.append(f"{sig} has no pull-up to +3V3")
+
+    # The 44-pin header (rev 0.4): pins 1-40 on the 40-pin header's nets, 41-42 +5 V into VB
+    # through a fuse and a Schottky, 43 GND.
+    ide44 = nl.refs("Connector_Generic:Conn_02x22_Odd_Even")
+    if len(ide44) != 1:
+        errors.append(f"expected one 44-pin IDE header, found {ide44}")
+    elif j_ide:
+        j44 = ide44[0]
+        for pin in range(1, 41):
+            if pin == 20:  # the key, unconnected on both
+                continue
+            a, b = nl.net_of.get((j_ide, str(pin))), nl.net_of.get((j44, str(pin)))
+            if a != b:
+                errors.append(f"44-pin header pin {pin} is on {b}, the 40-pin's on {a}")
+        if nl.net_of.get((j44, "43")) != "GND":
+            errors.append("44-pin header pin 43 is not GND")
+        five = nl.net_of.get((j44, "41"))
+        if not five or nl.net_of.get((j44, "42")) != five or not reaches_vb(nl, five):
+            errors.append("44-pin header pins 41-42 don't reach VB through a fuse and a Schottky")
 
     sd = sorted(r for r, lib in nl.lib.items() if lib.startswith("Connector:Micro_SD_Card"))
     for sig, card_pin in [("SD_CLK", "CLK"), ("SD_CMD", "CMD"), ("SD_DAT0", "DAT0"), ("SD_DAT1", "DAT1"),
@@ -226,7 +280,7 @@ def main():
                 out |= set(nl.nodes.get(other, []))
         return out
 
-    link = nl.refs("Connector_Generic:Conn_01x04")
+    link = [r for r in nl.refs("Connector_Generic:Conn_01x04") if "LINK" in (nl.net_of.get((r, "3")) or "")]
     for sig, pin in [("LINK_TX", "3"), ("LINK_RX", "4")]:
         if not link or (link[0], pin) not in via_resistor(sig):
             errors.append(f"{sig} (GP{gp[sig]}) doesn't reach the link header's pin {pin} through a resistor")
@@ -234,10 +288,7 @@ def main():
         errors.append("link header pin 2 is not GND")
     if link:
         # pin 1: 5 V from the HDD Synth, through a Schottky (anode on pin 1) into VB
-        five = nl.net_of.get((link[0], "1"))
-        ored = [r for r, p in nl.nodes.get(five, []) if nl.lib[r] == "Device:D_Schottky" and p == "2"
-                and nl.net_of.get((r, "1"), "").split("/")[-1] == "VB"]
-        if not ored:
+        if not reaches_vb(nl, nl.net_of.get((link[0], "1"))):
             errors.append("link header pin 1 doesn't reach VB through a Schottky diode")
     if not any(nl.lib[r] == "Device:LED" for r, _ in via_resistor("LED")):
         errors.append(f"LED (GP{gp['LED']}) doesn't reach an LED through a resistor")
@@ -251,13 +302,55 @@ def main():
                for r, _ in nl.nodes.get(en, [])):
         errors.append("BUS_EN# has no pull-up to +3V3")
 
+    # The microSD's power switch (rev 0.4): GP43 on a P-FET's gate, pulled down (on) by
+    # 8.2k or less (RP2350 erratum E9); its drain feeds the socket's VDD and the card's pull-ups.
+    pwr = gpio_net("SD_PWR#")
+    fets = [r for r, p in nl.nodes.get(pwr, []) if nl.lib[r].startswith("Transistor_FET:") and nl.pin_name[(r, p)] == "G"]
+    if len(fets) != 1:
+        errors.append(f"SD_PWR# (GP{gp['SD_PWR#']}) drives {len(fets)} MOSFET gates, expected 1")
+    else:
+        q = fets[0]
+        drain = nl.net_of.get((q, nl.pin_named(q, "D")))
+        vdd = nl.net_of.get((sd[0], nl.pin_named(sd[0], "VDD"))) if sd else None
+        if nl.net_of.get((q, nl.pin_named(q, "S"))) != "+3V3" or not drain or drain != vdd:
+            errors.append("the card's power switch must take +3V3 to the microSD's VDD")
+        pulls = [r for r, _ in nl.nodes.get(pwr, []) if nl.lib[r] == "Device:R" and ohms(nl.value[r]) <= 8200
+                 and "GND" in (nl.net_of.get((r, "1")), nl.net_of.get((r, "2")))]
+        if not pulls:
+            errors.append("SD_PWR# needs a pull-down of 8.2k or less (on by default; RP2350 erratum E9)")
+        for sig in ("SD_CMD", "SD_DAT0", "SD_DAT1", "SD_DAT2", "SD_DAT3"):
+            if not any(nl.lib[r] == "Device:R" and drain in (nl.net_of.get((r, "1")), nl.net_of.get((r, "2")))
+                       for r, _ in nl.nodes.get(gpio_net(sig), [])):
+                errors.append(f"{sig}'s pull-up isn't on the card's switched supply")
+
+    # The PSRAM (rev 0.4): its chip select on GP47, the rest on the flash's QSPI lines.
+    psram = [r for r, lib in nl.lib.items() if lib.startswith("Memory_RAM:APS6404")]
+    flash = [r for r, lib in nl.lib.items() if lib.startswith("Memory_Flash:")]
+    if len(psram) != 1:
+        errors.append(f"expected one PSRAM, found {psram}")
+    else:
+        if nl.net_of.get((psram[0], "1")) != gpio_net("PSRAM_CS#"):
+            errors.append(f"PSRAM_CS# (GP{gp['PSRAM_CS#']}) is not on the PSRAM's chip select")
+        if not any(nl.lib[r] == "Device:R" and "+3V3" in (nl.net_of.get((r, "1")), nl.net_of.get((r, "2")))
+                   for r, _ in nl.nodes.get(gpio_net("PSRAM_CS#"), [])):
+            errors.append("PSRAM_CS# has no pull-up to +3V3")
+        for pin in ("2", "3", "5", "6", "7"):
+            if not flash or nl.net_of.get((psram[0], pin)) != nl.net_of.get((flash[0], pin)):
+                errors.append(f"PSRAM pin {pin} isn't on the flash's pin {pin}")
+
+    # CD audio (rev 0.4): each PWM pin reaches the audio header through its filter.
+    audio = [r for r in nl.refs("Connector_Generic:Conn_01x04") if "AUD" in (nl.net_of.get((r, "1")) or "")]
+    for sig, pin in (("AUDIO_L", "1"), ("AUDIO_R", "4")):
+        if not audio or not reaches(nl, gpio_net(sig), (audio[0], pin)):
+            errors.append(f"{sig} (GP{gp[sig]}) doesn't reach the CD audio header's pin {pin}")
+
     errors += check_rp2350_support(nl, u1)
 
     if errors:
         print("\n".join("FAIL " + e for e in errors))
         sys.exit(1)
-    print(f"OK: {len(IDE_PIN)} IDE signals, {len(IDE_GND)} IDE grounds, microSD, link, LED and bus enable "
-          f"match src/config.h")
+    print(f"OK: {len(IDE_PIN)} IDE signals, {len(IDE_GND)} IDE grounds, the 44-pin header, microSD and its power "
+          f"switch, PSRAM, CD audio, link, LED and bus enable match src/config.h")
 
 
 if __name__ == "__main__":
