@@ -2,7 +2,9 @@
 
 How the drive should share the RP2350's three PIO blocks once 4-bit SDIO for the microSD card joins the bus program, multiword DMA and the diagnostics. Decided 28 Oct 2026 (option C below); to be built when SDIO is taken on.
 
-**On hold until DMA runs on hardware** (DMARQ and DMACK# wired; see [dma.md](dma.md)). SDIO speeds up reads only once DMA lifts the adapter's PIO pace, and the configuration that costs the diagnostics (an image with DMA) only exists then. Reviewed 28 Oct against SdFat's driver: see [Before starting](#before-starting) and the answered questions at the end.
+**Being built (branch `sdio`, 8 Nov 2026):** SDIO ran on the PCB (reads 6.59 MB/s by DMA from the card, against SPI's 1.38; writes 7.20 against 2.00; data verified), so the PCB build, `pcb_drive`, uses it; the BB48 builds stay on SPI. Done: the allocator (`src/pio_plan.h`, which keeps `ide_dma` and drops the diagnostics with an image and DMA, as option C below), SDIO from power-up with an SPI fallback for a card left in SPI mode, recovery by card detect. Still to do: the test disk giving the card's block to the diagnostics, the console's block swap, and our own copy of the driver. The status below is from before.
+
+**Was on hold until DMA runs on hardware** (DMARQ and DMACK# wired; see [dma.md](dma.md)). SDIO speeds up reads only once DMA lifts the adapter's PIO pace, and the configuration that costs the diagnostics (an image with DMA) only exists then. Reviewed 28 Oct against SdFat's driver: see [Before starting](#before-starting) and the answered questions at the end.
 
 ## The problem
 

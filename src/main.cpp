@@ -62,6 +62,7 @@
 #include "iocs16.h"
 #include "bus_timing.h"
 #include "command_history.h"
+#include "pio_plan.h"
 #include "mmc.h"
 #include <hardware/structs/m33.h>
 #include "iordy_timer.h"
@@ -186,6 +187,10 @@ static std::atomic<uint8_t> g_mdma_mode{NO_DMA};       // set by core 1 at start
 static std::atomic<uint8_t> g_mode_asked{0};            // HDDSYNTH.INI's mode, for core 1
 static SharedFlag g_dmarq_wired{false};                 // found by core 1 at start-up
 static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: auto may offer DMA
+// Which PIO programs core 1 started (pio_plan.h), for `s` and `S`: written
+// once by core 1 at start-up, then g_pio_planned set; core 0 reads it after.
+static pio_plan::Plan g_pio_plan;
+static std::atomic<bool> g_pio_planned{false};  // start-up only, so std::atomic is fine (not per access)
 
 // HDDSYNTH.INI's geometry for core 1, packed (cylinders << 16 | heads << 8 |
 // sectors), or 0 for auto; stored with the disk's size (geometryFor).
@@ -334,27 +339,33 @@ void setup1() {
     g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
                                                     g_dmarq_wired.load(), g_dma_auto.load()),
                       std::memory_order_relaxed);
-    iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
-    const IdentifyInfo device1 = device1Identity();
+    // The other PIO blocks, shared out by what this configuration needs
+    // (pio_plan.h): the card's SDIO takes one on the PCB build.
+    const bool dma = g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA;
+    g_pio_plan = pio_plan::choose(sd_card::sdio(), dma, g_isa.load());
+    if (g_pio_plan.iordy_timer) iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
+    if (g_pio_plan.bus_observer) {
+        const IdentifyInfo device1 = device1Identity();
 #if HDDPRO_HDCD
-    const bool cdrom1 = g_device1_cdrom;  // a CD-ROM, disc or none
-    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
-                        device1.total_sectors || cdrom1 ? &device1 : nullptr, cdrom1);
+        const bool cdrom1 = g_device1_cdrom;  // a CD-ROM, disc or none
+        bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                            device1.total_sectors || cdrom1 ? &device1 : nullptr, cdrom1);
 #else
-    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
-                        device1.total_sectors ? &device1 : nullptr);
+        bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                            device1.total_sectors ? &device1 : nullptr);
 #endif
-    // The third PIO block: multiword DMA if it's offered, otherwise IOCS16#
-    // for ISA cards (which never use DMA). Neither fits beside the others.
-    if (g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA)
-        ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
-    else {
-        iocs16::begin();
+    }
+    // Multiword DMA if it's offered, otherwise IOCS16# for ISA cards (which
+    // never use DMA).
+    if (g_pio_plan.ide_dma) ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
+    if (g_pio_plan.iocs16) iocs16::begin();
+    if (!dma) {
         // DMACK#, as ide_dma::begin() leaves it: an input for console `p`.
         gpio_init(cfg::PIN_DMACK_N);
         gpio_disable_pulls(cfg::PIN_DMACK_N);
     }
-    bus_timing::begin();  // the read timing probe, where there's room (not beside ide_dma)
+    if (g_pio_plan.bus_timing) bus_timing::begin();  // the read timing probe, where there's room
+    g_pio_planned.store(true, std::memory_order_release);
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
     // delay its PIO accesses while the host waits on a read.
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
@@ -1106,6 +1117,7 @@ static void chooseDisk() {
     // `isa = on`: the ISA card that needs it strobes DIOR# with no chip select,
     // which the observer takes for data.
     bus_observer::setImageChecks(!g_isa.load() && !g_test_disk);
+    sd_card::sharePio();  // core 1 shares out the PIO blocks next, by whether the card holds one
 #if HDDPRO_CDROM
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
     g_disk_chosen.store(true, std::memory_order_release);
@@ -1301,6 +1313,13 @@ static void printConfig() {
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
                   drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa),
                   drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy));
+    if (g_pio_planned.load(std::memory_order_acquire)) {
+        const pio_plan::Plan& p = g_pio_plan;
+        Serial.printf("CONFIG pio card=%s dma=%s iocs16=%s iordy_timer=%s bus_observer=%s bus_timing=%s%s%s\n",
+                      sd_card::busName(), drive_config::onOff(p.ide_dma), drive_config::onOff(p.iocs16),
+                      drive_config::onOff(p.iordy_timer), drive_config::onOff(p.bus_observer),
+                      drive_config::onOff(p.bus_timing), p.why ? ": " : "", p.why ? p.why : "");
+    }
     if (busRequested())
         Serial.printf("CONFIG bus program set from the console (P%c) until a power cycle\n", busRequested());
 #if HDDPRO_CDROM
@@ -1962,6 +1981,13 @@ static void printStats() {
     Serial.printf(" window=%lu skipped=%lu", (unsigned long)g_window.load(), (unsigned long)g_skipped.load());
 #endif
 #if FIRMWARE_SLICE != 0
+    iordy_timer::poll();
+    // Which diagnostics run (pio_plan.h): their counts below stay 0 if off.
+    if (g_pio_planned.load(std::memory_order_acquire))
+        Serial.printf(" card_bus=%s diag=%s", sd_card::busName(),
+                      g_pio_plan.iordy_timer && g_pio_plan.bus_observer ? "on"
+                      : g_pio_plan.iordy_timer                          ? "iordy_timer"
+                                                                        : "off");
     iordy_timer::poll();
     Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu iordy_max_reg=%s iordy_max_at_us=%lu",
                   (unsigned long)iordy_timer::slowReads(), (unsigned long)iordy_timer::maxNs(),

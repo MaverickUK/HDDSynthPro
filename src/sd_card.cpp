@@ -35,22 +35,51 @@ static const char* fsType(uint8_t fat_type) {
     }
 }
 
-// Puts SPI0 on the SD pins.
-static bool spiPins(Print& out) {
-    // If a pin were refused, SPI would fall back to its default pins, which
-    // on this board are IDE data lines: don't start at all.
-    if (!SPI.setSCK(cfg::PIN_SD_CLK) || !SPI.setTX(cfg::PIN_SD_CMD) || !SPI.setRX(cfg::PIN_SD_DAT0)) {
-        out.println("SD error: SPI0 refused the SD pins");
-        return false;
-    }
-    return true;
+// Puts SPI0 on the SD pins. If a pin were refused, SPI would fall back to
+// its default pins, which on this board are IDE data lines: don't start at all.
+static bool spiPins() {
+    return SPI.setSCK(cfg::PIN_SD_CLK) && SPI.setTX(cfg::PIN_SD_CMD) && SPI.setRX(cfg::PIN_SD_DAT0);
 }
 
-// Starts the card and mounts its volume (a fresh volume: whatever SdFat had
-// cached from a card before is dropped).
-static bool startCard() {
+static bool startSpi() {
+    if (!spiPins()) return false;
     SdSpiConfig config(cfg::PIN_SD_DAT3, DEDICATED_SPI, SD_SCK_MHZ(cfg::SD_SPI_MHZ), &SPI);
     return s_sd.begin(config);
+}
+
+// Whether the card runs over SDIO (the PCB build, when it started that way).
+static bool s_on_sdio = false;
+#if SD_SDIO
+// SDIO may be tried: until the PIO blocks were shared out without it
+// (sharePio), or a card that was in wouldn't start over SDIO at boot.
+static bool s_sdio_allowed = true;
+// The card is started for the first time: falling back to SPI is allowed.
+static bool s_booting = true;
+// A card that was in wouldn't start over SDIO at boot, and runs over SPI.
+static bool s_sdio_refused = false;
+// The PCB's card detect switch: low with a card in.
+static bool cardDetected() { return !gpio_get(cfg::PIN_SD_CD); }
+#endif
+
+// Starts the card and mounts its volume (a fresh volume: whatever SdFat had
+// cached from a card before is dropped). The PCB build starts it over SDIO;
+// a card that's in but won't (most likely left in SPI mode, which only a
+// power cycle ends) runs over SPI instead, if that happens at boot.
+static bool startCard() {
+#if SD_SDIO
+    if (s_sdio_allowed) {
+        if (s_sd.begin(SdioConfig(cfg::PIN_SD_CLK, cfg::PIN_SD_CMD, cfg::PIN_SD_DAT0, cfg::SD_SDIO_CLKDIV))) {
+            s_on_sdio = true;
+            return true;
+        }
+        s_sd.end();  // frees the PIO block SdFat's driver claimed, even when it failed
+        s_on_sdio = false;
+        if (!s_booting || !cardDetected()) return false;  // later: try SDIO again next time
+        s_sdio_allowed = false;
+        s_sdio_refused = true;
+    }
+#endif
+    return startSpi();
 }
 
 // Device 1's open image (openDevice1Image), declared here because restarting
@@ -64,7 +93,6 @@ static uint32_t s_restarts = 0;
 // Mounts the card's volume, unless it already is.
 static bool mount(Print& out) {
     if (s_sd.fatType()) return true;
-    if (!spiPins(out)) return false;
     if (!startCard()) {
         out.printf("SD error: no card, or no FAT volume on it (code %u, data %u)\n",
                    unsigned(s_sd.sdErrorCode()), unsigned(s_sd.sdErrorData()));
@@ -84,10 +112,25 @@ static bool wakeIfSilent(Print& out);  // below, with the card watch
 void printInfo(Print& out) {
     if (!mount(out) || !wakeIfSilent(out)) return;
     uint32_t sectors = s_sd.card()->sectorCount();
-    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s\n", cardType(s_sd.card()->type()),
+    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s bus=%s\n", cardType(s_sd.card()->type()),
                (unsigned long)(sectors / 2048), fsType(s_sd.fatType()),
                imageState(IMAGE_NAME), imageState(BENCH_IMAGE_NAME),
-               s_sd.exists(drive_config::FILE_NAME) ? "present" : "none");
+               s_sd.exists(drive_config::FILE_NAME) ? "present" : "none", busName());
+#if SD_SDIO
+    if (s_sdio_refused)
+        out.println("SD warning: the card didn't start over SDIO, so it runs over SPI (about a quarter of the speed). "
+                    "It was most likely left in SPI mode: take it out and put it back for SDIO.");
+#endif
+}
+
+const char* busName() { return s_on_sdio ? "sdio" : "spi"; }
+bool sdio() { return s_on_sdio; }
+
+void sharePio() {
+#if SD_SDIO
+    s_booting = false;
+    if (!s_on_sdio) s_sdio_allowed = false;  // its block went to something else
+#endif
 }
 
 // ---- Watching the card (media_watch.h) ---------------------------------------
@@ -110,6 +153,11 @@ static uint64_t s_served_size = 0;           // its size, which the drive told t
 // card the pull-up on DAT0 reads 0xFF. Only while the card is lost: CMD0
 // resets a card, so SdFat must start it again afterwards.
 static bool cardAnswers() {
+#if SD_SDIO
+    // Never an SPI CMD0 for a card served over SDIO: it would leave the card
+    // in SPI mode. The PCB has card detect; starting the card says the rest.
+    if (s_sdio_allowed) return cardDetected();
+#endif
     SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
     digitalWrite(cfg::PIN_SD_DAT3, HIGH);
     for (int i = 0; i < 10; ++i) SPI.transfer(0xFF);  // 80 clocks with CS high wake a card just put in
@@ -203,7 +251,16 @@ static bool restartCard() { return card_retry::restart(s_watch, s_card_ops); }
 // the drive ran (it then wakes in SD mode, not SPI), with no image read since
 // to notice. Asks the card (CMD9), a few hundred microseconds.
 static bool cardSilent() {
-    return s_sd.fatType() && s_sd.card()->sectorCount() == 0;
+    if (!s_sd.fatType()) return false;
+#if SD_SDIO
+    // SDIO's driver gives the size it read at start-up; CMD13 asks the card.
+    // The read in progress is ended first (CMD12): the driver leaves a
+    // multi-sector read open between calls and takes the next sector from it
+    // without a command, so after a CMD13 in the middle it returned other
+    // sectors' data, CRC good and no error (8 Nov: 19 of 20 lookups failed).
+    if (s_on_sdio) return !cardDetected() || !s_sd.card()->syncDevice() || s_sd.card()->status() == 0xFFFFFFFF;
+#endif
+    return s_sd.card()->sectorCount() == 0;
 }
 
 // Restarts the card if it has stopped answering; for `S` and `M`, before they
@@ -228,7 +285,15 @@ void serviceMedia() {
     if (s_watch.state() == media_watch::State::Lost) {
         reattach(now);
     } else {
-        cid_t cid;  // a different card: still in?
+        // A different card: still in? (SDIO's driver gives the CID it read
+        // at start-up, so the PCB asks card detect.)
+#if SD_SDIO
+        if (s_on_sdio) {
+            if (!cardDetected()) s_watch.gone(now);
+            return;
+        }
+#endif
+        cid_t cid;
         if (!s_sd.card()->readCID(&cid)) s_watch.gone(now);
     }
 }

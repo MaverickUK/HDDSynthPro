@@ -20,6 +20,14 @@ constexpr const char* BENCH_IMAGE_NAME = "HDDBENCH.IMG";  // scratch, for benchm
 // or "SD error ...". Only reads. Blocks core 0 for up to about a second.
 void printInfo(Print& out);
 
+// The card's bus: "sdio" (the PCB build) or "spi". sdio() says whether it
+// holds a PIO block; core 1 reads it once, after core 0 has chosen the disk,
+// to share out the rest (pio_plan). Core 0 calls sharePio() then: from then
+// on SDIO is tried only if it was running, since its block may be in use.
+const char* busName();
+bool sdio();
+void sharePio();
+
 // Mounts the card and opens image `name` if it is there. Returns the image,
 // or nullptr (no card, no image, or an error, written to `log`).
 // Closes any image opened before. `name` must outlive the open image.

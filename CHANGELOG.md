@@ -2,6 +2,20 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.31.0-sdio.1] - 2026-11-08 (branch `sdio`, from `hdd-cd`)
+
+### Added
+- **The PCB build, `pcb_drive`, with the SD card on 4-bit SDIO** ([docs/pio-allocation.md](docs/pio-allocation.md)). On the PCB (rev 0.3, 8 Nov), with an uncommitted experiment of the same driver serving `HDDBENCH.IMG` by multiword DMA: reads 6.59 MB/s against SPI's 1.38, random 4 KB reads 651 a second against 285, writes 7.20 MB/s against 2.00; two whole-image write-and-verify passes, 0 bad; 20 of 20 directory lookups (17 of 20 failed on the BB48's hand-wired leads, 29 Oct). The BB48 builds stay on SPI.
+  - SdFat's PIO SDIO driver, at 25 MHz (a divider of 2 at 200 MHz). It takes a whole PIO block, so **`src/pio_plan.h`** (pure, `test_pio_plan.cpp`) decides at start-up what else runs: with the card on SDIO and DMA offered, `ide_dma` and no diagnostics; without DMA, the IORDY timer with the bus observer, or with IOCS16# for `isa = on`; on SPI, everything as before. `host/tests/test_pio_plan_sizes.py` holds its instruction counts to the assembled programs, SdFat's included.
+  - A card that won't start over SDIO at boot while card detect (GPIO 40) says one is in (most likely left in SPI mode by other firmware: only a power cycle ends that) runs over SPI, and `S` says to take it out and put it back. SdFat's driver keeps its PIO block when it fails to start, so it's ended first.
+  - A card that stops answering is found by card detect and CMD13 instead of the SPI CMD0, which would leave it in SPI mode.
+  - **Found on the board: SdFat's SDIO driver returns the wrong sectors after a CMD13 in the middle of a read.** Its `readSector` leaves a multi-sector read (CMD18) open between calls and takes the next sector from it without a command; `status()` (CMD13) doesn't end it first, so the reads after it came from a stream out of step: CRC good, no error, other sectors' data. 19 of 20 `S` lookups failed (`image=none config=none` with both files there) while `wakeIfSilent` sent a CMD13 before each; ending the read first (`syncDevice()`, CMD12) made it 20 of 20. Its `readCID()` and `sectorCount()` give what it read at start-up, so a changed card's "still in?" check uses card detect instead.
+  - `S`: `bus=sdio|spi` on the `SD ok` line, and `CONFIG pio card=... dma=... iocs16=... iordy_timer=... bus_observer=... bus_timing=...` with why any are off; `s`: `card_bus` and `diag=on|iordy_timer|off`.
+  - CI builds and checks it and releases `hddsynthpro-pcb-drive-vX.Y.Z.uf2`.
+- The BB48 builds' core 1 functions are at the same addresses and sizes as in 0.30.0-dev.13; `pcb_drive`'s are the same as `bb48_drive`'s.
+- **On the PCB (8 Nov):** the card starts over SDIO from power-up (`bus=sdio`), 20 of 20 lookups; the plan as designed (`mode = auto`: the IORDY timer and bus observer; `mode = mdma2`: `ide_dma`, no diagnostics). After `bb48_drive` had left the card in SPI mode, `pcb_drive` ran it over SPI with the warning, and the plan gave the diagnostics and `ide_dma` back.
+- **Not yet:** while the test disk is served the card still holds its block (so with DMA offered there are no diagnostics); giving it to the diagnostics, and lending it back for the console's file commands, is next.
+
 ## [0.30.0-dev.13] - 2026-11-05 (branch `hdd-cd`)
 
 ### Added
