@@ -8,10 +8,47 @@
 #include "config.h"
 #include "drive_config.h"
 #include "image_parts.h"
+#if HDDPRO_PCB
+#include "sdio_card.h"
+#endif
 
 namespace sd_card {
 
+#if SD_SDIO
+// The card and its volume, mounted on SdFat's SPI driver or on our copy of
+// its SDIO driver (sdio_card.h). SdFs can only use the library's own SDIO
+// driver, so the PCB build mounts the volume itself, as SdFs does.
+class CardFs : public FsVolume {
+public:
+    bool begin(SdSpiConfig config) {
+        spi_.begin(config);
+        return mountOn(&spi_);
+    }
+    bool begin(PioSdioConfig config) {
+        sdio_.begin(config);
+        return mountOn(&sdio_);
+    }
+    void end() {
+        FsVolume::end();
+        if (card_) card_->end();
+    }
+    SdCardInterface* card() { return card_; }
+    uint8_t sdErrorCode() { return card_ ? card_->errorCode() : SD_CARD_ERROR_INVALID_CARD_CONFIG; }
+    uint32_t sdErrorData() { return card_ ? card_->errorData() : 0; }
+
+private:
+    bool mountOn(SdCardInterface* card) {
+        card_ = card;
+        return !card->errorCode() && FsVolume::begin(card);
+    }
+    SdSpiCard spi_;
+    sdio::Card sdio_;
+    SdCardInterface* card_ = nullptr;
+};
+static CardFs s_sd;
+#else
 static SdFs s_sd;
+#endif
 static FsFile s_image;
 static const char* s_open_name = nullptr;  // which image s_image is
 static const char* s_open_error = "";

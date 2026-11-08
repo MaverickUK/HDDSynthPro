@@ -11,7 +11,6 @@ import pytest
 pytestmark = pytest.mark.sim
 
 REPO = Path(__file__).resolve().parents[2]
-SDFAT_SDIO = Path.home() / ".platformio/packages/framework-arduinopico/libraries/SdFat/src/SdCard/PioSdio/PioSdioCard.pio.h"
 
 
 def plan_constants() -> dict[str, int]:
@@ -34,12 +33,8 @@ def test_plan_slots_match_the_programs(assemble, constant, programs):
     assert plan_constants()[constant] == total
 
 
-def test_plan_sdio_slots_match_sdfat():
-    """SdFat's driver adds the five programs it lists in total_pio_length."""
-    if not SDFAT_SDIO.exists():
-        pytest.skip("SdFat isn't installed here (build once with `pio run`)")
-    text = SDFAT_SDIO.read_text()
-    lengths = dict(re.findall(r"static const struct pio_program (\w+)_program = \{.*?\.length = (\d+)", text, re.S))
-    used = re.search(r"total_pio_length =(.*?);", text, re.S).group(1)
-    total = sum(int(lengths[name]) for name in re.findall(r"(\w+)_program\.length", used))
+def test_plan_sdio_slots_match_the_driver(assemble):
+    """Our copy of SdFat's driver (src/sdio_card.pio) loads these five."""
+    total = sum(len(assemble("sdio_card", name).instructions)
+                for name in ("cmd_rsp", "rd_clk", "rd_data", "wr_data", "wr_resp"))
     assert plan_constants()["SDIO_SLOTS"] == total

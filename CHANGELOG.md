@@ -2,6 +2,17 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.31.0-sdio.3] - 2026-11-08 (branch `sdio`)
+
+### Changed
+- **`pcb_drive` runs the card on our own copy of SdFat's SDIO driver** (`src/sdio_card.*`, from SdFat 2.3.1's `PioSdioCard`, MIT licence; every change marked `HDDSynthPro:`), mounted through a small volume class (`CardFs` in `sd_card.cpp`, as SdFs does it), since SdFs can only use the library's own. The BB48 builds still use SdFs and SPI, and don't link it; their core 1 functions are at dev.13's addresses and sizes. Fixed in the copy:
+  - `status()` (CMD13) and `cardCMD6()` end a read or write in progress first, so the wrong-sector reads of sdio.1 can't happen from any caller (sdio.1 worked around it in `cardSilent` only).
+  - It claims the two state machines it uses, not all four, and frees only those; and it stops them, and gives the card's pins back to SIO, before removing its programs. The library's freed all four, other users' included, and left two machines running over whatever was loaded next: here, the diagnostics, after a parked card's borrow (sdio.2).
+  - No debug printing to `Serial` (the library's `USE_DEBUG_MODE 1`).
+  - No input synchroniser bypass, said so: the library's shifted by the GPIO number, past bit 31 for GPIO 34-39, so it never set any. 25 MHz has always run with the synchronisers in.
+- `host/tests/test_pio_plan_sizes.py` checks `SDIO_SLOTS` against `src/sdio_card.pio`.
+- **Not yet on the board:** built and host-tested while the card soak runs on sdio.2.
+
 ## [0.31.0-sdio.2] - 2026-11-08 (branch `sdio`)
 
 ### Added

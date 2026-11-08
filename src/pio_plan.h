@@ -3,8 +3,9 @@
 // PIO blocks of 32 instructions and 4 state machines each:
 //
 //   ide_bus      always, a block of its own (every variant fills 30-32 slots)
-//   the card     4-bit SDIO (the PCB build) takes a whole block: SdFat's
-//                driver claims all 4 state machines (and 27 slots)
+//   the card     4-bit SDIO (the PCB build) takes a whole block: our copy of
+//                SdFat's driver (sdio_card) uses 27 slots and 2 state machines,
+//                but only starts in an empty block (its GPIO base is 16)
 //   the rest     multiword DMA's data phase (ide_dma), or IOCS16# for ISA
 //                cards (iocs16), the diagnostics (iordy_timer with iordy_check,
 //                bus_observer) and the read timing probe (bus_timing), as many
@@ -34,7 +35,7 @@ constexpr unsigned IOCS16_SLOTS = 6;
 constexpr unsigned IORDY_TIMER_SLOTS = 16 + 5;    // iordy_timer, iordy_check
 constexpr unsigned BUS_OBSERVER_SLOTS = 8;
 constexpr unsigned BUS_TIMING_SLOTS = 22;
-constexpr unsigned SDIO_SLOTS = 10 + 5 + 4 + 4 + 4;  // SdFat's PioSdio (and it claims all 4 machines)
+constexpr unsigned SDIO_SLOTS = 10 + 5 + 4 + 4 + 4;  // sdio_card: cmd_rsp, rd_clk, rd_data, wr_data, wr_resp
 
 struct Plan {
     bool ide_dma = false;
