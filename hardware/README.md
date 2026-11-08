@@ -2,7 +2,14 @@
 
 The KiCad project for the HDDSynthPro board: an RP2350B that acts as an IDE drive. The microcontroller and its support parts (core regulator, crystal, flash, USB) are on the board, following Raspberry Pi's RP2350 minimal design; rev 0.1 used a Pimoroni PGA2350 module instead. The design and the reasons for it are in [docs/pcb.html](../docs/pcb.html); open it in a browser.
 
-Status: **not reviewed**. The schematic is complete and the board is placed and routed: ERC and DRC find 0 violations, 0 unconnected items and 0 differences from the schematic. Review the routing (below) before ordering.
+Status: **rev 0.4, placed, not yet routed** (8 Nov 2026, branch `pcb-rev04`). Rev 0.3 (ordered 28 Oct) is in `production/` and in git history (commit 4fee041). What rev 0.4 adds, and why: [docs/pcb-rev04.md](../docs/pcb-rev04.md).
+
+## Rev 0.4: where it stands
+
+- **Done:** the schematic (ERC: 0 errors, 0 warnings; `check_netlist.py` passes, and was checked to fail on a wrong pin), the Molex footprint, and the placement: every part placed, DRC finds no overlaps or shorts, only the unrouted connections and rev 0.3's two expected USB-C silkscreen warnings.
+- **Next: routing,** on the Mac where Freerouting is set up (below, *Routing*): `tools/autoroute.py`, then DRC with `--schematic-parity`. Expect the router to need help with the 44-pin header's 40 links to J5 (short, side by side) and with the long power runs from the Molex header and the 44-pin connector to VB.
+- **Before ordering:** a day with rev 0.3 ([pcb-bringup.md](../docs/pcb-bringup.md)) to choose the series resistors and confirm SDIO; check J8's and J9's footprints against real parts (no LCSC part found for J8); pull pin 20 (the key) out of J7, or use a header without it; check J7's rotation in JLCPCB's preview (its `FT Rotation Offset` is copied from the 40-pin header's, unchecked).
+- **Not yet updated for rev 0.4:** [docs/pcb.html](../docs/pcb.html), the interactive design page, and `tools/jlcpcb.py`'s `JLC_FIX` table.
 
 ## Files
 
@@ -11,15 +18,16 @@ Status: **not reviewed**. The schematic is complete and the board is placed and 
 | `hddsynthpro.kicad_pro` | The project: open this in KiCad (9 or 10) |
 | `hddsynthpro.kicad_dru` | One custom design rule: 0.125 mm spacing inside Raspberry Pi's regulator layout only |
 | `hddsynthpro.kicad_sch` | Root sheet, with one sheet per block |
-| `power.kicad_sch` | USB-C, the 5 V header, the link's 5 V input, diode-OR, the AMS1117 3.3 V regulator, ESD, BOOTSEL/RESET, SWD |
-| `mcu.kicad_sch` | The RP2350B and its support circuit, the activity link socket (J3) and the LEDs |
-| `ide.kicad_sch` | The four SN74CB3T3245 bus switches and the 40-pin IDE header |
-| `sd.kicad_sch` | The microSD socket and its pull-ups |
+| `power.kicad_sch` | USB-C, the 5 V header, the link's 5 V input, (rev 0.4) the Molex and 44-pin 5 V inputs, diode-OR, the AMS1117 3.3 V regulator, ESD, BOOTSEL/RESET, SWD |
+| `mcu.kicad_sch` | The RP2350B and its support circuit, (rev 0.4) the PSRAM, the activity link socket (J3) and the LEDs |
+| `ide.kicad_sch` | The four SN74CB3T3245 bus switches, the series-resistor footprints, the 40-pin and (rev 0.4) 44-pin IDE headers |
+| `sd.kicad_sch` | The microSD socket, its pull-ups and (rev 0.4) its power switch |
+| `audio.kicad_sch` | Rev 0.4's CD audio out: PWM, RC filters and the 4-pin header |
 | `hddsynthpro.kicad_pcb` | The board: 100.33 × 69.88 mm, the HDD Synth Mk5's outline and M3 holes, 4 layers (signals, GND plane, 3V3 plane, signals) |
 | `HDDSynthPro.kicad_sym`, `HDDSynthPro.pretty/` | Parts KiCad lacks: the SN74CB3T3245's symbol (pinout from TI's datasheet); Raspberry Pi's polarity-marked inductor and wide-pad 0402 footprints; the TF PUSH microSD socket; the logo. (The old PGA2350 symbol and footprint stay for reference.) |
 | `tools/gen_schematic.py` | Generated the schematic, with an LCSC part number and any Fabrication Toolkit offsets on every part |
 | `tools/layout_pcb.py` | Placed the parts and laid the fixed copper (run with KiCad's own Python) |
-| `tools/make_footprints.py` | Made the inductor, wide 0402 and TF PUSH footprints |
+| `tools/make_footprints.py` | Made the inductor, wide 0402, TF PUSH and (rev 0.4) Molex disk-power footprints |
 | `tools/make_logo.py` | Made the silkscreen logo footprint from `media/HDDSynthProWide3.png` |
 | `tools/autoroute.py` | Routed the rest with Freerouting |
 | `tools/jlcpcb.py` | Writes `fab/bom-jlcpcb.csv` and `fab/cpl-jlcpcb.csv` for JLCPCB's assembly service |
@@ -35,6 +43,8 @@ kicad-cli sch erc hddsynthpro.kicad_sch                      # electrical rules:
 python3 tools/check_netlist.py                               # GPIO map and RP2350 support circuit
 kicad-cli pcb drc --schematic-parity hddsynthpro.kicad_pcb   # 0 errors, 0 unconnected, 0 parity issues
 ```
+
+On Windows (KiCad 10 in `C:\Program Files\KiCad\10.0`), from Git Bash: put `/c/Program Files/KiCad/10.0/bin` on `PATH`, set `KICAD_SHARE="C:/Program Files/KiCad/10.0/share/kicad"` for `gen_schematic.py`, and run `layout_pcb.py` with that folder's `python.exe`. `gen_schematic.py` reproduces the committed schematic byte for byte there.
 
 `check_netlist.py` exports the netlist with `kicad-cli` and follows each IDE signal from its GPIO, through the 33 Ω resistor where there is one and the bus switch, to the IDE header, and checks it lands on the ATA pin. It also checks the microSD socket, the link, the LED, the bus-switch enable, the IDE grounds, and the RP2350B's support circuit against Raspberry Pi's design: every supply pin's rail, the inductor's polarity, the VREG_AVDD filter, the crystal and its 1 kΩ, the flash wiring and the USB 27 Ω resistors. Run it after every schematic edit: CLAUDE.md requires the pin map to agree everywhere. (DRC's two remaining warnings are the USB-C socket's outline overhanging the board edge, as it's meant to.)
 
@@ -93,7 +103,7 @@ Every part carries its JLCPCB part number in an `LCSC` field, so the Fabrication
 
 ## Before ordering a board
 
-- **Power from the HDD Synth.** J3's pin 1 takes 5 V through D5 (an SS14, like D1 and D2) into VB, so one supply can run both boards. The Mk5's J6 pin 1 carries 3.3 V: with a Mk5, leave pin 1 of the cable unconnected (3.3 V there wouldn't damage anything, but the board would brown out on it alone). Any input works on its own; with several, the highest wins.
+- **Power from the HDD Synth.** J3's pin 1 takes 5 V through D5 (a B5819W since rev 0.4; an SS14 before) into VB, so one supply can run both boards. The Mk5's J6 pin 1 carries 3.3 V: with a Mk5, leave pin 1 of the cable unconnected (3.3 V there wouldn't damage anything, but the board would brown out on it alone). Any input works on its own; with several, the highest wins.
 - **Card detect.** On generic push-push sockets the detect pin usually meets the grounded shell when a card is in (reads low with R12 pulling up); check on the first board.
 - **New pins.** The board adds GP41 (`BUS_EN#`, the bus switches' enable), GP40 (card detect), GP31 and GP3 (DMARQ and DMACK#, reserved). The firmware doesn't use them yet. Until it drives GP41 low, close solder jumper JP1, or the IDE bus stays disconnected.
 - **Firmware build.** The RP2350B is the PGA2350's chip with the same GPIOs, 12 MHz crystal and 16 MB flash, but it's no longer the BB48 board: the PlatformIO board for this PCB needs a generic RP2350B definition rather than `olimex_pico2bb48`.

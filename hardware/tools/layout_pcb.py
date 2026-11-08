@@ -15,10 +15,13 @@ gen_schematic.py, this only bootstraps: once the board has been edited in
 KiCad, rerunning it overwrites the edits. Traces aren't routed here.
 
 Layout: the HDD Synth Mk5's outline and holes. The 40-pin IDE header on the left,
-vertical, just inside the left-hand holes. The four bus switches sit beside it,
-their IDE side facing the header and their RP2350B side facing the chip. The
-RP2350B is in the middle; USB-C, power and the link along the top edge; the
-microSD socket on the right edge with its pull-ups beside it.
+vertical, and the 44-pin one (rev 0.4) between it and the edge. The four bus
+switches sit beside them, their IDE side facing the header and their RP2350B side
+facing the chip, with rev 0.4's series resistors beside their RP2350B-side pins.
+The RP2350B is in the middle, the PSRAM by its flash; USB-C, power and the link
+along the top edge; the microSD socket on the right edge with its pull-ups and
+power switch beside it, CD audio above it; the Molex disk-power header on the
+bottom edge.
 Four layers: signals, GND plane, 3V3 plane, signals.
 """
 import json
@@ -34,7 +37,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sexpr import find, first, parse  # noqa: E402
 
 HW = Path(__file__).resolve().parent.parent
-KICAD_SHARE = Path(os.environ.get("KICAD_SHARE", "/Applications/KiCad/KiCad.app/Contents/SharedSupport"))
+KICAD_SHARE = Path(os.environ.get("KICAD_SHARE", "/Applications/KiCad/KiCad.app/Contents/SharedSupport"
+                                   if sys.platform == "darwin" else "C:/Program Files/KiCad/10.0/share/kicad"))
 OUT = HW / "hddsynthpro.kicad_pcb"
 
 # Board outline, mm. KiCad's y axis points down. The HDD Synth Mk5's outline (100.33 x 69.88 mm,
@@ -83,7 +87,7 @@ PLACE = {
     "J3": (127.0, 104.0, 90),      # link socket, pins along the edge, pin 1 on the left
     "R3": (128.27, 108.8, 90),
     "R4": (130.81, 108.8, 90),
-    "D5": (136.0, 110.0, 180),     # link 5 V into VB, anode towards J3's pin 1
+    "D5": (125.6, 111.0, 90),      # link 5 V into VB, anode towards J3 (SOD-123 since rev 0.4)
     "J6": (138.46, 104.0, 90),     # SWD, 1x3 0.1" header, pins along the edge
     "SW1": (165.0, 152.0, 0),      # BOOTSEL, bottom right, clear of the flash and the logo
     "SW2": (173.5, 152.0, 0),      # RESET
@@ -111,12 +115,57 @@ PLACE = {
     "R12": (172.0, 137.5, 0),
     "C3": (172.0, 140.0, 0),
     "C2": (172.0, 143.0, 0),
+    # Rev 0.4 (docs/pcb-rev04.md)
+    "J7": (104.0, 116.0, 0),       # 44-pin 2 mm header, pin 1 at the top as J5's
+    "F3": (102.0, 163.5, 90),      # its +5 V (pins 41-42): fuse, then diode into VB
+    "D7": (104.8, 163.5, 90),      # SOD-123, clear of the mounting hole
+    "U9": (136.0, 111.5, 0),       # PSRAM, beside the flash, its QSPI pins facing it
+    "C30": (136.0, 107.4, 0),
+    "R47": (141.0, 110.0, 90),     # its CS pull-up
+    "R44": (134.5, 157.2, 90),     # CSEL, PDIAG#, DASP# pull-ups, below U6
+    "R45": (135.7, 157.2, 90),
+    "R46": (136.9, 157.2, 90),
+    "Q1": (178.5, 145.5, 0),       # the microSD's power switch
+    "R48": (181.5, 146.0, 90),
+    "C31": (181.5, 143.0, 90),
+    "J8": (164.0, 165.2, 0),       # Molex disk power, bottom edge, pin 1 (+12 V) on the left
+    "F2": (182.0, 158.6, 0),
+    "D6": (183.0, 152.8, 90),
+    # CD audio on the right edge, between the LEDs and the microSD, right of the regulator:
+    # two rows (left, then right channel), the header at the edge
+    "R49": (188.8, 121.0, 0), "C32": (190.4, 119.5, 90), "R50": (192.0, 121.0, 0), "C33": (193.6, 119.5, 90),
+    "C36": (195.6, 121.0, 90),
+    "R51": (188.8, 124.5, 0), "C34": (190.4, 123.0, 90), "R52": (192.0, 124.5, 0), "C35": (193.6, 123.0, 90),
+    "C37": (195.6, 124.5, 90),
+    "J9": (198.6, 119.5, 0),
 }
+# Rev 0.4's series resistors (R23-R43, schematic order: DD0-15, DA0-2, CS0#, CS1#) sit beside the
+# bus switch pin each one feeds, its switch-side pad (2) towards the switch: two staggered columns,
+# so the outer column's tracks pass between the inner column's parts.
+SERIES = [f"DD{i}" for i in range(16)] + ["DA0", "DA1", "DA2", "CS0_N", "CS1_N"]
+SWITCH_PIN_Y = {  # the switch's A-side pin for each net (x 132.86), rev 0.3's placement
+    "DD7": 117.38, "DD8": 118.03, "DD6": 118.67, "DD9": 119.33, "DD5": 119.97, "DD10": 120.62, "DD4": 121.28,
+    "DD11": 127.22, "DD3": 127.88, "DD12": 128.53, "DD2": 129.18, "DD13": 129.82, "DD1": 130.47, "DD14": 131.12,
+    "DD0": 131.78, "DD15": 139.22, "DA1": 143.78, "DA0": 149.22, "DA2": 149.88, "CS0_N": 150.53, "CS1_N": 151.18,
+}
+SERIES_X = (134.9, 136.9)  # inner and outer columns
+
+
+def _place_series():
+    """Neighbouring pins (0.65 mm apart) alternate between the columns; a lone pin takes the inner one."""
+    col, prev = 0, None
+    for net, y in sorted(SWITCH_PIN_Y.items(), key=lambda kv: kv[1]):
+        col = 1 - col if prev is not None and y - prev < 0.7 else 0
+        PLACE[f"R{23 + SERIES.index(net)}"] = (SERIES_X[col], y, 180)
+        prev = y
+
+
+_place_series()
 # Reference designators moved off pads and neighbours: ref -> (x, y), or None to hide.
 REF_TEXT = {
     **{r: (169.0, PLACE[r][1]) for r in ("R7", "R8", "R9", "R10", "R11", "R12", "C3", "C2")},
     "R3": (128.27, 111.6), "R4": (130.81, 111.6), "U4": (161.9, 113.4), "J6": (146.6, 103.4), "J1": (164.6, 101.6),
-    "R14": (138.6, 148.5), "R15": (138.6, 150.7),
+    "R14": (145.0, 148.5), "R15": (145.0, 150.7),
     "J2": (183.6, 103.6), "F1": (178.5, 112.6), "R13": (126.3, 163.8), "JP1": (130.3, 163.8),
     **{u: (PLACE[u][0], PLACE[u][1]) for u in ("U2", "U3", "U5", "U6")},  # on the chip body
     **{c: (126.9, PLACE[c][1]) for c in ("C4", "C5", "C7", "C8")},
@@ -125,6 +174,11 @@ REF_TEXT = {
     # The small parts round the RP2350 have no room for labels; they're on the fab layer.
     **{r: None for r in ["L1", "R16", "R17", "R21", "R22"] + [f"C{n}" for n in range(9, 29) if n not in (12,)]},
     "C12": None,
+    # rev 0.4: the small parts are listed on the fab layer
+    **{f"R{n}": None for n in range(23, 53)}, **{f"C{n}": None for n in range(30, 38)},
+    "J7": (104.0, 113.6), "J9": (198.6, 117.0), "J8": (160.0, 165.2), "U9": (136.0, 111.5),
+    "F2": (182.0, 160.4), "F3": (102.0, 160.4), "D6": (185.6, 152.8), "D7": (104.8, 167.6), "Q1": (178.5, 143.2),
+    "D5": (125.6, 107.6),
 }
 # Raspberry Pi's core-regulator cluster (RP2350 minimal design), relative to the VREG_LX pad:
 # ref -> (dx, dy, rotation). Same pin order and pitch on the RP2350B as on their RP2350A.
@@ -237,18 +291,24 @@ USB_VIAS = [("USB_DM", 157.75, 109.15), ("USB_DM", 158.95, 109.6), ("USB_DP", 15
 HOLES = [(X0 + 9.76, Y0 + 4.09), (X0 + 86.36, Y0 + 4.09), (X0 + 9.76, Y0 + 65.81), (X0 + 86.36, Y0 + 65.81)]
 LOGO = (151.0, 161.2)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
 SILK = [  # text, x, y, size, rotation
-    ("RP2350B IDE drive  rev 0.3", 172.0, 160.0, 1.0, 0),
-    ("IDE 40-pin", 111.0, 135.0, 1.0, 90),
+    ("IDE drive  rev 0.4", 171.0, 158.4, 0.9, 0),
+    ("IDE 40-pin", 112.6, 135.0, 1.0, 90),
+    ("IDE 44-pin 2 mm: one host only", 108.6, 137.0, 0.9, 90),
     ("5V", 127.0, 101.3, 0.8, 0), ("GND", 129.54, 101.3, 0.8, 0), ("TX", 132.08, 101.3, 0.8, 0),
-    ("RX", 134.62, 101.3, 0.8, 0),
+    ("RX", 134.62, 101.3, 0.8, 0), ("Synth Link", 130.81, 106.68, 0.8, 0),
     ("+5V GND", 178.25, 108.5, 0.8, 0),
     ("CLK", 138.46, 101.3, 0.8, 0), ("GND", 141.0, 101.3, 0.8, 0), ("DIO", 143.54, 101.3, 0.8, 0),
-    ("BOOT", 165.0, 156.0, 0.8, 0),
-    ("RST", 173.5, 156.0, 0.8, 0),
-    ("JP1: close for firmware\nwithout BUS_EN#", 172.0, 164.5, 0.8, 0),
+    ("SWD", 140.97, 106.68, 0.8, 0),
+    ("Boot sel", 165.0, 156.0, 0.8, 0),
+    ("Reset", 173.5, 156.0, 0.8, 0),
+    ("JP1: close for firmware\nwithout BUS_EN#", 132.6, 166.2, 0.8, 0),
+    ("12V", 164.0, 160.3, 0.8, 0), ("GND", 169.08, 160.3, 0.8, 0), ("GND", 174.16, 160.3, 0.8, 0),
+    ("+5V", 179.24, 160.3, 0.8, 0),
+    ("CD audio L-G-G-R", 192.0, 129.4, 0.8, 0),
 ]
 # Net-name patterns for the Power class (local nets carry their sheet path).
-POWER_PATTERNS = ["VB", "5V_LINK", "*/VBUS_USB", "*/5V_EXT", "*/5V_EXT_IN"]  # GND and +3V3 are planes
+POWER_PATTERNS = ["VB", "5V_LINK", "*/VBUS_USB", "*/5V_EXT", "*/5V_EXT_IN", "5V_IDE44", "*/5V_IDE44_F",
+                  "*/5V_MOLEX", "*/5V_MOLEX_IN"]  # GND and +3V3 are planes
 
 
 def mm(v):

@@ -4403,7 +4403,7 @@
 				)
 			)
 		)
-		(property "Value" "SS14"
+		(property "Value" "B5819W"
 			(at 213.36 104.14 0)
 			(effects
 				(font
@@ -4411,7 +4411,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Diode_SMD:D_SMA"
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 213.36 101.6 0)
 			(effects
 				(font
@@ -4438,7 +4438,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C2480"
+		(property "LCSC" "C8598"
 			(at 213.36 101.6 0)
 			(effects
 				(font
@@ -5068,7 +5068,7 @@
 				)
 			)
 		)
-		(property "Value" "SS14"
+		(property "Value" "B5819W"
 			(at 213.36 154.94 0)
 			(effects
 				(font
@@ -5076,7 +5076,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Diode_SMD:D_SMA"
+		(property "Footprint" "Diode_SMD:D_SOD-123"
 			(at 213.36 152.4 0)
 			(effects
 				(font
@@ -5103,7 +5103,7 @@
 				(hide yes)
 			)
 		)
-		(property "LCSC" "C2480"
+		(property "LCSC" "C8598"
 			(at 213.36 152.4 0)
 			(effects
 				(font

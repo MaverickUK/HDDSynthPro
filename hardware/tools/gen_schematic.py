@@ -415,7 +415,7 @@ LCSC = {
     **{r: "C23733" for r in _refs("C", 9, 10, 11)},                # 4.7uF 0402
     **{r: "C1525" for r in _refs("C", *range(12, 27))},            # 100nF 0402
     **{r: "C1548" for r in _refs("C", 27, 28)},                    # 15pF 0402
-    "D1": "C2480", "D2": "C2480", "D5": "C2480", "D3": "C2297", "D4": "C84256",
+    "D1": "C2480", "D2": "C2480", "D5": "C8598", "D3": "C2297", "D4": "C84256",  # D5: B5819W (rev 0.4)
     "F1": "C19193043",
     "J1": "C165948", "J2": "C158012", "J3": "C2718488", "J4": "C393941", "J5": "C19193815", "J6": "C2937625",
     "L1": "C42411119",
@@ -440,7 +440,7 @@ LCSC = {
     "C30": "C1525", "C31": "C52923",                               # 100nF, 1uF 0402
     **{r: "C15195" for r in _refs("C", 32, 33, 34, 35)},           # 10nF 0402
     "C36": "C15850", "C37": "C15850",                              # 10uF 0805
-    "D6": "C2480", "D7": "C2480", "F2": "C19193043", "F3": "C19193043",
+    "D6": "C2480", "D7": "C8598", "F2": "C19193043", "F3": "C19193043",
     "J7": "C5371836", "Q1": "C15127", "U9": "C5333729",
 }
 
@@ -477,7 +477,7 @@ def power_sheet(sh):
     sh.part("Device:Polyfuse", "F1", "500mA", 99.06, 137.16, {"1": "5V_EXT_IN", "2": "5V_EXT"},
             "Fuse:Fuse_1206_3216Metric")
     sh.part("Device:D_Schottky", "D2", "SS14", 213.36, 81.28, {"2": "5V_EXT", "1": "VB"}, "Diode_SMD:D_SMA")
-    sh.part("Device:D_Schottky", "D5", "SS14", 213.36, 101.6, {"2": "5V_LINK", "1": "VB"}, "Diode_SMD:D_SMA")
+    sh.part("Device:D_Schottky", "D5", "B5819W", 213.36, 101.6, {"2": "5V_LINK", "1": "VB"}, "Diode_SMD:D_SOD-123")  # smaller since rev 0.4
     sh.note("D1/D2/D5: diode-OR of USB, the 5 V header and the link socket's\n"
             "pin 1 (5 V from the HDD Synth); also reverse-polarity protection.\nVB is about 4.6 V.", 200.66, 111.76)
 
@@ -491,7 +491,7 @@ def power_sheet(sh):
     sh.part("Device:D_Schottky", "D6", "SS14", 213.36, 167.64, {"2": "5V_MOLEX", "1": "VB"}, "Diode_SMD:D_SMA")
     sh.part("Device:Polyfuse", "F3", "500mA", 99.06, 152.4, {"1": "5V_IDE44", "2": "5V_IDE44_F"},
             "Fuse:Fuse_1206_3216Metric")
-    sh.part("Device:D_Schottky", "D7", "SS14", 213.36, 152.4, {"2": "5V_IDE44_F", "1": "VB"}, "Diode_SMD:D_SMA")
+    sh.part("Device:D_Schottky", "D7", "B5819W", 213.36, 152.4, {"2": "5V_IDE44_F", "1": "VB"}, "Diode_SMD:D_SOD-123")
     sh.note("D6/D7: the Molex plug and the 44-pin IDE connector's +5 V\n(pins 41-42, from an Amiga or a laptop) "
             "into VB, each through\na polyfuse: any mix of inputs can be connected at once.", 200.66, 177.8)
     sh.c("C1", "10uF", 254.0, 71.12, "VB", "GND", C0805)
