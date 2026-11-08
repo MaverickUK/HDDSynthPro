@@ -23,6 +23,18 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 - The BB48 builds' core 1 functions are at the same addresses and sizes as in 0.30.0-dev.13; `pcb_drive`'s are the same as `bb48_drive`'s.
 - **On the PCB (8 Nov):** the card starts over SDIO from power-up (`bus=sdio`), 20 of 20 lookups; the plan as designed (`mode = auto`: the IORDY timer and bus observer; `mode = mdma2`: `ide_dma`, no diagnostics). After `bb48_drive` had left the card in SPI mode, `pcb_drive` ran it over SPI with the warning, and the plan gave the diagnostics and `ide_dma` back.
 - **Not yet:** while the test disk is served the card still holds its block (so with DMA offered there are no diagnostics); giving it to the diagnostics, and lending it back for the console's file commands, is next.
+## [0.30.0] - 2026-11-08
+
+Everything since 0.28.0, from the branches `two-drives` (0.29.0-2d.x), `atapi-cdrom` (0.29.0), `data-lane`, `merge-cdrom` and `hdd-cd` (0.30.0-dev.1-13); each step is below. For the people flashing it: [docs/release-notes/v0.30.0.md](docs/release-notes/v0.30.0.md).
+
+- **Two drives:** `device1` serves a second image, or a folder as a read-only FAT16 disk ([docs/two-drives.md](docs/two-drives.md)); `image` became `device0`.
+- **CD-ROM drives** (exploratory): `bb48_cdrom` (the CD-ROM as device 0) and `bb48_hdcd` (a hard disk and a CD-ROM as device 1), serving an ISO or a BIN/CUE's data track by PIO or multiword DMA, discs changed from the console (`M`) ([docs/atapi.md](docs/atapi.md)).
+- **The data lane** (`early_answers = off`), multiword DMA under early answers fixed, device 1 recovering from SD card dropouts, and the diagnostics for the Evesham's unwaited CD reads.
+
+### Tested for the release (8 Nov, the HDDSynthPro PCB rev 0.3 on the Mac, the USB adapter)
+- `bb48_drive` dev.13 (the PCB runs the BB48's firmware unchanged): slices 3-4 and `-m speed` on early answers, the default (reads 1.06 MB/s, writes 1.12, 74,143 sectors checked on the cable, 0 bad), and in multiword DMA 2 (reads 7.60 MB/s, writes 10.92; 259,432 sectors checked with full observer checks, 0 bad).
+- **Device 1 gets over a card dropout (dev.11):** `bb48_hdcd`, `DOOM_SE.ISO` as device 1, read whole in a loop (23.4 MB, 1.29 MB/s); the card pulled and put back mid-read: reads failed while it was out, the board printed `CARD restarted: it stopped answering (1 in all)`, and every pass after matched the first (SHA-256).
+- **Found: macOS reads a CD's whole device with READ CD (0xBE),** asking for raw 2,352-byte frames, which the drive refuses (ILLEGAL REQUEST): `/dev/diskN` fails, its data volume (`/dev/diskNs0`, READ(10)) reads. Windows and DOS use READ(10). Raw frames would need sync, header and EDC/ECC built for each frame (or taken from a BIN's raw frames).
 
 ## [0.30.0-dev.13] - 2026-11-05 (branch `hdd-cd`)
 
