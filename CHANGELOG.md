@@ -12,6 +12,7 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
   - No input synchroniser bypass, said so: the library's shifted by the GPIO number, past bit 31 for GPIO 34-39, so it never set any. 25 MHz has always run with the synchronisers in.
 - `host/tests/test_pio_plan_sizes.py` checks `SDIO_SLOTS` against `src/sdio_card.pio`.
 - **Not yet on the board:** built and host-tested while the card soak runs on sdio.2.
+- **The card soak on sdio.2 (8 Nov, 14:03-17:53, the PCB, SdFat's driver):** `pcb_drive` serving `HDDBENCH.IMG` over SDIO by multiword DMA (no diagnostics in that set-up), `-m cardsoak` for 230 minutes: 20.73 GB written and 31.55 GB read in runs of 1-128 sectors, every sector checked as read and seven full read-backs of the image, **0 wrong**, no card lost or restarted. Random mixed transfers ran 1.66-1.85 MB/s writing and 2.4-2.5 reading for the first hour, then about 15% slower from 70-80 minutes on (1.36-1.46 and 2.13-2.27; a full read-back 11.1 s, then 13.5-13.8 s) and steady after; reads slowed too, so maybe the card warming up rather than its write housekeeping. Not measured further.
 
 ## [0.31.0-sdio.2] - 2026-11-08 (branch `sdio`)
 
