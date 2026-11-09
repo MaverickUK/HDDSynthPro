@@ -2,6 +2,19 @@
 
 28 Oct 2026, planned. Branch `atapi-cdrom`.
 
+## One build since 0.32.0 (9 Nov 2026, [one-build-per-board.md](one-build-per-board.md))
+
+The CD-ROM builds are gone: `bb48_drive` and `pcb_drive` hold the CD-ROM drive, chosen in `HDDSYNTH.INI` ([settings.md](settings.md)):
+
+| Up to 0.31.0 | Since 0.32.0 |
+|---|---|
+| `bb48_cdrom`: a CD-ROM drive alone, device 0 | `device0 = cdrom` (or an `.ISO`/`.CUE` name), `cdrom = DISC.ISO` |
+| `bb48_hdcd`: a hard disk, and a CD-ROM as device 1 | `device1 = cdrom` (or an `.ISO`/`.CUE` name) |
+
+Both are `hdcd::Device`, which keeps the CD-ROM on unit 0 or 1 (`cdSelected()` is one mask and one compare for either, or for none). The CD-ROM as device 0 runs early answers or `ide_bus`, never the data lane, as `bb48_cdrom` did; as device 1, `ide_bus`. The READY line no longer names a build (`READY HDDSynthPro 0.32.0 slice3`); `S` says where the CD-ROM is: `CONFIG device0=cdrom kind=cdrom disc=DOOM.ISO frames=N` (or `device1=`). The PCB serves discs over SDIO, as it serves images.
+
+The sections below are the history, with the build names of their time. To try the CD-ROM now: `PIO_ENV=bb48_drive scripts/rig.sh -m cdrom` with `E device0 = cdrom` (or `device1`), `E cdrom = none` and `!` (or `T`) for the test disc; on Windows `HDDPRO_CDROM_DEV=\\.\CdRom0` and `mode = mdma2`.
+
 ## A hard disk and a CD-ROM together: `bb48_hdcd` (4 Nov 2026, 0.30.0-dev.4, branch `hdd-cd`)
 
 **Through the USB adapter and on a retro PC (4 Nov, dev.10).** On the adapter: both drives in Windows, soaked an hour ([CHANGELOG](../CHANGELOG.md), dev.10). **On the Evesham** (Athlon XP, PCI IDE, `ide_bus`, PIO 3): the BIOS and the Windows 98 floppy's `OAKCDROM.SYS`/MSCDEX found both, C: as `ICL386MB.IMG`'s MS-DOS 5 and D: as the CD-ROM; Doom ran from `DOOM_SE.ISO` with its saves on C:, 3,361 commands, none failed, 5,360 sectors checked on the cable, 0 bad. The host didn't wait for IORDY on 26 CD data reads (none on the disk's), and held Status reads up to 3.6 µs (the slow reads below). Still to try: MS-DOS 5 booting from C: with the CD-ROM driver on it (`docs/bench-checklist.md`).
@@ -209,7 +222,7 @@ A new pytest marker, `cdrom`, with tests that skip unless the board runs the `bb
 | Status after reset (DRDY clear for packet devices?) | Follow ATA/ATAPI-5 and the C0 trace; a host that sees the wrong status won't find the drive |
 
 **Questions for after this exploration:**
-- One binary with both a hard disk and a CD-ROM (devices 0 and 1), or a CD-ROM mode chosen in `HDDSYNTH.INI`? **Both, in `bb48_hdcd`** (above): device 1 a CD-ROM from `HDDSYNTH.INI`. A CD-ROM as device 0 alone stays `bb48_cdrom`'s.
+- One binary with both a hard disk and a CD-ROM (devices 0 and 1), or a CD-ROM mode chosen in `HDDSYNTH.INI`? **Both, in `bb48_hdcd`** (above): device 1 a CD-ROM from `HDDSYNTH.INI`. A CD-ROM as device 0 alone stays `bb48_cdrom`'s. **Since 0.32.0 one build does all of it** (top).
 - Swapping discs at run time from the console or the HDD Synth (UNIT ATTENTION, "medium may have changed", 06h/28h, and GET EVENT STATUS NOTIFICATION's media events). **From the console since 0.30.0-dev.7** (above); the HDD Synth to come.
 - Audio tracks: BIN/CUE images, PLAY AUDIO through the HDD Synth's speaker, READ CD for raw sectors.
 - The Amiga, which needs Kickstart 3.1.4 or later, or a third-party ATAPI driver, and a CD file system.

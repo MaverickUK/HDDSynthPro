@@ -11,6 +11,25 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
   - `pcb_drive` on the data lane (`early_answers = off`): **reads 4.24 MB/s** (random 0.76 ms), writes 2.03 (the BB48 on the lane: 2.18 and 1.98, so SPI was what held the lane's reads back); 0 bad; 2,741 Status reads past 1,250 ns (worst 1,650 ns, the lane's known ones, [docs/data-lane.md](docs/data-lane.md)), all waited for.
 - **The Evesham's unwaited CD data reads are gone on the PCB** (`bb48_hdcd`, `ide_bus`, Doom from `DOOM_SE.ISO` with its saves on C:, as on 4 Nov): 2,966 READ(10), **0 `NOIORDY`** (the BB48: 26); 3,663 data reads held past 400 ns, every one waited for, the worst 1,100 ns. So the 5 Nov guess (the Evesham doesn't sample IORDY on the data port) was wrong; the BB48's hand-wired, undamped DIOR# (the PCB has 33 Ω on DIOR#/DIOW#) is the likelier cause, by ringing seen as an early strobe end or a real one ([docs/atapi.md](docs/atapi.md)). The CD's slow Status reads are unchanged (worst 3,620 ns).
 
+## [0.32.0-dev.1] - 2026-11-09 (branch `one-build`)
+
+One drive build per board ([docs/one-build-per-board.md](docs/one-build-per-board.md), step 2). Built and host-tested; not yet run on the board.
+
+### Changed
+- **`bb48_drive` and `pcb_drive` serve a hard disk, a CD-ROM drive or both, by `HDDSYNTH.INI`:** the `bb48_cdrom` and `bb48_hdcd` builds (and `HDDPRO_CDROM`, `HDDPRO_HDCD`) are gone. Core 1 always runs `hdcd::Device`, which before was `bb48_hdcd`'s alone, so the hard disk alone now pays its `cdSelected()` per access: to measure against 0.31.0's `bb48_drive` in PIO (the plan's step 1) before this merges. `cdSelected()` is now one mask and one compare, for no CD-ROM, one as device 1, or one alone as device 0.
+- **The CD-ROM on the PCB:** discs are served over SDIO, as images are.
+- **The READY line no longer names a build** (`READY HDDSynthPro 0.32.0-dev.1 slice3`). The rig tests find a CD-ROM drive by console `S` instead (`CONFIG device0=... kind=cdrom ...` or `device1=`); `host/bench_session.py` runs every step on `bb48_drive`, with each step's settings on top of those it found.
+- `S` reports a CD-ROM as device 0 as `CONFIG device0=NAME kind=cdrom disc=... frames=N` (`bb48_cdrom` said `CONFIG cdrom=... serving=...`).
+- CI builds, checks and releases three UF2s: `bb48-listen`, `bb48-drive` and `pcb-drive`.
+
+### Added
+- **`device0 = cdrom`** (or a `device0` name ending in `.ISO` or `.CUE`): a CD-ROM drive alone as device 0, as `bb48_cdrom` was: its disc from `cdrom`, the test disc with `cdrom = none` or console `T` (`J` still serves `HDDBENCH.IMG`, as a hard disk), early answers instead of the data lane. `device1` is left out, and `S` says so. Settings files from 0.31.0 work unchanged (`device1 = cdrom`, `cdrom = NAME`).
+- Host tests: the CD-ROM alone as device 0 in `hdcd::Device`, by PIO and by DMA; `device0 = cdrom` in `drive_config`.
+
+### Fixed
+- **The PCB parked the card under device 1's image** when device 0 served nothing from the card (`device0 = none`, or a CD-ROM with no disc): the PIO blocks were shared out before device 1's image, folder or disc was opened, so it was read through a borrowed block that the next console `S` gave back to the diagnostics. Device 1 is now chosen first. On 0.31.0 this already struck `device0 = none` with a `device1` image.
+- **Console `M` on the PCB** putting a disc in a drive that started with none (the card parked): the disc now keeps the card's PIO block, as if served from boot, and the diagnostics stay off until a restart (it says so); a disc that can't be opened gives the block back.
+
 ## [0.31.0] - 2026-11-09
 
 The PCB build, from branch `sdio` (0.31.0-sdio.1-4); each step is below. For the people flashing it: [docs/release-notes/v0.31.0.md](docs/release-notes/v0.31.0.md).

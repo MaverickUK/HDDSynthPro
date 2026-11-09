@@ -1,7 +1,8 @@
-// The bb48_hdcd build's device: a hard disk as device 0 and, when
-// HDDSYNTH.INI's `device1 = cdrom` asks for one, a CD-ROM drive as device 1
+// The drive build's device (drive_device.h): a hard disk as device 0 and,
+// when HDDSYNTH.INI's `device1 = cdrom` asks for one, a CD-ROM drive as
+// device 1; or, with `device0 = cdrom`, a CD-ROM drive alone as device 0
 // (docs/two-drives.md, docs/atapi.md). Pure C++, host-tested. Runs on core 1
-// behind the same interface as ata::Device (drive_device.h picks it).
+// behind the same interface as ata::Device.
 //
 // Two devices on one cable, as on a real bus: both take every write to the
 // task file, Device and Device Control registers, and RESET#; the selected
@@ -14,10 +15,14 @@
 // the hard disk build's ata::Device (with its own device 1, a second image
 // or a folder, if any), plus one branch per access.
 //
-// Fetches: the CD-ROM's carry unit 1 (core 0 reads device 1's disc) and ids
-// with the top bit set, so a result goes back to the device that asked: each
-// is offered both, and each takes only its own id. (The hard disk's ids
-// would reach the top bit only after 2^31 fetches, a terabyte or more.)
+// Fetches: the CD-ROM's as device 1 carry unit 1 (core 0 reads device 1's
+// disc) and ids with the top bit set, so a result goes back to the device that
+// asked: each is offered both, and each takes only its own id. (The hard
+// disk's ids would reach the top bit only after 2^31 fetches, a terabyte or
+// more.) As device 0 the CD-ROM is the only drive: the hard disk is off (it
+// sees nothing), the CD-ROM answers whichever device is selected, as the one
+// drive on a cable does (Status 00h for an absent device 1), and its fetches
+// carry unit 0, device 0's disk being its disc.
 #pragma once
 
 #include <cstdint>
@@ -42,17 +47,21 @@ struct CommandInfo {
 
 class Device {
 public:
-    // `disk1`: device 1 as a second hard disk, or nullptr; `cdrom`: device 1
-    // as a CD-ROM drive (its `total_sectors` the disc's, 0 for no disc), or
-    // nullptr. Not both: `cdrom` wins.
-    Device(const IdentifyInfo& disk0, const IdentifyInfo* disk1, const IdentifyInfo* cdrom);
+    // `disk1`: device 1 as a second hard disk, or nullptr; `cdrom`: a CD-ROM
+    // drive (its `total_sectors` the disc's, 0 for no disc), or nullptr, as
+    // device `cd_unit`: 1 beside the disk (then not with `disk1`: `cdrom`
+    // wins), or 0 alone (then `disk0` and `disk1` are unused).
+    Device(const IdentifyInfo& disk0, const IdentifyInfo* disk1, const IdentifyInfo* cdrom, uint8_t cd_unit = 1);
     __attribute__((always_inline)) bool hasCdrom() const { return cd_on_; }
+    uint8_t cdUnit() const { return cd_unit_; }  // 0 or 1, if hasCdrom()
 
     // ---- Bus side (as ata::Device) ------------------------------------------
 
     // The CD-ROM is selected: it answers. Always inlined, as every access asks
-    // (core 1's code must stay in RAM, as for ata::Device).
-    __attribute__((always_inline)) bool cdSelected() const { return cd_on_ && (device_reg_ & ata::DEV_DEV); }
+    // (core 1's code must stay in RAM, as for ata::Device). One mask and one
+    // compare for all three layouts (cd_mask_, cd_match_): no CD-ROM, never;
+    // as device 1, when DEV is 1; alone as device 0, always.
+    __attribute__((always_inline)) bool cdSelected() const { return (device_reg_ & cd_mask_) == cd_match_; }
 
     __attribute__((always_inline)) uint16_t read(Reg reg) {
         uint16_t value = peek(reg);
@@ -140,6 +149,10 @@ private:
     ata::Device hd_;
     atapi::Device cd_;
     bool cd_on_;
+    uint8_t cd_unit_;   // the CD-ROM's device: 1 beside the disk, 0 alone
+    bool hd_on_;        // the hard disk is there (not with the CD-ROM as device 0)
+    uint8_t cd_mask_;   // cdSelected(): (device_reg_ & cd_mask_) == cd_match_
+    uint8_t cd_match_;
     void noteStarts(uint32_t hd_before, uint32_t cd_before);
     void resyncDevice();  // both devices told the Device register again, before a command
     bool cd_last_ = false;  // the CD-ROM started the latest command (else the disk)

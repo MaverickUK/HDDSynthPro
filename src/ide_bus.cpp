@@ -11,11 +11,7 @@
 
 #include "ata_device.h"
 #include "drive_device.h"
-#if HDDPRO_CDROM
-#include "atapi_device.h"
-#elif HDDPRO_HDCD
 #include "hdcd_device.h"
-#endif
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"

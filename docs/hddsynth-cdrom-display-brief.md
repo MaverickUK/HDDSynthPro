@@ -10,6 +10,8 @@ For whoever builds either side: Claude Code in **HDDSynth_Native** (the synth) o
 
 The HDD Synth already has an OLED, and HDDSynthPro now has a CD-ROM drive: alone (`bb48_cdrom`), or as device 1 beside a hard disk (`bb48_hdcd`, `device1 = cdrom`), with discs changed at run time from its console (`M`, 0.30.0-dev.7). This brief gives the HDD Synth an FDDSynthPro-style screen for the CD-ROM, and lets it swap discs. **The synth draws the screen and owns the controls; HDDSynthPro reports and obeys.**
 
+**Since 0.32.0 there's one drive build** ([one-build-per-board.md](one-build-per-board.md)): read `bb48_cdrom` below as `device0 = cdrom` and `bb48_hdcd` as `device1 = cdrom`, both in `bb48_drive` and `pcb_drive`. What the synth is sent doesn't change.
+
 Two things have to change first:
 - **Pins.** On the HDD Synth Mk5, header J6 carries either the OLED or the link (UART1 on the OLED's I²C pins, GP24/GP25), so `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` switches the OLED off. **The next hardware revision gives the link dedicated pins** (TX, RX and GND, and 5 V for powering HDDSynthPro's PCB through its J3), so the OLED and the link run together. Everything below assumes that revision.
 - **Line length.** Both sides' receivers drop lines over 80 bytes (`SENTENCE_MAX_LINE` in the shared `sentence.h`, `activity_link::MAX_LINE`). Disc names can be longer, so they're sent shortened for display (below), and a disc is asked for by its place in the list plus a checksum of its full name. `sentence.h` stays unchanged.

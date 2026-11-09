@@ -1,5 +1,6 @@
-"""The CD-ROM build serving the test ISO (docs/atapi.md, slice C2's exit):
-the host mounts the disc and every file reads back as made.
+"""A CD-ROM drive (`device0 = cdrom` or `device1 = cdrom`) serving the test
+ISO (docs/atapi.md, slice C2's exit): the host mounts the disc and every file
+reads back as made.
 
 Not yet run on the rig. Put the test ISO on the card first, as the disc the
 settings name (HDDSYNTH.ISO by default):
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import is_cdrom_build
+from conftest import cdrom_line
 from hddproto import test_iso, trace
 
 pytestmark = pytest.mark.cdrom
@@ -27,10 +28,10 @@ pytestmark = pytest.mark.cdrom
 
 @pytest.fixture(scope="module", autouse=True)
 def serving_the_iso(drive):
-    if not is_cdrom_build(drive):
-        pytest.skip("needs the CD-ROM build: PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom")
-    line = drive.command("S", "CONFIG cdrom=", timeout=10)
-    if "serving=disc" not in line:
+    line = cdrom_line(drive)
+    if line is None:
+        pytest.skip("needs a CD-ROM drive: `E device0 = cdrom` (or device1) and `!`")
+    if "disc=test disc" in line or "disc=no disc" in line:
         pytest.skip(f"the drive isn't serving an ISO ({line.strip()}); build the test ISO onto the card "
                     "(python -m hddproto.test_iso build ...) and restart (!)")
 

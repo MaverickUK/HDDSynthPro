@@ -19,10 +19,10 @@ namespace bus_observer {
 // iordy_timer::begin, so the two never race to claim a PIO. `identity` is
 // the drive's, so IDENTIFY blocks on the bus can be checked too.
 // `identity1`: device 1's, with two drives (docs/two-drives.md), or nullptr;
-// `packet1`: device 1 is a CD-ROM drive (the bb48_hdcd build), whose block is
-// IDENTIFY PACKET DEVICE's.
+// `packet1`: device 1 is a CD-ROM drive (`device1 = cdrom`), whose block is
+// IDENTIFY PACKET DEVICE's; `packet0`: so is device 0 (`device0 = cdrom`).
 void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyInfo* identity1 = nullptr,
-           bool packet1 = false);
+           bool packet1 = false, bool packet0 = false);
 
 // Stops the program and its DMA channel and frees them, so another user can
 // have the PIO block (the PCB's card borrowing it for SDIO); begin() starts

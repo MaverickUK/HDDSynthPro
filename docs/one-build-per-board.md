@@ -2,6 +2,13 @@
 
 A brief for doing this work on the Windows rig. Read `CLAUDE.md` first: its rules hold throughout, especially *Rules that keep the bus safe*, *Core split* and the *Rig* notes for Windows.
 
+## Progress (9 Nov, evening, Windows PC without the board)
+
+- **Step 2 is done** on branch `one-build` (0.32.0-dev.1, `CHANGELOG.md`): `hdcd::Device` takes the CD-ROM on unit 0 or 1 (`cdSelected()` became one mask and one compare, `(device_reg_ & cd_mask_) == cd_match_`, for all three layouts: no cheaper or dearer than `bb48_hdcd`'s `cd_on_ && (device_reg_ & DEV_DEV)`, but measure); `device0 = cdrom` in `drive_config`; `main.cpp`, `ide_bus.cpp` and `bus_observer.cpp` without `HDDPRO_CDROM`/`HDDPRO_HDCD`; `bb48_cdrom` and `bb48_hdcd` gone from `platformio.ini` and CI; `conftest.py` finds a CD-ROM by `S`; the docs. Native tests (5,676 checks) and `pytest` (sim) pass; `check_core1_ram.py` passes on both drive ELFs (69 functions, as `bb48_hdcd`); RAM 94.1% on both.
+- Found on the way and fixed: on the PCB, the card was parked (its PIO block lent to the diagnostics) *before* device 1's image or disc was opened, when device 0 served nothing from the card; and `M` into an empty drive opened the disc on a borrowed block. See the CHANGELOG.
+- **Step 1 wasn't run:** the board and the adapter weren't on this PC. Run it now as **0.31.0's `bb48_drive` against `one-build`'s `bb48_drive`** (the merged build is `bb48_hdcd` plus the device-0 option, so this answers step 1's question and checks step 2 in one go): A-B-A-B, the same records as below. If the merged build loses, the fallback below still applies: keep a hard-disk-only build per board.
+- Then step 3.
+
 ## The goal
 
 Go from five firmware builds to three:

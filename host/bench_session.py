@@ -20,7 +20,8 @@ stats, the serial log, and summary.md (also printed at the end).
 It needs the adapter on USB (replug it first; restart the PC if it acts up)
 and the board running any drive build. It never formats the card: the only
 file it changes is HDDSYNTH.INI, through console E, and only the settings the
-steps name (device1, mode), which it restores. The retro PCs, MSCDEX and the
+steps name (device0, device1, mode), which it restores; each step starts
+from the settings as they were, plus its own. The retro PCs, MSCDEX and the
 soak's long run stay by hand.
 """
 from __future__ import annotations
@@ -67,32 +68,33 @@ class Step:
     default: bool = True
 
 
-HDCD = {"device1": "cdrom", "mode": "mdma2"}
+HDCD = {"device1": "cdrom", "mode": "mdma2"}  # a hard disk, and a CD-ROM as device 1
+CD0 = {"device0": "cdrom", "mode": "mdma2"}  # a CD-ROM drive alone, as device 0
 STEPS = [
     Step("pio-lane", "PIO speed on the data lane, after dev.3's DMA fix", "bb48_drive", program="l",
          marker="speed", expect={"read_mbs": 1.54, "iops": 80, "write_mbs": 1.68}, note="checklist 1, dev.2's figures"),
     Step("pio-early", "PIO speed on early answers", "bb48_drive", program="e",
          marker="speed", expect={"read_mbs": 1.21, "iops": 76, "write_mbs": 1.13}, note="checklist 1, dev.2's figures"),
     Step("slices-lane", "Slices 3-4 on the data lane", "bb48_drive", program="l", marker="slice3 or slice4"),
-    Step("hdcd-speed", "bb48_hdcd: the hard disk (device 0) in DMA beside a CD-ROM", "bb48_hdcd", settings=HDCD,
+    Step("hdcd-speed", "The hard disk (device 0) in DMA beside a CD-ROM", "bb48_drive", settings=HDCD,
          marker="speed", expect={"read_mbs": 8.84, "iops": 1000, "write_mbs": 12.48},
          note="checklist 2: bb48_drive's DMA on early answers; within noise means hdcd costs nothing"),
-    Step("hdcd-cdrom", "bb48_hdcd: every byte of the test disc (device 1), with read-ahead", "bb48_hdcd",
+    Step("hdcd-cdrom", "Every byte of the test disc (device 1), with read-ahead", "bb48_drive",
          settings=HDCD, marker="cdrom", cdrom=True, expect={"cd_mbs": 2.42},
          note="checklist 2: dev.3 without read-ahead"),
-    Step("hdcd-both", "bb48_hdcd: disk speed while the CD-ROM is read", "bb48_hdcd", settings=HDCD,
+    Step("hdcd-both", "Disk speed while the CD-ROM (device 1) is read", "bb48_drive", settings=HDCD,
          marker="speed", interleave=True, note="checklist 2: no errors, bus_bad=0"),
-    Step("hdcd-discs", "bb48_hdcd: disc changes seen by Windows (console M)", "bb48_hdcd", settings=HDCD,
+    Step("hdcd-discs", "Disc changes on device 1 seen by Windows (console M)", "bb48_drive", settings=HDCD,
          discs=True, note="checklist 2; MSCDEX on the Evesham stays by hand"),
-    Step("cd-profile", "bb48_cdrom: slow reads and command times, early answers", "bb48_cdrom",
-         flags="-DCMD_PROFILE=1", program="e", settings={"mode": "mdma2"}, marker="cdrom", cdrom=True,
+    Step("cd-profile", "A CD-ROM as device 0: slow reads and command times, early answers", "bb48_drive",
+         flags="-DCMD_PROFILE=1", program="e", settings=CD0, marker="cdrom", cdrom=True,
          note="checklist 2b"),
-    Step("cd-profile-idebus", "bb48_cdrom: the same on ide_bus", "bb48_cdrom", flags="-DCMD_PROFILE=1",
-         program="i", settings={"mode": "mdma2"}, marker="cdrom", cdrom=True, note="checklist 2b"),
-    Step("cd-pollfirst", "bb48_cdrom: the candidate fix, EARLY_POLL_FIRST_NS=1000", "bb48_cdrom",
-         flags="-DCMD_PROFILE=1 -DEARLY_POLL_FIRST_NS=1000", program="e", settings={"mode": "mdma2"},
+    Step("cd-profile-idebus", "A CD-ROM as device 0: the same on ide_bus", "bb48_drive", flags="-DCMD_PROFILE=1",
+         program="i", settings=CD0, marker="cdrom", cdrom=True, note="checklist 2b"),
+    Step("cd-pollfirst", "A CD-ROM as device 0: the candidate fix, EARLY_POLL_FIRST_NS=1000", "bb48_drive",
+         flags="-DCMD_PROFILE=1 -DEARLY_POLL_FIRST_NS=1000", program="e", settings=CD0,
          marker="cdrom", cdrom=True, note="checklist 2b: fewer reads past 1,250 ns, no errors?"),
-    Step("hdcd-soak", "bb48_hdcd: a 60-minute soak while the CD-ROM is read", "bb48_hdcd", settings=HDCD,
+    Step("hdcd-soak", "A 60-minute soak while the CD-ROM (device 1) is read", "bb48_drive", settings=HDCD,
          marker="slice6", interleave=True, note="checklist 3 (not in the default run: --only hdcd-soak)", default=False),
 ]
 STATS_KEPT = ("bus", "iordy_max_ns", "iordy_max_reg", "iordy_slow", "iordy_ignored", "bus_sectors", "bus_bad",
@@ -196,20 +198,22 @@ class Session:
             self.restart_with("!")
 
     def read_settings(self):
-        """device1 and mode as HDDSYNTH.INI has them now (console S)."""
+        """device0, device1 and mode as HDDSYNTH.INI has them now (console S)."""
         if self.dry:
             return
         for line in self.config():
-            if m := re.match(r"CONFIG file=\S+ device0=\S+ mode=(\S+)", line):
-                self.settings["mode"] = m.group(1)
+            if m := re.match(r"CONFIG file=\S+ device0=(\S+) mode=(\S+)", line):
+                self.settings["device0"] = m.group(1)
+                self.settings["mode"] = m.group(2)
             if m := re.match(r"CONFIG device1=(\S+)", line):
                 self.settings["device1"] = m.group(1)
         self.settings.setdefault("device1", "none")
         self.log(f"settings now: {self.settings}")
 
     def test_disk(self) -> bool:
-        if "cdrom" in self.drive.ready.split():
-            return any(f"frames={TEST_DISC_FRAMES}" in l for l in self.config() if l.startswith("CONFIG cdrom="))
+        cd0 = [l for l in self.config() if re.match(r"CONFIG device0=\S+ kind=cdrom", l)]
+        if cd0:  # a CD-ROM as device 0: the test disc
+            return f"frames={TEST_DISC_FRAMES}" in cd0[0]
         return self.stats().get("disk") == "generated"
 
     def ensure_test_disk(self):
@@ -483,10 +487,11 @@ def main():
                         session.flash(step.env, step.flags)
                         session.flashed = (step.env, step.flags)
                         session.read_settings()
-                    session.set_settings(step.settings)
+                    # The settings as they were before the session, plus the step's own
+                    session.set_settings({**{k: v or "none" for k, v in session.changed.items()}, **step.settings})
                     session.ensure_test_disk()
                     session.set_program(step.program)
-                    session.redetect(cdrom_only=step.env == "bb48_cdrom")
+                    session.redetect(cdrom_only=step.settings.get("device0") == "cdrom")
                 if not a.dry_run:
                     session.drive.send("r")  # read timings from here
                 text, summary = session.pytest(step) if step.marker else ("", "")

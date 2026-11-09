@@ -27,12 +27,10 @@ jobs:
       - run: pip install platformio -r host/requirements.txt
 
       # Builds first: it installs pioasm, which the PIO simulator tests use.
-      - run: pio run -e bb48 -e bb48_drive -e bb48_cdrom -e bb48_hdcd -e pcb_drive
+      - run: pio run -e bb48 -e bb48_drive -e pcb_drive
       - name: Core 1 runs only from RAM
         run: |
           python3 scripts/check_core1_ram.py
-          python3 scripts/check_core1_ram.py .pio/build/bb48_cdrom/firmware.elf
-          python3 scripts/check_core1_ram.py .pio/build/bb48_hdcd/firmware.elf
           python3 scripts/check_core1_ram.py .pio/build/pcb_drive/firmware.elf
       - name: C++ unit tests
         run: test/run_native_tests.sh
@@ -91,9 +89,6 @@ jobs:
           mkdir dist
           cp .pio/build/bb48/firmware.uf2 "dist/hddsynthpro-bb48-listen-v${{ steps.version.outputs.version }}.uf2"
           cp .pio/build/bb48_drive/firmware.uf2 "dist/hddsynthpro-bb48-drive-v${{ steps.version.outputs.version }}.uf2"
-          # Exploratory (docs/atapi.md): a CD-ROM drive, and a hard disk with a CD-ROM as device 1
-          cp .pio/build/bb48_cdrom/firmware.uf2 "dist/hddsynthpro-bb48-cdrom-v${{ steps.version.outputs.version }}.uf2"
-          cp .pio/build/bb48_hdcd/firmware.uf2 "dist/hddsynthpro-bb48-hdcd-v${{ steps.version.outputs.version }}.uf2"
           # The drive on the HDDSynthPro PCB: the SD card over SDIO
           cp .pio/build/pcb_drive/firmware.uf2 "dist/hddsynthpro-pcb-drive-v${{ steps.version.outputs.version }}.uf2"
       - uses: actions/upload-artifact@v7

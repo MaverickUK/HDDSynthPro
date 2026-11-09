@@ -228,7 +228,7 @@ TEST(test_config_cdrom) {
     CHECK_STR(edited("image = A.IMG\n", "cdrom", "B.ISO"), "image = A.IMG\ncdrom = B.ISO\n");
 }
 
-// device1 = cdrom, or an ISO: device 1 is a CD-ROM drive (the bb48_hdcd build).
+// device1 = cdrom, or an ISO: device 1 is a CD-ROM drive.
 TEST(test_config_device1_cdrom) {
     drive_config::Config c = parsed("device1 = cdrom\ncdrom = DOOM.ISO\n");
     CHECK(drive_config::device1IsCdrom(c));
@@ -247,6 +247,25 @@ TEST(test_config_device1_cdrom) {
     CHECK(!drive_config::device1IsCdrom(parsed("device1 = GAMES\n")));
     CHECK(!drive_config::device1IsCdrom(parsed("device1 = .ISO\n")));  // no name before it
     CHECK(!drive_config::device1IsCdrom(parsed("")));
+}
+
+// device0 = cdrom, or an ISO: device 0 is a CD-ROM drive, alone.
+TEST(test_config_device0_cdrom) {
+    drive_config::Config c = parsed("device0 = cdrom\ncdrom = DOOM.ISO\n");
+    CHECK(drive_config::device0IsCdrom(c));
+    CHECK(drive_config::servesImage(c));  // not `none`: main.cpp checks for a CD-ROM first
+    CHECK_STR(drive_config::device0Disc(c), "DOOM.ISO");
+    c = parsed("image = Quake.ISO\n");  // the old name too
+    CHECK(drive_config::device0IsCdrom(c));
+    CHECK_STR(drive_config::device0Disc(c), "Quake.ISO");
+    c = parsed("device0 = MYST.CUE\ncdrom = none\n");
+    CHECK_STR(drive_config::device0Disc(c), "MYST.CUE");
+    c = parsed("device0 = cdrom\ncdrom = none\n");
+    CHECK_STR(drive_config::device0Disc(c), "none");
+    CHECK(!drive_config::servesDisc(c));  // the test disc
+    CHECK(!drive_config::device0IsCdrom(parsed("device0 = GAMES.IMG\n")));
+    CHECK(!drive_config::device0IsCdrom(parsed("device0 = none\n")));
+    CHECK(!drive_config::device0IsCdrom(parsed("")));  // HDDSYNTH.IMG
 }
 
 // isa = on: IORDY from the strobe, for ISA cards (an ICL 386, 0.21.0).
@@ -368,6 +387,7 @@ void runDriveConfigTests() {
     RUN(test_config_image_none);
     RUN(test_config_cdrom);
     RUN(test_config_device1_cdrom);
+    RUN(test_config_device0_cdrom);
     RUN(test_config_defaults);
     RUN(test_config_default_file_is_the_defaults);
     RUN(test_config_reads_both_keys);
