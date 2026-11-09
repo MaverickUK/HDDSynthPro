@@ -372,12 +372,29 @@ void setup1() {
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
 }
 
+
+// Core 1's helpers, one copy per device kind: the hard disk alone
+// (ata::Device) and with a CD-ROM (hdcd::Device). Each body is an inlined
+// template (NAME##T); CORE1_FOR below defines the copies, the hard disk's in
+// CORE1_RAM in the order 0.31.0 had them and the CD-ROM's after all of it
+// (CORE1_RAM_CD), so the hard disk's code sits where it did (core1_ram.h).
+#define CORE1_DECLARE(D)                                    \
+    static void serviceDma(D& dev);                         \
+    static void postFetch(D& dev, uint32_t& posted_fetch);  \
+    static void busyTimers(D& dev);                         \
+    static void recordDone(D& dev);                         \
+    static void earlyIdle(D& dev);                          \
+    static void runCommandEarly(D& dev);                    \
+    static void runDrive(D& dev);
+CORE1_DECLARE(ata::Device)
+CORE1_DECLARE(hdcd::Device)
+
 // The DMA command's data phase (READ DMA, WRITE DMA): one bookkeeping step.
 // A burst that ended goes back to the device; a new one starts when the
 // device has a sector (or buffer) for it; and when the command is over, done
 // or cut short (RESET#, SRST, a new command, an error), ide_dma tidies up.
 template <class Dev>
-CORE1_RAM static void serviceDma(Dev& dev) {
+__attribute__((always_inline)) static inline void serviceDmaT(Dev& dev) {
     if (ide_dma::burstRunning()) {
         if (!ide_dma::burstDone()) {
             if (!dev.dmaCommand()) ide_dma::endCommand();  // cut short mid-burst
@@ -396,7 +413,7 @@ CORE1_RAM static void serviceDma(Dev& dev) {
 
 // Posts the device's fetch to core 0, once per fetch.
 template <class Dev>
-CORE1_RAM static void postFetch(Dev& dev, uint32_t& posted_fetch) {
+__attribute__((always_inline)) static inline void postFetchT(Dev& dev, uint32_t& posted_fetch) {
     uint32_t id = dev.pendingFetchId();
     if (id == 0 || id == posted_fetch) return;  // the common case, without a call
     ata::Fetch fetch;
@@ -407,7 +424,7 @@ CORE1_RAM static void postFetch(Dev& dev, uint32_t& posted_fetch) {
 // loop1, and early_answers' tight bus loop runs it too, since the host may
 // poll status throughout the hold and the loop never goes quiet to return.
 template <class Dev>
-CORE1_RAM static void busyTimers(Dev& dev) {
+__attribute__((always_inline)) static inline void busyTimersT(Dev& dev) {
     static uint32_t wake_start_us = 0;  // 0: not timing a wake
     static uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
     if (!dev.dataOutHeld()) {
@@ -434,7 +451,7 @@ CORE1_RAM static void recordBus(uint32_t sample) { record(TraceKind::Bus, sample
 CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
     record(commandStartEvent(t_us, c.command, c.lba, c.count, 0, c.unit));
 }
-CORE1_RAM static void recordCommandStart(uint32_t t_us, const hdcd::CommandInfo& c) {
+CORE1_RAM_CD static void recordCommandStart(uint32_t t_us, const hdcd::CommandInfo& c) {
     record(commandStartEvent(t_us, c.command, c.lba, c.count, c.packet, c.unit));
 }
 [[maybe_unused]] static uint8_t packetOf(const ata::CommandInfo&) { return 0; }
@@ -455,7 +472,7 @@ static uint32_t g_early_command_start_us = 0;
 static uint32_t g_done_recorded = 0;
 
 template <class Dev>
-CORE1_RAM static void recordDone(Dev& dev) {
+__attribute__((always_inline)) static inline void recordDoneT(Dev& dev) {
     if (dev.commandsCompleted() == g_done_recorded) return;
     g_done_recorded = dev.commandsCompleted();
     if (g_done_recorded == dev.commandsStarted()) g_command_active.store(false);
@@ -468,7 +485,7 @@ CORE1_RAM static void recordDone(Dev& dev) {
 // instead of polling, so the bus goes quiet and the main loop's step 1 came
 // only after EARLY_BUS_ONLY_US: a 64 KB READ DMA took 12 s (0.30.0-dev.3).
 template <class Dev>
-CORE1_RAM static void earlyIdle(Dev& dev) {
+__attribute__((always_inline)) static inline void earlyIdleT(Dev& dev) {
     busyTimers(dev);
     recordDone(dev);
     if (dev.dmaCommand() || ide_dma::active()) serviceDma(dev);
@@ -491,7 +508,7 @@ CORE1_RAM static inline void noteCommandTime(Dev& dev, uint32_t start) {
 }
 
 template <class Dev>
-CORE1_RAM static void runCommandEarly(Dev& dev) {
+__attribute__((always_inline)) static inline void runCommandEarlyT(Dev& dev) {
 #if CMD_PROFILE
     const uint32_t profile_start = m33_hw->dwt_cyccnt;
 #endif
@@ -540,7 +557,7 @@ __attribute__((noinline)) static void stayAbsent(Dev& dev) {
 // do one small bookkeeping step before looking again. So a read waits for one
 // step at most; iordy_timer.pio measures how long the host actually waits.
 template <class Dev>
-CORE1_RAM __attribute__((noinline)) static void runDrive(Dev& dev) {
+__attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
     uint32_t started = dev.commandsStarted();
     g_done_recorded = dev.commandsCompleted();
     uint32_t command_start_us = 0;
@@ -583,8 +600,8 @@ CORE1_RAM __attribute__((noinline)) static void runDrive(Dev& dev) {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
             if (early) {
                 last_access_cycles = m33_hw->dwt_cyccnt;
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle<Dev>,
-                                       runCommandEarly<Dev>, g_trace_bus.load() ? recordBus : nullptr);
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, static_cast<void (*)(Dev&)>(earlyIdle),
+                                       static_cast<void (*)(Dev&)>(runCommandEarly), g_trace_bus.load() ? recordBus : nullptr);
             }
             // Back to the bus, but with a command queued only for a few accesses:
             // the host polls STATUS straight after a command and gets BSY at once,
@@ -638,8 +655,8 @@ CORE1_RAM __attribute__((noinline)) static void runDrive(Dev& dev) {
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
             if (early)
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle<Dev>,
-                                       runCommandEarly<Dev>, g_trace_bus.load() ? recordBus : nullptr);
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, static_cast<void (*)(Dev&)>(earlyIdle),
+                                       static_cast<void (*)(Dev&)>(runCommandEarly), g_trace_bus.load() ? recordBus : nullptr);
             // The host may already be polling (the adapter reads STATUS at
             // once after IDENTIFY): answer it before the bookkeeping below.
             while (ide_bus::serviceOnce(dev, sample)) {
@@ -745,11 +762,22 @@ CORE1_RAM __attribute__((noinline)) static void runDrive(Dev& dev) {
         // early_answers: back to the tight bus loop after every pass, so a quiet
         // spell's first access finds core 1 polling, not mid-pass (660 ns).
         if (early)
-            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle<Dev>,
-                                   runCommandEarly<Dev>, g_trace_bus.load() ? recordBus : nullptr);
+            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, static_cast<void (*)(Dev&)>(earlyIdle),
+                                   static_cast<void (*)(Dev&)>(runCommandEarly), g_trace_bus.load() ? recordBus : nullptr);
     }
 }
 
+
+#define CORE1_FOR(D, RAM)                                                                     \
+    RAM static void recordDone(D& dev) { recordDoneT(dev); }                                    \
+    RAM static void runCommandEarly(D& dev) { runCommandEarlyT(dev); }                          \
+    RAM static void serviceDma(D& dev) { serviceDmaT(dev); }                                    \
+    RAM static void busyTimers(D& dev) { busyTimersT(dev); }                                    \
+    RAM static void earlyIdle(D& dev) { earlyIdleT(dev); }                                      \
+    RAM static void postFetch(D& dev, uint32_t& posted_fetch) { postFetchT(dev, posted_fetch); } \
+    RAM __attribute__((noinline)) static void runDrive(D& dev) { runDriveT(dev); }
+CORE1_FOR(ata::Device, CORE1_RAM)
+CORE1_FOR(hdcd::Device, CORE1_RAM_CD)
 
 // The device, constructed by loop1 in storage both kinds share, so RAM holds
 // only the one that runs.

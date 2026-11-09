@@ -15,8 +15,15 @@
 
 #if defined(ARDUINO)
 #define CORE1_RAM __attribute__((section(".time_critical.core1")))
+// The CD-ROM's core 1 code (atapi_device, hdcd_device, mmc, and ide_bus's
+// copy for hdcd::Device): in RAM too, but placed after all of CORE1_RAM's
+// (the linker script takes .after_data.* after .data), so the hard disk's
+// functions sit where they did before the CD-ROM joined the build. Where core
+// 1's code sits moves its timings (CLAUDE.md, Core split).
+#define CORE1_RAM_CD __attribute__((section(".after_data.core1_cd")))
 #else
 #define CORE1_RAM
+#define CORE1_RAM_CD
 #endif
 
 // A flag shared between the cores, for core 1 to read or set per access.

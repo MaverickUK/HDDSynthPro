@@ -8,8 +8,8 @@ namespace mmc {
 namespace {
 
 // Big-endian fields, as SCSI packs them.
-CORE1_RAM uint16_t be16(const uint8_t* p) { return uint16_t(p[0] << 8 | p[1]); }
-CORE1_RAM uint32_t be32(const uint8_t* p) {
+CORE1_RAM_CD uint16_t be16(const uint8_t* p) { return uint16_t(p[0] << 8 | p[1]); }
+CORE1_RAM_CD uint32_t be32(const uint8_t* p) {
     return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
 }
 
@@ -19,50 +19,50 @@ struct Out {
     uint8_t* p;
     size_t size;
     size_t n = 0;
-    CORE1_RAM void u8(uint8_t v) {
+    CORE1_RAM_CD void u8(uint8_t v) {
         if (n < size) p[n] = v;
         ++n;
     }
-    CORE1_RAM void u16(uint16_t v) {
+    CORE1_RAM_CD void u16(uint16_t v) {
         u8(uint8_t(v >> 8));
         u8(uint8_t(v));
     }
-    CORE1_RAM void u32(uint32_t v) {
+    CORE1_RAM_CD void u32(uint32_t v) {
         u16(uint16_t(v >> 16));
         u16(uint16_t(v));
     }
-    CORE1_RAM void zeros(unsigned count) {
+    CORE1_RAM_CD void zeros(unsigned count) {
         for (unsigned i = 0; i < count; ++i) u8(0);
     }
     // A space-padded ASCII field, `width` bytes.
-    CORE1_RAM void text(const char* s, unsigned width) {
+    CORE1_RAM_CD void text(const char* s, unsigned width) {
         for (unsigned i = 0; i < width; ++i) u8(*s ? uint8_t(*s++) : uint8_t(' '));
     }
     // Fills in a length field written earlier as a placeholder.
-    CORE1_RAM void set16(size_t at, uint16_t v) {
+    CORE1_RAM_CD void set16(size_t at, uint16_t v) {
         if (at + 1 < size) {
             p[at] = uint8_t(v >> 8);
             p[at + 1] = uint8_t(v);
         }
     }
-    CORE1_RAM void set32(size_t at, uint32_t v) {
+    CORE1_RAM_CD void set32(size_t at, uint32_t v) {
         set16(at, uint16_t(v >> 16));
         set16(at + 2, uint16_t(v));
     }
 };
 
-CORE1_RAM Reply good(State& st) {
+CORE1_RAM_CD Reply good(State& st) {
     st.sense = SENSE_NONE;
     return Reply{Reply::Kind::Good, 0, 0, 0};
 }
 
-CORE1_RAM Reply error(State& st, const Sense& s) {
+CORE1_RAM_CD Reply error(State& st, const Sense& s) {
     st.sense = s;
     return Reply{Reply::Kind::Error, 0, 0, 0};
 }
 
 // `out`'s reply, cut to the host's allocation length.
-CORE1_RAM Reply data(State& st, const Out& out, uint32_t allocation) {
+CORE1_RAM_CD Reply data(State& st, const Out& out, uint32_t allocation) {
     st.sense = SENSE_NONE;
     uint32_t n = out.n < out.size ? uint32_t(out.n) : uint32_t(out.size);
     if (n > allocation) n = allocation;
@@ -70,7 +70,7 @@ CORE1_RAM Reply data(State& st, const Out& out, uint32_t allocation) {
 }
 
 // A TOC address: LBA, or MSF (00h, M, S, F) when the host asks for it.
-CORE1_RAM void address(Out& out, uint32_t lba, bool msf) {
+CORE1_RAM_CD void address(Out& out, uint32_t lba, bool msf) {
     if (!msf) {
         out.u32(lba);
         return;
@@ -87,7 +87,7 @@ constexpr uint8_t DATA_TRACK = 0x14;  // ADR 1 (position), control 4 (a data tra
 constexpr uint8_t LEAD_OUT = 0xAA;
 
 // One entry of the full TOC (READ TOC format 2): `point` at P-MSF.
-CORE1_RAM void tocPoint(Out& out, uint8_t point, uint8_t pm, uint8_t ps, uint8_t pf) {
+CORE1_RAM_CD void tocPoint(Out& out, uint8_t point, uint8_t pm, uint8_t ps, uint8_t pf) {
     out.u8(1);  // session
     out.u8(DATA_TRACK);
     out.u8(0);  // TNO: the lead-in
@@ -102,7 +102,7 @@ CORE1_RAM void tocPoint(Out& out, uint8_t point, uint8_t pm, uint8_t ps, uint8_t
 // from `start`, 1: the current ones from `start`, 2: only `start`): its code,
 // persistent and current bits, and its payload's length. True if written, so
 // the caller writes the payload.
-CORE1_RAM bool feature(Out& out, uint8_t rt, uint16_t start, uint16_t code, bool persistent, bool current,
+CORE1_RAM_CD bool feature(Out& out, uint8_t rt, uint16_t start, uint16_t code, bool persistent, bool current,
                        uint8_t length) {
     bool wanted = rt == 2 ? code == start : code >= start && (rt == 0 || current);
     if (!wanted) return false;
@@ -112,7 +112,7 @@ CORE1_RAM bool feature(Out& out, uint8_t rt, uint16_t start, uint16_t code, bool
     return true;
 }
 
-CORE1_RAM Reply readToc(const uint8_t* c, const Disc& disc, State& st, Out& out) {
+CORE1_RAM_CD Reply readToc(const uint8_t* c, const Disc& disc, State& st, Out& out) {
     if (!disc.frames) return error(st, SENSE_NO_MEDIUM);
     bool msf = (c[1] & 0x02) != 0;
     uint8_t format = c[2] & 0x0F;
@@ -162,7 +162,7 @@ CORE1_RAM Reply readToc(const uint8_t* c, const Disc& disc, State& st, Out& out)
 
 // GET CONFIGURATION's features: the CD-ROM profile, and what a read-only
 // drive with a tray implies.
-CORE1_RAM Reply getConfiguration(const uint8_t* c, const Disc& disc, State& st, Out& out) {
+CORE1_RAM_CD Reply getConfiguration(const uint8_t* c, const Disc& disc, State& st, Out& out) {
     uint8_t rt = c[1] & 0x03;  // 0: all features, 1: the current ones, 2: just one
     uint16_t start = be16(c + 2);
     if (rt == 3) return error(st, SENSE_BAD_FIELD);
@@ -190,7 +190,7 @@ CORE1_RAM Reply getConfiguration(const uint8_t* c, const Disc& disc, State& st, 
     return data(st, out, be16(c + 7));
 }
 
-CORE1_RAM Reply getEventStatus(const uint8_t* c, const Disc& disc, State& st, Out& out) {
+CORE1_RAM_CD Reply getEventStatus(const uint8_t* c, const Disc& disc, State& st, Out& out) {
     if (!(c[1] & 0x01)) return error(st, SENSE_BAD_FIELD);  // polled only: no asynchronous events
     constexpr uint8_t MEDIA_CLASS = 0x10;
     if (c[4] & MEDIA_CLASS) {
@@ -209,7 +209,7 @@ CORE1_RAM Reply getEventStatus(const uint8_t* c, const Disc& disc, State& st, Ou
     return data(st, out, be16(c + 7));
 }
 
-CORE1_RAM Reply modeSense(const uint8_t* c, const Disc& disc, State& st, Out& out, bool six) {
+CORE1_RAM_CD Reply modeSense(const uint8_t* c, const Disc& disc, State& st, Out& out, bool six) {
     uint8_t pc = uint8_t(c[2] >> 6);  // 0 current, 1 changeable, 2 default, 3 saved
     uint8_t page = c[2] & 0x3F;
     if (pc == 3) return error(st, SENSE_NO_SAVING);
@@ -251,7 +251,7 @@ CORE1_RAM Reply modeSense(const uint8_t* c, const Disc& disc, State& st, Out& ou
     return data(st, out, six ? c[4] : be16(c + 7));
 }
 
-CORE1_RAM Reply inquiry(const uint8_t* c, State& st, Out& out) {
+CORE1_RAM_CD Reply inquiry(const uint8_t* c, State& st, Out& out) {
     if ((c[1] & 0x01) || c[2]) return error(st, SENSE_BAD_FIELD);  // no vital product data pages
     out.u8(0x05);  // a CD-ROM device
     out.u8(0x80);  // removable
@@ -266,7 +266,7 @@ CORE1_RAM Reply inquiry(const uint8_t* c, State& st, Out& out) {
 }
 
 // The frames from `lba` exist, or the packet fails: no disc, or out of range.
-CORE1_RAM bool inRange(const Disc& disc, State& st, uint32_t lba, uint32_t frames, Reply& failed) {
+CORE1_RAM_CD bool inRange(const Disc& disc, State& st, uint32_t lba, uint32_t frames, Reply& failed) {
     if (!disc.frames) {
         failed = error(st, SENSE_NO_MEDIUM);
         return false;
@@ -280,14 +280,14 @@ CORE1_RAM bool inRange(const Disc& disc, State& st, uint32_t lba, uint32_t frame
 
 }  // namespace
 
-CORE1_RAM void powerOn(State& state, const Disc& disc) {
+CORE1_RAM_CD void powerOn(State& state, const Disc& disc) {
     state.sense = SENSE_NONE;
     state.unit_attention = true;
     state.attention = SENSE_POWER_ON;
     state.media_event = disc.frames ? MEDIA_NEW : MEDIA_NO_CHANGE;
 }
 
-CORE1_RAM void discChanged(State& state, const Disc& disc) {
+CORE1_RAM_CD void discChanged(State& state, const Disc& disc) {
     if (disc.frames) {
         state.unit_attention = true;
         state.attention = SENSE_MEDIUM_CHANGED;
@@ -298,20 +298,20 @@ CORE1_RAM void discChanged(State& state, const Disc& disc) {
     }
 }
 
-CORE1_RAM void toMsf(uint32_t lba, uint8_t& m, uint8_t& s, uint8_t& f) {
+CORE1_RAM_CD void toMsf(uint32_t lba, uint8_t& m, uint8_t& s, uint8_t& f) {
     uint32_t x = lba + 150;  // the 2 s pregap, at 75 frames a second
     f = uint8_t(x % 75);
     s = uint8_t(x / 75 % 60);
     m = uint8_t(x / (75 * 60));
 }
 
-CORE1_RAM uint32_t readLength(const uint8_t* c) {
+CORE1_RAM_CD uint32_t readLength(const uint8_t* c) {
     if (c[0] == OP_READ_10) return be16(c + 7);
     if (c[0] == OP_READ_12) return be32(c + 6);
     return 0;
 }
 
-CORE1_RAM Reply execute(const uint8_t* c, const Disc& disc, State& st, uint8_t* buffer, size_t size) {
+CORE1_RAM_CD Reply execute(const uint8_t* c, const Disc& disc, State& st, uint8_t* buffer, size_t size) {
     Out out{buffer, size};
     uint8_t op = c[0];
     // MMC: these four report no unit attention, so a host can always ask
