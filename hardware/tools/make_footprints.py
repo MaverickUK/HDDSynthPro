@@ -2,7 +2,8 @@
 """Writes the footprints KiCad's libraries don't have, into HDDSynthPro.pretty.
 
 Usage: python3 hardware/tools/make_footprints.py [path/to/RPI-RP2350A-MINIMAL_R4-S1.kicad_pcb]
-(without Raspberry Pi's board, only the footprints drawn here: the microSD socket and the Molex header)
+(without Raspberry Pi's board, only the footprints drawn here: the microSD socket, the Molex header and
+the two IDE headers with pin 20 unplated)
 
 - C_0402_1005Metric_RPi_Wide: Raspberry Pi's wide-pad 0402, for the two capacitors
   either side of the VREG_LX strip in their regulator layout.
@@ -20,6 +21,7 @@ Usage: python3 hardware/tools/make_footprints.py [path/to/RPI-RP2350A-MINIMAL_R4
   (the keyed side). Pin 1 is +12 V. Check the drill and outline against the part
   chosen before ordering: KiCad has no footprint for it.
 """
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -161,13 +163,48 @@ def molex_8981():
     return name
 
 
+KICAD_FOOTPRINTS = Path(os.environ.get("KICAD_SHARE", "/Applications/KiCad/KiCad.app/Contents/SharedSupport"
+                                        if sys.platform == "darwin" else "C:/Program Files/KiCad/10.0/share/kicad")) / "footprints"
+
+
+def keyed(lib, name, ring):
+    """KiCad's header footprint with pin 20, IDE's key, as an unplated hole (rev 0.4).
+
+    The headers JLCPCB stocks have a pin 20, so the hole stays for it, but nothing solders
+    it: after assembly it pushes out of the plastic with pliers, for keyed cables, instead of
+    being cut flush. A silkscreen ring marks it. `ring` is the ring's radius, clear of the
+    neighbouring pads.
+    """
+    src = parse((KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{name}.kicad_mod").read_text(encoding="utf-8"))
+    new = name + "_Pin20Unplated"
+    fp = [S("footprint"), new]
+    for item in src[2:]:
+        if isinstance(item, list) and item and item[0] == "descr":
+            item = [S("descr"), item[1] + ". Pin 20 (IDE's key) an unplated hole, ringed: pull the pin out after assembly"]
+        elif isinstance(item, list) and item and item[0] == "pad" and item[1] == "20":
+            at, drill = first(item, "at"), first(item, "drill")[1]
+            item = [S("pad"), "20", S("np_thru_hole"), S("circle"), at, [S("size"), drill, drill], [S("drill"), drill],
+                    [S("layers"), "*.Cu", "*.Mask"], u(new, "pad20")]
+            fp.append(item)
+            cx, cy = float(at[1]), float(at[2])
+            fp.append([S("fp_circle"), [S("center"), cx, cy], [S("end"), round(cx + ring, 3), cy],
+                       [S("stroke"), [S("width"), 0.12], [S("type"), S("solid")]], [S("fill"), S("no")],
+                       [S("layer"), "F.SilkS"], u(new, "ring20")])
+            continue
+        fp.append(item)
+    (PRETTY / f"{new}.kicad_mod").write_text(dump(fp) + "\n")
+    return new
+
+
 def main():
+    drawn = [tf_push(), molex_8981(), keyed("Connector_IDC", "IDC-Header_2x20_P2.54mm_Vertical", 1.15),
+             keyed("Connector_PinHeader_2.00mm", "PinHeader_2x22_P2.00mm_Vertical", 0.95)]
     if len(sys.argv) == 1:
-        print("wrote", tf_push(), "and", molex_8981())
+        print("wrote", ", ".join(drawn))
         return
     if len(sys.argv) != 2:
         sys.exit(__doc__)
-    print("wrote", inductor(sys.argv[1]), wide_0402(sys.argv[1]), tf_push(), "and", molex_8981())
+    print("wrote", inductor(sys.argv[1]), wide_0402(sys.argv[1]), ", ".join(drawn))
 
 
 if __name__ == "__main__":

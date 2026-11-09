@@ -6,10 +6,11 @@ Status: **rev 0.4, routed, not reviewed** (8 Nov 2026, branch `pcb-rev04`). Rev 
 
 ## Rev 0.4: where it stands
 
+- **Pin 20 (9 Nov):** J5 and J7 use copies of KiCad's footprints with pin 20 as an unplated hole (`make_footprints.py`), since no stocked header leaves it out; rev 0.3's had to be cut. KiCad drops an unplated hole's pin number, so DRC's schematic check gives two expected `net_conflict` warnings, "No pad found for pin 20" on J5 and J7.
 - **Done:** the schematic (ERC: 0 errors, 0 warnings; `check_netlist.py` passes, and was checked to fail on a wrong pin), the Molex footprint, the placement and the routing (Freerouting 2.5.0 on Windows, then `tools/widen_power.py`). DRC with `--schematic-parity`: 0 unconnected pads, 0 differences from the schematic, only rev 0.3's two expected USB-C silkscreen warnings.
 - **VB, the 5 V supply:** Freerouting ignores the Power class's 0.6 mm, so `layout_pcb.py` lays VB's two long branches (D6, Molex, up the right side; D7, 44-pin, along the bottom edge) 0.6 mm wide and locked before routing: about 0.08 ohm, 16 mV at 200 mA. The run along the top (D5, D1, C1, D2) is the router's, widened to mostly 0.3-0.5 mm (about 19 mm at 0.15-0.2 mm near pads; about 0.13 ohm from USB). Fixing that run too was tried three ways (8 Nov): each crowded the PSRAM and flash's QSPI lines, the board's tightest spot, and left one or two of them unrouted.
 - **Worth a look in review:** SD_VDD (mostly 0.2-0.4 mm), and the chip side's detours, as on rev 0.3.
-- **Before ordering:** a day with rev 0.3 ([pcb-bringup.md](../docs/pcb-bringup.md)) to choose the series resistors and confirm SDIO; check J8's and J9's footprints against real parts (no LCSC part found for J8); pull pin 20 (the key) out of J7, or use a header without it; check J7's rotation in JLCPCB's preview (its `FT Rotation Offset` is copied from the 40-pin header's, unchecked).
+- **Before ordering:** a day with rev 0.3 ([pcb-bringup.md](../docs/pcb-bringup.md)) to choose the series resistors and confirm SDIO; check J8's and J9's footprints against real parts (no LCSC part found for J8); pull pin 20 (IDE's key) out of J5 and J7 with pliers after assembly (it's in an unplated hole, ringed on the silkscreen, so it isn't soldered); check J7's rotation in JLCPCB's preview (its `FT Rotation Offset` is copied from the 40-pin header's, unchecked).
 - **Not yet updated for rev 0.4:** [docs/pcb.html](../docs/pcb.html), the interactive design page, and `tools/jlcpcb.py`'s `JLC_FIX` table.
 
 ## Files

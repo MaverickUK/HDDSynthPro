@@ -307,8 +307,8 @@ HOLES = [(X0 + 9.76, Y0 + 4.09), (X0 + 86.36, Y0 + 4.09), (X0 + 9.76, Y0 + 65.81
 LOGO = (151.0, 161.2)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
 SILK = [  # text, x, y, size, rotation
     ("IDE drive  rev 0.4", 171.0, 158.4, 0.9, 0),
-    ("IDE 40-pin", 112.6, 135.0, 1.0, 90),
-    ("IDE 44-pin 2 mm: one host only", 108.6, 137.0, 0.9, 90),
+    ("IDE 40-pin: pull pin 20", 112.6, 135.0, 1.0, 90),
+    ("IDE 44-pin 2 mm: pull pin 20, one host only", 108.6, 137.0, 0.9, 90),
     ("5V", 127.0, 101.3, 0.8, 0), ("GND", 129.54, 101.3, 0.8, 0), ("TX", 132.08, 101.3, 0.8, 0),
     ("RX", 134.62, 101.3, 0.8, 0), ("Synth Link", 130.81, 106.68, 0.8, 0),
     ("+5V GND", 178.25, 108.5, 0.8, 0),

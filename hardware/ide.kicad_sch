@@ -9699,7 +9699,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_IDC:IDC-Header_2x20_P2.54mm_Vertical"
+		(property "Footprint" "HDDSynthPro:IDC-Header_2x20_P2.54mm_Vertical_Pin20Unplated"
 			(at 289.56 152.4 0)
 			(effects
 				(font
@@ -10761,7 +10761,7 @@
 			)
 		)
 	)
-	(text "IDE 40-pin, shrouded and keyed (pin 20 removed)."
+	(text "IDE 40-pin, shrouded. Pin 20 (the key) is an unplated hole:\npull the pin out after assembly, for keyed cables."
 		(exclude_from_sim no)
 		(at 274.32 190.5 0)
 		(effects
@@ -10770,7 +10770,7 @@
 			)
 			(justify left top)
 		)
-		(uuid "5ed23052-0de5-50c6-9a28-3c18a475a64d")
+		(uuid "3f6d48e2-4348-544f-af5c-e3ddc50bbaa4")
 	)
 	(symbol
 		(lib_id "Connector_Generic:Conn_02x22_Odd_Even")
@@ -10797,7 +10797,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_PinHeader_2.00mm:PinHeader_2x22_P2.00mm_Vertical"
+		(property "Footprint" "HDDSynthPro:PinHeader_2x22_P2.00mm_Vertical_Pin20Unplated"
 			(at 365.76 152.4 0)
 			(effects
 				(font
@@ -11973,7 +11973,7 @@
 		(at 373.38 180.34)
 		(uuid "3614fa1a-1608-5158-afbc-6b3122f7395c")
 	)
-	(text "IDE 44-pin (2 mm, 2.5-inch drives: Amiga 1200, laptops), in parallel with J5.\n41-42 +5 V from the host, 43 GND. Pin 20 (the key) not fitted.\nConnect a host to J5 or J7, never both."
+	(text "IDE 44-pin (2 mm, 2.5-inch drives: Amiga 1200, laptops), in parallel with J5.\n41-42 +5 V from the host, 43 GND. Pin 20 (the key) unplated: pull it out.\nConnect a host to J5 or J7, never both."
 		(exclude_from_sim no)
 		(at 335.28 200.66 0)
 		(effects

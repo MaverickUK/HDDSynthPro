@@ -393,8 +393,8 @@ FT_FIELDS = {
     "JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical": [("FT Rotation Offset", "180")],
     "PinSocket_1x04_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
     "PinHeader_1x03_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
-    "IDC-Header_2x20_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
-    "PinHeader_2x22_P2.00mm_Vertical": [("FT Rotation Offset", "-90")],  # as the 2x20 (unchecked)
+    "IDC-Header_2x20_P2.54mm_Vertical_Pin20Unplated": [("FT Rotation Offset", "-90")],  # KiCad's, pin 20 unplated
+    "PinHeader_2x22_P2.00mm_Vertical_Pin20Unplated": [("FT Rotation Offset", "-90")],  # as the 2x20 (unchecked)
     "SOT-223-3_TabPin2": [("FT Position Offset", "-0.18,0")],
     "USB_C_Receptacle_HRO_TYPE-C-31-M-12": [("FT Position Offset", "0,0.111")],
     "microSD_TF-PUSH": [("FT Position Offset", "0,0.15")],
@@ -685,17 +685,18 @@ def ide_sheet(sh):
     j5.update({str(p): "GND" for p in IDE_GND})
     j5.update({str(p): None for p in IDE_NC})
     sh.part("Connector_Generic:Conn_02x20_Odd_Even", "J5", "IDE", 289.56, 152.4, j5,
-            "Connector_IDC:IDC-Header_2x20_P2.54mm_Vertical")
-    sh.note("IDE 40-pin, shrouded and keyed (pin 20 removed).", 274.32, 190.5)
+            "HDDSynthPro:IDC-Header_2x20_P2.54mm_Vertical_Pin20Unplated")
+    sh.note("IDE 40-pin, shrouded. Pin 20 (the key) is an unplated hole:\n"
+            "pull the pin out after assembly, for keyed cables.", 274.32, 190.5)
 
     # Rev 0.4: the 2.5-inch drives' 44-pin connector, in parallel: pins 1-40 as J5,
     # 41-42 +5 V from the host (logic, motor) into VB (Power sheet), 43 GND, 44 not connected.
     j7 = dict(j5)
     j7.update({"41": "5V_IDE44", "42": "5V_IDE44", "43": "GND", "44": None})
     sh.part("Connector_Generic:Conn_02x22_Odd_Even", "J7", "IDE 44", 365.76, 152.4, j7,
-            "Connector_PinHeader_2.00mm:PinHeader_2x22_P2.00mm_Vertical")
+            "HDDSynthPro:PinHeader_2x22_P2.00mm_Vertical_Pin20Unplated")
     sh.note("IDE 44-pin (2 mm, 2.5-inch drives: Amiga 1200, laptops), in parallel with J5.\n"
-            "41-42 +5 V from the host, 43 GND. Pin 20 (the key) not fitted.\n"
+            "41-42 +5 V from the host, 43 GND. Pin 20 (the key) unplated: pull it out.\n"
             "Connect a host to J5 or J7, never both.", 335.28, 200.66)
 
 

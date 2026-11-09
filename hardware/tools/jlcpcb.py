@@ -36,7 +36,7 @@ JLC_FIX = {
     "JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical": (180, 1.25, 0.0),  # KiCad's origin is pin 1
     "PinSocket_1x04_P2.54mm_Vertical": (270, 0.0, 3.81),
     "PinHeader_1x03_P2.54mm_Vertical": (270, 0.0, 2.54),
-    "IDC-Header_2x20_P2.54mm_Vertical": (270, 1.27, 24.13),
+    "IDC-Header_2x20_P2.54mm_Vertical_Pin20Unplated": (270, 1.27, 24.13),
     # Electrically symmetric, but JLCPCB's footprint marks the polarity dot by its pad 2 and
     # Raspberry Pi's (ours) by pad 1, the 1.1 V end: turned 180, JLCPCB fits the dot where they want it.
     "L_Abracon_AOTA-B201610S3R3": (180, 0.0, 0.0),
