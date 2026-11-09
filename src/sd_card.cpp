@@ -1,15 +1,54 @@
 #include "sd_card.h"
 
 #include <SPI.h>
+#include <cstdio>
 #include <SdFat.h>
 
+#include "card_retry.h"
 #include "config.h"
 #include "drive_config.h"
 #include "image_parts.h"
+#if HDDPRO_PCB
+#include "sdio_card.h"
+#endif
 
 namespace sd_card {
 
+#if SD_SDIO
+// The card and its volume, mounted on SdFat's SPI driver or on our copy of
+// its SDIO driver (sdio_card.h). SdFs can only use the library's own SDIO
+// driver, so the PCB build mounts the volume itself, as SdFs does.
+class CardFs : public FsVolume {
+public:
+    bool begin(SdSpiConfig config) {
+        spi_.begin(config);
+        return mountOn(&spi_);
+    }
+    bool begin(PioSdioConfig config) {
+        sdio_.begin(config);
+        return mountOn(&sdio_);
+    }
+    void end() {
+        FsVolume::end();
+        if (card_) card_->end();
+    }
+    SdCardInterface* card() { return card_; }
+    uint8_t sdErrorCode() { return card_ ? card_->errorCode() : SD_CARD_ERROR_INVALID_CARD_CONFIG; }
+    uint32_t sdErrorData() { return card_ ? card_->errorData() : 0; }
+
+private:
+    bool mountOn(SdCardInterface* card) {
+        card_ = card;
+        return !card->errorCode() && FsVolume::begin(card);
+    }
+    SdSpiCard spi_;
+    sdio::Card sdio_;
+    SdCardInterface* card_ = nullptr;
+};
+static CardFs s_sd;
+#else
 static SdFs s_sd;
+#endif
 static FsFile s_image;
 static const char* s_open_name = nullptr;  // which image s_image is
 static const char* s_open_error = "";
@@ -33,28 +72,94 @@ static const char* fsType(uint8_t fat_type) {
     }
 }
 
-// Puts SPI0 on the SD pins.
-static bool spiPins(Print& out) {
-    // If a pin were refused, SPI would fall back to its default pins, which
-    // on this board are IDE data lines: don't start at all.
-    if (!SPI.setSCK(cfg::PIN_SD_CLK) || !SPI.setTX(cfg::PIN_SD_CMD) || !SPI.setRX(cfg::PIN_SD_DAT0)) {
-        out.println("SD error: SPI0 refused the SD pins");
-        return false;
-    }
-    return true;
+// Puts SPI0 on the SD pins. If a pin were refused, SPI would fall back to
+// its default pins, which on this board are IDE data lines: don't start at all.
+static bool spiPins() {
+    return SPI.setSCK(cfg::PIN_SD_CLK) && SPI.setTX(cfg::PIN_SD_CMD) && SPI.setRX(cfg::PIN_SD_DAT0);
 }
 
-// Starts the card and mounts its volume (a fresh volume: whatever SdFat had
-// cached from a card before is dropped).
-static bool startCard() {
+static bool startSpi() {
+    if (!spiPins()) return false;
     SdSpiConfig config(cfg::PIN_SD_DAT3, DEDICATED_SPI, SD_SCK_MHZ(cfg::SD_SPI_MHZ), &SPI);
     return s_sd.begin(config);
 }
 
+// Whether the card runs over SDIO (the PCB build, when it started that way).
+static bool s_on_sdio = false;
+#if SD_SDIO
+// SDIO may be tried: until the PIO blocks were shared out without it
+// (sharePio), or a card that was in wouldn't start over SDIO at boot.
+static bool s_sdio_allowed = true;
+// The card is started for the first time: falling back to SPI is allowed.
+static bool s_booting = true;
+// A card that was in wouldn't start over SDIO at boot, and runs over SPI.
+static bool s_sdio_refused = false;
+// The PCB's card detect switch: low with a card in.
+static bool cardDetected() { return !gpio_get(cfg::PIN_SD_CD); }
+// Running over SPI after SDIO was refused, the card was taken out: a card put
+// back is in SD mode and starts over SDIO after a restart, so nothing may send
+// it the SPI CMD0 that would put it back in SPI mode (wantsSdioRestart()).
+static bool s_out_since_refused = false;
+// No image on the card is served (the test disk), so SDIO was ended at boot
+// and its PIO block went to the diagnostics; the card waits in SD mode. A
+// card operation borrows the block (s_lend stops the diagnostics), starts
+// SDIO, and gives it back when done (giveBack).
+static bool s_parked = false;
+static bool s_borrowed = false;
+static bool (*s_lend)() = nullptr;
+static void (*s_reclaim)() = nullptr;
+#endif
+
+// Starts the card and mounts its volume (a fresh volume: whatever SdFat had
+// cached from a card before is dropped). The PCB build starts it over SDIO;
+// a card that's in but won't (most likely left in SPI mode, which only a
+// power cycle ends) runs over SPI instead, if that happens at boot.
+static bool startCard() {
+#if SD_SDIO
+    if (s_sdio_allowed) {
+        if (s_sd.begin(SdioConfig(cfg::PIN_SD_CLK, cfg::PIN_SD_CMD, cfg::PIN_SD_DAT0, cfg::SD_SDIO_CLKDIV))) {
+            s_on_sdio = true;
+            return true;
+        }
+        s_sd.end();  // frees the PIO block SdFat's driver claimed, even when it failed
+        s_on_sdio = false;
+        if (!s_booting || !cardDetected()) return false;  // later: try SDIO again next time
+        s_sdio_allowed = false;
+        s_sdio_refused = true;
+    }
+    if (s_out_since_refused) return false;  // keep it out of SPI mode: the drive restarts for SDIO
+#endif
+    return startSpi();
+}
+
+// Device 1's open image (openDevice1Image), declared here because restarting
+// the card closes it too; it's reopened by name at its next read or write.
+static FsFile s_device1_image;
+// Times the card was started again after it stopped answering, from any
+// path: device 0's reads (reattach), device 1's, or `S` and `M` finding it
+// silent. printCardChanges() prints a CARD line for each.
+static uint32_t s_restarts = 0;
+
 // Mounts the card's volume, unless it already is.
 static bool mount(Print& out) {
     if (s_sd.fatType()) return true;
-    if (!spiPins(out)) return false;
+#if SD_SDIO
+    if (s_parked) {
+        if (!s_lend || !s_lend()) {
+            out.println("SD error: the card's PIO block couldn't be borrowed");
+            return false;
+        }
+        if (s_sd.begin(SdioConfig(cfg::PIN_SD_CLK, cfg::PIN_SD_CMD, cfg::PIN_SD_DAT0, cfg::SD_SDIO_CLKDIV))) {
+            s_borrowed = true;
+            return true;
+        }
+        out.printf("SD error: no card, or no FAT volume on it (code %u, data %u)\n",
+                   unsigned(s_sd.sdErrorCode()), unsigned(s_sd.sdErrorData()));
+        s_sd.end();
+        s_reclaim();
+        return false;
+    }
+#endif
     if (!startCard()) {
         out.printf("SD error: no card, or no FAT volume on it (code %u, data %u)\n",
                    unsigned(s_sd.sdErrorCode()), unsigned(s_sd.sdErrorData()));
@@ -63,19 +168,92 @@ static bool mount(Print& out) {
     return true;
 }
 
+// Ends a borrowed SDIO session (mount() while parked) and gives the PIO block
+// back to the diagnostics. Every public function that may mount the card
+// holds a Lend for its duration.
+static void giveBack() {
+#if SD_SDIO
+    if (!s_borrowed) return;
+    s_sd.end();
+    s_borrowed = false;
+    s_reclaim();
+#endif
+}
+struct Lend {
+    ~Lend() { giveBack(); }
+};
+
 // "open" (being served), "present" or "none".
 static const char* imageState(const char* name) {
     if (s_image.isOpen() && s_open_name && strcasecmp(s_open_name, name) == 0) return "open";
     return s_sd.exists(name) ? "present" : "none";
 }
 
+static bool wakeIfSilent(Print& out);  // below, with the card watch
+
 void printInfo(Print& out) {
-    if (!mount(out)) return;
+    Lend lend;
+    if (!mount(out) || !wakeIfSilent(out)) return;
     uint32_t sectors = s_sd.card()->sectorCount();
-    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s\n", cardType(s_sd.card()->type()),
+    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s bus=%s\n", cardType(s_sd.card()->type()),
                (unsigned long)(sectors / 2048), fsType(s_sd.fatType()),
                imageState(IMAGE_NAME), imageState(BENCH_IMAGE_NAME),
-               s_sd.exists(drive_config::FILE_NAME) ? "present" : "none");
+               s_sd.exists(drive_config::FILE_NAME) ? "present" : "none", busName());
+#if SD_SDIO
+    if (s_sdio_refused)
+        out.println("SD warning: the card didn't start over SDIO, so it runs over SPI (about a quarter of the speed). "
+                    "It was most likely left in SPI mode: take it out and put it back for SDIO.");
+#endif
+}
+
+const char* busName() {
+#if SD_SDIO
+    if (s_parked) return "sdio-idle";
+#endif
+    return s_on_sdio ? "sdio" : "spi";
+}
+
+void setPioLender(bool (*lend)(), void (*reclaim)()) {
+#if SD_SDIO
+    s_lend = lend;
+    s_reclaim = reclaim;
+#else
+    (void)lend;
+    (void)reclaim;
+#endif
+}
+
+bool wantsSdioRestart() {
+#if SD_SDIO
+    if (!s_sdio_refused) return false;
+    if (!cardDetected()) {
+        s_out_since_refused = true;
+        return false;
+    }
+    return s_out_since_refused;
+#else
+    return false;
+#endif
+}
+bool sdio() { return s_on_sdio; }
+
+static bool s_folder_served = false;
+
+void sharePio() {
+#if SD_SDIO
+    s_booting = false;
+    if (!s_on_sdio) {
+        s_sdio_allowed = false;  // its block went to something else
+        return;
+    }
+    // Nothing on the card served (the test disk, or the welcome disk with no
+    // image): park the card, so the diagnostics get its block.
+    if (!s_image.isOpen() && !s_device1_image.isOpen() && !s_folder_served && s_lend && s_reclaim) {
+        s_sd.end();
+        s_on_sdio = false;
+        s_parked = true;
+    }
+#endif
 }
 
 // ---- Watching the card (media_watch.h) ---------------------------------------
@@ -98,6 +276,12 @@ static uint64_t s_served_size = 0;           // its size, which the drive told t
 // card the pull-up on DAT0 reads 0xFF. Only while the card is lost: CMD0
 // resets a card, so SdFat must start it again afterwards.
 static bool cardAnswers() {
+#if SD_SDIO
+    // Never an SPI CMD0 for a card served over SDIO: it would leave the card
+    // in SPI mode. The PCB has card detect; starting the card says the rest.
+    if (s_sdio_allowed) return cardDetected();
+    if (s_out_since_refused) return false;  // no SPI CMD0 for a card that could run over SDIO
+#endif
     SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
     digitalWrite(cfg::PIN_SD_DAT3, HIGH);
     for (int i = 0; i < 10; ++i) SPI.transfer(0xFF);  // 80 clocks with CS high wake a card just put in
@@ -132,6 +316,7 @@ static bool reattach(uint32_t now) {
     // The card is idle now and accepts no writes, so nothing SdFat still has
     // cached from before can reach it as the file is closed.
     s_image.close();
+    s_device1_image.close();  // reopened by name at its next read (device1Attempt)
     if (!startCard()) {
         s_watch.cameBackWithout("can't mount", now);
         return false;
@@ -147,6 +332,7 @@ static bool reattach(uint32_t now) {
     } else if (!identify(id)) {
         s_watch.cameBackWithout("can't read the card's ID", now);
     } else if (s_watch.cameBack(id, now) == media_watch::State::Present) {
+        ++s_restarts;
         return true;
     }
     s_image.close();
@@ -168,6 +354,53 @@ static bool attempt(Op op) {
     return false;
 }
 
+// The card's operations, for card_retry's decisions (card_retry.h).
+struct SdCardOps {
+    uint32_t now() { return millis(); }
+    bool answers() { return cardAnswers(); }
+    bool start() { return startCard(); }
+    bool reattach(uint32_t now) { return ::sd_card::reattach(now); }
+    void closeDevice1() { s_device1_image.close(); }
+    bool reopenDevice1();  // below, with device 1's image
+    void countRestart() { ++s_restarts; }
+};
+static SdCardOps s_card_ops;
+
+// The card stopped answering on a path other than device 0's image reads
+// (device 1's disk, `S`, `M`): restarts it (card_retry::restart).
+static bool restartCard() { return card_retry::restart(s_watch, s_card_ops); }
+
+// Whether the mounted card has stopped answering: SdFat still has its volume,
+// but the card doesn't give its size. So it was pulled out, or put back while
+// the drive ran (it then wakes in SD mode, not SPI), with no image read since
+// to notice. Asks the card (CMD9), a few hundred microseconds.
+static bool cardSilent() {
+    if (!s_sd.fatType()) return false;
+#if SD_SDIO
+    // SDIO's driver gives the size it read at start-up; CMD13 asks the card.
+    // The read in progress is ended first (CMD12): the driver leaves a
+    // multi-sector read open between calls and takes the next sector from it
+    // without a command, so after a CMD13 in the middle it returned other
+    // sectors' data, CRC good and no error (8 Nov: 19 of 20 lookups failed).
+    if (s_on_sdio) return !cardDetected() || !s_sd.card()->syncDevice() || s_sd.card()->status() == 0xFFFFFFFF;
+#endif
+    return s_sd.card()->sectorCount() == 0;
+}
+
+// Restarts the card if it has stopped answering; for `S` and `M`, before they
+// look for files. False if it's silent and couldn't be restarted.
+static bool wakeIfSilent(Print& out) {
+    if (!cardSilent()) return true;
+    if (restartCard()) {
+        out.println("SD restarted: it had stopped answering");
+        return true;
+    }
+    out.println("SD error: the card doesn't answer, and couldn't be restarted");
+    return false;
+}
+
+uint32_t restarts() { return s_restarts; }
+
 const media_watch::Watch& media() { return s_watch; }
 
 void serviceMedia() {
@@ -176,7 +409,15 @@ void serviceMedia() {
     if (s_watch.state() == media_watch::State::Lost) {
         reattach(now);
     } else {
-        cid_t cid;  // a different card: still in?
+        // A different card: still in? (SDIO's driver gives the CID it read
+        // at start-up, so the PCB asks card detect.)
+#if SD_SDIO
+        if (s_on_sdio) {
+            if (!cardDetected()) s_watch.gone(now);
+            return;
+        }
+#endif
+        cid_t cid;
         if (!s_sd.card()->readCID(&cid)) s_watch.gone(now);
     }
 }
@@ -421,9 +662,29 @@ unsigned imageExtents() { return unsigned(s_extent_count); }
 
 unsigned imageParts() { return s_parts; }
 
-bool configExists() { return s_sd.fatType() && s_sd.exists(drive_config::FILE_NAME); }
+// Prints nothing: for card operations whose caller reports the outcome itself.
+class NullPrint : public Print {
+public:
+    size_t write(uint8_t) override { return 1; }
+};
 
-bool mounted() { return s_sd.fatType() != 0; }
+bool configExists() {
+#if SD_SDIO
+    if (s_parked) {  // the card is in but idle: borrow it to look (`C` must never take "parked" for "missing")
+        Lend lend;
+        NullPrint quiet;
+        return mount(quiet) && s_sd.exists(drive_config::FILE_NAME);
+    }
+#endif
+    return s_sd.fatType() && s_sd.exists(drive_config::FILE_NAME);
+}
+
+bool mounted() {
+#if SD_SDIO
+    if (s_parked) return true;  // mounted at boot, idle since: mount() borrows it again
+#endif
+    return s_sd.fatType() != 0;
+}
 
 static bool readConfigOnce(char* buf, size_t size, size_t& len, bool& truncated) {
     len = 0;
@@ -442,6 +703,7 @@ static bool readConfigOnce(char* buf, size_t size, size_t& len, bool& truncated)
 // was pulled and put back unnoticed, reads failed too, and console E took
 // the file for missing and rewrote it from the defaults (2026-10-31).
 bool readConfig(char* buf, size_t size, size_t& len, bool& truncated, Print& log) {
+    Lend lend;
     if (!mount(log)) return false;
     if (readConfigOnce(buf, size, len, truncated)) return true;
     if (!s_sd.exists(drive_config::FILE_NAME) && s_sd.sdErrorCode() == 0) return false;  // simply not there
@@ -462,6 +724,7 @@ static bool writeConfigOnce(const char* text, size_t len) {
 // put back while the drive was idle, which nothing noticed (2026-10-31: the
 // write failed until a restart), or have stopped answering for a moment.
 bool writeConfig(const char* text, size_t len, Print& out) {
+    Lend lend;
     if (!mount(out)) return false;
     if (writeConfigOnce(text, len)) return true;
     unsigned code = unsigned(s_sd.sdErrorCode()), data = unsigned(s_sd.sdErrorData());
@@ -478,6 +741,7 @@ bool writeConfig(const char* text, size_t len, Print& out) {
 }
 
 bool createImage(const char* name, uint32_t sectors, Print& out) {
+    Lend lend;
     if (!mount(out)) return false;
     if (s_sd.exists(name)) {
         out.printf("# %s already exists: left as it is\n", name);
@@ -522,9 +786,10 @@ bool createImage(const char* name, uint32_t sectors, Print& out) {
 
 bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& truncated, const char*& why,
                    Print& log) {
+    Lend lend;
     len = 0;
     truncated = false;
-    if (!mount(log)) {
+    if (!mount(log) || !wakeIfSilent(log)) {
         why = "no card";
         return false;
     }
@@ -552,26 +817,45 @@ bool isFolder(const char* name) {
     return dir;
 }
 
-static FsFile s_device1_image;
+// Device 1's image: its name and how it was opened, to reopen it after the
+// card restarts (s_device1_image is declared above, with startCard).
+static char s_device1_name[drive_config::MAX_NAME + 1] = "";
+static oflag_t s_device1_flags = O_RDONLY;
+
+// A device 1 read, write or sync, through SdFat's file layer, retried once
+// after restarting the card if it fails (card_retry::device1Attempt).
+template <typename Op>
+static bool device1Attempt(Op&& op) {
+    return card_retry::device1Attempt(s_watch, s_card_ops, op);
+}
 
 // SdFat's file layer, for device 1's image: seek, then read or write.
 class Device1ImageFile : public ImageFile {
 public:
     uint64_t size() const override { return size_; }
     bool readAt(uint64_t offset, void* data, size_t bytes) override {
-        return s_device1_image.seekSet(offset) && s_device1_image.read(data, bytes) == int(bytes);
+        return device1Attempt(
+            [&] { return s_device1_image.seekSet(offset) && s_device1_image.read(data, bytes) == int(bytes); });
     }
     bool writeAt(uint64_t offset, const void* data, size_t bytes) override {
-        return s_device1_image.seekSet(offset) && s_device1_image.write(data, bytes) == bytes;
+        return device1Attempt(
+            [&] { return s_device1_image.seekSet(offset) && s_device1_image.write(data, bytes) == bytes; });
     }
-    bool sync() override { return s_device1_image.sync(); }
-    uint64_t size_ = 0;
+    bool sync() override {
+        return device1Attempt([] { return s_device1_image.sync(); });
+    }
+    uint64_t size_ = 0;  // as opened: a reopened file must still be this size
 };
 static Device1ImageFile s_device1_image_file;
 
+bool SdCardOps::reopenDevice1() {
+    return card_retry::reopen(s_device1_image, s_device1_name, s_device1_flags, s_device1_image_file.size_);
+}
+
 ImageFile* openDevice1Image(const char* name, Print& log, bool read_only) {
     if (s_device1_image.isOpen()) s_device1_image.close();
-    if (!mount(log)) {
+    s_device1_name[0] = '\0';
+    if (!mount(log) || !wakeIfSilent(log)) {
         s_open_error = "no card";
         return nullptr;
     }
@@ -584,6 +868,8 @@ ImageFile* openDevice1Image(const char* name, Print& log, bool read_only) {
         log.printf("SD error: can't open %s\n", name);
         return nullptr;
     }
+    std::snprintf(s_device1_name, sizeof s_device1_name, "%s", name);
+    s_device1_flags = read_only ? O_RDONLY : O_RDWR;
     s_device1_image_file.size_ = s_device1_image.fileSize();
     return &s_device1_image_file;
 }
@@ -663,6 +949,7 @@ private:
 static SdFolderSource s_folder;
 
 folder_disk::FolderSource& folderSource(const char* name) {
+    s_folder_served = true;
     s_folder.serve(name);
     return s_folder;
 }

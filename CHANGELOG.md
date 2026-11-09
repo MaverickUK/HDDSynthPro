@@ -2,6 +2,96 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.31.0] - 2026-11-09
+
+The PCB build, from branch `sdio` (0.31.0-sdio.1-4); each step is below. For the people flashing it: [docs/release-notes/v0.31.0.md](docs/release-notes/v0.31.0.md).
+
+- **`pcb_drive`: the SD card on 4-bit SDIO** for the HDDSynthPro PCB, on our own copy of SdFat's PIO SDIO driver (`src/sdio_card.*`, fixed). By multiword DMA from the card through the USB adapter: reads 6.2-6.6 MB/s, writes 5.8-7.2, against SPI's 1.38 and 2.00.
+- **`src/pio_plan.h`** shares out the PIO blocks at start-up; the test disk parks the card so the diagnostics keep their block, and console card operations borrow it back.
+- A card left in SPI mode falls back to SPI with a warning, and the drive restarts onto SDIO when it's put back.
+- `-m cardsoak`: hours of checked writes and reads on `HDDBENCH.IMG`. 10 hours on the release's driver, 0 wrong.
+- CI runs on every branch, and releases `hddsynthpro-pcb-drive-vX.Y.Z.uf2`. The BB48 builds are unchanged from 0.30.0 (core 1 at dev.13's addresses and sizes).
+
+## [0.31.0-sdio.4] - 2026-11-08 (branch `sdio`)
+
+### Fixed
+- **sdio.3's driver broke every multi-sector write** (found on the board, the first speed test): the driver's own `isBusy()` asks `status()`, inside writes and inside `syncDevice()`, so sdio.3's "end the transfer first" ended each write mid-stream (and `syncDevice()` called itself). Every other 128-sector WRITE DMA failed, took about 6 s, and was saved by the card restart and retry (`CARD lost and back`, 102 times in 10 minutes; `STUCK` lines); the data stayed right. Now the driver's own checks use `cardStatus()` (CMD13 as it stands) and only `status()`, for callers outside it, ends the transfer first.
+- **On the PCB after the fix:** 20 of 20 `S` lookups; `-m speed` by DMA from the card: reads 6.32 MB/s, 688 random 4 KB reads a second, writes 5.83 MB/s, no `CARD` or `STUCK` lines; two whole-image write-and-verify passes (6.4-6.9 MB/s writing, 5.9 reading), 0 bad.
+- **And the rest of sdio.2's checks, on sdio.4's driver:** a 10-minute card soak (1.07 GB written, 1.72 GB read, 0 wrong, no `CARD` lines); the test disk parks the card (`sdio-idle`, the diagnostics beside `ide_dma`), 20 of 20 borrowed lookups, `C` sees `HDDSYNTH.INI`, then slices 3-4 with full observer checks: 259,505 sectors checked on the cable, 0 bad, none dropped or lost, worst read 1,160 ns; and after `bb48_drive` the SPI fallback with its warning, then the card put back and the drive restarting onto SDIO by itself.
+- **The overnight card soak on sdio.4 (8-9 Nov, 19:02-05:02, the PCB):** `pcb_drive` serving `HDDBENCH.IMG` over SDIO by multiword DMA, `-m cardsoak` for 600 minutes: 54.72 GB written and 83.26 GB read, every sector checked and 19 full read-backs, **0 wrong**, no card lost or restarted, no `CARD` or `STUCK` lines. Writes 1.42-1.97 MB/s and reads 2.15-2.73 in this random mix, about 15% slower after the first hour and steady after, as sdio.2's soak on SdFat's driver was.
+
+## [0.31.0-sdio.3] - 2026-11-08 (branch `sdio`)
+
+### Changed
+- **`pcb_drive` runs the card on our own copy of SdFat's SDIO driver** (`src/sdio_card.*`, from SdFat 2.3.1's `PioSdioCard`, MIT licence; every change marked `HDDSynthPro:`), mounted through a small volume class (`CardFs` in `sd_card.cpp`, as SdFs does it), since SdFs can only use the library's own. The BB48 builds still use SdFs and SPI, and don't link it; their core 1 functions are at dev.13's addresses and sizes. Fixed in the copy:
+  - `status()` (CMD13) and `cardCMD6()` end a read or write in progress first, so the wrong-sector reads of sdio.1 can't happen from any caller (sdio.1 worked around it in `cardSilent` only).
+  - It claims the two state machines it uses, not all four, and frees only those; and it stops them, and gives the card's pins back to SIO, before removing its programs. The library's freed all four, other users' included, and left two machines running over whatever was loaded next: here, the diagnostics, after a parked card's borrow (sdio.2).
+  - No debug printing to `Serial` (the library's `USE_DEBUG_MODE 1`).
+  - No input synchroniser bypass, said so: the library's shifted by the GPIO number, past bit 31 for GPIO 34-39, so it never set any. 25 MHz has always run with the synchronisers in.
+- `host/tests/test_pio_plan_sizes.py` checks `SDIO_SLOTS` against `src/sdio_card.pio`.
+- **Not yet on the board:** built and host-tested while the card soak runs on sdio.2.
+- **The card soak on sdio.2 (8 Nov, 14:03-17:53, the PCB, SdFat's driver):** `pcb_drive` serving `HDDBENCH.IMG` over SDIO by multiword DMA (no diagnostics in that set-up), `-m cardsoak` for 230 minutes: 20.73 GB written and 31.55 GB read in runs of 1-128 sectors, every sector checked as read and seven full read-backs of the image, **0 wrong**, no card lost or restarted. Random mixed transfers ran 1.66-1.85 MB/s writing and 2.4-2.5 reading for the first hour, then about 15% slower from 70-80 minutes on (1.36-1.46 and 2.13-2.27; a full read-back 11.1 s, then 13.5-13.8 s) and steady after; reads slowed too, so maybe the card warming up rather than its write housekeeping. Not measured further.
+
+## [0.31.0-sdio.2] - 2026-11-08 (branch `sdio`)
+
+### Added
+- **`pcb_drive`: the test disk gets the diagnostics back.** With nothing on the card served (the test disk, `T`), SDIO is ended at boot and the card waits in SD mode (`card_bus=sdio-idle`), so the PIO plan is the BB48's: the IORDY timer and the bus observer run beside `ide_dma`, for soaks and timing runs. A card operation (`S`, `E`, `C`, `I`, `K`, a CUE sheet) borrows the block: `iordy_timer::end()` and `bus_observer::end()` (new: they free their state machines, programs and DMA channel) let SdFat's driver have it, and they start again when it's done (`sd_card::setPioLender`). `configExists()` and `mounted()` count a parked card as there, so `C` can't take it for missing and overwrite `HDDSYNTH.INI`. On the board: with `mode = mdma2`, `CONFIG pio card=sdio-idle dma=on iordy_timer=on bus_observer=on`; 20 of 20 `S` lookups, each borrowing the block; `C` said the file exists.
+- **`pcb_drive` restarts to put a card back on SDIO.** Running over SPI because the card didn't start over SDIO at boot, the drive watches card detect: once the card has been taken out and one put back (power-cycled, so in SD mode), it restarts (`SD: a card was put back; restarting to run it over SDIO`), keeping `J` or `T`. Until then nothing sends the card an SPI CMD0, which would put it back in SPI mode (as `S` did on 8 Nov, after the card was put back by hand).
+- **Tested on the PCB (8 Nov):** after 20 borrows, slices 3-4 on the test disk in multiword DMA with full observer checks: 263,190 sectors checked on the cable, 0 bad, none dropped or lost; worst read 1,160 ns, `iordy_ignored=0`. The restart: with the card on SPI after `bb48_drive`, the card taken out and put back printed the line and restarted, and the card came back on SDIO (parked, as the test disk was served).
+- The BB48 builds' core 1 functions are still at dev.13's addresses and sizes.
+
+## [0.31.0-sdio.1] - 2026-11-08 (branch `sdio`, from `hdd-cd`)
+
+### Added
+- **The PCB build, `pcb_drive`, with the SD card on 4-bit SDIO** ([docs/pio-allocation.md](docs/pio-allocation.md)). On the PCB (rev 0.3, 8 Nov), with an uncommitted experiment of the same driver serving `HDDBENCH.IMG` by multiword DMA: reads 6.59 MB/s against SPI's 1.38, random 4 KB reads 651 a second against 285, writes 7.20 MB/s against 2.00; two whole-image write-and-verify passes, 0 bad; 20 of 20 directory lookups (17 of 20 failed on the BB48's hand-wired leads, 29 Oct). The BB48 builds stay on SPI.
+  - SdFat's PIO SDIO driver, at 25 MHz (a divider of 2 at 200 MHz). It takes a whole PIO block, so **`src/pio_plan.h`** (pure, `test_pio_plan.cpp`) decides at start-up what else runs: with the card on SDIO and DMA offered, `ide_dma` and no diagnostics; without DMA, the IORDY timer with the bus observer, or with IOCS16# for `isa = on`; on SPI, everything as before. `host/tests/test_pio_plan_sizes.py` holds its instruction counts to the assembled programs, SdFat's included.
+  - A card that won't start over SDIO at boot while card detect (GPIO 40) says one is in (most likely left in SPI mode by other firmware: only a power cycle ends that) runs over SPI, and `S` says to take it out and put it back. SdFat's driver keeps its PIO block when it fails to start, so it's ended first.
+  - A card that stops answering is found by card detect and CMD13 instead of the SPI CMD0, which would leave it in SPI mode.
+  - **Found on the board: SdFat's SDIO driver returns the wrong sectors after a CMD13 in the middle of a read.** Its `readSector` leaves a multi-sector read (CMD18) open between calls and takes the next sector from it without a command; `status()` (CMD13) doesn't end it first, so the reads after it came from a stream out of step: CRC good, no error, other sectors' data. 19 of 20 `S` lookups failed (`image=none config=none` with both files there) while `wakeIfSilent` sent a CMD13 before each; ending the read first (`syncDevice()`, CMD12) made it 20 of 20. Its `readCID()` and `sectorCount()` give what it read at start-up, so a changed card's "still in?" check uses card detect instead.
+  - `S`: `bus=sdio|spi` on the `SD ok` line, and `CONFIG pio card=... dma=... iocs16=... iordy_timer=... bus_observer=... bus_timing=...` with why any are off; `s`: `card_bus` and `diag=on|iordy_timer|off`.
+  - CI builds and checks it and releases `hddsynthpro-pcb-drive-vX.Y.Z.uf2`.
+- The BB48 builds' core 1 functions are at the same addresses and sizes as in 0.30.0-dev.13; `pcb_drive`'s are the same as `bb48_drive`'s.
+- **On the PCB (8 Nov):** the card starts over SDIO from power-up (`bus=sdio`), 20 of 20 lookups; the plan as designed (`mode = auto`: the IORDY timer and bus observer; `mode = mdma2`: `ide_dma`, no diagnostics). After `bb48_drive` had left the card in SPI mode, `pcb_drive` ran it over SPI with the warning, and the plan gave the diagnostics and `ide_dma` back.
+- **Not yet:** while the test disk is served the card still holds its block (so with DMA offered there are no diagnostics); giving it to the diagnostics, and lending it back for the console's file commands, is next.
+## [0.30.0] - 2026-11-08
+
+Everything since 0.28.0, from the branches `two-drives` (0.29.0-2d.x), `atapi-cdrom` (0.29.0), `data-lane`, `merge-cdrom` and `hdd-cd` (0.30.0-dev.1-13); each step is below. For the people flashing it: [docs/release-notes/v0.30.0.md](docs/release-notes/v0.30.0.md).
+
+- **Two drives:** `device1` serves a second image, or a folder as a read-only FAT16 disk ([docs/two-drives.md](docs/two-drives.md)); `image` became `device0`.
+- **CD-ROM drives** (exploratory): `bb48_cdrom` (the CD-ROM as device 0) and `bb48_hdcd` (a hard disk and a CD-ROM as device 1), serving an ISO or a BIN/CUE's data track by PIO or multiword DMA, discs changed from the console (`M`) ([docs/atapi.md](docs/atapi.md)).
+- **The data lane** (`early_answers = off`), multiword DMA under early answers fixed, device 1 recovering from SD card dropouts, and the diagnostics for the Evesham's unwaited CD reads.
+
+### Tested for the release (8 Nov, the HDDSynthPro PCB rev 0.3 on the Mac, the USB adapter)
+- `bb48_drive` dev.13 (the PCB runs the BB48's firmware unchanged): slices 3-4 and `-m speed` on early answers, the default (reads 1.06 MB/s, writes 1.12, 74,143 sectors checked on the cable, 0 bad), and in multiword DMA 2 (reads 7.60 MB/s, writes 10.92; 259,432 sectors checked with full observer checks, 0 bad).
+- **Device 1 gets over a card dropout (dev.11):** `bb48_hdcd`, `DOOM_SE.ISO` as device 1, read whole in a loop (23.4 MB, 1.29 MB/s); the card pulled and put back mid-read: reads failed while it was out, the board printed `CARD restarted: it stopped answering (1 in all)`, and every pass after matched the first (SHA-256).
+- **Found: macOS reads a CD's whole device with READ CD (0xBE),** asking for raw 2,352-byte frames, which the drive refuses (ILLEGAL REQUEST): `/dev/diskN` fails, its data volume (`/dev/diskNs0`, READ(10)) reads. Windows and DOS use READ(10). Raw frames would need sync, header and EDC/ECC built for each frame (or taken from a BIN's raw frames).
+
+## [0.30.0-dev.13] - 2026-11-05 (branch `hdd-cd`)
+
+### Added
+- **Measurements for the Evesham's unwaited CD data reads** ([docs/atapi.md](docs/atapi.md#the-eveshams-unwaited-cd-data-reads-4-nov-2026)), core 0 only:
+  - `NOIORDY` lines name the command the last unwaited read fell in or followed, its device, and how long after it started and, if it had finished, after its DONE: `NOIORDY t reads=N data=N last=DATA after=READ(10) d1 +1840us`. `data=` counts the data register's. `src/command_history.h` (pure, `test_command_history.cpp`) keeps the last 16 commands from the CMD/DONE events, so a report collected after the next command started still finds the right one.
+  - `s` adds `iordy_ignored_data` and, for the data register alone, its reads held past 400 ns by how long (`iordy_data_slow=` up to 700 ns / 1,000 / 1,250 / longer) and the worst (`iordy_data_max_ns`): how late core 1 answers data words, apart from the status polls that dominate `iordy_max_ns`.
+- Every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.12 (only the linker's veneers moved), and `check_core1_ram.py` passes. **Not yet run on the board.**
+
+## [0.30.0-dev.12] - 2026-11-05 (branch `hdd-cd`)
+
+### Changed
+- **dev.11's card retry is host-tested.** What to do when device 1's read, write or sync fails (retry once, after restarting the card; only while the card isn't lost or changed; reopen device 1's file first, and only at the same size) and how to restart the card (as device 0's image read would with an image on it, any card that answers CMD0 without one, nothing while lost or changed) moved from `sd_card.cpp` to `src/card_retry.h`: header-only templates over the card's operations, with no SdFat or SDK code, so `test_card_retry.cpp` drives them with a fake card (17 tests). Behaviour is unchanged. Core 0 only: every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.11 (only the linker's veneers are in a different order), and `check_core1_ram.py` passes. **Not yet run on the board** (nor is dev.11).
+
+## [0.30.0-dev.11] - 2026-11-05 (branch `hdd-cd`)
+
+From the Evesham session (dev.10, "Tested on a retro PC"). Core 0 only: every core 1 function in `bb48_drive`, `bb48_hdcd` and `bb48_cdrom` is at the same address and size as in dev.10 (only literal-pool words differ, the addresses of core 0's variables), and `check_core1_ram.py` passes. Built and host-tested; **not yet run on the board.**
+
+### Fixed
+- **Device 1 gets over a card that stopped answering.** Its image's reads and writes (a CD-ROM's ISO or BIN, or a second hard disk's image in `bb48_hdcd`) went through SdFat's file layer with no retry, so after one card dropout every read failed until the drive restarted: on the Evesham every read of a BIN failed with MEDIUM ERROR, and then `M DOOM_SE.ISO` said `not found`. Now a device 1 read, write or sync that fails is retried once after restarting the card (`device1Attempt`, `restartCard` in `sd_card.cpp`), with device 0's checks: with device 0's image on the card, its watch marks the card lost and `reattach()` brings it back only if it's the same card and image; with none (the test disk), any card that answers CMD0. Device 1's file is closed before every restart and reopened by name at its next read, only if it's still the same size. While device 0's card is lost or changed, device 1's reads fail at once, as device 0's do. A folder's reads aren't retried.
+- **`S` and `M` wake a card that has gone silent.** SdFat keeps its volume after a card is pulled, so `S` printed `SD ok ... size_mb=0 image=none bench=none config=none` with the card in (as it did twice on the Evesham), and `M` couldn't find files that were there. Both now ask the card for its size first (CMD9, a few hundred microseconds), and restart it if it doesn't answer: `SD restarted: it had stopped answering`, or `SD error: the card doesn't answer, and couldn't be restarted`. So does reading a CUE sheet.
+- **CARD lines for a loss and return between two looks.** `printCardChanges()` printed only when the card's state differed when it looked, so a dropout recovered by the retry within one pass printed nothing (two on the Evesham). It now also compares the loss and restart counts: `CARD lost and back NAME: it stopped answering and was restarted (N in all)`, and, with device 0 not on the card, `CARD restarted: it stopped answering (N in all)`. `s` gains `card_restarts`.
+
+### Found (from the session's logs; no change)
+- **Why the card dropped out.** The first dropout is explained: the card was moved to the Mac and back while the board ran, and nothing read the card until the Evesham booted, so SdFat still held the old volume and the card had woken in SD mode (`S`: `size_mb=0`). The first read of C: failed, and `attempt()` restarted it (`card_lost=1`). That's the design working, but `S` and `M` didn't notice (fixed above). The second came during Doom; the likeliest moment is a WRITE SECTORS to `C:\DOOMDATA` that took 174 ms (at 459 s; the others took under 20 ms), long enough for a write that failed, a restart and the retry, though a slow card write can take that long by itself. The third left the card silent between 23:13 and the power cycle: the CUE sheet and the BIN's directory entry were read (from the card: the board had never read them before), then the BIN's first data read failed within 150-200 µs, too fast for a card that is busy (SdFat's timeouts are hundreds of milliseconds) and as fast as one that doesn't drive MISO at all. So the card stopped responding in SPI mode, from a reset or the socket's contacts after it was reseated, not from anything the BIN's reads asked of it; after a power cycle the same reads worked. With dev.11 each dropout prints a timed CARD line. A bench check: pull and reseat the card with the board running, then `-m card` and a CD-ROM read.
+- **The Evesham's unwaited CD data reads:** see [docs/atapi.md](docs/atapi.md#the-eveshams-unwaited-cd-data-reads-4-nov-2026).
+
 ## [0.30.0-dev.10] - 2026-11-04 (branch `hdd-cd`)
 
 ### Fixed
@@ -14,6 +104,19 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 - **The adapter hangs when a CD-ROM vanishes under it, it seems:** every time the board was flashed, restarted or taken off the bus (console `V`) while the adapter had a CD-ROM as device 1, the adapter went silent (no bus accesses, gone from USB) until it was unplugged and plugged back in; with hard disks alone, flashes and re-detections worked all evening. So `bench_session.py`'s flash-then-re-detect can't run `bb48_hdcd` steps with a CD-ROM unattended: after a flash, replug the adapter by hand. (A retro PC restarts with the drive, so it shouldn't meet this.)
 - `host/bench_session.py`: the soak (`--only hdcd-soak`) reads the CD-ROM throughout, and the background reader loads the test disc first and wraps at its end.
 - Without DMA offered (`mode = auto`) the adapter's TEST UNIT READY (a PACKET with the DMA bit set) is refused and it resets and re-detects for good: `bb48_hdcd` with a CD-ROM needs `mode = mdma2` on this adapter, as the CD-ROM build does.
+
+### Tested on a retro PC (4 Nov, evening, the Evesham: Athlon XP 2000+, PCI IDE, Windows 98 startup floppy)
+`bb48_hdcd` dev.10, a normal build: `device0 = ICL386MB.IMG` (PIO 3, geometry 756/13/51 from its partition table), `device1 = cdrom`, `cdrom = DOOM_SE.ISO`, `mode = auto`, `early_answers = on`, `isa = off`, so `ide_bus`. Logs: `host/runs/retro-20261104-{225907,231130,232103}-evesham-hdcd*.log`.
+- **Both drives found, on the primary channel** (the PC's own optical drive on the secondary). From the floppy, `OAKCDROM.SYS` and MSCDEX made the CD-ROM D: and C: was the image's MS-DOS 5 disk; `DIR` listed both.
+- **Doom from the CD, its saves on C:** (`C:\DOOMDATA`): 3,361 commands (3,079 READ(10) from the CD, 237 READ SECTORS and 27 WRITE SECTORS on C:, 18 TEST UNIT READY), **every one with good status**; 5,360 sectors checked on the cable, `bus_bad=0`; no `STUCK`, `BUSERR` or `NOCS` (`dior_no_cs=0`, a PCI controller).
+- **The host didn't wait for IORDY on 26 CD data reads** (`NOIORDY ... last=DATA`, each just after a READ(10), in its data phase); none on the hard disk's reads (0 at the DOS prompt). The game ran, so they were answered in time, but `ide_bus` doesn't promise that. On the CD-ROM build (early answers) this PC had 107 the same way (3 Nov).
+- **The CD's slow status reads:** 16,746 reads held past 400 ns during Doom, worst 3,590 ns (Alternate Status, the driver polling between packets), 2,418 by the DOS prompt (worst 3,160 ns). The host waited for every one (`iordy_ignored` counts none on Status). The known slow reads ([docs/atapi.md](docs/atapi.md)); step 2b of the bench checklist profiles them.
+- **Disc changes under MSCDEX** (console `M`): to `none`, `DIR D:` gave `CDR101: Not ready`; to the test disc, the next command got UNIT ATTENTION (medium may have changed), MSCDEX re-read the TOC and sector 16 and said `CDR103: CDROM not High Sierra or ISO-9660 format`, so it noticed the change rather than listing from its cache; to `DOOMBIN.CUE`, the same unit attention, then `DIR D:` and `DIR D:\DOOMCD` listed Doom's files.
+- **BIN/CUE works on the board, on a retro PC:** `DOOMBIN.CUE`/`.BIN` (from `tools/iso_to_bincue.py DOOM_SE.ISO --audio 30`: MODE1/2352, then a silent audio track) read as `DOOMBIN.BIN, track 1 of 2 (2352-byte frames from byte 16), 11431 frames`, and served `DOOM_SE`'s files, no errors.
+- **Found: the SD card dropped out several times during the session** and a disc change then failed. The card had been put back in while the board ran, and `S` twice reported `size_mb=0 image=none bench=none config=none` with the card in, recovering on its own in between (`card_lost=2 card_back=2`). Device 0 carried on (its reads go through `attempt()`, which restarts the card after a failed read); **device 1's reads go through SdFat's file layer with no retry**, so after a dropout every BIN read failed (MEDIUM ERROR, 3/xx, in 150-200 µs, MSCDEX resetting the CD-ROM and retrying) and `M DOOM_SE.ISO` gave `not found`. Unplugging the BB48 cleared it, and the BIN then read cleanly. Also, **no `CARD` line was printed for those dropouts**: `printCardChanges()` compares the state when it looks, so a loss and recovery between two looks goes unreported. Both to fix.
+
+### Changed
+- `scripts/retro_log.py` sends `M disc` lines with their Enter, as it does `E` lines (it sent `M` lines without one, so the drive waited at its disc prompt and took the next character typed as part of the name).
 
 ## [0.30.0-dev.9] - 2026-11-04 (branch `hdd-cd`)
 

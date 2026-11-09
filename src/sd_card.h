@@ -20,6 +20,26 @@ constexpr const char* BENCH_IMAGE_NAME = "HDDBENCH.IMG";  // scratch, for benchm
 // or "SD error ...". Only reads. Blocks core 0 for up to about a second.
 void printInfo(Print& out);
 
+// The card's bus: "sdio" (the PCB build) or "spi". sdio() says whether it
+// holds a PIO block; core 1 reads it once, after core 0 has chosen the disk,
+// to share out the rest (pio_plan). Core 0 calls sharePio() then: from then
+// on SDIO is tried only if it was running, since its block may be in use.
+const char* busName();
+bool sdio();
+void sharePio();
+// The PCB build: with nothing on the card served (the test disk), sharePio()
+// ends SDIO and its block goes to the diagnostics ("sdio-idle"). A card
+// operation (S, E, C, I, K...) then calls `lend` to have the diagnostics stop
+// and free the block, runs over SDIO, and calls `reclaim` to start them again.
+// Set before sharePio(); without them the card stays on SDIO.
+void setPioLender(bool (*lend)(), void (*reclaim)());
+// The PCB build, running the card over SPI because it didn't start over SDIO
+// at boot: true once that card has been taken out and one put back. A card
+// put back has been power-cycled, so it starts over SDIO, but only at boot
+// (its PIO block went to something else): the caller restarts the drive.
+// Until then nothing sends the card the SPI CMD0 that would end that.
+bool wantsSdioRestart();
+
 // Mounts the card and opens image `name` if it is there. Returns the image,
 // or nullptr (no card, no image, or an error, written to `log`).
 // Closes any image opened before. `name` must outlive the open image.
@@ -62,10 +82,15 @@ bool createImage(const char* name, uint32_t sectors, Print& out);
 // A read or write that fails is retried once after restarting the card, so a
 // card pulled and put back while the drive was idle costs nothing.
 const media_watch::Watch& media();
+// Times the card was started again after it stopped answering (device 0's or
+// device 1's reads, or `S` and `M` finding it silent): CARD lines and `s`.
+uint32_t restarts();
 // Device 1's disk (docs/two-drives.md), kept apart from the image above so
 // device 0's proven path is untouched: a second image through SdFat's
-// file layer only (no extent map, no card watch: a card pulled out fails
-// its reads until a restart), or a folder, read-only.
+// file layer only (no extent map), or a folder, read-only. An image read or
+// write that fails is retried once after restarting the card, with the same
+// checks as device 0's (the same card and image); while device 0's card is
+// lost or changed they fail at once. A folder's reads aren't retried.
 // Reads the first `size` bytes of file `name` (a CD's CUE sheet) into `buf`:
 // `truncated` if there's more. Only reads. False, with `why`, if it can't.
 bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& truncated, const char*& why,

@@ -103,6 +103,21 @@ constexpr unsigned PIN_SD_DAT3 = 39;  // SPI chip select
 // step up was checked by hashing the whole image.
 constexpr uint32_t SD_SPI_MHZ = 25;
 
+// The PCB build (pcb_drive, HDDPRO_PCB): the card runs over 4-bit SDIO
+// (docs/pio-allocation.md), about four times SPI's speed; the BB48 builds keep
+// SPI, since SDIO failed on its hand-wired leads. SdFat's PIO SDIO driver takes
+// a whole PIO block, so pio_plan decides what else fits. A card left in SPI
+// mode (by earlier firmware or the BB48) won't start over SDIO until it's taken
+// out and put back: at boot the drive then falls back to SPI and says so.
+// The divider is PIO cycles / 4 per SD clock: 2 is 25 MHz at 200 MHz (default
+// speed). 1 would be 50 MHz, beyond default speed: the driver doesn't switch
+// the card to high speed (CMD6), so it isn't used.
+#ifndef HDDPRO_PCB
+#define HDDPRO_PCB 0
+#endif
+#define SD_SDIO HDDPRO_PCB
+constexpr float SD_SDIO_CLKDIV = 2.0f;
+
 // After a command starts, core 1 only serves the bus for this long before its
 // next bookkeeping step, so the host's first status poll (the adapter's comes
 // at once after IDENTIFY and SET FEATURES) never waits behind one. Without it

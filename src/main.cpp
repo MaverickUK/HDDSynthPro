@@ -61,6 +61,9 @@
 #include "ide_dma.h"
 #include "iocs16.h"
 #include "bus_timing.h"
+#include "command_history.h"
+#include "pio_plan.h"
+#include "mmc.h"
 #include <hardware/structs/m33.h>
 #include "iordy_timer.h"
 #include "sd_card.h"
@@ -184,6 +187,10 @@ static std::atomic<uint8_t> g_mdma_mode{NO_DMA};       // set by core 1 at start
 static std::atomic<uint8_t> g_mode_asked{0};            // HDDSYNTH.INI's mode, for core 1
 static SharedFlag g_dmarq_wired{false};                 // found by core 1 at start-up
 static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: auto may offer DMA
+// Which PIO programs core 1 started (pio_plan.h), for `s` and `S`: written
+// once by core 1 at start-up, then g_pio_planned set; core 0 reads it after.
+static pio_plan::Plan g_pio_plan;
+static std::atomic<bool> g_pio_planned{false};  // start-up only, so std::atomic is fine (not per access)
 
 // HDDSYNTH.INI's geometry for core 1, packed (cylinders << 16 | heads << 8 |
 // sectors), or 0 for auto; stored with the disk's size (geometryFor).
@@ -297,6 +304,37 @@ static uint32_t g_bus_only_cycles;  // cfg::EARLY_BUS_ONLY_US in core 1's cycles
 static const char* const GAP_NAMES[GAP_KINDS] = {"-", "access", "lane", "command", "busonly",
                                                   "step0", "step1", "step2", "step3", "step4"};
 
+// The diagnostics the PIO plan has room for (iordy_timer, bus_observer):
+// started by core 1 at start-up, and by core 0 again when the PCB's card
+// gives back the PIO block it borrowed for a card operation.
+static void startDiagnostics() {
+    if (g_pio_plan.iordy_timer) iordy_timer::begin(cfg::IORDY_REPORT_NS);
+    if (g_pio_plan.bus_observer) {
+        const IdentifyInfo device1 = device1Identity();
+#if HDDPRO_HDCD
+        const bool cdrom1 = g_device1_cdrom;  // a CD-ROM, disc or none
+        bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                            device1.total_sectors || cdrom1 ? &device1 : nullptr, cdrom1);
+#else
+        bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
+                            device1.total_sectors ? &device1 : nullptr);
+#endif
+    }
+}
+
+// The PCB's card borrowing the diagnostics' PIO block (sd_card::setPioLender):
+// core 0, for a console card operation while the test disk is served. Waits
+// for core 1 to have shared out the blocks, so the card never races it.
+static bool lendDiagnostics() {
+    for (uint32_t start = millis(); !g_pio_planned.load(std::memory_order_acquire);)
+        if (millis() - start > 2000) return false;
+    if (!g_pio_plan.iordy_timer || !g_pio_plan.bus_observer) return false;  // they don't have a block of their own
+    iordy_timer::end();
+    bus_observer::end();
+    return true;
+}
+static void reclaimDiagnostics() { startDiagnostics(); }
+
 void setup1() {
     m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 1's own cycle counter, for g_c1_gap
     m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
@@ -332,27 +370,22 @@ void setup1() {
     g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
                                                     g_dmarq_wired.load(), g_dma_auto.load()),
                       std::memory_order_relaxed);
-    iordy_timer::begin(cfg::IORDY_REPORT_NS);  // here, so these never race to claim a PIO
-    const IdentifyInfo device1 = device1Identity();
-#if HDDPRO_HDCD
-    const bool cdrom1 = g_device1_cdrom;  // a CD-ROM, disc or none
-    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
-                        device1.total_sectors || cdrom1 ? &device1 : nullptr, cdrom1);
-#else
-    bus_observer::begin(g_disk_sectors.load(std::memory_order_relaxed), driveIdentity(),
-                        device1.total_sectors ? &device1 : nullptr);
-#endif
-    // The third PIO block: multiword DMA if it's offered, otherwise IOCS16#
-    // for ISA cards (which never use DMA). Neither fits beside the others.
-    if (g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA)
-        ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
-    else {
-        iocs16::begin();
+    // The other PIO blocks, shared out by what this configuration needs
+    // (pio_plan.h): the card's SDIO takes one on the PCB build.
+    const bool dma = g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA;
+    g_pio_plan = pio_plan::choose(sd_card::sdio(), dma, g_isa.load());
+    startDiagnostics();  // here, so these never race to claim a PIO
+    // Multiword DMA if it's offered, otherwise IOCS16# for ISA cards (which
+    // never use DMA).
+    if (g_pio_plan.ide_dma) ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
+    if (g_pio_plan.iocs16) iocs16::begin();
+    if (!dma) {
         // DMACK#, as ide_dma::begin() leaves it: an input for console `p`.
         gpio_init(cfg::PIN_DMACK_N);
         gpio_disable_pulls(cfg::PIN_DMACK_N);
     }
-    bus_timing::begin();  // the read timing probe, where there's room (not beside ide_dma)
+    if (g_pio_plan.bus_timing) bus_timing::begin();  // the read timing probe, where there's room
+    g_pio_planned.store(true, std::memory_order_release);
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
     // delay its PIO accesses while the host waits on a read.
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
@@ -1104,6 +1137,7 @@ static void chooseDisk() {
     // `isa = on`: the ISA card that needs it strobes DIOR# with no chip select,
     // which the observer takes for data.
     bus_observer::setImageChecks(!g_isa.load() && !g_test_disk);
+    sd_card::sharePio();  // core 1 shares out the PIO blocks next, by whether the card holds one
 #if HDDPRO_CDROM
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_release);  // after the mode: core 1 reads both
     g_disk_chosen.store(true, std::memory_order_release);
@@ -1299,6 +1333,13 @@ static void printConfig() {
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
                   drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa),
                   drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy));
+    if (g_pio_planned.load(std::memory_order_acquire)) {
+        const pio_plan::Plan& p = g_pio_plan;
+        Serial.printf("CONFIG pio card=%s dma=%s iocs16=%s iordy_timer=%s bus_observer=%s bus_timing=%s%s%s\n",
+                      sd_card::busName(), drive_config::onOff(p.ide_dma), drive_config::onOff(p.iocs16),
+                      drive_config::onOff(p.iordy_timer), drive_config::onOff(p.bus_observer),
+                      drive_config::onOff(p.bus_timing), p.why ? ": " : "", p.why ? p.why : "");
+    }
     if (busRequested())
         Serial.printf("CONFIG bus program set from the console (P%c) until a power cycle\n", busRequested());
 #if HDDPRO_CDROM
@@ -1692,7 +1733,12 @@ static uint32_t g_release_ms = 0;
 static uint64_t g_no_cs_at_release = 0;
 static bool g_no_cs_reported = false;
 
+// The last few commands, for the NOIORDY line: which one an unwaited read
+// fell in or followed (iordy_timer reports those separately).
+static CommandHistory g_commands;
+
 static void noteActivity(const TraceEvent& e) {
+    g_commands.note(e);
     if (e.kind == TraceKind::ResetRelease) {
         g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
         g_release_ms = millis();
@@ -1823,27 +1869,44 @@ static bool printLine(const char* line, size_t n) {
 
 #if FIRMWARE_SLICE != 0
 // A CARD line when the card the image is on is pulled out, comes back, or a
-// different card (or the image changed) comes back, which isn't served.
+// different card (or the image changed) comes back, which isn't served; and
+// when the card stopped answering and was restarted between two looks here
+// (counted, so a loss and return within one pass isn't missed: 4 Nov, two
+// went unreported on the Evesham).
 static void printCardChanges() {
     static media_watch::State shown = sd_card::media().state();
+    static uint32_t shown_losses = sd_card::media().losses(), shown_restarts = sd_card::restarts();
     const media_watch::Watch& card = sd_card::media();
-    if (card.state() == shown) return;
+    const uint32_t losses = card.losses(), restarts = sd_card::restarts();
+    const bool moved = losses != shown_losses || restarts != shown_restarts;
+    if (card.state() == shown && !moved) return;
     char line[160];
     int n;
     switch (card.state()) {
         case media_watch::State::Present:
-            n = std::snprintf(line, sizeof line, "CARD back %s\n", g_image_name);
+            n = card.state() == shown
+                    ? std::snprintf(line, sizeof line, "CARD lost and back %s: it stopped answering and was restarted (%lu in all)\n",
+                                    g_image_name, (unsigned long)restarts)
+                    : std::snprintf(line, sizeof line, "CARD back %s\n", g_image_name);
             break;
         case media_watch::State::Changed:
             n = std::snprintf(line, sizeof line,
                               "CARD changed: %s; not served (eject the disk on the computer, then restart the drive)\n",
                               card.why());
             break;
+        case media_watch::State::None:  // device 0 isn't on the card: device 1's disk, `S` or `M` restarted it
+            n = std::snprintf(line, sizeof line, "CARD restarted: it stopped answering (%lu in all)\n",
+                              (unsigned long)restarts);
+            break;
         default:
             n = std::snprintf(line, sizeof line, "CARD lost: the image's reads and writes fail until it's back\n");
             break;
     }
-    if (printLine(line, size_t(n))) shown = card.state();
+    if (printLine(line, size_t(n))) {
+        shown = card.state();
+        shown_losses = losses;
+        shown_restarts = restarts;
+    }
 }
 
 // A NOCS line the first time after each RESET# release (or boot) that the host
@@ -1859,15 +1922,31 @@ static void printNoChipSelect() {
 
 // A NOIORDY line when the host ends reads without waiting for IORDY, at most
 // once a second: such a host reads garbage whenever core 1 is slower than its
-// strobe (iordy_check.pio).
+// strobe (iordy_check.pio). It names the command the last one fell in or
+// followed, its device, and how long after it started (and, if it had
+// finished, after its DONE): to tell a block's first word, after a fetch,
+// from the rest (docs/atapi.md, the Evesham's CD reads). The times are when
+// core 0 collected the report, within a loop pass of the read (up to about
+// 0.5 ms behind it while it stores a sector).
 static void printIgnoredIordy() {
     static uint32_t shown = 0, last_ms = 0;
     uint32_t n = iordy_timer::ignoredReads();
     if (n == shown || millis() - last_ms < 1000) return;
-    char line[96];
-    int len = std::snprintf(line, sizeof line, "NOIORDY %lu reads=%lu last=%s: the host didn't wait for IORDY\n",
-                            (unsigned long)time_us_32(), (unsigned long)n, iordy_timer::ignoredRegister());
-    if (printLine(line, size_t(len))) {
+    char context[64] = "";
+    uint32_t at = iordy_timer::ignoredAtUs();
+    if (const CommandHistory::Entry* c = g_commands.at(at)) {
+        const char* name = c->command == 0xA0 ? mmc::name(c->packet) : commandName(c->command);
+        int k = std::snprintf(context, sizeof context, " after=%s%s +%luus", name, c->unit ? " d1" : "",
+                              (unsigned long)(at - c->start_us));
+        if (c->ended && int32_t(at - c->end_us) >= 0 && k > 0 && size_t(k) < sizeof context)
+            std::snprintf(context + k, sizeof context - size_t(k), " done+%luus", (unsigned long)(at - c->end_us));
+    }
+    char line[176];
+    int len = std::snprintf(line, sizeof line,
+                            "NOIORDY %lu reads=%lu data=%lu last=%s%s: the host didn't wait for IORDY\n",
+                            (unsigned long)at, (unsigned long)n, (unsigned long)iordy_timer::ignoredDataReads(),
+                            iordy_timer::ignoredRegister(), context);
+    if (len > 0 && printLine(line, size_t(len) < sizeof line ? size_t(len) : sizeof line - 1)) {
         shown = n;
         last_ms = millis();
     }
@@ -1923,13 +2002,23 @@ static void printStats() {
 #endif
 #if FIRMWARE_SLICE != 0
     iordy_timer::poll();
+    // Which diagnostics run (pio_plan.h): their counts below stay 0 if off.
+    if (g_pio_planned.load(std::memory_order_acquire))
+        Serial.printf(" card_bus=%s diag=%s", sd_card::busName(),
+                      g_pio_plan.iordy_timer && g_pio_plan.bus_observer ? "on"
+                      : g_pio_plan.iordy_timer                          ? "iordy_timer"
+                                                                        : "off");
+    iordy_timer::poll();
     Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu iordy_max_reg=%s iordy_max_at_us=%lu",
                   (unsigned long)iordy_timer::slowReads(), (unsigned long)iordy_timer::maxNs(),
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
     Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
                   iordy_timer::earlyRegister());
-    Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s", (unsigned long)iordy_timer::ignoredReads(),
-                  iordy_timer::ignoredRegister());
+    Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s iordy_ignored_data=%lu", (unsigned long)iordy_timer::ignoredReads(),
+                  iordy_timer::ignoredRegister(), (unsigned long)iordy_timer::ignoredDataReads());
+    Serial.printf(" iordy_data_slow=%lu/%lu/%lu/%lu iordy_data_max_ns=%lu", (unsigned long)iordy_timer::dataSlowReads(0),
+                  (unsigned long)iordy_timer::dataSlowReads(1), (unsigned long)iordy_timer::dataSlowReads(2),
+                  (unsigned long)iordy_timer::dataSlowReads(3), (unsigned long)iordy_timer::dataMaxNs());
     static uint32_t s_passes_then, s_ms_then;
     uint32_t passes = g_c1_passes, ms = millis();  // stays 0 without C1_PROFILE: nothing printed
     if (passes != s_passes_then && ms != s_ms_then)
@@ -1999,8 +2088,8 @@ static void printStats() {
     Serial.printf(" device1=%s device1_sectors=%lu", g_device1_kind,
                   (unsigned long)(g_device1_disk ? g_device1_disk->sectors() : 0));
     const media_watch::Watch& card = sd_card::media();
-    Serial.printf(" card=%s card_lost=%lu card_back=%lu", media_watch::stateName(card.state()),
-                  (unsigned long)card.losses(), (unsigned long)card.returns());
+    Serial.printf(" card=%s card_lost=%lu card_back=%lu card_restarts=%lu", media_watch::stateName(card.state()),
+                  (unsigned long)card.losses(), (unsigned long)card.returns(), (unsigned long)sd_card::restarts());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));
@@ -2333,6 +2422,9 @@ void setup() {
     gpio_init(cfg::PIN_BOARD_LED);
     gpio_set_dir(cfg::PIN_BOARD_LED, true);
     beginLink();
+#if FIRMWARE_SLICE != 0
+    sd_card::setPioLender(lendDiagnostics, reclaimDiagnostics);  // before chooseDisk shares out the blocks
+#endif
     chooseDisk();
     beginSeekTiming();
 #endif
@@ -2368,6 +2460,12 @@ void loop() {
     serviceLinkRx();
     serviceAbsence();
     checkStuck();
+    if (sd_card::wantsSdioRestart()) {
+        Serial.println("SD: a card was put back; restarting to run it over SDIO");
+        Serial.flush();
+        delay(50);
+        restart();  // keeps `J` or `T`
+    }
     sd_card::serviceMedia();
     printCardChanges();
 

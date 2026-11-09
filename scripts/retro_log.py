@@ -5,7 +5,7 @@ NOIORDY / BUSERR / STUCK / SLOWREAD / CARD lines, marked "!!". Every minute
 (and when you press Enter on an empty line) it prints a summary from `s`.
 
 Type console commands and Enter: `s`, `S`, `h`, `p`, `!` as usual, and
-`E key = value` to change a setting. `q` quits (after a last summary).
+`E key = value` to change a setting, `M disc` to change the CD-ROM's disc. `q` quits (after a last summary).
 
 Usage: python3 scripts/retro_log.py [note for the log's name, e.g. 486-pass1]
 Runs on macOS or Windows with host/requirements.txt installed (pyserial); HDDPRO_PORT picks the port if it isn't found."""
@@ -112,8 +112,8 @@ try:
             break
         if not typed:
             summary()
-        elif typed.startswith("E ") or typed.startswith("E\t"):
-            d.send("E")
+        elif typed[:2] in ("E ", "E\t", "M ", "M\t"):  # a setting or a disc: the letter, then the line and Enter
+            d.send(typed[0])
             time.sleep(0.3)
             d.send(typed[1:].strip() + "\n")
         else:

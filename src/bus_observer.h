@@ -24,6 +24,12 @@ namespace bus_observer {
 void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyInfo* identity1 = nullptr,
            bool packet1 = false);
 
+// Stops the program and its DMA channel and frees them, so another user can
+// have the PIO block (the PCB's card borrowing it for SDIO); begin() starts
+// it again, from an empty ring. The counts are kept. Core 0 only.
+void end();
+bool running();
+
 // Checks the samples so far; call often from core 0: data sectors with
 // `check` (the disk is the generated one), and IDENTIFY blocks with `check`
 // or `check_identify`. With neither the samples are discarded, which is

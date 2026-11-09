@@ -1,5 +1,16 @@
 # Next bench session (written 4 Nov 2026)
 
+## First: dev.11-13 on the board (written 5 Nov)
+
+0.30.0-dev.11 to dev.13 (`CHANGELOG.md`; dev.12 only moved the retry logic to `card_retry.h` and tested it; dev.13 adds NOIORDY measurements) are built and host-tested only. Flash a normal `bb48_hdcd` and, with the Evesham settings (`device1 = cdrom`):
+- [ ] `s` shows `card_restarts=0`; `S` as before.
+- [ ] **A card that went silent:** with the board running and nothing reading, pull the card and put it back. `S`: `SD restarted: it had stopped answering`, then the usual `SD ok ... size_mb=30436`. The `CARD` line for it (`CARD lost and back ...`).
+- [ ] **Device 1 gets over it:** pull and reseat the card again, then read the CD (`DIR D:` on the Evesham, or `M DOOMBIN.CUE` and Windows reading the disc on the rig). It should list, after one `CARD lost and back` line, with no MEDIUM ERROR.
+- [ ] Device 0 the same: pull and reseat, then `DIR C:`.
+- [ ] `-m speed` on `bb48_drive` (core 1's code didn't move, but the variables behind it did).
+- [ ] **On the Evesham, dev.13's NOIORDY measurements** (logged by `scripts/retro_log.py`): `r`, Doom from the CD as on 4 Nov, then `s`. Note `iordy_ignored_data`, `iordy_data_slow`, `iordy_data_max_ns`, and each `NOIORDY` line's `after=` and `+...us` ([atapi.md](atapi.md#the-eveshams-unwaited-cd-data-reads-4-nov-2026) says how to read them). Then the same with console `A` (read-ahead off), and compare.
+
+
 ## Next: the Evesham with a hard disk and a CD-ROM (prepared 4 Nov, late)
 
 The BB48 is ready for it, whichever computer its USB goes to (the settings are on the card):
@@ -13,11 +24,15 @@ The BB48 is ready for it, whichever computer its USB goes to (the settings are o
 
 **From the Mac:** plug the BB48's USB in first, then run `python3 scripts/retro_log.py evesham-hdcd` from the repo (`host/requirements.txt` installed; `HDDPRO_PORT=/dev/cu.usbmodem...` if it doesn't find the board). Send `h` and `S`, and check the lines above. Then follow the power order in [retro-test.md](retro-test.md#2-connecting-the-power-order-rule).
 
-1. [ ] **The cable** on the Evesham's primary channel. Its own optical drive is on the other channel; it was E: last time.
-2. [ ] **The BIOS,** primary master and slave on Auto: does it list a hard disk and `HDDSYNTH PRO CD-ROM`? Put the floppy first in the boot order: the BIOS tries to boot from the CD (NOT READY last time, with no disc). Here, then at the DOS prompt and after Doom (`r` before each), record the [auto-bus table](auto-bus.md#what-to-record-on-each-pc): `bus`, `dior_no_cs` and the `NOCS` line, `iordy_ignored` and any `NOIORDY` lines, `iordy_slow`, `iordy_max_ns`, `rd_t1_ns`, `rd_strobe_ns`; plus `bus_sectors`/`bus_bad`.
-3. [ ] **Boot the Windows 98 startup floppy.** MS-DOS 5 on the image has no CD-ROM driver, but the floppy loads `OAKCDROM.SYS` and MSCDEX. C: should be the image's disk, the RAM drive the next letter, then the CD-ROM: the driver's lines name its letter. Does `DIR C:` list MS-DOS 5's files, and `DIR` on the CD `DOOM_SE`'s?
-4. [ ] **Doom from the CD:** `MD C:\DOOMDATA` (on the image this time, so its saves stay), then on the CD's drive `CD \DOOMCD`, `SETUP`, `DOOM`. Play a level. Afterwards `s`: no failed commands but the expected refusals (READ SUB-CHANNEL 42h gets ILLEGAL REQUEST), `bus_bad=0`, no `STUCK`.
-5. [ ] **Optional, a disc change:** with MSCDEX loaded, `DIR` the CD, console `M` then `test` and Enter, `DIR` again (does MSCDEX notice the test disc?), then `M DOOM_SE.ISO` back.
+1. [x] **The cable** on the Evesham's primary channel. Its own optical drive is on the other channel; it was E: last time.
+2. [x] **The BIOS,** primary master and slave on Auto: does it list a hard disk and `HDDSYNTH PRO CD-ROM`? Put the floppy first in the boot order: the BIOS tries to boot from the CD (NOT READY last time, with no disc). Here, then at the DOS prompt and after Doom (`r` before each), record the [auto-bus table](auto-bus.md#what-to-record-on-each-pc): `bus`, `dior_no_cs` and the `NOCS` line, `iordy_ignored` and any `NOIORDY` lines, `iordy_slow`, `iordy_max_ns`, `rd_t1_ns`, `rd_strobe_ns`; plus `bus_sectors`/`bus_bad`.
+3. [x] **Boot the Windows 98 startup floppy.** MS-DOS 5 on the image has no CD-ROM driver, but the floppy loads `OAKCDROM.SYS` and MSCDEX. C: should be the image's disk, the RAM drive the next letter, then the CD-ROM: the driver's lines name its letter. Does `DIR C:` list MS-DOS 5's files, and `DIR` on the CD `DOOM_SE`'s?
+4. [x] **Doom from the CD:** `MD C:\DOOMDATA` (on the image this time, so its saves stay), then on the CD's drive `CD \DOOMCD`, `SETUP`, `DOOM`. Play a level. Afterwards `s`: no failed commands but the expected refusals (READ SUB-CHANNEL 42h gets ILLEGAL REQUEST), `bus_bad=0`, no `STUCK`.
+5. [x] **Optional, a disc change:** with MSCDEX loaded, `DIR` the CD, console `M` then `test` and Enter, `DIR` again (does MSCDEX notice the test disc?), then `M DOOM_SE.ISO` back.
+> **Done on the evening of 4 Nov (results in `CHANGELOG.md`, dev.10, "Tested on a retro PC"):** steps 1-5 passed: both drives found, Doom from the CD with its saves on C:, every command good, `bus_bad=0`; MSCDEX noticed every disc change, and the BIN/CUE (`DOOMBIN.CUE`, now on the card) served Doom's files. The BIOS snapshot of the auto-bus table was missed (the console wasn't open); the DOS prompt's and Doom's are in the CHANGELOG. **The SD card dropped out** after it was put back with the board running, and device 1 doesn't recover from that: if a disc change gives `not found` or CD reads fail with MEDIUM ERROR, `S` shows `size_mb=0`; unplug the BB48 (Evesham off first). The board is left set up for step 6 (`device1 = cdrom`, `DOOM_SE.ISO`).
+>
+> **Step 6, next time:** booted from the floppy, `MD C:\CDROM`, `COPY A:\OAKCDROM.SYS C:\CDROM`, `COPY %RAMD%:\MSCDEX.EXE C:\CDROM` (the floppy unpacks MSCDEX to its RAM drive). Add `DEVICE=C:\CDROM\OAKCDROM.SYS /D:MSCD001` to `C:\CONFIG.SYS` and `C:\CDROM\MSCDEX.EXE /D:MSCD001` to the end of `C:\AUTOEXEC.BAT` (`C:\DOS\EDIT`). Floppy out, restart. If MSCDEX (2.25, Windows 98's) says "Incorrect DOS version": `SETVER C:\CDROM\MSCDEX.EXE 7.10` (with `DEVICE=C:\DOS\SETVER.EXE` in `CONFIG.SYS`) and restart. Too few drive letters: `LASTDRIVE=Z`.
+
 6. [ ] **Optional:** boot MS-DOS 5 from C: with the CD-ROM driver. Copy `OAKCDROM.SYS` and `MSCDEX.EXE` from the floppy's boot (the RAM drive holds MSCDEX) to C:, and add them to `CONFIG.SYS`/`AUTOEXEC.BAT` (a version check may need `SETVER`).
 
 **If the BIOS doesn't find the drives,** console `P e` (early answers, which restarts): the program the Evesham ran each drive on alone. Early answers failed only the USB adapter's register check, with a CD-ROM as device 1. Record which one worked. `P 0` goes back to the settings'.

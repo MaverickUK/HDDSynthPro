@@ -74,6 +74,7 @@ static void look(uint32_t& written) {
 static constexpr unsigned SERVE_EVERY = 32;  // words checked between calls to `serve`
 
 static std::atomic<bool> s_started{false};
+static uint s_offset;  // where the program went, for end()
 
 void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyInfo* identity1, bool packet1) {
     static sector_check::Checker checker(disk_sectors);
@@ -94,10 +95,13 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyIn
     s_checker = &checker;
 
     uint offset;
+    s_read = 0;  // the DMA starts again at the ring's start (after an end())
+    checker.resync();
     bool ok = pio_claim_free_sm_and_add_program_for_gpio_range(
         &bus_observer_program, &s_pio, &s_sm, &offset, cfg::PIN_DD0,
         cfg::PIN_IORDY - cfg::PIN_DD0 + 1, true);
     hard_assert(ok);
+    s_offset = offset;
     pio_sm_config c = bus_observer_program_get_default_config(offset);
     sm_config_set_in_pins(&c, cfg::PIN_DD0);
     sm_config_set_in_shift(&c, true, false, 32);  // `in` shifts right: new bits on top
@@ -117,6 +121,16 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyIn
     pio_sm_set_enabled(s_pio, s_sm, true);
     s_started.store(true, std::memory_order_release);
 }
+
+void end() {
+    if (!s_started.exchange(false, std::memory_order_acq_rel)) return;
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    dma_channel_abort(s_dma);
+    dma_channel_unclaim(s_dma);
+    pio_remove_program_and_unclaim_sm(&bus_observer_program, s_pio, s_sm, s_offset);
+}
+
+bool running() { return s_started.load(std::memory_order_acquire); }
 
 void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
     if (!s_started.load(std::memory_order_acquire)) return;

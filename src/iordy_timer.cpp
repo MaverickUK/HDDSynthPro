@@ -27,8 +27,16 @@ static const char* s_early_register = "-";
 // iordy_check.pio: reads the host ended while IORDY was still low.
 static PIO s_check_pio;
 static uint s_check_sm;
+static uint s_offset, s_check_offset;  // where the programs went, for end()
 static uint32_t s_ignored = 0;
 static const char* s_ignored_register = "-";
+static uint32_t s_ignored_data = 0;
+static uint32_t s_ignored_at_us = 0;
+// The data port's slow reads apart (a host may time it apart from the other
+// registers): counts by how long IORDY held them, and the longest.
+static uint32_t s_data_buckets[DATA_BUCKETS] = {};
+static uint32_t s_data_bucket_iterations[DATA_BUCKETS - 1];  // each bucket's upper edge
+static uint32_t s_data_max_iterations = 0;
 // Core 1 starts the program while core 0 may already be polling.
 static std::atomic<bool> s_started{false};
 static std::atomic<bool> s_reset_requested{false};
@@ -41,6 +49,14 @@ static unsigned s_over_head = 0, s_over_count = 0;
 static uint32_t iterationsToNs(uint32_t iterations) {
     return uint32_t((2ull * iterations + 4) * 1000000000ull / clock_get_hz(clk_sys));
 }
+static uint32_t nsToIterations(uint32_t ns) {
+    return uint32_t((uint64_t(ns) * clock_get_hz(clk_sys) / 1000000000ull - 4) / 2);
+}
+
+// A read of the data register (command block, address 0).
+static bool isData(uint32_t sample) {
+    return bus::block(sample) == bus::Block::Command && bus::address(sample) == 0;
+}
 
 void begin(uint32_t threshold_ns) {
     uint offset;
@@ -49,6 +65,7 @@ void begin(uint32_t threshold_ns) {
         cfg::PIN_IORDY - cfg::PIN_DD0 + 1, true);
     hard_assert(ok);
 
+    s_offset = offset;
     pio_sm_config c = iordy_timer_program_get_default_config(offset);
     sm_config_set_in_pins(&c, cfg::PIN_DD0);
     sm_config_set_in_shift(&c, true, false, 32);  // `in` shifts right: new bits on top
@@ -59,7 +76,8 @@ void begin(uint32_t threshold_ns) {
     s_threshold_iterations = uint32_t(cycles / 2);
     // The inverse of iterationsToNs(), worked out once: poll() compares each
     // report against it, and converts only the reads past the limit.
-    s_limit_iterations = uint32_t((uint64_t(cfg::IORDY_LIMIT_NS) * clock_get_hz(clk_sys) / 1000000000ull - 4) / 2);
+    s_limit_iterations = nsToIterations(cfg::IORDY_LIMIT_NS);
+    for (int i = 0; i < DATA_BUCKETS - 1; ++i) s_data_bucket_iterations[i] = nsToIterations(DATA_BUCKET_EDGES_NS[i]);
     pio_sm_put(s_pio, s_sm, s_threshold_iterations);
     pio_sm_set_enabled(s_pio, s_sm, true);
 
@@ -69,6 +87,7 @@ void begin(uint32_t threshold_ns) {
         &iordy_check_program, &s_check_pio, &s_check_sm, &offset, cfg::PIN_DD0,
         cfg::PIN_IORDY - cfg::PIN_DD0 + 1, true);
     hard_assert(ok);
+    s_check_offset = offset;
     pio_sm_config k = iordy_check_program_get_default_config(offset);
     sm_config_set_in_pins(&k, cfg::PIN_DD0);
     sm_config_set_jmp_pin(&k, cfg::PIN_IORDY);
@@ -100,6 +119,12 @@ void poll() {
         uint32_t iterations = s_threshold_iterations + (0xFFFFu - (report >> 16));
         const char* reg = bus::registerName(bus::block(sample), bus::address(sample), false);
         ++s_slow;
+        if (isData(sample)) {
+            int b = 0;
+            while (b < DATA_BUCKETS - 1 && iterations > s_data_bucket_iterations[b]) ++b;
+            ++s_data_buckets[b];
+            if (iterations > s_data_max_iterations) s_data_max_iterations = iterations;
+        }
         if (iterations > s_max_iterations) {
             s_max_iterations = iterations;
             s_max_register = reg;
@@ -118,12 +143,28 @@ void poll() {
         uint32_t sample = pio_sm_get(s_check_pio, s_check_sm);
         ++s_ignored;
         s_ignored_register = bus::registerName(bus::block(sample), bus::address(sample), false);
+        s_ignored_at_us = time_us_32();
+        if (isData(sample)) ++s_ignored_data;
     }
     if (s_reset_requested.exchange(false, std::memory_order_relaxed)) reset();
 }
 
+void end() {
+    if (!s_started.exchange(false, std::memory_order_acq_rel)) return;
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    pio_sm_set_enabled(s_check_pio, s_check_sm, false);
+    pio_remove_program_and_unclaim_sm(&iordy_timer_program, s_pio, s_sm, s_offset);
+    pio_remove_program_and_unclaim_sm(&iordy_check_program, s_check_pio, s_check_sm, s_check_offset);
+}
+
+bool running() { return s_started.load(std::memory_order_acquire); }
+
 uint32_t ignoredReads() { return s_ignored; }
 const char* ignoredRegister() { return s_ignored_register; }
+uint32_t ignoredDataReads() { return s_ignored_data; }
+uint32_t ignoredAtUs() { return s_ignored_at_us; }
+uint32_t dataSlowReads(int bucket) { return s_data_buckets[bucket]; }
+uint32_t dataMaxNs() { return s_data_max_iterations ? iterationsToNs(s_data_max_iterations) : 0; }
 
 uint32_t slowReads() { return s_slow; }
 uint32_t maxNs() { return s_max_iterations ? iterationsToNs(s_max_iterations) : 0; }
@@ -153,6 +194,10 @@ void reset() {
     s_early_register = "-";
     s_ignored = 0;
     s_ignored_register = "-";
+    s_ignored_data = 0;
+    s_ignored_at_us = 0;
+    for (auto& b : s_data_buckets) b = 0;
+    s_data_max_iterations = 0;
     busctrl_hw->counter[0].value = 0;  // any write clears a counter
     busctrl_hw->counter[1].value = 0;
 }
