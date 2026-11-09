@@ -2,6 +2,15 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Tested
+- **The PCB build in PIO (9 Nov, 0.31.0, the USB adapter):** `-m speed` from `HDDBENCH.IMG` over SDIO: reads 1.20 MB/s, 75 random 4 KB reads a second, writes 1.02 (the adapter's PIO pace); then `-m cardsoak` for 272 minutes: 4.97 GB written, 8.04 GB read, 606,804 commands, 8 full read-backs, **0 wrong**, no card lost or restarted, `iordy_ignored=0`. The IORDY timer, beside SDIO in that plan, counted 15.4 million reads past 1,250 ns (11.9 million Status, worst 2,070 ns; 3.5 million data, worst 1,710 ns), all waited for: early answers' known slow reads, at the rate the test disk showed without SDIO (8 Nov), so SDIO doesn't slow core 1.
+- **The PCB in a retro PC (9 Nov, the Evesham, PIO 3), the benchmark image (`DOSBENCH.IMG`):**
+  - `pcb_drive` on early answers: reads 2.29 MB/s (random 0.98 ms), writes 1.25 (the BB48 over SPI: 1.81 and 1.28); a 15-minute `HDDBENCH` soak: 64,792 commands, 2,390,875 sectors checked on the cable, 0 bad; no `NOIORDY`; worst Status read 1,020 ns, worst data read 500 ns. One data read at start-up was held 289 µs (at 52 s, as the BIOS started; waited for): not looked into yet.
+  - `pcb_drive` on the data lane (`early_answers = off`): **reads 4.24 MB/s** (random 0.76 ms), writes 2.03 (the BB48 on the lane: 2.18 and 1.98, so SPI was what held the lane's reads back); 0 bad; 2,741 Status reads past 1,250 ns (worst 1,650 ns, the lane's known ones, [docs/data-lane.md](docs/data-lane.md)), all waited for.
+- **The Evesham's unwaited CD data reads are gone on the PCB** (`bb48_hdcd`, `ide_bus`, Doom from `DOOM_SE.ISO` with its saves on C:, as on 4 Nov): 2,966 READ(10), **0 `NOIORDY`** (the BB48: 26); 3,663 data reads held past 400 ns, every one waited for, the worst 1,100 ns. So the 5 Nov guess (the Evesham doesn't sample IORDY on the data port) was wrong; the BB48's hand-wired, undamped DIOR# (the PCB has 33 Ω on DIOR#/DIOW#) is the likelier cause, by ringing seen as an early strobe end or a real one ([docs/atapi.md](docs/atapi.md)). The CD's slow Status reads are unchanged (worst 3,620 ns).
+
 ## [0.31.0] - 2026-11-09
 
 The PCB build, from branch `sdio` (0.31.0-sdio.1-4); each step is below. For the people flashing it: [docs/release-notes/v0.31.0.md](docs/release-notes/v0.31.0.md).

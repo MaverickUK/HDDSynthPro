@@ -112,6 +112,10 @@ Worst reads now, generated disk, three trials each:
 
 Writes to the SD card ran at 0.92 MB/s, 553 µs a sector against 327 into RAM: each store held the host under BSY. With write-behind the host sends the next sector into the other buffer while the last is stored, and writes reach 1.51 MB/s, every byte intact (300 mixed writes read back). But during writes some status reads were held 1.5-2.0 µs, over ATA's 1.25. Two theories didn't hold: deferring store results until the post-block hold ended made it worse (1,960 ns), which suggests the NS1081 polls Status during the hold. So it ships off (console `W` turns it on), until instrumentation shows what core 1 is doing when the slow read lands.
 
+## The PCB with SDIO (0.31.0, 8-9 Nov 2026)
+
+From `HDDBENCH.IMG` on the card, the USB adapter on the Mac: SPI by multiword DMA 1.38 MB/s reads, 285 random 4 KB reads a second, 2.00 writes; SDIO (25 MHz) 6.2-6.6, about 680, 5.8-7.2; SDIO in PIO 3 1.20, 75, 1.02 (the adapter's pace). The Evesham (`DOSBENCH.IMG`, PIO 3): early answers 2.29 reads, 1.25 writes; the data lane 4.24 and 2.03 (the BB48 over SPI on the lane: 2.18 and 1.98). On that PC the card was what held reads back; writes are the PC's and the bus program's.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

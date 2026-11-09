@@ -39,14 +39,14 @@ I'm not yet sure if this will exist alongside the original HDD Synth or will sup
 
 ## Status
 
-The BB48 works as a read/write IDE hard disk, serving a disk image from a microSD card. It has booted two real retro PCs and soaked for 10 hours at a time behind a USB-IDE adapter. Releases are tagged on `main` (`v0.26.2`, with the firmware files); newer work is on branch `no-iordy`.
+The drive works as a read/write IDE hard disk (and, exploratory, a CD-ROM drive), serving disk images from a microSD card, on the Olimex BB48 and on the HDDSynthPro PCB (rev 0.3). It has run four retro PCs and soaked for 10 hours at a time behind a USB-IDE adapter. Releases are tagged on `main` with the firmware files (`v0.31.0`: on the PCB the card runs over 4-bit SDIO).
 
 - **The drive build** (`pio run -e bb48_drive`) serves `HDDSYNTH.IMG` from a microSD card, or whichever image `HDDSYNTH.INI` names ([docs/settings.md](docs/settings.md)). Without a card it serves a 64 MB welcome disk, with writes kept in RAM until reboot.
 - **Transfer modes:** PIO modes 0-3 and multiword DMA mode 2. Every register's value is ready as soon as it's addressed (early answers, on by default since 0.27.0), so controllers that ignore IORDY work too, and IORDY is let go after 23 µs with no strobe, which keeps 16-bit ISA cards safe; they also get IOCS16#.
 - **Few settings needed:** the drive takes its CHS geometry from the image's own partition table (an image from an old drive boots with the BIOS on auto), and an image over 4 GB can be split across files on a FAT32 card (`tools/split_image.py`; 0.28.0, not yet tried on hardware). `HDDSYNTH.INI` mostly just names the image.
 - **Checked on the cable:** the drive watches its own bus, and checks every data word the host takes off it against what it meant to send.
 - **The board's LED** lights for drive activity, as a hard disk's would.
-- **Next:** a standard benchmark image to run on every machine, the PCB, and the activity link to the HDD Synth ([docs/activity-link.md](docs/activity-link.md)).
+- **Next:** the activity link to the HDD Synth ([docs/activity-link.md](docs/activity-link.md)), one drive build per board (hard disk, CD-ROM or both by settings), and PCB rev 0.4 (IOCS16# for ISA cards).
 
 The listen-only build (`pio run -e bb48`) records every IDE register access it sees without driving any pin, for studying what a host does.
 
@@ -59,6 +59,7 @@ The listen-only build (`pio run -e bb48`) records every IDE register access it s
 | USB-IDE adapter (Norelsys NS1081; JMicron ID on Windows), from macOS and Windows | Adapter's own | PIO 0-3, multiword DMA 2 | 0.16-0.18 | Detection and re-detection, partitioning and formatting, the rig tests (slices 0-5), standby and wake, FLUSH CACHE, a card pulled and put back, soaks | 10-hour soaks clean in PIO mode 3 (28.9 GB, 49.5 million sectors checked on the cable, 0 bad) and in DMA (51.9 GB, 89.0 million sectors, 0 bad) |
 | ICL HRA 386 (BIOS 1.20, 1992) | 16-bit ISA IDE card | PIO 0 (the card's ISA timing) | 0.22.0, 0.23.15 | Boots MS-DOS 5 from a copy of its own CF card; CHKDSK, copying files. The benchmark image: `HDDBENCH` and a 14-minute soak | Works: the benchmark passed, and the soak checked about 400 MB with 0 bad sectors. Needs the IOCS16# wire (IDE pin 32 to GPIO 2); since 0.27.0 no settings (it boots on the defaults) |
 | Pentium 200 (Intel PIIX, Phoenix BIOS) | PIIX, on the motherboard | PIO 3 (no DMA offered yet) | 0.23.15 | Boots Windows 95 from a copy of its own 4 GB CF card, with Windows' own 32-bit disk driver (`ESDI_506.PDR`) | Works. 163,847 sectors checked on the cable, 0 bad. Needs `early_answers = on`: in its BIOS's timing the PIIX ignores IORDY ([docs/no-iordy.md](docs/no-iordy.md)) |
+| Evesham, on the HDDSynthPro PCB | On the motherboard | PIO 3 | 0.31.0 (`pcb_drive`, `bb48_hdcd`) | The benchmark image over SDIO, on early answers and on the data lane, and a 15-minute soak; Doom from the CD-ROM (device 1) beside the 386's disk | Works: 2.39 million sectors checked on the cable in the soak, 0 bad; no read the PC didn't wait for, the CD's included (the BB48 had 26 on 4 Nov) |
 | Evesham, AMD Athlon XP 2000+, 1 GB, GeForce 2 GTS | On the motherboard | PIO 3 | 0.25.0-0.26.1 | Booted the benchmark image first time (`HDDBENCH`). Booted the ICL 386's MS-DOS 5 disk with the BIOS on auto, using `geometry = 756/13/51` (that drive's own geometry); ran Duke Nukem | Works: the benchmark passed, with 47,423 sectors checked on the cable and 0 bad. Needs `early_answers = on`: it didn't wait for IORDY on 115 reads under DOS |
 
 What each machine needed, and the dead ends, are in [CHANGELOG.md](CHANGELOG.md) (0.19-0.23) and [docs/retro-test.md](docs/retro-test.md).
@@ -77,10 +78,14 @@ Measured from the host, in MB/s:
 | ICL 386 (`DOSBENCH.IMG`, through the BIOS) | SD card image | PIO 0 | 1.51 (random: 1.09 ms a read) | 0.72 |
 | Pentium 200 | SD card image | PIO 3 | not measured yet | not measured yet |
 | Evesham Athlon XP 2000+ (`DOSBENCH.IMG`, through the BIOS) | SD card image | PIO 3 | 1.81 (random: 0.98 ms a read) | 1.28 |
+| USB-IDE adapter, the PCB | SD card image (SDIO) | PIO 3 | 1.20 | 1.02 |
+| USB-IDE adapter, the PCB | SD card image (SDIO) | Multiword DMA 2 | 6.2-6.6 (about 680 random 4 KB reads/s) | 5.8-7.2 |
+| Evesham, the PCB (`DOSBENCH.IMG`) | SD card image (SDIO) | PIO 3, early answers | 2.29 (random: 0.98 ms) | 1.25 |
+| Evesham, the PCB (`DOSBENCH.IMG`) | SD card image (SDIO) | PIO 3, data lane | **4.24** (random: 0.76 ms) | 2.03 |
 
 **Limits on these figures:**
 - In PIO the adapter paces itself (about 1.1 µs a word, and 10 ms before each READ), so faster PIO modes can't speed it up; DMA avoids both.
-- The SD card over SPI caps image transfers at about 2 MB/s, whatever the mode; SDIO on the PCB should lift that. The Athlon's 1.81 MB/s reads are at that limit.
+- The SD card over SPI caps image transfers at about 2 MB/s, whatever the mode; the PCB's SDIO lifts it to about 7. The Athlon's 1.81 MB/s reads on the BB48 were at the SPI limit; on the PCB, on the data lane, they're 4.24.
 - The retro PCs' figures come from the benchmark image (below), through the BIOS as DOS uses the disk. The Pentium's run was cut short when its power supply failed, which was unrelated to the drive.
 
 Every step is in [docs/speed-log.md](docs/speed-log.md).
