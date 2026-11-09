@@ -2,6 +2,16 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [0.31.0] - 2026-11-09
+
+The PCB build, from branch `sdio` (0.31.0-sdio.1-4); each step is below. For the people flashing it: [docs/release-notes/v0.31.0.md](docs/release-notes/v0.31.0.md).
+
+- **`pcb_drive`: the SD card on 4-bit SDIO** for the HDDSynthPro PCB, on our own copy of SdFat's PIO SDIO driver (`src/sdio_card.*`, fixed). By multiword DMA from the card through the USB adapter: reads 6.2-6.6 MB/s, writes 5.8-7.2, against SPI's 1.38 and 2.00.
+- **`src/pio_plan.h`** shares out the PIO blocks at start-up; the test disk parks the card so the diagnostics keep their block, and console card operations borrow it back.
+- A card left in SPI mode falls back to SPI with a warning, and the drive restarts onto SDIO when it's put back.
+- `-m cardsoak`: hours of checked writes and reads on `HDDBENCH.IMG`. 10 hours on the release's driver, 0 wrong.
+- CI runs on every branch, and releases `hddsynthpro-pcb-drive-vX.Y.Z.uf2`. The BB48 builds are unchanged from 0.30.0 (core 1 at dev.13's addresses and sizes).
+
 ## [0.31.0-sdio.4] - 2026-11-08 (branch `sdio`)
 
 ### Fixed

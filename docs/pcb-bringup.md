@@ -14,7 +14,7 @@ You'll need: a multimeter with a continuity beeper, a USB-C cable, the USB-IDE a
 ## 2. First power: USB-C only
 
 - [ ] Plug in USB-C. The power LED (D4) lights. 3V3 reads 3.3 V.
-- [ ] The board appears as **RP2350 Boot** (hold BOOTSEL while plugging in, if it doesn't). Flash the drive build: `pio run -e bb48_drive -t upload`. It's the BB48's firmware unchanged: the board keeps the same GPIOs.
+- [ ] The board appears as **RP2350 Boot** (hold BOOTSEL while plugging in, if it doesn't). Flash the PCB's drive build: `pio run -e pcb_drive -t upload` (or `hddsynthpro-pcb-drive-vX.Y.Z.uf2` from a release, 0.31.0 or later). It's the BB48's drive firmware with the SD card on 4-bit SDIO; the BB48's `bb48_drive` also runs on the board (same GPIOs), with the card on SPI.
 - [ ] Console: `h` answers `READY HDDSynthPro <version> slice3`.
 - [ ] `p`: `BUS_EN#=0` (the firmware has the bus switches on). With no cable the bus lines float.
 - [ ] **Solder-bridge test**, cable still unplugged: `x` then `Y`. It now also checks through the bus switches to the IDE header. `SHORTTEST OK` passes; a `SHORT` or `STUCK` line names the pins to look at (see [bringup.md](bringup.md), step 2).
@@ -50,7 +50,7 @@ The bus switches isolate the bus when the board is unpowered (Ioff), so the BB48
 ## 7. The SD image
 
 - [ ] `E image = HDDSYNTH.IMG`, `!`. `-m slice5`, `-m card` (the card pulled and put back).
-- [ ] **SDIO** ([pio-allocation.md](pio-allocation.md)): unreliable on the rig's hand-wired leads, so the first real test is here. The quick experiment from 29 Oct was four small edits: `cfg::SD_SDIO = true` and `SD_SDIO_CLKDIV` (2.0 for 25 MHz at 200 MHz) in `config.h`; `startCard()` calling `s_sd.begin(SdioConfig(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_DAT0, clkdiv))`; `mount()` skipping `spiPins()`; `ide_dma::begin()` skipped to free a PIO block. **Take the card out and put it back after flashing it**: a card left in SPI mode by earlier firmware won't start over SDIO until its power is cut. Check with `S` repeated 20 times (every line `image=open`) and `host/runs/tools/writeverify.py` on `HDDBENCH.IMG`, at 25 MHz and then 50 MHz.
+- [ ] **SDIO** (`pcb_drive`, 0.31.0; [pio-allocation.md](pio-allocation.md)): `S` says `bus=sdio`. If it says `bus=spi` with a warning, the card was left in SPI mode by other firmware (`bb48_drive`, or the BB48): take it out and put it back, and the drive restarts onto SDIO. With nothing on the card served (the test disk) it says `sdio-idle`: the card waits and the diagnostics have its PIO block. On the first board (8 Nov 2026), by multiword DMA from the card: reads 6.2-6.6 MB/s, writes 5.8-7.2 (SPI: 1.38 and 2.00); a 10-hour `-m cardsoak` on `HDDBENCH.IMG` (`J`), 0 wrong.
 
 ## 8. A soak
 
