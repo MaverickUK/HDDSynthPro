@@ -30,6 +30,7 @@ ONE_OFFS = (
     "ide_bus::restart(",          # when the host releases RESET#
     "iordy_timer::requestReset(",  # likewise
     "stayAbsent(",                # console `V`: the drive goes silent, once per absence
+    "void stayAbsent<",           # likewise, one per device type
     "__cxa_guard_acquire",        # guards for function-local statics
     "__cxa_guard_release",
 )

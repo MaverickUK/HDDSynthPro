@@ -11,6 +11,41 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
   - `pcb_drive` on the data lane (`early_answers = off`): **reads 4.24 MB/s** (random 0.76 ms), writes 2.03 (the BB48 on the lane: 2.18 and 1.98, so SPI was what held the lane's reads back); 0 bad; 2,741 Status reads past 1,250 ns (worst 1,650 ns, the lane's known ones, [docs/data-lane.md](docs/data-lane.md)), all waited for.
 - **The Evesham's unwaited CD data reads are gone on the PCB** (`bb48_hdcd`, `ide_bus`, Doom from `DOOM_SE.ISO` with its saves on C:, as on 4 Nov): 2,966 READ(10), **0 `NOIORDY`** (the BB48: 26); 3,663 data reads held past 400 ns, every one waited for, the worst 1,100 ns. So the 5 Nov guess (the Evesham doesn't sample IORDY on the data port) was wrong; the BB48's hand-wired, undamped DIOR# (the PCB has 33 Ω on DIOR#/DIOW#) is the likelier cause, by ringing seen as an early strobe end or a real one ([docs/atapi.md](docs/atapi.md)). The CD's slow Status reads are unchanged (worst 3,620 ns).
 
+## [0.32.0-dev.4] - 2026-11-09 (branch `one-build`)
+
+### Fixed
+- **`S` and `s` said the diagnostics ran after a disc had taken their PIO block** (console `M` into a CD-ROM that started with no disc on the card, on the PCB): `CONFIG pio ... iordy_timer=off bus_observer=off (the card took the diagnostics' block for a disc, until a restart)`, and `s` says `diag=off`.
+
+### Tested (the PCB, `pcb_drive` dev.3)
+- **SDIO with a CD-ROM as device 0:** after the BB48 builds the card ran over SPI with the warning; taken out and put back, it came up on SDIO, parked (`sdio-idle`) with the test disc served, and the adapter detected the CD-ROM on `ide_bus` from the settings alone. `M DOOM_SE.ISO` put the owner's ISO in over the borrowed block, which the card kept (`bus=sdio`); a following `S` didn't take it back. Windows read all 27 files (22.7 MB) at 6.70 MB/s, twice, the passes agreeing; no card lost or restarted, `iordy_ignored=0`.
+
+## [0.32.0-dev.3] - 2026-11-09 (branch `one-build`)
+
+### Fixed
+- **A CD-ROM as device 0 was never detected through the USB adapter** on early answers (the setting's default): the adapter polled Status, held 1.8-2.4 µs each, and never sent a command, then dropped off USB, as with a CD-ROM as device 1 on 4 Nov (0.30.0-dev.10). `bb48_cdrom` had managed on early answers with `atapi::Device` alone; through `hdcd::Device` each access costs more. Now any CD-ROM runs `ide_bus` (console `P e` still picks early answers); `S` says `CONFIG with a CD-ROM as device 0, ide_bus`.
+
+### Tested (the PCB, the USB adapter, Windows; dev.2 and dev.3)
+- **A CD-ROM as device 1** beside the test disk (`mode = mdma2`): `-m cdrom` reads the whole 64 MB test disc right at 3.37 MB/s (0.30.0-dev.3, without read-ahead: 2.42), random and first/last reads pass; 9,107 sectors checked on the cable, 0 bad, `iordy_ignored=0`. The hard disk beside it in MDMA 2: reads 8.63 MB/s, 1,066 random 4 KB reads a second, writes 12.94 MB/s (0.30.0's `bb48_hdcd`: 9.02, 13.25).
+- **A CD-ROM alone as device 0** (`device0 = cdrom`, `ide_bus`): the whole disc at 3.19 MB/s, random and first/last reads pass, 9,196 sectors checked on the cable, 0 bad, IDENTIFY PACKET DEVICE checked too; console `M`: `none`, `test`, a missing ISO (`not found`, then no disc), `test` again, and the host reads the disc after.
+
+## [0.32.0-dev.2] - 2026-11-09 (branch `one-build`)
+
+### Changed
+- **One binary, two loops.** dev.1 ran `hdcd::Device` for every configuration, and the hard disk alone paid for it: on the PCB through the USB adapter, PIO 3, early answers, the test disk, 0.31.0's `bb48_drive` read 1.20 MB/s and wrote 1.13; 0.31.0's `bb48_hdcd` (no CD-ROM) 1.14 and 0.90; dev.1 1.17 and **0.83**, its worst read 2,730 ns (2,070), and five times the data reads past 700 ns. Now core 1's bus code is compiled twice: for `ata::Device`, the hard disk alone (with a second disk or folder as device 1, or none), and for `hdcd::Device`, with a CD-ROM as device 0 or 1. `loop1` picks one at boot (`runDrive<Dev>`) and builds the device in storage both share, so RAM holds one. `ide_bus`'s functions are a `CORE1_RAM` overload per device around an always-inlined template (an explicit template instantiation goes to flash whatever its section attribute; `check_core1_ram.py` caught it). `ata::Device::intrqDriven()` is always inlined, as GCC stopped inlining it in the new copy. RAM 95.5% (dev.1: 94.1%; 0.31.0's `bb48_drive`: 91.7%).
+- **Measured, A-B-A-B** (each figure repeated to the digit on the same build, so differences are real):
+
+  | | 0.31.0 `bb48_drive` | dev.2 |
+  |---|---|---|
+  | Early answers: reads | 1.20 MB/s | 1.17 |
+  | Random 4 KB reads | 75.0-75.7 a second | 74.9-75.1 |
+  | Writes | 1.13 MB/s | 1.11 |
+  | Worst read | 2,070-2,080 ns | 2,130 |
+  | Data reads past 700 ns (a speed run) | 24,700-28,100 | 21,100-21,300 |
+  | Data lane: reads, random, writes | 1.53, 80.0, 1.68 | 1.53, 79.8-80.0, 1.64 |
+  | Data lane: worst read | 1,380-1,410 ns | 1,360-1,370 |
+
+  Slices 3-4 pass (259,397 sectors checked on the cable, 0 bad, `iordy_ignored=0`). The 2-2.5% left is where the code sits, not what it does: the hard disk's core 1 functions are byte for byte the size they were in 0.31.0, only about 3.6 KB further on in RAM, behind the CD-ROM code the linker now keeps (CLAUDE.md: *Core split*). A device at a fixed address in place of the pointer changed nothing (tried before dev.3, not kept).
+
 ## [0.32.0-dev.1] - 2026-11-09 (branch `one-build`)
 
 One drive build per board ([docs/one-build-per-board.md](docs/one-build-per-board.md), step 2). Built and host-tested; not yet run on the board.
@@ -23,7 +58,7 @@ One drive build per board ([docs/one-build-per-board.md](docs/one-build-per-boar
 - CI builds, checks and releases three UF2s: `bb48-listen`, `bb48-drive` and `pcb-drive`.
 
 ### Added
-- **`device0 = cdrom`** (or a `device0` name ending in `.ISO` or `.CUE`): a CD-ROM drive alone as device 0, as `bb48_cdrom` was: its disc from `cdrom`, the test disc with `cdrom = none` or console `T` (`J` still serves `HDDBENCH.IMG`, as a hard disk), early answers instead of the data lane. `device1` is left out, and `S` says so. Settings files from 0.31.0 work unchanged (`device1 = cdrom`, `cdrom = NAME`).
+- **`device0 = cdrom`** (or a `device0` name ending in `.ISO` or `.CUE`): a CD-ROM drive alone as device 0, as `bb48_cdrom` was: its disc from `cdrom`, the test disc with `cdrom = none` or console `T` (`J` still serves `HDDBENCH.IMG`, as a hard disk), on `ide_bus` (dev.3: below). `device1` is left out, and `S` says so. Settings files from 0.31.0 work unchanged (`device1 = cdrom`, `cdrom = NAME`).
 - Host tests: the CD-ROM alone as device 0 in `hdcd::Device`, by PIO and by DMA; `device0 = cdrom` in `drive_config`.
 
 ### Fixed

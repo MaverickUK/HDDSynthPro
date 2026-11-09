@@ -47,6 +47,8 @@
 #include "sentence.h"
 #include "ata_device.h"
 #include "hdcd_device.h"
+#include <new>
+#include <type_traits>
 #include "block_source.h"
 #include "cue_sheet.h"
 #include "bus_observer.h"
@@ -374,7 +376,8 @@ void setup1() {
 // A burst that ended goes back to the device; a new one starts when the
 // device has a sector (or buffer) for it; and when the command is over, done
 // or cut short (RESET#, SRST, a new command, an error), ide_dma tidies up.
-CORE1_RAM static void serviceDma(DriveDevice& dev) {
+template <class Dev>
+CORE1_RAM static void serviceDma(Dev& dev) {
     if (ide_dma::burstRunning()) {
         if (!ide_dma::burstDone()) {
             if (!dev.dmaCommand()) ide_dma::endCommand();  // cut short mid-burst
@@ -392,7 +395,8 @@ CORE1_RAM static void serviceDma(DriveDevice& dev) {
 }
 
 // Posts the device's fetch to core 0, once per fetch.
-CORE1_RAM static void postFetch(DriveDevice& dev, uint32_t& posted_fetch) {
+template <class Dev>
+CORE1_RAM static void postFetch(Dev& dev, uint32_t& posted_fetch) {
     uint32_t id = dev.pendingFetchId();
     if (id == 0 || id == posted_fetch) return;  // the common case, without a call
     ata::Fetch fetch;
@@ -402,7 +406,8 @@ CORE1_RAM static void postFetch(DriveDevice& dev, uint32_t& posted_fetch) {
 // BSY for a while: waking from standby, or after a data-out block. Step 3 of
 // loop1, and early_answers' tight bus loop runs it too, since the host may
 // poll status throughout the hold and the loop never goes quiet to return.
-CORE1_RAM static void busyTimers(DriveDevice& dev) {
+template <class Dev>
+CORE1_RAM static void busyTimers(Dev& dev) {
     static uint32_t wake_start_us = 0;  // 0: not timing a wake
     static uint32_t hold_start_us = 0;  // 0: not timing a data-out hold
     if (!dev.dataOutHeld()) {
@@ -425,9 +430,15 @@ CORE1_RAM static void busyTimers(DriveDevice& dev) {
 
 CORE1_RAM static void recordBus(uint32_t sample) { record(TraceKind::Bus, sample); }
 
-CORE1_RAM static void recordCommandStart(uint32_t t_us, const DriveCommandInfo& c) {
+// A command's CMD line: the hard disk's, or the CD-ROM build's (with PACKET's opcode).
+CORE1_RAM static void recordCommandStart(uint32_t t_us, const ata::CommandInfo& c) {
+    record(commandStartEvent(t_us, c.command, c.lba, c.count, 0, c.unit));
+}
+CORE1_RAM static void recordCommandStart(uint32_t t_us, const hdcd::CommandInfo& c) {
     record(commandStartEvent(t_us, c.command, c.lba, c.count, c.packet, c.unit));
 }
+[[maybe_unused]] static uint8_t packetOf(const ata::CommandInfo&) { return 0; }
+[[maybe_unused]] static uint8_t packetOf(const hdcd::CommandInfo& c) { return c.packet; }
 
 // early_answers: a queued command, run from the tight bus loop (ide_bus::
 // serveBusEarly) so core 1 doesn't leave it for one: going back to the main
@@ -443,7 +454,8 @@ static uint32_t g_early_command_start_us = 0;
 // adapter's back-to-back reads, 0.27.0).
 static uint32_t g_done_recorded = 0;
 
-CORE1_RAM static void recordDone(DriveDevice& dev) {
+template <class Dev>
+CORE1_RAM static void recordDone(Dev& dev) {
     if (dev.commandsCompleted() == g_done_recorded) return;
     g_done_recorded = dev.commandsCompleted();
     if (g_done_recorded == dev.commandsStarted()) g_command_active.store(false);
@@ -455,20 +467,22 @@ CORE1_RAM static void recordDone(DriveDevice& dev) {
 // completed, and a DMA command's bursts. In DMA the host waits for DMARQ
 // instead of polling, so the bus goes quiet and the main loop's step 1 came
 // only after EARLY_BUS_ONLY_US: a 64 KB READ DMA took 12 s (0.30.0-dev.3).
-CORE1_RAM static void earlyIdle(DriveDevice& dev) {
+template <class Dev>
+CORE1_RAM static void earlyIdle(Dev& dev) {
     busyTimers(dev);
     recordDone(dev);
     if (dev.dmaCommand() || ide_dma::active()) serviceDma(dev);
 }
 
 // CMD_PROFILE's bookkeeping: `start` is when the command's handling began.
-CORE1_RAM static inline void noteCommandTime(DriveDevice& dev, uint32_t start) {
+template <class Dev>
+CORE1_RAM static inline void noteCommandTime(Dev& dev, uint32_t start) {
 #if CMD_PROFILE
     uint32_t t = m33_hw->dwt_cyccnt - start;
     if (t > g_cmd_run_max) {
         g_cmd_run_max = t;
-        const DriveCommandInfo& c = dev.lastCommand();
-        g_cmd_run_what = uint32_t(c.command) | uint32_t(c.packet) << 8;
+        const auto& c = dev.lastCommand();
+        g_cmd_run_what = uint32_t(c.command) | uint32_t(packetOf(c)) << 8;
     }
 #else
     (void)dev;
@@ -476,7 +490,8 @@ CORE1_RAM static inline void noteCommandTime(DriveDevice& dev, uint32_t start) {
 #endif
 }
 
-CORE1_RAM static void runCommandEarly(DriveDevice& dev) {
+template <class Dev>
+CORE1_RAM static void runCommandEarly(Dev& dev) {
 #if CMD_PROFILE
     const uint32_t profile_start = m33_hw->dwt_cyccnt;
 #endif
@@ -506,7 +521,8 @@ CORE1_RAM static void runCommandEarly(DriveDevice& dev) {
 // check_core1_ram.py's one-offs).
 static SharedFlag g_absent{false};
 
-__attribute__((noinline)) static void stayAbsent(DriveDevice& dev) {
+template <class Dev>
+__attribute__((noinline)) static void stayAbsent(Dev& dev) {
     dev.hardReset(true);
     ide_bus::stop();
     ide_dma::endCommand();
@@ -518,22 +534,17 @@ __attribute__((noinline)) static void stayAbsent(DriveDevice& dev) {
     g_command_active.store(false);
 }
 
-CORE1_RAM void loop1() {
-    // Never returns. The bus comes first: every access waiting in the FIFO is
-    // served back to back, and only when it is empty does core 1 do one small
-    // bookkeeping step before looking again. So a read waits for one step at
-    // most; iordy_timer.pio measures how long the host actually waits.
-    // A hard disk as device 0, with a second disk, a CD-ROM or nothing as
-    // device 1; or a CD-ROM alone as device 0 (core 0 leaves device 1 out then).
-    static const IdentifyInfo device0 = driveIdentity();
-    static const IdentifyInfo device1 = device1Identity();
-    static const bool cdrom0 = g_device0_cdrom, cdrom1 = g_device1_cdrom;
-    static DriveDevice dev(device0, !cdrom1 && device1.total_sectors ? &device1 : nullptr,
-                           cdrom0 ? &device0 : cdrom1 ? &device1 : nullptr, cdrom0 ? 0 : 1);
+// Core 1's loop for one kind of device (drive_device.h): the hard disk alone,
+// or with a CD-ROM. Never returns. The bus comes first: every access waiting
+// in the FIFO is served back to back, and only when it is empty does core 1
+// do one small bookkeeping step before looking again. So a read waits for one
+// step at most; iordy_timer.pio measures how long the host actually waits.
+template <class Dev>
+CORE1_RAM __attribute__((noinline)) static void runDrive(Dev& dev) {
     uint32_t started = dev.commandsStarted();
     g_done_recorded = dev.commandsCompleted();
     uint32_t command_start_us = 0;
-    DriveCommandInfo start_info{};  // the command whose CMD line is still to record
+    std::decay_t<decltype(dev.lastCommand())> start_info{};  // the command whose CMD line is still to record
     bool start_unrecorded = false;
     bool quiet = false;  // a command just started: bookkeeping waits (COMMAND_QUIET_US)
     uint32_t posted_fetch = 0;
@@ -572,8 +583,8 @@ CORE1_RAM void loop1() {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
             if (early) {
                 last_access_cycles = m33_hw->dwt_cyccnt;
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
-                                       runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle<Dev>,
+                                       runCommandEarly<Dev>, g_trace_bus.load() ? recordBus : nullptr);
             }
             // Back to the bus, but with a command queued only for a few accesses:
             // the host polls STATUS straight after a command and gets BSY at once,
@@ -627,8 +638,8 @@ CORE1_RAM void loop1() {
             // early_answers: straight back to the tight bus loop (status polls, the
             // data block); the bookkeeping below can wait until the bus is quiet.
             if (early)
-                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
-                                       runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
+                ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle<Dev>,
+                                       runCommandEarly<Dev>, g_trace_bus.load() ? recordBus : nullptr);
             // The host may already be polling (the adapter reads STATUS at
             // once after IDENTIFY): answer it before the bookkeeping below.
             while (ide_bus::serviceOnce(dev, sample)) {
@@ -698,7 +709,7 @@ CORE1_RAM void loop1() {
             }
             case 3:  // BSY for a while: waking from standby, or after a data-out block
                 busyTimers(dev);
-                {  // a disc change from the console, between commands
+                if constexpr (std::is_same_v<Dev, hdcd::Device>) {  // a disc change from the console, between commands
                     uint32_t seq = g_disc_seq.load(std::memory_order_acquire);
                     if (seq != g_disc_done.load(std::memory_order_relaxed) && dev.discIdle()) {
                         dev.changeDisc(g_disc_sectors.load(std::memory_order_relaxed));
@@ -734,9 +745,30 @@ CORE1_RAM void loop1() {
         // early_answers: back to the tight bus loop after every pass, so a quiet
         // spell's first access finds core 1 polling, not mid-pass (660 ns).
         if (early)
-            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle,
-                                   runCommandEarly, g_trace_bus.load() ? recordBus : nullptr);
+            ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, earlyIdle<Dev>,
+                                   runCommandEarly<Dev>, g_trace_bus.load() ? recordBus : nullptr);
     }
+}
+
+
+// The device, constructed by loop1 in storage both kinds share, so RAM holds
+// only the one that runs.
+alignas(hdcd::Device) static unsigned char g_device_mem[sizeof(hdcd::Device)];
+static_assert(sizeof(hdcd::Device) >= sizeof(ata::Device) && alignof(hdcd::Device) >= alignof(ata::Device));
+
+// Picks core 1's loop once, by HDDSYNTH.INI: the hard disk alone (with a second
+// disk or folder as device 1, or none) runs ata::Device's, the code bb48_drive
+// ran up to 0.31.0, with nothing per access for a CD-ROM; with a CD-ROM as
+// device 0 or 1, hdcd::Device's (bb48_hdcd's and bb48_cdrom's). Measured: the
+// combined device alone cost PIO writes 20-27% (docs/one-build-per-board.md).
+CORE1_RAM void loop1() {
+    const IdentifyInfo device0 = driveIdentity();
+    const IdentifyInfo device1 = device1Identity();
+    const bool cdrom0 = g_device0_cdrom, cdrom1 = g_device1_cdrom;
+    if (cdrom0 || cdrom1)  // a CD-ROM alone as device 0 (core 0 leaves device 1 out), or as device 1
+        runDrive(*new (g_device_mem) hdcd::Device(device0, nullptr, cdrom0 ? &device0 : &device1, cdrom0 ? 0 : 1));
+    else
+        runDrive(*new (g_device_mem) ata::Device(device0, device1.total_sectors ? &device1 : nullptr));
 }
 
 // Core 0's share of the drive: move the sectors core 1 asks for. The disk is
@@ -1067,10 +1099,6 @@ static void chooseDisk() {
         case 'i': g_isa.store(true); g_early.store(false); break;
         default: break;
     }
-    // A CD-ROM as device 0 was proven on early answers and ide_bus, not on the
-    // data lane (written for the hard disk's 256-word blocks): early answers
-    // instead.
-    if (g_device0_cdrom && !g_isa.load() && !g_early.load()) g_early.store(true);
     g_iordy.store(g_config.iordy);
     // The geometry setting, for the image only (the welcome and generated disks
     // lay theirs out for the default), its cylinders cut to fit if it's bigger
@@ -1101,11 +1129,14 @@ static void chooseDisk() {
     // after device 1's image, folder or disc is open (with device 0 on the
     // test disk the card would otherwise be parked under them).
     sd_card::sharePio();
-    // A CD-ROM as device 1 runs on ide_bus (as console `P i`): on early
-    // answers the USB adapter's register check after RESET# never passed, so
-    // it never detected the drive and dropped off USB (4 Nov, 0.30.0-dev.10).
+    // A CD-ROM, as device 0 or 1, runs on ide_bus (as console `P i`), never the
+    // data lane (written for the hard disk's 256-word blocks). On early answers
+    // hdcd::Device answers too slowly (Status held 1.8-2.4 us): the USB
+    // adapter's register check after RESET# never passed, so it never detected
+    // the drive and dropped off USB (device 1: 4 Nov, 0.30.0-dev.10; device 0:
+    // 9 Nov, 0.32.0-dev.2, where bb48_cdrom's own atapi::Device had managed).
     // Console `P e` still picks early answers, to reproduce it.
-    if (g_device1_cdrom && busRequested() != 'e') {
+    if ((g_device0_cdrom || g_device1_cdrom) && busRequested() != 'e') {
         g_isa.store(true);
         g_early.store(false);
     }
@@ -1285,18 +1316,19 @@ static void printConfig() {
                   drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy));
     if (g_pio_planned.load(std::memory_order_acquire)) {
         const pio_plan::Plan& p = g_pio_plan;
-        Serial.printf("CONFIG pio card=%s dma=%s iocs16=%s iordy_timer=%s bus_observer=%s bus_timing=%s%s%s\n",
+        const bool diag = !sd_card::keptDiagnosticsBlock();  // a disc put in later may have taken their block
+        Serial.printf("CONFIG pio card=%s dma=%s iocs16=%s iordy_timer=%s bus_observer=%s bus_timing=%s%s%s%s\n",
                       sd_card::busName(), drive_config::onOff(p.ide_dma), drive_config::onOff(p.iocs16),
-                      drive_config::onOff(p.iordy_timer), drive_config::onOff(p.bus_observer),
-                      drive_config::onOff(p.bus_timing), p.why ? ": " : "", p.why ? p.why : "");
+                      drive_config::onOff(p.iordy_timer && diag), drive_config::onOff(p.bus_observer && diag),
+                      drive_config::onOff(p.bus_timing), p.why ? ": " : "", p.why ? p.why : "",
+                      diag ? "" : " (the card took the diagnostics' block for a disc, until a restart)");
     }
     if (busRequested())
         Serial.printf("CONFIG bus program set from the console (P%c) until a power cycle\n", busRequested());
-    if (g_device0_cdrom && !g_isa.load())
-        Serial.println("CONFIG with a CD-ROM as device 0, early answers, not the data lane");
-    if (g_device1_cdrom)
-        Serial.println(g_early.load() ? "CONFIG with a CD-ROM as device 1 on early answers (console P e): the USB adapter can't detect it"
-                                      : "CONFIG with a CD-ROM as device 1, ide_bus");
+    if (g_device0_cdrom || g_device1_cdrom)
+        Serial.printf(g_early.load() ? "CONFIG with a CD-ROM as device %d on early answers (console P e): the USB adapter can't detect it\n"
+                                     : "CONFIG with a CD-ROM as device %d, ide_bus\n",
+                      g_device0_cdrom ? 0 : 1);
     {
         Geometry g = startGeometry(driveIdentity());
         Serial.printf("CONFIG geometry=%u/%u/%u (%s)%s\n", unsigned(g.cylinders), unsigned(g.heads),
@@ -1953,7 +1985,8 @@ static void printStats() {
     // Which diagnostics run (pio_plan.h): their counts below stay 0 if off.
     if (g_pio_planned.load(std::memory_order_acquire))
         Serial.printf(" card_bus=%s diag=%s", sd_card::busName(),
-                      g_pio_plan.iordy_timer && g_pio_plan.bus_observer ? "on"
+                      sd_card::keptDiagnosticsBlock()                    ? "off"
+                      : g_pio_plan.iordy_timer && g_pio_plan.bus_observer ? "on"
                       : g_pio_plan.iordy_timer                          ? "iordy_timer"
                                                                         : "off");
     iordy_timer::poll();

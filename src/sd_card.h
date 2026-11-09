@@ -27,6 +27,9 @@ void printInfo(Print& out);
 const char* busName();
 bool sdio();
 void sharePio();
+// The PCB: a disc put in at run time (console `M`) kept the PIO block the
+// diagnostics lent the parked card, so they're off until a restart.
+bool keptDiagnosticsBlock();
 // The PCB build: with nothing on the card served (the test disk), sharePio()
 // ends SDIO and its block goes to the diagnostics ("sdio-idle"). A card
 // operation (S, E, C, I, K...) then calls `lend` to have the diagnostics stop

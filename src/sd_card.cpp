@@ -187,12 +187,16 @@ struct Lend {
 // disc in a drive that started with none): the card keeps the PIO block it
 // borrowed, as if it had been served from boot, and the diagnostics that
 // lent it stay off until a restart. Called before the Lend ends.
+static bool s_kept_block = false;
+bool keptDiagnosticsBlock() { return s_kept_block; }
+
 static void keepBorrowed(Print& log) {
 #if SD_SDIO
     if (!s_borrowed) return;
     s_borrowed = false;
     s_parked = false;
     s_on_sdio = true;
+    s_kept_block = true;
     log.println("# the card keeps the diagnostics' PIO block until a restart (iordy_timer and bus_observer off)");
 #else
     (void)log;
