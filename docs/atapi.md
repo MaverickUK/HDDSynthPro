@@ -40,6 +40,28 @@ Disc reads now fetch the next 512-byte sector into a second buffer while the hos
 
 Console `M`, then a disc and Enter, in both CD-ROM builds: an ISO or a CUE sheet on the card, `test` (the generated test disc) or `none` (eject), until a restart (`HDDSYNTH.INI` isn't changed). The host sees what a real drive's tray would show: a media-removal event (GET EVENT STATUS NOTIFICATION) and NOT READY while it's out, then a new-media event and a unit attention, medium may have changed (28h), on its next command. Core 0 ejects first and waits for core 1 to take the eject, which it does only once the device is idle (no command running, no fetch outstanding); only then does it swap the file and insert the new disc, so no fetch for one disc is ever served from the next. Host-tested (`mmc_disc_changes`, `atapi_changing_the_disc`, `hdcd_changing_the_disc_leaves_the_disk_alone`); on the board, swaps between `DOOM_SE.ISO`, the test disc, none and a missing file report as they should (`DISC DOOM_SE.ISO frames=11431`). Both Windows (through the USB adapter) and MSCDEX on the Evesham (4 Nov) notice: MSCDEX answered `CDR101: Not ready` with the tray empty, re-read the TOC and sector 16 after the unit attention, and said `CDR103: CDROM not High Sierra or ISO-9660 format` for the test disc rather than listing the old disc from its cache. Next: the HDD Synth's buttons, and a list of discs to step through for multi-disc games.
 
+## A wrong data word on the Evesham: Doom quits (10 Nov 2026, 0.32.0)
+
+**The fault:** on the PCB in the Evesham (PIO 3, `ICL386MB.IMG` as C:, `DOOM_SE.ISO` on the CD-ROM as device 1, `ide_bus`, the Windows 98 startup floppy and MSCDEX), Doom's demo ran for over an hour and then quit with `R_TextureNumForName: GST0T01 not found`. The bus observer, on full checks, flagged one sector at the same moment: `BUSERR lba=17366 word=93 seen=4f54 want=454e bad_words=1`. That's frame 4341, block 2. The ISO there holds `GSTONE1` twice. Word 92 is `TO` (4f54) and word 93 `NE` (454e), and the cable carried `TO` for both. So Doom read `GSTOTO1` (`GST0T01` on screen) and couldn't find the texture.
+
+**What the evidence says:**
+- **The drive's word sequence stayed in step.** The words before and after were right, and only one word in the sector was wrong. The host's strobe 93 found the previous word's value on DD, and strobe 94 found word 94.
+- **The card isn't the cause.** It read the sector right: the observer's expected data comes from core 0's fetch, and it matches the ISO on the Mac.
+- **This explains the evening's other failures.** On 0.32.0-dev.6 there had been errors on D: and Doom didn't start. On 0.32.0, over SDIO, the PC froze with black and white lines over part of the screen, the drive still waiting in the middle of a READ(10) (Status 48h, data offered and never taken; nothing on the bus after it). A `COMP` of `D:\DOOMCD` against a copy on C: (13 MB, read twice) found no difference, as you'd expect from a fault this rare.
+- **It's rare:** 1 bad word in 11,294 sectors checked, about 5.8 million words.
+- **No diagnostic saw the host skip the wait.** `iordy_ignored=0`, `iordy_data_max_ns=1110`, no `NOIORDY`, no card lost or restarted. The log is `host/runs/retro-20261110-220709-evesham-pcb-doom-spi-observer.log`, on `bb48_drive` with the card on SPI so that the observer has its block.
+
+**How it can happen (not proven):** between reads `ide_bus.pio` releases DD (`mov pindirs, null`), and the undriven lines keep their last value. So the host read word 93 before the drive drove it, which means the host didn't wait for IORDY on that read. Two candidates:
+1. **IORDY is late for back-to-back data reads.** After a read the program releases IORDY at `wait 1 jmppin side 0` and pulls it low again only at `arm`, about 7 cycles after it sees DIOR# rise: 35 ns, plus the input synchroniser, so about 45-55 ns. ATA's tA is 35 ns after the next strobe's start, so a controller that runs its recovery (t2i) shorter than PIO 3's 70 ns could sample IORDY high on rare reads, and not wait.
+2. **This controller doesn't always sample IORDY on the data port** (the 4 Nov guess below, which the PCB's clean 9 Nov run seemed to rule out).
+
+Either way `iordy_check.pio` should have caught it: the host's strobe would end while IORDY was low, before core 1 answered. Unless core 1 answered within the host's strobe but after its data sampling, which is the case it can't see, or a DIOR# glitch did something else.
+
+**Next:**
+- On the bench: the test disc as device 1, read in a loop through the USB adapter with full observer checks, to see whether any host shows it.
+- In the simulator: `pio_sim` with `ide_host_model`, back-to-back data reads with recovery under 70 ns, to see where IORDY lands.
+- If it's (1), a fix would keep IORDY low from one data read to the next, rather than releasing it between them.
+
 ## The Evesham's unwaited CD data reads (4 Nov 2026)
 
 **Update, 9 Nov 2026: not on the PCB.** The same session on the IDE Synth Bay PCB (`bb48_hdcd` 0.31.0, same core 1 code, same PC, same game, same settings) had **no** unwaited reads: 2,966 READ(10), 0 `NOIORDY`, and dev.13's counters show 3,663 data reads held past 400 ns (worst 1,100 ns), every one waited for. So the guess below, that this controller doesn't sample IORDY on the data port, was wrong. The likelier cause is the BB48's wiring: long, undamped DIOR# leads (the PCB has 33 Ω series resistors on DIOR# and DIOW#), whose ringing could look like the strobe ending early to `iordy_check.pio`, or make the controller end it early. Not proven either way; the PCB doesn't show it. The analysis below is kept as it was.

@@ -4,6 +4,11 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+### Found
+- **A wrong data word on the cable from the CD-ROM, in a retro PC** (10 Nov, the Evesham, PCB, 0.32.0, `ICL386MB.IMG` as C: and `DOOM_SE.ISO` as device 1, `ide_bus`, PIO 3). Doom's demo quit after about an hour with `R_TextureNumForName: GST0T01 not found`. The bus observer (`bb48_drive`, with the card on SPI to make room for it, full checks) flagged one sector: frame 4341, word 93 carried word 92's value (`TO` for `NE`), so `GSTONE1` arrived as `GSTOTO1`. The rest of the sector was right, and the card had read it right. That was 1 bad word in 11,294 sectors checked, with `iordy_ignored=0`. The same session's earlier failures fit it: errors on D: on dev.6, and a freeze with a striped screen on 0.32.0 over SDIO. The likeliest cause is the host reading a data word without waiting for IORDY, from a stale DD that `ide_bus.pio` had released; perhaps IORDY is pulled low too late for back-to-back reads. Analysis and next steps: [docs/atapi.md](docs/atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
+- **`STUCK` names the wrong command for a CD-ROM:** it records only ATA media commands, so it showed the last hard disk READ SECTORS while device 1's READ(10) was the one stuck.
+- On 0.32.0 the Evesham also ran Doom cleanly for a session: 2,550 READ(10) and 253 READ SECTORS, none failed.
+
 ## [0.32.0] - 2026-11-10
 
 One drive build per board, from branch `one-build` (0.32.0-dev.1-7); each step is below. For the people flashing it: [docs/release-notes/v0.32.0.md](docs/release-notes/v0.32.0.md).
