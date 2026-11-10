@@ -306,10 +306,11 @@ VB_VIAS = [(179.85, 128.15), (184.3, 156.9), (104.8, 166.6)]
 # The Mk5's M3 holes, relative to its top left corner: 9.76 mm in from the left, 13.97 from the right.
 HOLES = [(X0 + 9.76, Y0 + 4.09), (X0 + 86.36, Y0 + 4.09), (X0 + 9.76, Y0 + 65.81), (X0 + 86.36, Y0 + 65.81)]
 LOGO = (151.0, 161.2)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
-# The easter eggs (tools/make_eggs.py), flipped onto the back: x, y of their centres. Each sits where the
-# back has no through-hole pad and no via within 0.3 mm (silkscreen can't print over a via's hole):
-# Park Heads (20 x 10 mm) behind the buttons, Defrag (24 x 8.6 mm) behind the logo, by the bottom edge.
-EGGS = [("EGG_ParkHeads", 165.5, 148.5), ("EGG_Defrag", 141.0, 164.25)]
+# The easter eggs (tools/make_eggs.py), flipped onto the back: x, y of their centres, and rotation as seen
+# from the back. Each sits where the back has no through-hole pad and no via within 0.3 mm (silkscreen
+# can't print over a via's hole): Park Heads (20 x 10 mm) behind the buttons; Defrag (24 x 8.6 mm)
+# between the two IDE headers, reading up as the credit does, centred on the 44-pin header.
+EGGS = [("EGG_ParkHeads", 165.5, 148.5, 0), ("EGG_Defrag", 111.6, 137.0, 90)]
 # Silkscreen text styles, as the FDD Synth Pro's (and the HDD Synth MK5's): PLAIN; LABEL, a header's name
 # (bold, knocked out of a filled box, 1 mm); BACK, on the back (mirrored, so it reads from there; left-
 # justified, as the MK5's credit); BACK_CENTRE, the same centred. Pin names stay PLAIN, beside their pins.
@@ -647,9 +648,9 @@ def silkscreen(board, art):
             board.Add(t)
         style_text(t, text, *rest)
     leftover = [t for ts in old_texts.values() for t in ts]
-    placed = [("LOGO1", "LOGO_HDDSynthPro", *LOGO, False)]
-    placed += [(f"EGG{i}", name, x, y, True) for i, (name, x, y) in enumerate(EGGS, start=1)]
-    for ref, name, x, y, back in placed:
+    placed = [("LOGO1", "LOGO_HDDSynthPro", *LOGO, 0, False)]
+    placed += [(f"EGG{i}", name, x, y, rot, True) for i, (name, x, y, rot) in enumerate(EGGS, start=1)]
+    for ref, name, x, y, rot, back in placed:
         old = board.FindFootprintByReference(ref)
         if old:
             leftover.append(old)
@@ -657,6 +658,7 @@ def silkscreen(board, art):
         fp.SetReference(ref)
         fp.Reference().SetVisible(False)
         fp.SetPosition(pcbnew.VECTOR2I(mm(x), mm(y)))
+        fp.SetOrientationDegrees(rot)  # before the flip, which keeps it reading the same way from the back
         board.Add(fp)
         if back:  # once it's on the board: Flip crashes on a footprint that isn't
             fp.Flip(fp.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
