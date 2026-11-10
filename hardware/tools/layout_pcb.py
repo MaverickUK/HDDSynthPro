@@ -306,22 +306,42 @@ VB_VIAS = [(179.85, 128.15), (184.3, 156.9), (104.8, 166.6)]
 # The Mk5's M3 holes, relative to its top left corner: 9.76 mm in from the left, 13.97 from the right.
 HOLES = [(X0 + 9.76, Y0 + 4.09), (X0 + 86.36, Y0 + 4.09), (X0 + 9.76, Y0 + 65.81), (X0 + 86.36, Y0 + 65.81)]
 LOGO = (151.0, 161.2)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
-SILK = [  # text, x, y, size, rotation
-    ("IDE drive  rev 0.4", 171.0, 158.4, 0.9, 0),
-    ("IDE 40-pin: pull pin 20", 112.6, 135.0, 1.0, 90),
-    ("IDE 44-pin 2 mm: pull pin 20, one host only", 108.6, 137.0, 0.9, 90),
-    ("5V", 127.0, 101.3, 0.8, 0), ("GND", 129.54, 101.3, 0.8, 0), ("TX", 132.08, 101.3, 0.8, 0),
-    ("RX", 134.62, 101.3, 0.8, 0), ("Synth Link", 130.81, 106.68, 0.8, 0),
-    ("+5V GND", 178.25, 108.5, 0.8, 0),
-    ("CLK", 138.46, 101.3, 0.8, 0), ("GND", 141.0, 101.3, 0.8, 0), ("DIO", 143.54, 101.3, 0.8, 0),
-    ("SWD", 140.97, 106.68, 0.8, 0),
-    ("Boot sel", 165.0, 156.0, 0.8, 0),
-    ("Reset", 173.5, 156.0, 0.8, 0),
-    ("JP1: close for firmware\nwithout BUS_EN#", 132.6, 166.2, 0.8, 0),
-    ("12V", 164.0, 160.3, 0.8, 0), ("GND", 169.08, 160.3, 0.8, 0), ("GND", 174.16, 160.3, 0.8, 0),
-    ("+5V", 179.24, 160.3, 0.8, 0),
-    ("CD audio L-G-G-R", 192.0, 129.4, 0.8, 0),
+# The easter eggs (tools/make_eggs.py), flipped onto the back: x, y of their centres. Each sits where the
+# back has no through-hole pad and no via within 0.3 mm (silkscreen can't print over a via's hole):
+# Park Heads (20 x 10 mm) behind the buttons, Defrag (24 x 8.6 mm) behind the logo, by the bottom edge.
+EGGS = [("EGG_ParkHeads", 165.5, 148.5), ("EGG_Defrag", 141.0, 164.25)]
+# Silkscreen text styles, as the FDD Synth Pro's (and the HDD Synth MK5's): PLAIN; LABEL, a header's name
+# (bold, knocked out of a filled box, 1 mm); BACK, on the back (mirrored, so it reads from there; left-
+# justified, as the MK5's credit); BACK_CENTRE, the same centred. Pin names stay PLAIN, beside their pins.
+PLAIN, LABEL, BACK, BACK_CENTRE = "plain", "label", "back", "back-centre"
+SILK = [  # text, x, y, size, rotation, style
+    ("IDE 44-pin (2 mm)", 108.9, 137.0, 1.0, 90, LABEL),
+    ("Pull pin 20. One host only.", 110.75, 137.0, 0.8, 90, PLAIN),
+    ("IDE 40-pin", 112.6, 137.0, 1.0, 90, LABEL),
+    ("5V", 127.0, 101.3, 0.8, 0, PLAIN), ("GND", 129.54, 101.3, 0.8, 0, PLAIN),
+    ("TX", 132.08, 101.3, 0.8, 0, PLAIN), ("RX", 134.62, 101.3, 0.8, 0, PLAIN),
+    ("Synth link", 130.81, 106.55, 1.0, 0, LABEL),
+    ("CLK", 138.46, 101.3, 0.8, 0, PLAIN), ("GND", 141.0, 101.3, 0.8, 0, PLAIN),
+    ("DIO", 143.54, 101.3, 0.8, 0, PLAIN),
+    ("SWD", 140.97, 106.55, 1.0, 0, LABEL),
+    ("+5V GND", 178.25, 108.5, 0.8, 0, PLAIN),
+    ("5V in", 183.7, 103.6, 1.0, 90, LABEL),        # J2's, beside it: no room below
+    ("Boot sel", 165.0, 156.2, 1.0, 0, LABEL),
+    ("Reset", 173.5, 156.2, 1.0, 0, LABEL),
+    ("JP1: close for firmware\nwithout BUS_EN#", 132.6, 166.2, 0.8, 0, PLAIN),
+    ("Molex power", 171.0, 158.3, 1.0, 0, LABEL),
+    ("12V", 164.0, 160.3, 0.8, 0, PLAIN), ("GND", 169.08, 160.3, 0.8, 0, PLAIN),
+    ("GND", 174.16, 160.3, 0.8, 0, PLAIN), ("+5V", 179.24, 160.3, 0.8, 0, PLAIN),
+    ("CD audio", 188.8, 129.6, 1.0, 0, LABEL),
+    ("L-G-G-R", 196.4, 129.6, 0.8, 0, PLAIN),
+    ("SD card", 181.9, 136.0, 1.0, 90, LABEL),
+    # On the back: the board's name under Park Heads, and the MK5's credit, as on the FDD Synth Pro
+    # (the same place on the same outline: by the left edge, reading up).
+    ("HDDSynthPro rev 0.4", 165.5, 155.6, 1.0, 0, BACK_CENTRE),
+    ("Nostalgia by Peter Bridger", X0 + 1.27, Y0 + 52.13, 1.0, 270, BACK),
 ]
+# References the labels stand in for: hidden, as on the FDD Synth Pro (the fab layer keeps them).
+LABELLED = ["J2", "J3", "J4", "J5", "J6", "J7", "J8", "J9", "SW1", "SW2"]
 # Net-name patterns for the Power class (local nets carry their sheet path).
 POWER_PATTERNS = ["VB", "5V_LINK", "*/VBUS_USB", "*/5V_EXT", "*/5V_EXT_IN", "5V_IDE44", "*/5V_IDE44_F",
                   "*/5V_MOLEX", "*/5V_MOLEX_IN"]  # GND and +3V3 are planes
@@ -585,30 +605,67 @@ def core_copper(board):
         board.Add(v)
 
 
-def silkscreen(board, logo):
-    """The board's own silkscreen: the logo and the labels. Replaces any already there.
+def style_text(t, text, x, y, size, angle, style):
+    t.SetText(text)
+    back = style in (BACK, BACK_CENTRE)
+    t.SetLayer(pcbnew.B_SilkS if back else pcbnew.F_SilkS)
+    t.SetPosition(pcbnew.VECTOR2I(mm(x), mm(y)))
+    t.SetTextAngleDegrees(angle)
+    t.SetTextSize(pcbnew.VECTOR2I(mm(size), mm(size)))
+    t.SetMirrored(back)
+    t.SetIsKnockout(style == LABEL)
+    t.SetBold(style == LABEL)
+    t.SetTextThickness(mm(0.2 if style == LABEL else 0.1 if back else size * 0.15))
+    t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_LEFT if style == BACK else pcbnew.GR_TEXT_H_ALIGN_CENTER)
+    t.SetVertJustify(pcbnew.GR_TEXT_V_ALIGN_BOTTOM if style == BACK else pcbnew.GR_TEXT_V_ALIGN_CENTER)
 
-    `logo` is the loaded LOGO_HDDSynthPro footprint: load it before LoadBoard(), as
-    FootprintLoad() fails in KiCad 10's bindings once a board has been loaded.
+
+def art_footprints():
+    """The logo and the easter eggs, loaded: do it before LoadBoard(), as FootprintLoad() fails in
+    KiCad 10's bindings once a board has been loaded."""
+    return {name: load_footprint(f"HDDSynthPro:{name}") for name in ["LOGO_HDDSynthPro"] + [e[0] for e in EGGS]}
+
+
+def silkscreen(board, art):
+    """The board's own silkscreen: the logo, the easter eggs, the labels. Replaces any already there.
+
+    `art` is art_footprints()'s. KiCad 10's bindings fail on the next Remove() after one, so texts
+    already there are restyled in place (matched by their text, in order), new ones added, and what's
+    left over (texts no longer in SILK, the old logo and eggs) removed last, with one Remove() each
+    through the board's own list, which saving survives.
     """
-    for d in list(board.GetDrawings()):
-        if d.GetClass() == "PCB_TEXT" and d.GetLayer() == pcbnew.F_SilkS:
-            board.Remove(d)
-    old = board.FindFootprintByReference("LOGO1")
-    if old:
-        board.Remove(old)
-    logo.SetReference("LOGO1")
-    logo.SetPosition(pcbnew.VECTOR2I(mm(LOGO[0]), mm(LOGO[1])))
-    board.Add(logo)
-    for text, x, y, size, rot in SILK:
-        t = pcbnew.PCB_TEXT(board)
-        t.SetText(text)
-        t.SetPosition(pcbnew.VECTOR2I(mm(x), mm(y)))
-        t.SetTextAngleDegrees(rot)
-        t.SetLayer(pcbnew.F_SilkS)
-        t.SetTextSize(pcbnew.VECTOR2I(mm(size), mm(size)))
-        t.SetTextThickness(mm(size * 0.15))
-        board.Add(t)
+    old_texts = {}
+    for d in board.GetDrawings():
+        if d.GetClass() == "PCB_TEXT" and d.GetLayer() in (pcbnew.F_SilkS, pcbnew.B_SilkS):
+            old_texts.setdefault(d.GetText(), []).append(d)
+    for text, *rest in SILK:
+        same = old_texts.get(text)
+        if same:
+            t = same.pop(0)
+        else:
+            t = pcbnew.PCB_TEXT(board)
+            board.Add(t)
+        style_text(t, text, *rest)
+    leftover = [t for ts in old_texts.values() for t in ts]
+    placed = [("LOGO1", "LOGO_HDDSynthPro", *LOGO, False)]
+    placed += [(f"EGG{i}", name, x, y, True) for i, (name, x, y) in enumerate(EGGS, start=1)]
+    for ref, name, x, y, back in placed:
+        old = board.FindFootprintByReference(ref)
+        if old:
+            leftover.append(old)
+        fp = art[name]
+        fp.SetReference(ref)
+        fp.Reference().SetVisible(False)
+        fp.SetPosition(pcbnew.VECTOR2I(mm(x), mm(y)))
+        board.Add(fp)
+        if back:  # once it's on the board: Flip crashes on a footprint that isn't
+            fp.Flip(fp.GetPosition(), pcbnew.FLIP_DIRECTION_LEFT_RIGHT)
+    for ref in LABELLED:
+        fp = board.FindFootprintByReference(ref)
+        if fp:
+            fp.Reference().SetVisible(False)
+    for item in leftover:
+        board.Remove(item)
 
 
 def main():
@@ -627,10 +684,10 @@ def main():
         print(f"fields updated on {sys.argv[2]}")
         return
     if len(sys.argv) > 2 and sys.argv[1] == "--silkscreen":
-        # Redo only the logo and labels on an existing (routed) board.
-        logo = load_footprint("HDDSynthPro:LOGO_HDDSynthPro")
+        # Redo only the logo, the easter eggs and the labels on an existing (routed) board.
+        art = art_footprints()
         board = pcbnew.LoadBoard(sys.argv[2])
-        silkscreen(board, logo)
+        silkscreen(board, art)
         board.Save(sys.argv[2])
         print(f"silkscreen updated on {sys.argv[2]}")
         return
@@ -689,7 +746,7 @@ def main():
             fp.Reference().SetPosition(pcbnew.VECTOR2I(mm(REF_TEXT[ref][0]), mm(REF_TEXT[ref][1])))
             fp.Reference().SetTextAngleDegrees(0)
 
-    silkscreen(board, load_footprint("HDDSynthPro:LOGO_HDDSynthPro"))
+    silkscreen(board, art_footprints())
 
     # The zone filler crashes outside the GUI; fill the planes with kicad-cli (see the docstring).
     core_copper(board)

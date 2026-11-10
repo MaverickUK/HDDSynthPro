@@ -26,11 +26,12 @@ Status: **rev 0.4, routed, not reviewed** (8 Nov 2026, branch `pcb-rev04`). Rev 
 | `sd.kicad_sch` | The microSD socket, its pull-ups and (rev 0.4) its power switch |
 | `audio.kicad_sch` | Rev 0.4's CD audio out: PWM, RC filters and the 4-pin header |
 | `hddsynthpro.kicad_pcb` | The board: 100.33 × 69.88 mm, the HDD Synth Mk5's outline and M3 holes, 4 layers (signals, GND plane, 3V3 plane, signals) |
-| `HDDSynthPro.kicad_sym`, `HDDSynthPro.pretty/` | Parts KiCad lacks: the SN74CB3T3245's symbol (pinout from TI's datasheet); Raspberry Pi's polarity-marked inductor and wide-pad 0402 footprints; the TF PUSH microSD socket; the logo. (The old PGA2350 symbol and footprint stay for reference.) |
+| `HDDSynthPro.kicad_sym`, `HDDSynthPro.pretty/` | Parts KiCad lacks: the SN74CB3T3245's symbol (pinout from TI's datasheet); Raspberry Pi's polarity-marked inductor and wide-pad 0402 footprints; the TF PUSH microSD socket; the logo and the easter eggs. (The old PGA2350 symbol and footprint stay for reference.) |
 | `tools/gen_schematic.py` | Generated the schematic, with an LCSC part number and any Fabrication Toolkit offsets on every part |
 | `tools/layout_pcb.py` | Placed the parts and laid the fixed copper (run with KiCad's own Python) |
 | `tools/make_footprints.py` | Made the inductor, wide 0402, TF PUSH and (rev 0.4) Molex disk-power footprints |
 | `tools/make_logo.py` | Made the silkscreen logo footprint from `media/HDDSynthProWide3.png` |
+| `tools/make_eggs.py` | Makes the easter eggs on the back (silkscreen footprints) from `media/Defrag.png` and `media/ParkHeads.png` |
 | `tools/autoroute.py` | Routed the rest with Freerouting |
 | `tools/jlcpcb.py` | Writes `fab/bom-jlcpcb.csv` and `fab/cpl-jlcpcb.csv` for JLCPCB's assembly service |
 | `tools/check_netlist.py` | Checks the schematic against `src/config.h` and Raspberry Pi's support circuit |

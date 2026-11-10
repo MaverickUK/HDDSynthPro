@@ -100,6 +100,12 @@ R53, 10 kΩ (0402, LCSC C25744), from IORDY on the header's side of its bus swit
 - **To 3.3 V, not VB:** 3.3 V is a valid high (ATA's is 2.0 V), the host's 5 V pull-up pushes only about 0.15 mA back through it, and VB is local to the power sheet. With the board off, the host's own pull-up still holds IORDY high.
 - **On the board:** between U5 and J5, above the IDE traces, at (124.7, 136.5); its +3V3 pad goes by a via to the 3V3 plane, its IORDY pad by a via and a 3.5 mm bottom-layer trace to IORDY's via at (124.71, 141.37). Placed by script on the routed board (no other trace moved); DRC as before (two silkscreen-to-edge warnings, nothing unconnected), and `check_netlist.py` now requires the pull-up on the header's side.
 
+## 10. Silkscreen as on the FDD Synth Pro (added 10 Nov)
+
+- **Header labels** in the FDD Synth Pro's (and the HDD Synth MK5's) style: bold, 1 mm, knocked out of a filled box (`LABEL` in `layout_pcb.py`): IDE 40-pin, IDE 44-pin (2 mm), Synth link, SWD, 5V in, Molex power, CD audio, SD card, Boot sel, Reset. Pin names (5V GND TX RX, CLK GND DIO, 12V GND GND +5V, L-G-G-R) and the notes (pull pin 20, one host only; JP1) stay plain, beside what they name. The references the labels stand for are hidden on the silkscreen (J2-J9, SW1, SW2); the fab layer keeps them.
+- **On the back:** "Nostalgia by Peter Bridger" read up the left edge, as on the FDD Synth Pro (the same place on the same outline); the board's name and revision, which no longer fit on the front beside the Molex label; and two easter eggs, made by `tools/make_eggs.py` from `media/Defrag.png` (24 x 8.6 mm, behind the logo) and `media/ParkHeads.png` (20 x 10 mm, behind the buttons). Their black prints as silkscreen, so they show white, in reverse. Each is sized so its finest gaps print (0.15 and 0.21 mm) and placed where the back has no through-hole pad and no via within 0.3 mm.
+- **Checked:** DRC as before (the two silkscreen-to-edge warnings on the USB socket, nothing unconnected, no silkscreen overlaps), parity as before (pin 20), `check_netlist.py` passes; the BOM and placement files are unchanged (the eggs are board-only, like the logo).
+
 ## Dropped since 29 Oct
 
 - **The debug header:** USB-C carries the console, and has been enough for every measurement (core 1's profiles print in `s`). GPIO 46 stays spare.
