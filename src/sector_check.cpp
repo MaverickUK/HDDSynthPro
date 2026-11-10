@@ -68,6 +68,7 @@ bool Checker::checkIdentify(bool& is_identify) {
     ++identify_checked_;
     if (m.bad_words == 0) return false;
     ++identify_bad_;
+    noteStrobes(m);
     mismatch_ = m;
     return true;
 }
@@ -82,6 +83,19 @@ void Checker::expect(uint32_t lba, const uint16_t words[256]) {
     e.lba = lba;
     for (unsigned i = 0; i < 256; ++i) e.words[i] = words[i];
     ++expect_count_;
+}
+
+void Checker::noteStrobes(Mismatch& m) const {
+    if (!HAS_STROBE) return;
+    unsigned i = m.first_word;
+    m.strobe_ns = strobes_[i];
+    m.strobe_before_ns = i > 0 ? strobes_[i - 1] : 0;
+    m.strobe_after_ns = i < 255 ? strobes_[i + 1] : 0;
+    m.strobe_min_ns = m.strobe_max_ns = strobes_[0];
+    for (unsigned k = 1; k < 256; ++k) {
+        if (strobes_[k] < m.strobe_min_ns) m.strobe_min_ns = strobes_[k];
+        if (strobes_[k] > m.strobe_max_ns) m.strobe_max_ns = strobes_[k];
+    }
 }
 
 Mismatch Checker::compare(uint32_t lba, const uint16_t* want) const {
@@ -143,6 +157,7 @@ bool Checker::checkExpected() {
     ++checked_;
     if (best_m.bad_words == 0) return false;
     ++bad_;
+    noteStrobes(best_m);
     mismatch_ = best_m;
     return true;
 }
@@ -157,7 +172,7 @@ bool Checker::observe(uint32_t word, bool data) {
         count_ = 0;  // part of this sector is missing,
         aligned_ = false;  // and where the next one starts
     }
-    uint32_t sample = word & ((1u << SEQ_SHIFT) - 1);
+    uint32_t sample = word & SAMPLE_MASK;
     bus::Block block = bus::block(sample);
     bool dma = block == bus::Block::None;  // DIOR# with no chip select: a DMA word
     if (!dma && (block != bus::Block::Command || bus::address(sample) != 0)) {
@@ -166,6 +181,7 @@ bool Checker::observe(uint32_t word, bool data) {
         return false;
     }
     if (dma) ++dma_words_;
+    strobes_[count_] = uint16_t(strobeNs(word));
     words_[count_++] = bus::data(sample);
     if (count_ < 256) return false;
     count_ = 0;
@@ -206,6 +222,7 @@ bool Checker::finishSector(bool data) {
         ++checked_;
         if (m.bad_words == 0) return false;
         ++bad_;
+        noteStrobes(m);
         mismatch_ = m;
         return true;
     }

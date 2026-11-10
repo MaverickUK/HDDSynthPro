@@ -13,19 +13,29 @@ pytestmark = pytest.mark.sim
 REPO = Path(__file__).resolve().parents[2]
 
 
-def plan_constants() -> dict[str, int]:
+def plan_constants(strobe: bool = False) -> dict[str, int]:
+    """The *_SLOTS constants, as built without HDDPRO_OBSERVER_STROBE (or, with
+    `strobe`, with it: the first of a constant's `#if` / `#else` pair)."""
     text = (REPO / "src" / "pio_plan.h").read_text()
     out = {}
     for name, expr in re.findall(r"constexpr unsigned (\w+_SLOTS) = ([0-9 +]+);", text):
+        if strobe and name in out:
+            continue  # the #else line: not this build's
         out[name] = sum(int(n) for n in expr.split("+"))
     return out
+
+
+def test_plan_slots_for_the_strobe_observer(assemble):
+    """With HDDPRO_OBSERVER_STROBE the observer is bus_observer_strobe."""
+    total = len(assemble("bus_observer", "bus_observer_strobe").instructions)
+    assert plan_constants(strobe=True)["BUS_OBSERVER_SLOTS"] == total
 
 
 @pytest.mark.parametrize("constant, programs", [
     ("IDE_DMA_SLOTS", [("ide_dma", "ide_dma_read"), ("ide_dma", "ide_dma_write")]),
     ("IOCS16_SLOTS", [("iocs16", None)]),
     ("IORDY_TIMER_SLOTS", [("iordy_timer", None), ("iordy_check", None)]),
-    ("BUS_OBSERVER_SLOTS", [("bus_observer", None)]),
+    ("BUS_OBSERVER_SLOTS", [("bus_observer", "bus_observer")]),
     ("BUS_TIMING_SLOTS", [("bus_timing", None)]),
 ])
 def test_plan_slots_match_the_programs(assemble, constant, programs):

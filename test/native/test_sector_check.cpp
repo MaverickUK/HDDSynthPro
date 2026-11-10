@@ -17,15 +17,25 @@ namespace {
 // Builds observer words, numbering them as the PIO program does.
 struct Observer {
     uint32_t seq = 0;
+    unsigned strobe_ns = 300;  // how long the next reads hold DIOR# low (HAS_STROBE)
 
     uint32_t read(bool command_block, unsigned addr, uint16_t data) {
         uint32_t s = data;
         s |= (addr & 7u) << bus::bitOf(cfg::PIN_DA0);
         // CS0# low selects the command block, CS1# low the control block
         s |= command_block ? bus::maskOf(cfg::PIN_CS1_N) : bus::maskOf(cfg::PIN_CS0_N);
-        uint32_t w = s | ((seq & SEQ_MASK) << SEQ_SHIFT);
+        uint32_t w = s | ((seq & SEQ_MASK) << SEQ_SHIFT) | strobeBits();
         seq = (seq - 1) & SEQ_MASK;
         return w;
+    }
+    // bus_observer_strobe's pass count: down from 63, one pass per 15 ns.
+    uint32_t strobeBits() const {
+#if HDDPRO_OBSERVER_STROBE
+        uint32_t passes = strobe_ns / STROBE_PASS_NS;
+        return ((STROBE_MASK - passes) & STROBE_MASK) << STROBE_SHIFT;
+#else
+        return 0;
+#endif
     }
     uint32_t status() { return read(true, 7, 0x58); }
     uint32_t data(uint16_t v) { return read(true, 0, v); }
@@ -441,7 +451,43 @@ TEST(test_sector_check_identify_of_either_unit) {
     CHECK_EQ(c.mismatch().first_word, 30u);
 }
 
+// The Evesham's wrong word (10 Nov 2026): one read of a CD sector carried the
+// word before it again. With HDDPRO_OBSERVER_STROBE the report says how long
+// that read and its neighbours held DIOR# low, so a read the host cut short
+// shows; without it, the fields are 0.
+TEST(test_sector_check_reports_the_strobe_of_the_wrong_word) {
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    auto good = imageWords(17366);
+    c.expect(17366, good.data());
+    auto seen = good;
+    seen[93] = seen[92];
+    c.observe(o.status(), false);
+    int reports = 0;
+    for (unsigned i = 0; i < 256; ++i) {
+        o.strobe_ns = i == 93 ? 75 : (i == 92 ? 240 : (i == 94 ? 255 : 300));
+        reports += c.observe(o.data(seen[i]), false) ? 1 : 0;
+    }
+    CHECK_EQ(reports, 1);
+    const Mismatch& m = c.mismatch();
+    CHECK_EQ(m.first_word, 93u);
+    CHECK_EQ(m.seen, good[92]);
+#if HDDPRO_OBSERVER_STROBE
+    CHECK_EQ(m.strobe_ns, 75u);
+    CHECK_EQ(m.strobe_before_ns, 240u);
+    CHECK_EQ(m.strobe_after_ns, 255u);
+    CHECK_EQ(m.strobe_min_ns, 75u);
+    CHECK_EQ(m.strobe_max_ns, 300u);
+    // And the pass count wraps every 64 passes (960 ns).
+    CHECK_EQ(strobeNs(uint32_t(STROBE_MASK - 4) << STROBE_SHIFT), 60u);
+#else
+    CHECK_EQ(m.strobe_ns, 0u);
+    CHECK_EQ(m.strobe_max_ns, 0u);
+#endif
+}
+
 void runSectorCheckTests() {
+    RUN(test_sector_check_reports_the_strobe_of_the_wrong_word);
     RUN(test_sector_check_identify_of_either_unit);
     RUN(test_sector_check_identify_good);
     RUN(test_sector_check_identify_garbled);
@@ -466,3 +512,4 @@ void runSectorCheckTests() {
     RUN(test_sector_check_image_ring_overflow);
     RUN(test_sector_check_image_text_isnt_identify);
 }
+

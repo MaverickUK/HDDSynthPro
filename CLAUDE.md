@@ -147,8 +147,7 @@ The current state only; the history, with every measurement, is in `CHANGELOG.md
   - Core 1's speed depends on where its code sits (0.32.0-dev.2-4 read 2.5% slower with byte-identical functions 3.6 KB further on); since dev.5 the layout is fixed and checked (*Core split*).
   - RAM is 95.5% used.
   - PIO writes on 0.32.0 are 2% below 0.31.0's (core 0 suspected).
-  - **A wrong data word from the CD-ROM on the Evesham** (10 Nov, 0.32.0, PIO 3, `ide_bus`): once in about 5.8 million words, the host read the previous word again (Doom quit: `GSTONE1` read as `GSTOTO1`), with `iordy_ignored=0`; the card's data was right. Probably a read the host didn't wait for, from a DD `ide_bus.pio` had released; perhaps IORDY low too late (45-55 ns after DIOR# rises) for back-to-back reads. Open: [docs/atapi.md](docs/atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
-  - `STUCK` names the last hard disk command, not a CD-ROM's packet command.
+  - **A wrong data word from the CD-ROM on the Evesham** (10 Nov, 0.32.0, PIO 3, `ide_bus`): once in about 5.8 million words, the host read the previous word again (Doom quit: `GSTONE1` read as `GSTOTO1`), with `iordy_ignored=0`; the card's data was right. The simulator rules out a host skipping its IORDY wait (`iordy_check` flags every such case, `test_stale_word_sim.py`), so it's electrical (the strobe cut short as DD is driven) or the drive offering the wrong word. 0.32.1-dev.1's `-DHDDPRO_OBSERVER_STROBE=1` times each read's strobe in `BUSERR` to tell them apart; the board is on `bb48_drive` built with it, for the next Evesham run. Open: [docs/atapi.md](docs/atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
   - macOS reads the CD-ROM's whole device with READ CD (0xBE), which the drive refuses; the data volume reads.
   - The bus observer's sector check is unreliable behind ISA cards, which strobe DIOR# with no chip select (counted as DMA words).
 - **The drive builds** hold:

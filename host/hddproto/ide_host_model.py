@@ -112,6 +112,7 @@ class Access:
     addr: int
     data: int = 0       # for writes
     hold_cs: bool = False  # keep CS/DA asserted afterwards (back-to-back data)
+    ignore_iordy: bool = False  # this strobe ends after t2 whatever IORDY says
 
 
 @dataclass
@@ -173,7 +174,19 @@ class Run:
 
 
 def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = Mode0(),
-             start_ns: float = 100.0, tail_ns: float = 1000.0, timeout_ns: float = 5000.0) -> Run:
+             start_ns: float = 100.0, tail_ns: float = 1000.0, timeout_ns: float = 5000.0,
+             observers: tuple[PioSim, ...] = (), dd_keeper: bool = False,
+             iordy_rise_ns: float = 0.0) -> Run:
+    """Runs the host's accesses against `sim` and `core1`.
+
+    `observers`: other state machines that only read the pins (iordy_check,
+    bus_observer), stepped each cycle on the same pins through their own
+    synchronisers; their RX FIFOs collect what they report.
+    `dd_keeper`: undriven DD lines keep the last value driven on them (the
+    cable's capacitance), instead of reading as floating; a host read of an
+    undriven bus then latches that value rather than None.
+    `iordy_rise_ns`: IORDY reads high (to the host and the pins) only this
+    long after the device releases it, for the host's pull-up to raise it."""
     T = {k: int(v * 1000) for k, v in timing.__dict__.items() if not isinstance(v, bool)}
     waits = timing.waits_for_iordy
     results: list[Result] = []
@@ -198,6 +211,8 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
     iordy_low_since = None
     last_read: Result | None = None
     drive_since = None
+    kept_dd = DD_MASK      # the value undriven DD lines hold (dd_keeper)
+    released_at = None     # when the device last released IORDY
     t = 0
     end_ps = None
 
@@ -213,6 +228,14 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
         iordy_low = device_iordy_low()
         if iordy_low and (sim.pin_out >> B_IORDY) & 1:
             errors.append(f"{t / 1000:.0f} ns: IORDY driven high")
+        # IORDY as the line shows it: low while pulled, and a while after
+        if iordy_low:
+            released_at = None
+        elif released_at is None:
+            released_at = t
+        line_low = iordy_low or (released_at is not None and t - released_at < int(iordy_rise_ns * 1000))
+        if dev_drive == DD_MASK:
+            kept_dd = sim.pin_out & DD_MASK
 
         # Track when IORDY went low (for the lead-time measurement)
         if iordy_low and iordy_low_since is None:
@@ -252,14 +275,14 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             if cur.iordy_low_lead_ns is None and iordy_low and not tA_checked:
                 cur.iordy_low_lead_ns = (fall - t) / 1000
             if not tA_checked and t >= fall + T["tA"]:
-                cur.iordy_low_at_tA = iordy_low
+                cur.iordy_low_at_tA = line_low
                 tA_checked = True
             end = None
             if tA_checked:
-                if not cur.iordy_low_at_tA or not waits:
+                if not cur.iordy_low_at_tA or not waits or cur.access.ignore_iordy:
                     end = fall + T["t2"]
                 else:
-                    if iordy_seen_high_at is None and not iordy_low:
+                    if iordy_seen_high_at is None and not line_low:
                         iordy_seen_high_at = t
                         cur.wait_ns = (t - fall) / 1000
                     if iordy_seen_high_at is not None:
@@ -273,7 +296,8 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
                     diow = 1
                     host_dd_until = t + T["t4"]
                 else:
-                    cur.read_value = (sim.pin_out & DD_MASK) if dev_drive == DD_MASK else None
+                    cur.read_value = (sim.pin_out & DD_MASK) if dev_drive == DD_MASK else (
+                        kept_dd if dd_keeper else None)
                     if drive_since is not None:
                         cur.data_setup_ns = (t - drive_since) / 1000
                     dior = 1
@@ -312,11 +336,13 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             elif dev_drive:
                 dd = sim.pin_out & DD_MASK
             else:
-                dd = DD_MASK  # floating
+                dd = kept_dd if dd_keeper else DD_MASK  # floating
             pins = (dd | (da << B_DA0) | (cs0 << B_CS0) | (cs1 << B_CS1) | (dior << B_DIOR)
-                    | (diow << B_DIOW) | ((0 if iordy_low else 1) << B_IORDY) | (1 << B_RESET))
+                    | (diow << B_DIOW) | ((0 if line_low else 1) << B_IORDY) | (1 << B_RESET))
             history.append(pins)
             sim.step(synced(history, k, sim.bypass_mask))
+            for observer in observers:
+                observer.step(synced(history, k, observer.bypass_mask))
             while sim.rx_fifo and core1.ready(t):
                 rx_words += 1
                 core1.on_word(t, sim.rx_fifo.pop(0))

@@ -29,8 +29,35 @@ namespace sector_check {
 
 // One observer word: bits 0-20 as in the pin sample (DD0-15, DA2-0, CS0#,
 // CS1#), bits 21-31 a sequence number that counts down by one per read.
+// With HDDPRO_OBSERVER_STROBE (bus_observer_strobe, a bench diagnostic), bits
+// 21-26 are how long DIOR# was low, in the observer's 15 ns passes counting
+// down from 63, and bits 27-31 the sequence number.
+constexpr unsigned SAMPLE_BITS = 21;
+constexpr uint32_t SAMPLE_MASK = (1u << SAMPLE_BITS) - 1;
+#if HDDPRO_OBSERVER_STROBE
+constexpr bool HAS_STROBE = true;
+constexpr unsigned STROBE_SHIFT = 21;
+constexpr uint32_t STROBE_MASK = 0x3Fu;
+constexpr unsigned STROBE_PASS_NS = 15;  // 3 cycles at 200 MHz
+constexpr unsigned SEQ_SHIFT = 27;
+constexpr uint32_t SEQ_MASK = 0x1Fu;
+#else
+constexpr bool HAS_STROBE = false;
 constexpr unsigned SEQ_SHIFT = 21;
 constexpr uint32_t SEQ_MASK = 0x7FFu;
+#endif
+
+// How long DIOR# was low for an observer word, in ns (HAS_STROBE), from the
+// observer's passes: exact to a pass, and wrapping every 64 passes (960 ns).
+inline unsigned strobeNs(uint32_t word) {
+#if HDDPRO_OBSERVER_STROBE
+    unsigned passes = (STROBE_MASK - ((word >> STROBE_SHIFT) & STROBE_MASK)) & STROBE_MASK;
+    return passes * STROBE_PASS_NS;
+#else
+    (void)word;
+    return 0;
+#endif
+}
 
 // Mismatch::lba for an IDENTIFY block.
 constexpr uint32_t IDENTIFY_LBA = 0xFFFFFFFFu;
@@ -49,6 +76,10 @@ struct Mismatch {
     uint16_t bad_words;    // how many of the 256 were wrong
     uint16_t bits_lost;    // 1s read as 0, over the sector
     uint16_t bits_gained;  // 0s read as 1
+    // How long DIOR# was low (HAS_STROBE; else 0), in ns: the first wrong
+    // word's read, the reads either side of it, and the sector's shortest
+    // and longest. A read the host cut short shows against its neighbours.
+    uint16_t strobe_ns, strobe_before_ns, strobe_after_ns, strobe_min_ns, strobe_max_ns;
 };
 
 class Checker {
@@ -127,6 +158,8 @@ private:
     unsigned compareIdentify(unsigned unit, Mismatch& m) const;
     uint32_t identify_checked_ = 0, identify_bad_ = 0;
     uint16_t words_[256];
+    uint16_t strobes_[256];  // each word's read, in ns (HAS_STROBE)
+    void noteStrobes(Mismatch& m) const;
     unsigned count_ = 0;
     bool aligned_ = true;  // count_ is known to start at a sector (see resync)
     uint64_t dma_words_ = 0;  // 64-bit: DMA's rate wraps 32 bits in a few hours

@@ -57,10 +57,21 @@ Console `M`, then a disc and Enter, in both CD-ROM builds: an ISO or a CUE sheet
 
 Either way `iordy_check.pio` should have caught it: the host's strobe would end while IORDY was low, before core 1 answered. Unless core 1 answered within the host's strobe but after its data sampling, which is the case it can't see, or a DIOR# glitch did something else.
 
-**Next:**
-- On the bench: the test disc as device 1, read in a loop through the USB adapter with full observer checks, to see whether any host shows it.
-- In the simulator: `pio_sim` with `ide_host_model`, back-to-back data reads with recovery under 70 ns, to see where IORDY lands.
-- If it's (1), a fix would keep IORDY low from one data read to the next, rather than releasing it between them.
+**What the simulator says (11 Nov, `host/tests/test_stale_word_sim.py`):** neither candidate fits.
+- **(1) is ruled out:** `ide_bus` pulls IORDY low again 25-30 ns after DIOR# rises, not the 45-55 ns guessed above. So IORDY is low at the next strobe's tA with recovery down to 20 ns.
+- **A host that skips its wait gets flagged:** with `iordy_check` and the bus observer running beside `ide_bus` on the same pins, every data read the host didn't wait for and read wrong was flagged. That's 1,165 cases, over core 1 latencies of 40-300 ns, strobes of 60-300 ns, recovery of 10-70 ns, undriven DD lines keeping their last word, and IORDY rising over up to 25 ns. So (2), as the model knows it, doesn't fit `iordy_ignored=0` either.
+
+**What fits the evidence:**
+- The observer saw `TO` on the cable within 20 ns of DIOR# rising, and the words before and after were right.
+- `iordy_check` saw IORDY high just after the strobe. The program releases IORDY only 40 ns after driving DD, so the drive had been driving DD for at least that long.
+
+So either:
+- **Electrical:** DD didn't take the new word in 40 ns or more, or something cut the strobe short at the moment DD was driven. For example, simultaneous switching noise briefly lifting the IORDY low the drive holds, so that the host ended the strobe within a few tens of ns.
+- **The drive offered `TO`:** core 1's word for that read was word 92 again, from a sector buffer changed under it. Reading the code, no path of core 1's answers a data read with a stale word and still steps past it (the direct answer, `serveOther`'s catch-up, a sample with DIOW# or the address misread). Each gives the right word or shifts the rest, and the rest wasn't shifted. A buffer written under core 1 is still open.
+
+**The measurement that decides:** 0.32.1-dev.1's `-DHDDPRO_OBSERVER_STROBE=1` makes the bus observer time each read's strobe, and `BUSERR` report the wrong word's against its neighbours'. A short one (tens of ns, against hundreds) is the electrical case; one as long as the rest is the drive offering the wrong word. The board was left on `bb48_drive` built with it (the card on SPI, so the observer has its block). Next on the Evesham: Doom's demo with the observer on full checks (console `O`) until a `BUSERR`, then read its `strobe_ns`.
+
+**On the bench:** `-m cdsoak` reads the test disc in Doom's pattern for an hour with every sector checked. But through the rig's adapter the CD's data goes by multiword DMA, not `ide_bus`'s PIO data path, so it soaks the CD-ROM's commands and the card, not this fault. A host that reads a CD-ROM by PIO is what reproduces it.
 
 ## The Evesham's unwaited CD data reads (4 Nov 2026)
 

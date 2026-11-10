@@ -27,3 +27,29 @@ done:
     push noblock            ; DMA keeps the FIFO empty
     jmp y-- top
 .wrap
+
+; As bus_observer, with how long DIOR# was low (HDDPRO_OBSERVER_STROBE, a
+; bench diagnostic): X counts the sampling loop's passes, one per 3 cycles
+; (15 ns at 200 MHz), so a read the host cut short shows apart from one it
+; waited for. Each word:
+;   bits 20-0   the sample, as above
+;   bits 26-21  the passes, counting down from 63 (wrapping every 64: 960 ns)
+;   bits 31-27  the sequence number, counting down (gaps still show, modulo 32)
+; Two instructions more than bus_observer (src/pio_plan.h).
+
+.program bus_observer_strobe
+.wrap_target
+top:
+    wait 0 gpio 26          ; DIOR# falls: the host starts a read
+    mov x, !null            ; the pass count, down from all ones
+sample:
+    mov osr, pins           ; sample, and again while DIOR# is low
+    jmp pin done            ; DIOR# has risen: the last sample is the one
+    jmp x-- sample          ; one pass more (x never reaches 0 in a read)
+done:
+    in osr, 21              ; DD0-15, DA2-0, CS0#, CS1#
+    in x, 6                 ; the passes
+    in y, 5                 ; the sequence number on top
+    push noblock            ; DMA keeps the FIFO empty
+    jmp y-- top
+.wrap

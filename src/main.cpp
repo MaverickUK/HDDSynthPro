@@ -1724,11 +1724,12 @@ static void serviceAbsence() {
     if (millis() - g_absent_since_ms >= ABSENT_MAX_MS) setAbsent(false, " timeout");
 }
 
-// The last media command seen, for the STUCK line (checkStuck).
+// The last command started, of any kind and on either device, for the STUCK
+// line (checkStuck): a CD-ROM's READ(10) is a PACKET, not a media command.
 static struct {
-    uint8_t command = 0;
+    uint8_t command = 0, packet = 0, unit = 0;
     uint32_t lba = 0, count = 0;
-} g_last_command;
+} g_last_started;
 
 // On an SD image the bus observer checks IDENTIFY only around detection,
 // which comes about 2.6 s after RESET# is released: for this long after each
@@ -1752,6 +1753,13 @@ static CommandHistory g_commands;
 
 static void noteActivity(const TraceEvent& e) {
     g_commands.note(e);
+    if (e.kind == TraceKind::CommandStart) {
+        g_last_started.command = uint8_t(e.extra);
+        g_last_started.packet = uint8_t(e.extra >> 24);
+        g_last_started.unit = e.unit;
+        g_last_started.lba = e.pins;
+        g_last_started.count = commandCount(e);
+    }
     if (e.kind == TraceKind::ResetRelease) {
         g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
         g_release_ms = millis();
@@ -1761,9 +1769,6 @@ static void noteActivity(const TraceEvent& e) {
     uint8_t command = uint8_t(e.extra);
     if (!activity::isMediaCommand(command)) return;
     if (e.kind == TraceKind::CommandStart) {
-        g_last_command.command = command;
-        g_last_command.lba = e.pins;
-        g_last_command.count = commandCount(e);
         activity_link::Op op = activity_link::opOf(command);
         bool seek_only = (command >= 0x10 && command <= 0x1F) || (command >= 0x70 && command <= 0x7F);
         if (op != activity_link::Op::None)
@@ -1854,9 +1859,13 @@ static void checkStuck() {
     }
     if (reported || now - since_ms < STUCK_MS) return;
     reported = true;
-    Serial.printf("STUCK cmd=%02x lba=%lu count=%lu busy_ms=%lu fetches=%lu last_fetch=%lu lba=%lu %s ok=%d "
+    // The command named is the last one started, on either device: what
+    // core 1 is running, unless its CMD event is still in the trace ring.
+    const auto& c = g_last_started;
+    Serial.printf("STUCK cmd=%02x%s%s lba=%lu count=%lu%s busy_ms=%lu fetches=%lu last_fetch=%lu lba=%lu %s ok=%d "
                   "ago_ms=%lu results_waiting=%u\n",
-                  g_last_command.command, (unsigned long)g_last_command.lba, (unsigned long)g_last_command.count,
+                  c.command, c.command == 0xA0 ? " " : "", c.command == 0xA0 ? mmc::name(c.packet) : "",
+                  (unsigned long)c.lba, (unsigned long)c.count, c.unit ? " d1" : "",
                   (unsigned long)(now - since_ms), (unsigned long)g_last_fetch.count, (unsigned long)g_last_fetch.id,
                   (unsigned long)g_last_fetch.lba, g_last_fetch.store ? "store" : "read", (int)g_last_fetch.ok,
                   (unsigned long)(now - g_last_fetch.at_ms), unsigned(g_mailbox.resultsWaiting()));
