@@ -13,7 +13,8 @@
 // Off (the default) every call compiles to nothing, so the normal builds'
 // core 1 code is unchanged (scripts/check_core1_layout.py). On, each access
 // costs a few cycles, which moves core 1's timings a little: compare like
-// with like.
+// with like. Freezing a copy costs about 1.5 us once, which may hold the next
+// access; no second copy is taken until core 0 has printed the first.
 #pragma once
 
 #include <cstdint>
