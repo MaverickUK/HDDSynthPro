@@ -1,6 +1,6 @@
-# HDDSynthPro hardware
+# IDE Synth Bay hardware
 
-The KiCad project for the HDDSynthPro board: an RP2350B that acts as an IDE drive. The microcontroller and its support parts (core regulator, crystal, flash, USB) are on the board, following Raspberry Pi's RP2350 minimal design; rev 0.1 used a Pimoroni PGA2350 module instead. The design and the reasons for it are in [docs/pcb.html](../docs/pcb.html); open it in a browser.
+The KiCad project for the IDE Synth Bay board (formerly HDD Synth Pro): an RP2350B that acts as an IDE drive. The files keep the old name (`hddsynthpro.kicad_*`, the `HDDSynthPro` library). The microcontroller and its support parts (core regulator, crystal, flash, USB) are on the board, following Raspberry Pi's RP2350 minimal design; rev 0.1 used a Pimoroni PGA2350 module instead. The design and the reasons for it are in [docs/pcb.html](../docs/pcb.html); open it in a browser.
 
 Status: **rev 0.4, routed, not reviewed** (8 Nov 2026, branch `pcb-rev04`). Rev 0.3 (ordered 28 Oct) is in `production/` and in git history (commit 4fee041). What rev 0.4 adds, and why: [docs/pcb-rev04.md](../docs/pcb-rev04.md).
 
@@ -30,7 +30,7 @@ Status: **rev 0.4, routed, not reviewed** (8 Nov 2026, branch `pcb-rev04`). Rev 
 | `tools/gen_schematic.py` | Generated the schematic, with an LCSC part number and any Fabrication Toolkit offsets on every part |
 | `tools/layout_pcb.py` | Placed the parts and laid the fixed copper (run with KiCad's own Python) |
 | `tools/make_footprints.py` | Made the inductor, wide 0402, TF PUSH and (rev 0.4) Molex disk-power footprints |
-| `tools/make_logo.py` | Made the silkscreen logo footprint from `media/HDDSynthProWide3.png` |
+| `tools/make_logo.py` | Makes the silkscreen logo footprint from `media/IDESynthBay.png` |
 | `tools/make_eggs.py` | Makes the easter eggs on the back (silkscreen footprints) from `media/Defrag.png` and `media/ParkHeads.png` |
 | `tools/autoroute.py` | Routed the rest with Freerouting |
 | `tools/jlcpcb.py` | Writes `fab/bom-jlcpcb.csv` and `fab/cpl-jlcpcb.csv` for JLCPCB's assembly service |
@@ -90,7 +90,7 @@ kicad-cli pcb drc --refill-zones --save-board --schematic-parity hddsynthpro.kic
 
 Then `tools/widen_power.py` (KiCad's Python, `kicad-cli` on `PATH`) widens VB to 0.6 mm and SD_VDD to 0.4 mm wherever the clearances allow, stepping each segment down until DRC is clean: Freerouting doesn't keep the Power class's width.
 
-The logo (19.4 × 16 mm, bottom middle of the front) is the board-only footprint `LOGO_HDDSynthPro`: dark pixels of `media/HDDSynthProWide3.png` as silkscreen, strokes widened to about 0.15 mm so they print. `tools/layout_pcb.py --silkscreen hddsynthpro.kicad_pcb` redoes the logo and labels on the routed board without touching the traces; `--fields` copies the schematic's fields (LCSC numbers, offsets) onto it.
+The logo (17.2 × 15 mm, bottom middle of the front) is the board-only footprint `LOGO_IDESynthBay`: dark pixels of `media/IDESynthBay.png` as silkscreen (the discs' grey shading drops out), "BAY"'s thin bars closed into solid letters, strokes widened so they print. The easter eggs on the back come the same way from `tools/make_eggs.py`. `tools/layout_pcb.py --silkscreen hddsynthpro.kicad_pcb` redoes the logo, the easter eggs and the labels on the routed board without touching the traces; `--fields` copies the schematic's fields (LCSC numbers, offsets) onto it.
 
 ## Editing
 

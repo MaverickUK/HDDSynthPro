@@ -106,6 +106,10 @@ R53, 10 kΩ (0402, LCSC C25744), from IORDY on the header's side of its bus swit
 - **On the back:** "Nostalgia by Peter Bridger" read up the left edge, as on the FDD Synth Pro (the same place on the same outline); the board's name and revision, which no longer fit on the front beside the Molex label; and two easter eggs, made by `tools/make_eggs.py` from `media/Defrag.png` (24 x 8.6 mm, upright between the two IDE headers, reading up as the credit does) and `media/ParkHeads.png` (20 x 10 mm, behind the buttons). Their black prints as silkscreen, so they show white, in reverse. Each is sized so its finest gaps print (0.15 and 0.21 mm) and placed where the back has no through-hole pad and no via within 0.3 mm.
 - **Checked:** DRC as before (the two silkscreen-to-edge warnings on the USB socket, nothing unconnected, no silkscreen overlaps), parity as before (pin 20), ERC clean (0 errors, 0 warnings), `check_netlist.py` passes; the BOM and placement files are unchanged (the eggs are board-only, like the logo).
 
+## 11. The new name: IDE Synth Bay (added 10 Nov)
+
+The project is renamed from HDD Synth Pro to IDE Synth Bay: it serves CD-ROM drives as well as hard disks now. On the board: the logo is `LOGO_IDESynthBay` (17.2 x 15 mm, where the old one was), made by `tools/make_logo.py` from `media/IDESynthBay.png` (the discs' grey shading drops out; "BAY"'s thin bars are closed into solid letters, since 0.1 mm bars wouldn't print); the back reads "IDE Synth Bay rev 0.4"; the schematic's title blocks say IDE Synth Bay. The files keep their names (`hddsynthpro.kicad_*`, the `HDDSynthPro` library), so nothing that refers to them changes. DRC, parity and ERC as before, `check_netlist.py` passes, the BOM and placement files unchanged.
+
 ## Dropped since 29 Oct
 
 - **The debug header:** USB-C carries the console, and has been enough for every measurement (core 1's profiles print in `s`). GPIO 46 stays spare.

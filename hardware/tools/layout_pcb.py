@@ -1,4 +1,4 @@
-"""Creates the first version of the HDDSynthPro board: footprints placed, nets assigned, planes poured.
+"""Creates the first version of the IDE Synth Bay board (formerly HDD Synth Pro): footprints placed, nets assigned, planes poured.
 
 Run with KiCad's own Python, which has the pcbnew module:
   /Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3 \
@@ -305,7 +305,7 @@ VB_TRACKS = [
 VB_VIAS = [(179.85, 128.15), (184.3, 156.9), (104.8, 166.6)]
 # The Mk5's M3 holes, relative to its top left corner: 9.76 mm in from the left, 13.97 from the right.
 HOLES = [(X0 + 9.76, Y0 + 4.09), (X0 + 86.36, Y0 + 4.09), (X0 + 9.76, Y0 + 65.81), (X0 + 86.36, Y0 + 65.81)]
-LOGO = (151.0, 161.2)  # centre of LOGO_HDDSynthPro (19.4 x 16 mm, from tools/make_logo.py)
+LOGO = (151.0, 161.2)  # centre of LOGO_IDESynthBay (17.2 x 15 mm, from tools/make_logo.py)
 # The easter eggs (tools/make_eggs.py), flipped onto the back: x, y of their centres, and rotation as seen
 # from the back. Each sits where the back has no through-hole pad and no via within 0.3 mm (silkscreen
 # can't print over a via's hole): Park Heads (20 x 10 mm) behind the buttons; Defrag (24 x 8.6 mm)
@@ -338,7 +338,7 @@ SILK = [  # text, x, y, size, rotation, style
     ("SD card", 181.9, 136.0, 1.0, 90, LABEL),
     # On the back: the board's name under Park Heads, and the MK5's credit, as on the FDD Synth Pro
     # (the same place on the same outline: by the left edge, reading up).
-    ("HDDSynthPro rev 0.4", 165.5, 155.6, 1.0, 0, BACK_CENTRE),
+    ("IDE Synth Bay rev 0.4", 165.5, 155.6, 1.0, 0, BACK_CENTRE),
     ("Nostalgia by Peter Bridger", X0 + 1.27, Y0 + 52.13, 1.0, 270, BACK),
 ]
 # References the labels stand in for: hidden, as on the FDD Synth Pro (the fab layer keeps them).
@@ -624,7 +624,7 @@ def style_text(t, text, x, y, size, angle, style):
 def art_footprints():
     """The logo and the easter eggs, loaded: do it before LoadBoard(), as FootprintLoad() fails in
     KiCad 10's bindings once a board has been loaded."""
-    return {name: load_footprint(f"HDDSynthPro:{name}") for name in ["LOGO_HDDSynthPro"] + [e[0] for e in EGGS]}
+    return {name: load_footprint(f"HDDSynthPro:{name}") for name in ["LOGO_IDESynthBay"] + [e[0] for e in EGGS]}
 
 
 def silkscreen(board, art):
@@ -648,7 +648,7 @@ def silkscreen(board, art):
             board.Add(t)
         style_text(t, text, *rest)
     leftover = [t for ts in old_texts.values() for t in ts]
-    placed = [("LOGO1", "LOGO_HDDSynthPro", *LOGO, 0, False)]
+    placed = [("LOGO1", "LOGO_IDESynthBay", *LOGO, 0, False)]
     placed += [(f"EGG{i}", name, x, y, rot, True) for i, (name, x, y, rot) in enumerate(EGGS, start=1)]
     for ref, name, x, y, rot, back in placed:
         old = board.FindFootprintByReference(ref)

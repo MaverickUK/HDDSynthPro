@@ -1,6 +1,6 @@
 # PCB bring-up: rev 0.3
 
-The first day with the HDDSynthPro board (the `hardware/` KiCad project, [pcb.html](pcb.html)). In order: each step either passes or says what to fix before the next. It mirrors the BB48 rig's [bringup.md](bringup.md), with what's new on the board: the RP2350B on the board itself, the bus switches, card detect, and DMARQ/DMACK#.
+The first day with the IDE Synth Bay board (the `hardware/` KiCad project, [pcb.html](pcb.html)). In order: each step either passes or says what to fix before the next. It mirrors the BB48 rig's [bringup.md](bringup.md), with what's new on the board: the RP2350B on the board itself, the bus switches, card detect, and DMARQ/DMACK#.
 
 You'll need: a multimeter with a continuity beeper, a USB-C cable, the USB-IDE adapter and a 40-pin IDE cable, the microSD card, and firmware **0.16.6 or later** (it switches the bus on; earlier firmware needs JP1 closed).
 
