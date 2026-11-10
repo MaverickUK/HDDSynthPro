@@ -1,4 +1,4 @@
-HDD Synth Pro benchmark image
+IDE Synth Bay benchmark image
 =============================
 
 This disk boots FreeDOS and runs HDDBENCH, which measures the disk through

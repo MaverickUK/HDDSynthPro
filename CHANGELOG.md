@@ -4,6 +4,9 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+### Changed
+- **The project is now IDE Synth Bay** (formerly HDD Synth Pro), as it serves CD-ROM drives as well as hard disks: the README (with the new logo, `media/IDESynthBay.png`), CLAUDE.md, the docs and these release notes use the new name. The repository, file names, identifiers, the console's `READY HDDSynthPro` and the drive's IDENTIFY model keep the old one, so nothing that matches them changes. The PCB (rev 0.4, branch `pcb-rev04`) carries the new logo.
+
 ### Tested
 - **The PCB build in PIO (9 Nov, 0.31.0, the USB adapter):** `-m speed` from `HDDBENCH.IMG` over SDIO: reads 1.20 MB/s, 75 random 4 KB reads a second, writes 1.02 (the adapter's PIO pace); then `-m cardsoak` for 272 minutes: 4.97 GB written, 8.04 GB read, 606,804 commands, 8 full read-backs, **0 wrong**, no card lost or restarted, `iordy_ignored=0`. The IORDY timer, beside SDIO in that plan, counted 15.4 million reads past 1,250 ns (11.9 million Status, worst 2,070 ns; 3.5 million data, worst 1,710 ns), all waited for: early answers' known slow reads, at the rate the test disk showed without SDIO (8 Nov), so SDIO doesn't slow core 1.
 - **The PCB in a retro PC (9 Nov, the Evesham, PIO 3), the benchmark image (`DOSBENCH.IMG`):**

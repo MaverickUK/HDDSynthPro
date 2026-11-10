@@ -1,6 +1,6 @@
 # Brief: head positions for modelled drives, and authentic seek timing
 
-> **Built in HDDSynthPro 0.19.0** ([activity-link.md](activity-link.md#protocol-version-2-head-positions-and-the-synths-model)). Where it differs from this brief: a command that carries straight on from the last one's next sector doesn't seek or wait for the platter (a drive's read-ahead), and `SEEK` doesn't move the modelled head yet. Not yet run on the rig or with the synth.
+> **Built in IDE Synth Bay 0.19.0** ([activity-link.md](activity-link.md#protocol-version-2-head-positions-and-the-synths-model)). Where it differs from this brief: a command that carries straight on from the last one's next sector doesn't seek or wait for the platter (a drive's read-ahead), and `SEEK` doesn't move the modelled head yet. Not yet run on the rig or with the synth.
 
 For Claude Code working in **HDDSynthPro**. Read this repo's CLAUDE.md first; everything below keeps its rules (core 1 never touches the UART or SD; core 0 never waits; pure, host-tested modules; SemVer and CHANGELOG with every change).
 
@@ -8,14 +8,14 @@ For Claude Code working in **HDDSynthPro**. Read this repo's CLAUDE.md first; ev
 
 HDD Synth firmware **v0.20.0** added **modelled drives**: a sample pack can be a `drive.json` instead of WAVs, and the synth synthesises the drive live, with a virtual head that seeks with a real actuator's physics (a voice coil's bang-bang seek, or a stepper's steps). Try it in the browser: <https://maverickuk.github.io/HDDSynth_Native/drive-lab/>.
 
-Today the synth only gets `$HDA` (busy, class, op) from HDDSynthPro, so its head goes to made-up positions: a plausible "file copy" or "random access" workload. HDDSynthPro knows each command's real LBA, so it can tell the synth where the head is really going.
+Today the synth only gets `$HDA` (busy, class, op) from IDE Synth Bay, so its head goes to made-up positions: a plausible "file copy" or "random access" workload. IDE Synth Bay knows each command's real LBA, so it can tell the synth where the head is really going.
 
 HDD Synth firmware **v0.21.0** (HDDSynth_Native) has the receiving side of everything below, tested on the synth with the sentences typed in over USB.
 
 There are two parts:
 
-1. **`$HDE`, head targets** (HDDSynthPro → synth): where each command goes. Always on with the activity link.
-2. **Authentic timing** (a new setting, off by default): HDDSynthPro holds each command for as long as the modelled drive would take (the seek, the wait for the sector to come round, the transfer), so the host really runs at the drive's pace, and what the synth plays matches what the host experiences. The model comes from the synth (`$HDM`, synth → HDDSynthPro, the link's other direction, unused until now) or from a preset in `HDDSYNTH.INI`.
+1. **`$HDE`, head targets** (IDE Synth Bay → synth): where each command goes. Always on with the activity link.
+2. **Authentic timing** (a new setting, off by default): IDE Synth Bay holds each command for as long as the modelled drive would take (the seek, the wait for the sector to come round, the transfer), so the host really runs at the drive's pace, and what the synth plays matches what the host experiences. The model comes from the synth (`$HDM`, synth → IDE Synth Bay, the link's other direction, unused until now) or from a preset in `HDDSYNTH.INI`.
 
 ## Part 1: `$HDE`, head targets (protocol version 2)
 
@@ -65,7 +65,7 @@ A new key in `HDDSYNTH.INI` (`src/drive_config.*`, and `docs/settings.md`'s tabl
 
 ### `$HDM`: the model, from the synth
 
-On the link's other direction (synth J6 pin 4, GP24, UART1 TX → HDDSynthPro GPIO 1, UART0 RX; J3 pin 4 on the PCB), the synth sends every 2 s, and at once when its pack changes:
+On the link's other direction (synth J6 pin 4, GP24, UART1 TX → IDE Synth Bay GPIO 1, UART0 RX; J3 pin 4 on the PCB), the synth sends every 2 s, and at once when its pack changes:
 
 ```
 $HDM,2,<V|S>,<rpm>,<cylinders>,<fullStroke ms x10>,<track ms x10>,<settleDamp x100>,<step ms x10>,<stepRamp x100>,<zoned 0|1>*hh
@@ -115,7 +115,7 @@ done    = ready_(n-1);   head_x = x;   head_free_at = done
 - **DMA:** hold the DMA burst for the command (or each block of it) to the same `ready_k` times.
 - **Commands that move no data** (verify, seek): `SEEK` moves the head (`seek` only); others as now.
 - **Limits:** the slowest case is the 1985 stepper's full stroke, about 0.53 s, plus a turn. That's well inside host and adapter timeouts (seconds). Never hold a command longer than 1 s whatever the model says.
-- **`$HDE` with timing on:** send each command's target when its seek starts (`max(now, head_free_at)`), not when it arrives, so the synth's head moves when HDDSynthPro's does. Commands then arrive at the pace of real seeks, so the 2 ms rate limit rarely bites.
+- **`$HDE` with timing on:** send each command's target when its seek starts (`max(now, head_free_at)`), not when it arrives, so the synth's head moves when IDE Synth Bay's does. Commands then arrive at the pace of real seeks, so the 2 ms rate limit rarely bites.
 
 ## Tests
 
@@ -138,12 +138,12 @@ done    = ready_(n-1);   head_x = x;   head_free_at = done
   - `seek_timing = off` benchmarks as before. The other rig tests run with it off.
 - **With the synth** (EXPERIMENTAL_HDDSYNTHPRO_SUPPORT on, a modelled pack):
   - the synth's `s` shows `heads=` rising and `(arriving)`;
-  - HDDSynthPro's `S` shows the model from `$HDM`, and it follows a pack change on the synth within 2 s (the BB48 rig needs its GPIO 1 jumper for this);
+  - IDE Synth Bay's `S` shows the model from `$HDM`, and it follows a pack change on the synth within 2 s (the BB48 rig needs its GPIO 1 jumper for this);
   - a file copy sounds like steady reading with track ticks, and random access like seeks.
 
 ## Wiring
 
-No new wire: the link is a UART pair, and `$HDM` uses its other direction (the synth's TX into HDDSynthPro's RX), which version 1 left unused.
+No new wire: the link is a UART pair, and `$HDM` uses its other direction (the synth's TX into IDE Synth Bay's RX), which version 1 left unused.
 
 - **The PCB:** J3 already carries it. Pin 4 is LINK_RX (GPIO 1) through a resistor, in the same pin order as the synth's J6, so the straight 4-way cable connects both directions (`hardware/tools/check_netlist.py` checks it).
 - **The BB48 rig,** wired with TX and GND only, needs the one jumper `docs/activity-link.md` lists as "reserved, not connected": GPIO 1 (EXT1 pin 5) through 1 kΩ to the synth's J6 pin 4 (GP24). Update that table to show it in use.

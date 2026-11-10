@@ -1,10 +1,10 @@
 # Activity link to the HDD Synth
 
-HDDSynthPro knows exactly what the emulated drive is doing; the HDD Synth only sees an activity LED. This link sends the drive's activity to an HDD Synth over a one-way UART, so the synth can play a different sound for sustained sequential transfers than for random access.
+IDE Synth Bay knows exactly what the emulated drive is doing; the HDD Synth only sees an activity LED. This link sends the drive's activity to an HDD Synth over a one-way UART, so the synth can play a different sound for sustained sequential transfers than for random access.
 
 > **Protocol version 2 (0.19.0):** head positions (`$HDE`) for the HDD Synth's modelled drives, and authentic seek timing (`seek_timing`, with the model from the synth's `$HDM` on the reply wire): [below](#protocol-version-2-head-positions-and-the-synths-model), from [hddsynth-head-position-brief.md](hddsynth-head-position-brief.md). The HDD Synth side is in its firmware v0.21.0. Host-tested; not yet run on the rig or with the synth.
 
-Status: **the HDDSynthPro side is built (0.9.0)** and sends on the rig, with a loopback test (0.10.1): fit a jumper from GPIO 0 to GPIO 1 (EXT1 pins 4 and 5), then console `U`, or `pytest -m link`. Not yet run with the jumper; with the UART's internal loopback it passes. Still to do: the HDD Synth side, briefed in [hddsynth-activity-link-brief.md](hddsynth-activity-link-brief.md); its receiver can copy `activity_link::Receiver`.
+Status: **the IDE Synth Bay side is built (0.9.0)** and sends on the rig, with a loopback test (0.10.1): fit a jumper from GPIO 0 to GPIO 1 (EXT1 pins 4 and 5), then console `U`, or `pytest -m link`. Not yet run with the jumper; with the UART's internal loopback it passes. Still to do: the HDD Synth side, briefed in [hddsynth-activity-link-brief.md](hddsynth-activity-link-brief.md); its receiver can copy `activity_link::Receiver`.
 
 As built, it differs from the plan below in two places:
 - **UART0 is driven through the Pico SDK, transmit only**, not Arduino's `Serial1`. `Serial1.availableForWrite()` only says whether one byte fits and `write()` waits when the FIFO is full, so it couldn't keep the rule that core 0 never waits; it also enables a receive interrupt, which a floating GPIO 1 could trigger. Now GPIO 1 isn't touched, and a sentence is written only when the 32-byte TX FIFO is empty, so it always fits.
@@ -40,14 +40,14 @@ Built in HDDSynth_Native **v0.18.0**. On the synth's SD card, in `settings.json`
 
 Ground and one data wire. **Never connect the two boards' 3.3 V pins:** each is powered on its own.
 
-| HDDSynthPro (BB48) | | HDD Synth MK5 (header J6) |
+| IDE Synth Bay (BB48) | | HDD Synth MK5 (header J6) |
 |---|---|---|
 | GPIO 0 (UART0 TX), EXT1 pin 4 | 1 kΩ in series | pin 3, GP25 (UART1 RX; the OLED's SCL) |
 | GND, EXT1 pin 2 | | pin 2, GND |
 | GPIO 1 (UART0 RX), EXT1 pin 5 | 1 kΩ in series; only for `seek_timing = synth` | pin 4, GP24 (UART1 TX; the OLED's SDA) |
 | (not connected) | | pin 1, 3.3 V |
 
-- **Power over the link (HDDSynthPro PCB, rev 0.3 on):** the board's J3 pin 1 takes **5 V** through a Schottky diode into its supply, so a future HDD Synth can power both boards from one supply. The Mk5's J6 pin 1 carries 3.3 V, so with the Mk5 leave pin 1 unconnected (the BB48 has no such input at all).
+- **Power over the link (IDE Synth Bay PCB, rev 0.3 on):** the board's J3 pin 1 takes **5 V** through a Schottky diode into its supply, so a future HDD Synth can power both boards from one supply. The Mk5's J6 pin 1 carries 3.3 V, so with the Mk5 leave pin 1 unconnected (the BB48 has no such input at all).
 
 - The 1 kΩ resistor limits the current into the synth's pin if one board is powered and the other isn't (the HDD Synth runs on its supercap after a power cut, and an unpowered RP2350's pin would otherwise be fed through its protection diodes). It doesn't matter at 115200 baud.
 - J6 carries either the OLED or the link, not both: the same pins.
@@ -55,7 +55,7 @@ Ground and one data wire. **Never connect the two boards' 3.3 V pins:** each is 
 
 ## Protocol, version 1
 
-- UART, **115200 baud, 8N1**, 3.3 V logic, one way (HDDSynthPro → synth).
+- UART, **115200 baud, 8N1**, 3.3 V logic, one way (IDE Synth Bay → synth).
 - ASCII lines in the style of NMEA, so a USB-serial adapter and a terminal show them as they are:
 
 ```
@@ -91,7 +91,7 @@ Rules:
 
 Added in 0.19.0 for the HDD Synth's modelled drives (its v0.20.0 on), which synthesise the drive with a virtual head. `$HDA` stays version 1, unchanged, and a synth older than v0.21.0 ignores the new sentences.
 
-### `$HDE`: where the head goes (HDDSynthPro → synth)
+### `$HDE`: where the head goes (IDE Synth Bay → synth)
 
 ```
 $HDE,2,<pos>,<op>,<sectors>*<checksum>\r\n
@@ -109,10 +109,10 @@ Known answers: `$HDE,2,0,R,8*21`, `$HDE,2,32768,W,128*2F`, `$HDE,2,65535,R,1*28`
 
 - One for each media command as it starts: a read or write when core 0 gets its first sector (`Fetch` carries the command's first LBA and count), a verify or seek from its trace event. Always on with the link.
 - At most one every 2 ms (`cfg::LINK_HEAD_GAP_US`, about its time on the wire): faster commands keep only the newest target (`s`: `head_replaced`). A due `$HDA` (a change, or the 200 ms heartbeat) goes first, and `$HDE` takes the gaps (`activity_link::nextSentence`).
-- With seek timing on, each target goes out when the modelled seek starts, not when the command arrives, so the synth's head moves when HDDSynthPro's does.
+- With seek timing on, each target goes out when the modelled seek starts, not when the command arrives, so the synth's head moves when IDE Synth Bay's does.
 - `s` shows `head_sent`, `head_replaced` and `head_last`.
 
-### `$HDM`: the synth's model (synth → HDDSynthPro)
+### `$HDM`: the synth's model (synth → IDE Synth Bay)
 
 On the link's other wire (the synth's J6 pin 4, GP24, into GPIO 1), every 2 s and at once when its pack changes:
 
@@ -144,7 +144,7 @@ ready_k = arrive + wait + transferUs(k + 1, 63)                 sector k under t
 - No command is held more than 1 s (`seek_capped` in `s`). The slowest preset, `stepper85`, takes 528 ms for a full stroke.
 - Not modelled yet: `SEEK` commands don't move the modelled head (no fetch reaches core 0 for them), and a write's first sector is timed from when it arrives, after the host has sent it.
 
-## HDDSynthPro side: the plan (version 1)
+## IDE Synth Bay side: the plan (version 1)
 
 All on core 0. Core 1 and the bus timing are untouched.
 

@@ -1,12 +1,14 @@
-# HDD Synth Pro
+# IDE Synth Bay
 
-<img src="media/HDDSynthProWide3.png" alt="HDD Synth Pro logo" width="300" align="left">
+<img src="media/IDESynthBay.png" alt="IDE Synth Bay logo" width="300" align="left">
 
-An RP2350 that pretends to be an IDE hard disk, as the base for a future HDD Synth that *is* the drive rather than one that listens to it.
+An RP2350 that pretends to be an IDE hard disk and CD-ROM drive, as the base for a future HDD Synth that *is* the drive rather than one that listens to it.
 
 At this stage it is a proof of concept on an Olimex RP2350-PICO2-BB48. It is tested through a USB-IDE adapter from macOS and Windows, and in real retro PCs (see [Testing](#testing)). See [docs/plan.md](docs/plan.md) for the slices and [docs/wiring.md](docs/wiring.md) for the connections. For an interactive wiring diagram, open [docs/wiring.html](docs/wiring.html) in a browser. [docs/bringup.md](docs/bringup.md) is the checklist for hardware day. [docs/pcb-bom.md](docs/pcb-bom.md) sketches the custom PCB that follows the prototype. [docs/activity.md](docs/activity.md) explains how the drive tells sequential from random activity, for more realistic sounds.
 
-The logo? The pro part is meant to be an IDE cable, with pin 1 being red :)
+Formerly HDD Synth Pro: renamed IDE Synth Bay once it served CD-ROM drives as well as hard disks. The repository, file names and the firmware's own messages keep the old name.
+
+The logo? "BAY" is meant to be an IDE cable, with pin 1 being red :)
 
 <br clear="left">
 
@@ -39,7 +41,7 @@ I'm not yet sure if this will exist alongside the original HDD Synth or will sup
 
 ## Status
 
-The drive works as a read/write IDE hard disk (and, exploratory, a CD-ROM drive), serving disk images from a microSD card, on the Olimex BB48 and on the HDDSynthPro PCB (rev 0.3). It has run four retro PCs and soaked for 10 hours at a time behind a USB-IDE adapter. Releases are tagged on `main` with the firmware files (`v0.31.0`: on the PCB the card runs over 4-bit SDIO).
+The drive works as a read/write IDE hard disk (and, exploratory, a CD-ROM drive), serving disk images from a microSD card, on the Olimex BB48 and on the IDE Synth Bay PCB (rev 0.3). It has run four retro PCs and soaked for 10 hours at a time behind a USB-IDE adapter. Releases are tagged on `main` with the firmware files (`v0.31.0`: on the PCB the card runs over 4-bit SDIO).
 
 - **The drive build** (`pio run -e bb48_drive`) serves `HDDSYNTH.IMG` from a microSD card, or whichever image `HDDSYNTH.INI` names ([docs/settings.md](docs/settings.md)). Without a card it serves a 64 MB welcome disk, with writes kept in RAM until reboot.
 - **Transfer modes:** PIO modes 0-3 and multiword DMA mode 2. Every register's value is ready as soon as it's addressed (early answers, on by default since 0.27.0), so controllers that ignore IORDY work too, and IORDY is let go after 23 µs with no strobe, which keeps 16-bit ISA cards safe; they also get IOCS16#.
@@ -59,7 +61,7 @@ The listen-only build (`pio run -e bb48`) records every IDE register access it s
 | USB-IDE adapter (Norelsys NS1081; JMicron ID on Windows), from macOS and Windows | Adapter's own | PIO 0-3, multiword DMA 2 | 0.16-0.18 | Detection and re-detection, partitioning and formatting, the rig tests (slices 0-5), standby and wake, FLUSH CACHE, a card pulled and put back, soaks | 10-hour soaks clean in PIO mode 3 (28.9 GB, 49.5 million sectors checked on the cable, 0 bad) and in DMA (51.9 GB, 89.0 million sectors, 0 bad) |
 | ICL HRA 386 (BIOS 1.20, 1992) | 16-bit ISA IDE card | PIO 0 (the card's ISA timing) | 0.22.0, 0.23.15 | Boots MS-DOS 5 from a copy of its own CF card; CHKDSK, copying files. The benchmark image: `HDDBENCH` and a 14-minute soak | Works: the benchmark passed, and the soak checked about 400 MB with 0 bad sectors. Needs the IOCS16# wire (IDE pin 32 to GPIO 2); since 0.27.0 no settings (it boots on the defaults) |
 | Pentium 200 (Intel PIIX, Phoenix BIOS) | PIIX, on the motherboard | PIO 3 (no DMA offered yet) | 0.23.15 | Boots Windows 95 from a copy of its own 4 GB CF card, with Windows' own 32-bit disk driver (`ESDI_506.PDR`) | Works. 163,847 sectors checked on the cable, 0 bad. Needs `early_answers = on`: in its BIOS's timing the PIIX ignores IORDY ([docs/no-iordy.md](docs/no-iordy.md)) |
-| Evesham, on the HDDSynthPro PCB | On the motherboard | PIO 3 | 0.31.0 (`pcb_drive`, `bb48_hdcd`) | The benchmark image over SDIO, on early answers and on the data lane, and a 15-minute soak; Doom from the CD-ROM (device 1) beside the 386's disk | Works: 2.39 million sectors checked on the cable in the soak, 0 bad; no read the PC didn't wait for, the CD's included (the BB48 had 26 on 4 Nov) |
+| Evesham, on the IDE Synth Bay PCB | On the motherboard | PIO 3 | 0.31.0 (`pcb_drive`, `bb48_hdcd`) | The benchmark image over SDIO, on early answers and on the data lane, and a 15-minute soak; Doom from the CD-ROM (device 1) beside the 386's disk | Works: 2.39 million sectors checked on the cable in the soak, 0 bad; no read the PC didn't wait for, the CD's included (the BB48 had 26 on 4 Nov) |
 | Evesham, AMD Athlon XP 2000+, 1 GB, GeForce 2 GTS | On the motherboard | PIO 3 | 0.25.0-0.26.1 | Booted the benchmark image first time (`HDDBENCH`). Booted the ICL 386's MS-DOS 5 disk with the BIOS on auto, using `geometry = 756/13/51` (that drive's own geometry); ran Duke Nukem | Works: the benchmark passed, with 47,423 sectors checked on the cable and 0 bad. Needs `early_answers = on`: it didn't wait for IORDY on 115 reads under DOS |
 
 What each machine needed, and the dead ends, are in [CHANGELOG.md](CHANGELOG.md) (0.19-0.23) and [docs/retro-test.md](docs/retro-test.md).
@@ -117,6 +119,6 @@ Read the power-order rule in [docs/wiring.md](docs/wiring.md) before connecting 
 
 ## Licence
 
-HDD Synth Pro is free software, under the GNU General Public License, version 3 ([LICENSE](LICENSE)), as is [HDD Synth](https://github.com/MaverickUK/HDDSynth_Native). You can use, study, change and share it; if you share a changed version, it must be under the same licence, with its source.
+IDE Synth Bay is free software, under the GNU General Public License, version 3 ([LICENSE](LICENSE)), as is [HDD Synth](https://github.com/MaverickUK/HDDSynth_Native). You can use, study, change and share it; if you share a changed version, it must be under the same licence, with its source.
 
 The benchmark image's build downloads [FreeDOS](https://www.freedos.org/), which is GPL too; FreeDOS isn't stored in this repository.

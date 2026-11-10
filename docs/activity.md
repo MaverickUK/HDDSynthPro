@@ -1,6 +1,6 @@
 # Telling sequential from random activity
 
-The original HDD Synth is driven by the host's HDD activity LED: one bit, busy or not, so it can only play one "access" sound. HDD Synth Pro *is* the drive, so it sees every command the host sends: which sectors, how many, and when. That's enough to tell a head streaming along the disk from one jumping about, and to choose a sequential or a random sound to match.
+The original HDD Synth is driven by the host's HDD activity LED: one bit, busy or not, so it can only play one "access" sound. IDE Synth Bay *is* the drive, so it sees every command the host sends: which sectors, how many, and when. That's enough to tell a head streaming along the disk from one jumping about, and to choose a sequential or a random sound to match.
 
 This note covers how it works, what the prototype proves, and the limits.
 
