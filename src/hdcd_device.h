@@ -31,29 +31,7 @@
 #include "atapi_device.h"
 #include "identify.h"
 
-// Candidate fixes for the CD-ROM's slow register reads (docs/atapi.md, "Slow
-// Device reads on ide_bus"), off until measured on the bench. Each keeps what
-// the host sees exactly as it is (test_hdcd runs both ways):
-// - HDDPRO_HDCD_FAST_WRITES: a Data write goes to the selected device only (the
-//   other ignores it in write() anyway), and a task-file register's (Features,
-//   Sector Count, LBA) to both by their inlined latch(), skipping write()'s
-//   calls and noteStarts (such a write never starts a command);
-// - HDDPRO_HDCD_LAZY_INTRQ: ide_bus doesn't update INTRQ after a task-file
-//   register's write, which can't change the interrupt or who drives it.
-#ifndef HDDPRO_HDCD_FAST_WRITES
-#define HDDPRO_HDCD_FAST_WRITES 0
-#endif
-#ifndef HDDPRO_HDCD_LAZY_INTRQ
-#define HDDPRO_HDCD_LAZY_INTRQ 0
-#endif
-
 namespace hdcd {
-
-// Features, Sector Count, LBA low, mid and high: registers both devices latch,
-// which nothing else happens on.
-__attribute__((always_inline)) inline bool isTaskFile(ata::Reg reg) {
-    return reg >= ata::Reg::ErrorFeatures && reg <= ata::Reg::LbaHigh;
-}
 
 using ata::Reg;
 

@@ -41,10 +41,4 @@ SANITIZE="${SANITIZE:-address,undefined}"
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/make_welcome_img.cpp src/welcome_disk.cpp src/drive_config.cpp \
     src/seek_timing.cpp src/drive_params.cpp src/drive_timing.cpp src/sentence.cpp \
     -o .pio/native-tests/make_welcome_img
-# hdcd_device.h's candidate fixes on: the same tests must pass.
-"$CXX" -std=c++17 -O2 -g -Wall -Wextra -fsanitize="$SANITIZE" ${SANITIZE_EXTRA:-} -DHDDPRO_HDCD_FAST_WRITES=1 \
-    -Isrc test/native/test_hdcd_main.cpp test/native/test_hdcd.cpp src/hdcd_device.cpp src/atapi_device.cpp \
-    src/mmc.cpp src/ata_device.cpp src/identify.cpp \
-    -o .pio/native-tests/run_hdcd_fast
 .pio/native-tests/run_tests "$@"
-.pio/native-tests/run_hdcd_fast

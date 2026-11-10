@@ -599,8 +599,7 @@ TEST(hdcd_a_cdrom_as_device_0_by_dma) {
 }
 
 // Writes to the disk with the CD-ROM beside it: the data goes to the disk
-// alone, and the CD-ROM reads as before. (With HDDPRO_HDCD_FAST_WRITES only
-// the selected device gets Data writes: the same, faster.)
+// alone, and the CD-ROM reads as before.
 TEST(hdcd_disk_writes_with_a_cdrom_beside_it) {
     Device dev(DISK, nullptr, &DISC);
     GeneratedDisk base(DISK.total_sectors);

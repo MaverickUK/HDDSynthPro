@@ -187,22 +187,6 @@ public:
     // Host writes a register (only the low byte matters except for DATA).
     void write(Reg reg, uint16_t value);
 
-    // write()'s path for a task-file register (Features, Sector Count, LBA
-    // low, mid and high), inlined: hdcd::Device's fast writes give it every
-    // such write, as both devices on a cable take them. Ignored while BSY, as
-    // write() does; never starts anything.
-    __attribute__((always_inline)) void latch(Reg reg, uint8_t v) {
-        if (status_ & ST_BSY) return;
-        switch (reg) {
-            case Reg::ErrorFeatures: features_ = v; break;
-            case Reg::SectorCount: sector_count_ = v; break;
-            case Reg::LbaLow: lba_low_ = v; break;
-            case Reg::LbaMid: lba_mid_ = v; break;
-            case Reg::LbaHigh: lba_high_ = v; break;
-            default: break;
-        }
-    }
-
     // The bus layer's way in for a Command write: queueCommand() only sets BSY
     // and keeps the command (nanoseconds), and runQueuedCommand() runs it as
     // core 1's next job. A status poll straight after the write then sees BSY

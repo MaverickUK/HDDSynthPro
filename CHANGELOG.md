@@ -11,6 +11,17 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
   - `pcb_drive` on the data lane (`early_answers = off`): **reads 4.24 MB/s** (random 0.76 ms), writes 2.03 (the BB48 on the lane: 2.18 and 1.98, so SPI was what held the lane's reads back); 0 bad; 2,741 Status reads past 1,250 ns (worst 1,650 ns, the lane's known ones, [docs/data-lane.md](docs/data-lane.md)), all waited for.
 - **The Evesham's unwaited CD data reads are gone on the PCB** (`bb48_hdcd`, `ide_bus`, Doom from `DOOM_SE.ISO` with its saves on C:, as on 4 Nov): 2,966 READ(10), **0 `NOIORDY`** (the BB48: 26); 3,663 data reads held past 400 ns, every one waited for, the worst 1,100 ns. So the 5 Nov guess (the Evesham doesn't sample IORDY on the data port) was wrong; the BB48's hand-wired, undamped DIOR# (the PCB has 33 Ω on DIOR#/DIOW#) is the likelier cause, by ringing seen as an early strobe end or a real one ([docs/atapi.md](docs/atapi.md)). The CD's slow Status reads are unchanged (worst 3,620 ns).
 
+## [0.32.0-dev.7] - 2026-11-10 (branch `one-build`)
+
+### Removed
+- **dev.6's two candidate fixes for the CD-ROM's slow register reads** (`HDDPRO_HDCD_FAST_WRITES`, `HDDPRO_HDCD_LAZY_INTRQ`), measured on the bench and no help (below). The firmware's code is dev.5's again; the two tests dev.6 added to `test_hdcd` stay, as plain tests of two devices on one cable.
+
+### Tested (10 Nov, the PCB, the USB adapter)
+- **Slices 1-2** (`device1 = none`, the test disk, `mode = mdma2`, re-detections from the console): slice 2 passes; slice 1 fails its IORDY check as every build has since 0.28.0, at 1,640 ns (213 reads past 1,250 ns at detection, worst 1,730 ns, on Device). So the slow Device reads at detection aren't the CD-ROM's alone; with a CD-ROM they're three to five times longer.
+- **A 30-minute card soak** (`-m cardsoak`, `HDDBENCH.IMG` over SDIO): 0 wrong, no card lost or restarted, writes 1.75 MB/s and reads 2.86 (0.31.0: 1.72 and 2.79).
+- **The access log on the CD-ROM's slow reads** (three re-detections, `device1 = cdrom`, `dma = off`): about 140 reads held 4.9-7.7 us, and none of them froze the log. So core 1 had found its FIFO empty less than 1.25 us before answering each one: no long step and no backlog of register writes. The time goes before the access reaches core 1, in `ide_bus.pio`'s path from the strobe to its push, or in a way the log can't see. Its one freeze was a false alarm: core 1's PIO data loop doesn't note an empty FIFO, so 11.7 ms waiting there for the adapter counted as busy.
+- **The candidate fixes, compared** (`cd_fixes.sh`, two re-detections each, the access log on; counts from the `SLOWREAD` lines): none 48 slow reads, worst 7,980 ns; fast writes 121 (twice the detections), worst 6,480; lazy INTRQ 213, worst 4,990. Per detection no fewer, and every variant far past 1,250 ns. Both together wasn't run (a console process held the port for its flash).
+
 ## [0.32.0-dev.6] - 2026-11-10 (branch `one-build`)
 
 ### Added

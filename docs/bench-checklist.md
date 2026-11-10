@@ -20,8 +20,9 @@ Results: `runs/bench/slices12-dev5b.txt`, `cardsoak-dev5b.txt`, `acclog-dev5.txt
 
 ## 3. The CD-ROM's slow register reads ([atapi.md](atapi.md#slow-device-reads-on-ide_bus-10-nov-2026-0320-dev5))
 
-- [ ] Read `acclog-dev5.txt`: each `LATE answer` block lists what core 1 did in the microseconds before a read it answered late (accesses, commands, long loop steps, with times). Which job takes the time before the slow Device reads?
-- [ ] If it's the register writes (both devices' `write` per access), compare the candidate fixes (`HDDPRO_HDCD_FAST_WRITES`, `HDDPRO_HDCD_LAZY_INTRQ` in `src/hdcd_device.h`): `bash runs/bench/cd_fixes.sh` flashes none, each, then both, each with the access log, **asks for a replug after each flash** (four, plus one at the end), captures two re-detections each and prints `iordy_max_ns`, `iordy_slow` and the late answers per variant (`runs/bench/cdfix-summary.txt`). About 25 minutes with the owner there.
+Done 10 Nov: core 1 isn't late, and neither fix helps (CHANGELOG, 0.32.0-dev.7). Kept for the record:
+- [x] Read `acclog-dev5.txt`: each `LATE answer` block lists what core 1 did in the microseconds before a read it answered late (accesses, commands, long loop steps, with times). Which job takes the time before the slow Device reads?
+- [x] If it's the register writes (both devices' `write` per access), compare the candidate fixes (`HDDPRO_HDCD_FAST_WRITES`, `HDDPRO_HDCD_LAZY_INTRQ` in `src/hdcd_device.h`): `bash runs/bench/cd_fixes.sh` flashes none, each, then both, each with the access log, **asks for a replug after each flash** (four, plus one at the end), captures two re-detections each and prints `iordy_max_ns`, `iordy_slow` and the late answers per variant (`runs/bench/cdfix-summary.txt`). About 25 minutes with the owner there.
 - [ ] Then the best variant with a normal `-m cdrom` run (`mode = mdma2`, `dma = on`, `T`; `MSYS_NO_PATHCONV=1 HDDPRO_CDROM_DEV=//./CdRom1`; the number changes as Windows re-enumerates).
 - [ ] A fix that helps becomes the default only after the hard disk's code is shown unmoved (`scripts/check_core1_layout.py`) and the CD-ROM passes `-m cdrom` and an hour's soak.
 
