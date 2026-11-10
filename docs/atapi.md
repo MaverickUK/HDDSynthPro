@@ -64,6 +64,26 @@ On the rig the CD-ROM build held Alternate Status reads up to 2.8-3.6 µs (the h
 - **The likely part:** in early answers' tight loop a command runs straight after the access that queued it, and for the CD-ROM that's the packet's last word: `runPacket` and `mmc::execute` (1,680 bytes, the biggest function on core 1), the trace's CMD and DONE records, then the device's next step, all before the host's next access, typically an Alternate Status poll, is answered. The hard disk's commands are short by comparison (IDENTIFY points at a buffer). Plus early answers' own latency, which the hard disk shows too.
 - **The measurement:** a build with `-DCMD_PROFILE=1` prints `cmd_run_max_ns` and `cmd_run_max` (command/packet) in `s`: the longest time core 1 spent on a command while the host waited. If it's near the slow reads' excess over about 1 µs, the packet is the cause, and the fix is to answer the host's first poll (BSY) before running it, or to hand `mmc::execute` to core 0 as a fetch is. The first is built, off: `-DEARLY_POLL_FIRST_NS=1000` (0.30.0-dev.8, `ide_bus.cpp`'s `servePollFirst`); core 1 waits up to that long after a command is queued for the host's next access, answers it, then runs the command. If it's small, the cause is early answers itself, and the CD-ROM build should try `ide_bus` (`P i`), whose worst read on the hard disk is about 1.2 µs.
 
+## Slow Device reads on `ide_bus` (10 Nov 2026, 0.32.0-dev.5)
+
+Since 0.30.0-dev.10 a CD-ROM always runs `ide_bus`, so the 4 Nov analysis above (early answers' tight loop running a packet straight after its last word) doesn't cover what the USB adapter showed on 10 Nov, at detection, with `device1 = cdrom` and DMA off (so with the diagnostics):
+
+| Before | Slow read | Held |
+|---|---|---|
+| every IDENTIFY (device 0 and 1) and IDENTIFY PACKET | Device | 4,900-5,620 ns |
+| straight after, the same commands | Alternate Status | 2,100-2,400 ns |
+| SET FEATURES (device 1), TEST UNIT READY | Alternate Status | 3,300-3,400 ns |
+| IDENTIFY PACKET's data | Status | 1,960-2,310 ns |
+
+ATA allows 1,250 ns. The adapter waits for IORDY on all of them; a host that doesn't would read them wrong. Repeatable to within 15% over three detections, so systematic, not contention.
+
+What the code says:
+- **Not flash:** of the flash addresses in core 1's literal pools, only `mmc::execute`'s and `modeSense`'s sense codes are loaded, per command, not per access. `atapi::Device::deliverSector`'s is a sense code too.
+- **Not the selection:** `ata::Device::deviceWritten` and `selectUnit` are a few loads and stores.
+- **A heavier write:** before a command the adapter writes five registers back to back (Device, Sector Count, LBA low, mid, high: `host/reference/slice0_probe_jmicron.txt`), about 0.8 us apart, then reads Device. With a CD-ROM each write is `hdcd::Device::write`: both devices' `write`, `noteStarts`, then `updateIntrq` calling `intrq()` and `intrqDriven()` on the selected one, all out of line, perhaps 0.6 us where the hard disk alone takes about 0.35. That makes a backlog, but not one of 5 us.
+
+So it needs measuring: `-DHDDPRO_ACCESS_LOG=1` (`src/access_log.h`) prints, for a read answered late, everything core 1 did in the microseconds before it (`ACCLOG` lines). `host/runs/bench/after_replug.sh` (git-ignored) captures three detections with it. Fixes to weigh once it's known: the plain task-file registers written only to the selected device and copied to the other at selection or command time; `updateIntrq` only when the interrupt can have changed; the device calls inlined.
+
 ## Status (3 Nov 2026, 0.29.0): the MVP is built, and reads on a retro PC
 
 The firmware side of slices C1 and C2: the `bb48_cdrom` build serves the test disc or an ISO over PIO, and `test/run_native_tests.sh` drives `atapi::Device` through whole PACKET exchanges.

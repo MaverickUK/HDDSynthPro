@@ -11,6 +11,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
   - `pcb_drive` on the data lane (`early_answers = off`): **reads 4.24 MB/s** (random 0.76 ms), writes 2.03 (the BB48 on the lane: 2.18 and 1.98, so SPI was what held the lane's reads back); 0 bad; 2,741 Status reads past 1,250 ns (worst 1,650 ns, the lane's known ones, [docs/data-lane.md](docs/data-lane.md)), all waited for.
 - **The Evesham's unwaited CD data reads are gone on the PCB** (`bb48_hdcd`, `ide_bus`, Doom from `DOOM_SE.ISO` with its saves on C:, as on 4 Nov): 2,966 READ(10), **0 `NOIORDY`** (the BB48: 26); 3,663 data reads held past 400 ns, every one waited for, the worst 1,100 ns. So the 5 Nov guess (the Evesham doesn't sample IORDY on the data port) was wrong; the BB48's hand-wired, undamped DIOR# (the PCB has 33 Ω on DIOR#/DIOW#) is the likelier cause, by ringing seen as an early strobe end or a real one ([docs/atapi.md](docs/atapi.md)). The CD's slow Status reads are unchanged (worst 3,620 ns).
 
+## [0.32.0-dev.6] - 2026-11-10 (branch `one-build`)
+
+### Added
+- **The access log** (`src/access_log.h`), a bench diagnostic built in only with `-DHDDPRO_ACCESS_LOG=1`: core 1 keeps a ring of its last 48 jobs (each access taken from the FIFO, each command run, each loop step over 0.5 us, the FIFO found empty) with its cycle counter, and when it answers a read the host is already strobing after more than 1.25 us busy, it freezes a copy, which core 0 prints as `ACCLOG` lines (how long before the late answer each began). `SLOWREAD` names a slow read but not its cause, and comes up to half a millisecond later. Off, every call compiles to nothing: core 1's layout is unchanged (`check_core1_layout.py`), and no log data is built in. On: RAM 96.3%, `check_core1_ram.py` passes.
+
+### Found, to measure
+- **The CD-ROM's slow Device reads on `ide_bus`** (10 Nov, `pcb_drive` dev.5, `device1 = cdrom`, `dma = off`, detection through the USB adapter): one Device read held 4,900-5,620 ns just before every IDENTIFY and IDENTIFY PACKET, with an Alternate Status read of 2,100-2,400 ns after it, and Alternate Status at 3,300-3,400 ns before device 1's SET FEATURES and TEST UNIT READY. Repeatable to within 15%, so systematic. Not flash (core 1's literal pools hold flash addresses only in `mmc`'s per-command sense codes), not `selectUnit` (a few stores). The adapter's register check writes five registers back to back, then reads Device: with a CD-ROM each write runs both devices' `write`, `noteStarts` and `updateIntrq`'s two `intrq()` calls, perhaps 0.6 us, but that can't build a 5 us backlog by itself. The access log will say; [docs/atapi.md](docs/atapi.md) has the details.
+
 ## [0.32.0-dev.5] - 2026-11-09 (branch `one-build`, overnight)
 
 ### Build

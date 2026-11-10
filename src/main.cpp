@@ -37,6 +37,7 @@
 #include <hardware/structs/busctrl.h>
 #include <hardware/uart.h>
 
+#include "access_log.h"
 #include "activity.h"
 #include "activity_link.h"
 #include "drive_config.h"
@@ -647,8 +648,10 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
 #endif
             dev.setReadAhead(g_read_ahead.load());
             dev.setWriteBehind(g_write_behind.load());
+            access_log::note(access_log::COMMAND, 0);
             dev.runQueuedCommand();
             ide_bus::syncDataLane(dev);  // IDENTIFY's block onto the lane, then INTRQ
+            access_log::note(access_log::COMMAND, 1);
 #if CMD_PROFILE
             noteCommandTime(dev, profile_start);
 #endif
@@ -695,6 +698,7 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
         }
 
         pass_kind = uint8_t(GAP_STEP0 + step);
+        [[maybe_unused]] const uint32_t step_start = access_log::ON ? access_log::now() : 0;
         switch (step) {
             case 0:  // the trace's CMD and DONE lines, in that order, at most one per pass
                 if (early && g_early_started != 0 && g_early_started != started) {
@@ -758,6 +762,7 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
                 break;
             }
         }
+        access_log::step(step, step_start);
         step = step == 4 ? 0 : step + 1;
         // early_answers: back to the tight bus loop after every pass, so a quiet
         // spell's first access finds core 1 polling, not mid-pass (660 ns).
@@ -1976,6 +1981,48 @@ static void printSlowReads() {
         has_pending = false;
     }
 }
+
+// HDDPRO_ACCESS_LOG (access_log.h): core 1's work before a late read, as
+// ACCLOG lines, oldest first, each with how long before the late answer it
+// began. A line at a time, so a busy USB link never holds core 0 up.
+static void printAccessLog() {
+    if constexpr (access_log::ON) {
+        static unsigned next = 0;
+        if (!access_log::g_frozen_ready) return;
+        const access_log::Entry& last = access_log::g_frozen[access_log::SIZE - 1];
+        const uint32_t ns_per_10_cycles = 10000 / (clock_get_hz(clk_sys) / 1000000);
+        for (; next < access_log::SIZE; ++next) {
+            const access_log::Entry& e = access_log::g_frozen[next];
+            if (e.cycles == 0 && e.value == 0 && e.kind == 0) continue;  // not filled yet
+            char what[40];
+            switch (e.kind) {
+                case access_log::ACCESS: {
+                    bool write = bus::op(e.value) == bus::Op::Write;
+                    std::snprintf(what, sizeof what, "%s %s %04x", write ? "WR" : "RD",
+                                  bus::registerName(bus::block(e.value), bus::address(e.value), write),
+                                  bus::data(e.value));
+                    break;
+                }
+                case access_log::EMPTY: std::snprintf(what, sizeof what, "fifo empty"); break;
+                case access_log::COMMAND: std::snprintf(what, sizeof what, e.value ? "command done" : "command run"); break;
+                case access_log::STEP:
+                    std::snprintf(what, sizeof what, "step %lu took %luns", (unsigned long)(e.value & 0xFF),
+                                  (unsigned long)((e.value >> 8) * ns_per_10_cycles / 10));
+                    break;
+                default:
+                    std::snprintf(what, sizeof what, "LATE answer, busy %luns",
+                                  (unsigned long)(e.value * ns_per_10_cycles / 10));
+                    break;
+            }
+            char line[80];
+            int n = std::snprintf(line, sizeof line, "ACCLOG -%luns %s\n",
+                                  (unsigned long)((last.cycles - e.cycles) * ns_per_10_cycles / 10), what);
+            if (n <= 0 || !printLine(line, size_t(n) < sizeof line ? size_t(n) : sizeof line - 1)) return;
+        }
+        next = 0;
+        access_log::g_frozen_ready = false;  // core 1 may freeze the next one
+    }
+}
 #endif
 
 static void printReady() {
@@ -2452,6 +2499,7 @@ void loop() {
     bus_timing::poll();
     bus_timing::printPending(2);
     printSlowReads();
+    printAccessLog();
     printIgnoredIordy();
     printNoChipSelect();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.

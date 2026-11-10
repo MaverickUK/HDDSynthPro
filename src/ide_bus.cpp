@@ -9,6 +9,7 @@
 #include <hardware/pio.h>
 #include <hardware/structs/m33.h>
 
+#include "access_log.h"
 #include "ata_device.h"
 #include "hdcd_device.h"
 #include "bus_sample.h"
@@ -611,6 +612,7 @@ __attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sampl
             pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
             dev.consumeRead(reg);
         }
+        access_log::answered();
     }
     updateIntrq(dev);
 }
@@ -658,9 +660,11 @@ template <class Dev>
 __attribute__((always_inline)) static inline bool serviceOnceT(Dev& dev, uint32_t& sample) {
     if (rxEmpty(s_pio, s_sm)) {
         fifoEmpty(SITE_MAIN);
+        access_log::empty();
         return false;
     }
     sample = pio_sm_get(s_pio, s_sm);
+    access_log::note(access_log::ACCESS, sample);
     serve(dev, sample);
     return true;
 }
@@ -676,12 +680,15 @@ __attribute__((always_inline)) static inline void serveOtherT(Dev& dev, uint32_t
         // finished, so it's still DRQ.
         ata::Reg reg = s_reg_for[regIndex(sample)];
         pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
+        access_log::note(access_log::ACCESS, sample);
+        access_log::answered();
         dev.consumeDataWords(served);
         dev.consumeRead(reg);
         updateIntrq(dev);
         return;
     }
     dev.consumeDataWords(served);  // a write: catch the device up first
+    access_log::note(access_log::ACCESS, sample);
     serve(dev, sample);
 }
 
