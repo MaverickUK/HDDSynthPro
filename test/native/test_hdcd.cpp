@@ -598,6 +598,78 @@ TEST(hdcd_a_cdrom_as_device_0_by_dma) {
     CHECK_EQ(host.fetches[1], 0);
 }
 
+// Writes to the disk with the CD-ROM beside it: the data goes to the disk
+// alone, and the CD-ROM reads as before. (With HDDPRO_HDCD_FAST_WRITES only
+// the selected device gets Data writes: the same, faster.)
+TEST(hdcd_disk_writes_with_a_cdrom_beside_it) {
+    Device dev(DISK, nullptr, &DISC);
+    GeneratedDisk base(DISK.total_sectors);
+    RamOverlayDisk<8> disk(base);
+    DiscSource disc;
+    Host host{dev, {&disk, &disc}};
+    std::vector<uint8_t> d;
+    host.packet({mmc::OP_TEST_UNIT_READY}, d);  // the unit attention
+    const uint32_t lba = 2000;
+    std::vector<uint16_t> written;
+    for (int w = 0; w < 2 * 256; ++w) written.push_back(uint16_t(0xA500 + w));
+    host.select(0);
+    dev.write(Reg::SectorCount, 2);
+    dev.write(Reg::LbaLow, lba & 0xFF);
+    dev.write(Reg::LbaMid, (lba >> 8) & 0xFF);
+    dev.write(Reg::LbaHigh, 0);
+    dev.write(Reg::Device, 0xE0);
+    host.command(ata::CMD_WRITE_SECTORS);
+    for (int s = 0; s < 2; ++s) {
+        CHECK(host.waitNotBusy());
+        CHECK(host.altStatus() & ata::ST_DRQ);
+        for (int w = 0; w < 256; ++w) dev.write(Reg::Data, written[size_t(s * 256 + w)]);
+    }
+    CHECK(host.waitNotBusy());
+    CHECK_EQ(host.reg(Reg::StatusCommand), ata::ST_DRDY | ata::ST_DSC);
+    std::vector<uint16_t> words;
+    CHECK_EQ(host.readSectors(lba, 2, words), ata::ST_DRDY | ata::ST_DSC);
+    CHECK(words == written);
+    CHECK_EQ(host.fetches[1], 0);  // the CD-ROM saw none of it
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 7, 0, 0, 1}, d), ata::ST_DRDY);
+    CHECK(d == discFrames(7, 1));
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+}
+
+// Both devices on a cable take every task-file register write, whichever is
+// selected, and keep it while the other is selected.
+TEST(hdcd_task_file_writes_reach_both_devices) {
+    Device dev(DISK, nullptr, &DISC);
+    GeneratedDisk disk(DISK.total_sectors);
+    DiscSource disc;
+    Host host{dev, {&disk, &disc}};
+    host.select(1);
+    dev.write(Reg::SectorCount, 0x12);
+    dev.write(Reg::LbaLow, 0x34);
+    dev.write(Reg::LbaMid, 0x56);
+    dev.write(Reg::LbaHigh, 0x78);
+    CHECK_EQ(host.reg(Reg::SectorCount), 0x12);
+    CHECK_EQ(host.reg(Reg::LbaLow), 0x34);
+    host.select(0);
+    CHECK_EQ(host.reg(Reg::SectorCount), 0x12);
+    CHECK_EQ(host.reg(Reg::LbaLow), 0x34);
+    CHECK_EQ(host.reg(Reg::LbaMid), 0x56);
+    CHECK_EQ(host.reg(Reg::LbaHigh), 0x78);
+    dev.write(Reg::LbaLow, 0x9A);  // device 0 selected: device 1 takes it too
+    host.select(1);
+    CHECK_EQ(host.reg(Reg::LbaLow), 0x9A);
+    CHECK_EQ(host.reg(Reg::LbaHigh), 0x78);
+    // A busy device ignores them: the CD-ROM mid-packet, the disk still takes it
+    dev.write(Reg::ErrorFeatures, 0);
+    dev.write(Reg::LbaMid, 0xFE);
+    dev.write(Reg::LbaHigh, 0xFF);
+    host.command(atapi::CMD_PACKET);
+    CHECK(host.waitNotBusy());
+    CHECK(host.altStatus() & ata::ST_DRQ);  // waiting for the packet: not busy, so it takes writes
+    host.select(0);
+    dev.write(Reg::LbaLow, 0x21);
+    CHECK_EQ(host.reg(Reg::LbaLow), 0x21);
+}
+
 void runHdcdTests() {
     RUN(hdcd_each_device_shows_its_signature);
     RUN(hdcd_a_bios_probe_finds_a_disk_and_a_cdrom);
@@ -613,4 +685,6 @@ void runHdcdTests() {
     RUN(hdcd_changing_the_disc_leaves_the_disk_alone);
     RUN(hdcd_a_cdrom_alone_as_device_0);
     RUN(hdcd_a_cdrom_as_device_0_by_dma);
+    RUN(hdcd_disk_writes_with_a_cdrom_beside_it);
+    RUN(hdcd_task_file_writes_reach_both_devices);
 }

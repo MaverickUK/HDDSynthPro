@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <type_traits>
 
 #include <hardware/clocks.h>
 #include <hardware/dma.h>
@@ -597,6 +598,9 @@ __attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sampl
             dev.queueCommand(uint8_t(bus::data(sample)));
         else
             dev.write(reg, bus::data(sample));
+        if constexpr (std::is_same_v<Dev, hdcd::Device> && HDDPRO_HDCD_LAZY_INTRQ) {
+            if (hdcd::isTaskFile(reg)) return;  // can't change INTRQ (hdcd_device.h)
+        }
     } else {
         // Every read must be answered, or the PIO holds IORDY low forever.
         // The host waits until it is, so answer first and catch up after.

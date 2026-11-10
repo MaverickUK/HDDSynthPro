@@ -31,6 +31,20 @@ CORE1_RAM_CD void Device::resyncDevice() {
 
 CORE1_RAM_CD void Device::write(Reg reg, uint16_t value) {
     uint8_t v = uint8_t(value);
+    if constexpr (HDDPRO_HDCD_FAST_WRITES) {
+        if (reg == Reg::Data) {  // only the selected device takes data: the other's write() ignores it
+            if (cdSelected())
+                cd_.write(reg, value);
+            else if (hd_on_)
+                hd_.write(reg, value);
+            return;  // a packet's last word queues it; it starts in runQueuedCommand
+        }
+        if (isTaskFile(reg)) {
+            if (hd_on_) hd_.latch(reg, v);
+            if (cd_on_) cd_.latch(reg, v);
+            return;
+        }
+    }
     if (reg == Reg::Device) {
         device_reg_ = v;
     } else if (reg == Reg::AltStatusDevCtrl) {
