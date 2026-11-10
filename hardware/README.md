@@ -2,7 +2,7 @@
 
 The KiCad project for the IDE Synth Bay board (formerly HDD Synth Pro): an RP2350B that acts as an IDE drive. The files keep the old name (`hddsynthpro.kicad_*`, the `HDDSynthPro` library). The microcontroller and its support parts (core regulator, crystal, flash, USB) are on the board, following Raspberry Pi's RP2350 minimal design; rev 0.1 used a Pimoroni PGA2350 module instead. The design and the reasons for it are in [docs/pcb.html](../docs/pcb.html); open it in a browser.
 
-Status: **rev 0.4, routed, not reviewed** (8 Nov 2026, branch `pcb-rev04`). Rev 0.3 (ordered 28 Oct) is in `production/` and in git history (commit 4fee041). What rev 0.4 adds, and why: [docs/pcb-rev04.md](../docs/pcb-rev04.md).
+Status: **rev 0.4, ordered 10 Nov 2026**; `production/` holds the files sent. Rev 0.3 (ordered 28 Oct) is in `production/` and in git history (commit 4fee041). What rev 0.4 adds, and why: [docs/pcb-rev04.md](../docs/pcb-rev04.md).
 
 ## Rev 0.4: where it stands
 

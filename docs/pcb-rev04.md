@@ -1,5 +1,7 @@
 # PCB rev 0.4: what to add
 
+**Ordered 10 Nov 2026**, from the files in `hardware/production/` (merged into `main` the same day). What follows is the plan and what went into it.
+
 Rev 0.3 (the `hardware/` KiCad project, sent for manufacture on 28 Oct 2026) is the minimum that runs today's firmware: the IDE bus behind four SN74CB3T3245 bus switches, DMARQ and DMACK#, microSD wired for SDIO with card detect, the activity link, USB-C and the 5 V inputs. [pcb-bom.md](pcb-bom.md) holds the fuller design targets and their reasons.
 
 This page is rev 0.4's plan. It was first written on 29 Oct, and revised on 8 Nov with what the retro PCs, the Amiga, the DMA soaks and the CD-ROM drive have taught since. GPIOs go into `src/config.h` first, and `hardware/tools/check_netlist.py` checks the board against it.
