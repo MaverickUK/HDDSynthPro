@@ -128,11 +128,11 @@ Console:
 
 SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it with any firmware change, add a `CHANGELOG.md` entry (Keep a Changelog), and tag `vX.Y.Z`.
 
-## Status (10 Nov 2026)
+## Status (10 Nov 2026: v0.32.0 released from `main`)
 
 The current state only; the history, with every measurement, is in `CHANGELOG.md` and `docs/speed-log.md`.
 
-- **Releases:** v0.31.0 (9 Nov) is the latest, from `main`. **0.32.0** is on branch `one-build` (dev.5, [docs/one-build-per-board.md](docs/one-build-per-board.md)): one drive build per board. Soaked an hour per build and the CD-ROM checked; left are slices 1-2 (with `device1 = none`), a 30-minute `-m cardsoak` over SDIO, then the owner's go to fast-forward `main` and tag.
+- **Releases:** v0.32.0 (10 Nov) is the latest, from `main`: one drive build per board ([docs/one-build-per-board.md](docs/one-build-per-board.md)), soaked an hour per build, the CD-ROM checked, slices 2-4 and a 30-minute SDIO card soak. PCB rev 0.4 (the new logo, R53, the silkscreen) is on branch `pcb-rev04`, to merge once ordered.
 - **Hardware:** PCB rev 0.3 is up ([docs/pcb-bringup.md](docs/pcb-bringup.md); pin 20 of its IDE header cut for keyed cables). Rev 0.4 is being laid out on branch `pcb-rev04` ([docs/pcb-rev04.md](docs/pcb-rev04.md)); its regenerated production files are uncommitted (the owner's), and whether to add an IORDY pull-up footprint is undecided.
 - **Proven on the rig:** PIO modes 0-3 and multiword DMA 2; detection, re-detection, standby and wake (from macOS), FLUSH CACHE, no card at boot, a card pulled and put back; two drives (an image or a folder as device 1); a CD-ROM as device 0 or 1 (ISO, BIN/CUE); the data lane; the card on SDIO. **Soaks:** 10 hours in PIO 3 (0.16.0), 10 hours in MDMA 2 (0.17.1), 10 hours of card soak over SDIO (0.31.0), an hour of each drive build (0.32.0-dev.5); no sector wrong on the cable since 0.8.22.
 - **Speeds through the adapter:** PIO 3 about 1.2-1.4 MB/s (the adapter's pace); MDMA 2 from RAM 7.7 MB/s reads and 13.9 writes; the card over SPI tops out near 1.8 MB/s for reads, over SDIO 6.2-6.6.
@@ -156,9 +156,9 @@ The current state only; the history, with every measurement, is in `CHANGELOG.md
   - `ata_device` (IDENTIFY, READ/WRITE SECTORS and DMA, DIAGNOSTIC and the housekeeping commands bridges send; everything else gets ABRT), `atapi_device` and `mmc` for the CD-ROM, `hdcd_device` for both;
   - the disk through the mailbox: the SD image, the welcome disk with no card or image (not yet tried on the rig), or the generated disk (`device0 = none`, console `T`), with the RAM overlay; settings from `HDDSYNTH.INI` (`drive_config`).
 - **Next:**
-  1. Finish and release 0.32.0.
+  1. Merge `pcb-rev04` into `main` once rev 0.4 is ordered.
   2. The rig: a second working adapter, and a way to cut its VBUS from a script, so replugs stop needing the owner.
-  3. The CD-ROM's slow Status and Device reads.
+  3. The CD-ROM's slow Status and Device reads: core 1 isn't late for them (the access log, 10 Nov), so look at `ide_bus.pio`'s path from the strobe to its push; fix the access log's false alarm first (core 1's PIO data loop doesn't note an empty FIFO).
   4. DMA as the default (`drive_config::DEFAULT_DMA`): soaked on the rig since 0.17.1, kept off so far.
   5. The activity link: the loopback test (console `U`, `-m link`), then with the synth (HDDSynth_Native v0.21.0); protocol 2 (`$HDE`, `seek_timing`) is host-tested only.
   6. PCB rev 0.4, and with it the PSRAM: a read cache, write-back, buffers for two drives and the CD-ROM.

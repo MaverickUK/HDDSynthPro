@@ -95,7 +95,7 @@ On the adapter (Windows), with the merged `bb48_drive` and `pcb_drive`:
 
 Then: CHANGELOG `## [0.32.0]`, the release notes, fast-forward `main`, tag `v0.32.0`, and delete the branch.
 
-**The release, step by step** (with the owner's go):
+**The release, step by step** (done 10 Nov 2026: v0.32.0):
 1. `src/version.h`: `FIRMWARE_VERSION "0.32.0"`. Build all three (`pio run -e bb48 -e bb48_drive -e pcb_drive`); `scripts/check_core1_layout.py` (the version string sits outside core 1's block, so nothing should move) and `check_core1_ram.py`.
 2. `CHANGELOG.md`: above the dev entries, this, dated the release day:
 

@@ -4,6 +4,18 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-10
+
+One drive build per board, from branch `one-build` (0.32.0-dev.1-7); each step is below. For the people flashing it: [docs/release-notes/v0.32.0.md](docs/release-notes/v0.32.0.md).
+
+- **`bb48_drive` and `pcb_drive` serve a hard disk, a CD-ROM drive or both, by `HDDSYNTH.INI`** (`device1 = cdrom` beside the disk, `device0 = cdrom` alone); `bb48_cdrom` and `bb48_hdcd` are gone. Core 1 has a loop per device kind, picked at boot, so the hard disk alone runs 0.31.0's code: PIO reads at 0.31.0's speed, writes within 2%.
+- **The CD-ROM on the PCB's SDIO card bus.** A CD-ROM always runs `ide_bus`.
+- **Core 1's hard disk code has a fixed place in RAM**, checked by CI (`scripts/core1_layout.py`, `check_core1_layout.py`); `check_core1_ram.py` follows calls through function pointers.
+- **The access log** (`-DHDDPRO_ACCESS_LOG=1`), a bench diagnostic: what core 1 did before a read it answered late.
+- Fixed: on the PCB, device 1's image or disc read through a PIO block the parked card had only borrowed.
+- Tested: an hour's soak of each drive build (8.9 million sectors checked on the cable, 0 bad), `-m cdrom` with the CD-ROM as device 0 and 1, slices 2-4, a 30-minute SDIO card soak (0 wrong). Known: the CD-ROM's slow register reads at detection (up to about 8 us; docs/atapi.md): core 1 isn't late for them, and two candidate fixes made no difference, so the cause is looked for before the access reaches core 1. Slice 1's IORDY check still fails, as on every build since 0.28.0.
+- The project is renamed IDE Synth Bay (below).
+
 ### Changed
 - **The project is now IDE Synth Bay** (formerly HDD Synth Pro), as it serves CD-ROM drives as well as hard disks: the README (with the new logo, `media/IDESynthBay.png`), CLAUDE.md, the docs and these release notes use the new name. The repository, file names, identifiers, the console's `READY HDDSynthPro` and the drive's IDENTIFY model keep the old one, so nothing that matches them changes. The PCB (rev 0.4, branch `pcb-rev04`) carries the new logo.
 
