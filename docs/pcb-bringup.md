@@ -29,7 +29,7 @@ You'll need: a multimeter with a continuity beeper, a USB-C cable, the USB-IDE a
 
 The bus switches isolate the bus when the board is unpowered (Ioff), so the BB48's power-order rule no longer applies. Powering the board first is still a good habit on the first day.
 
-- [ ] Plug the IDE cable in, then the adapter's USB.
+- [ ] Plug the IDE cable in, then the adapter's USB. A keyed cable needs pin 20 of the header removed (cut flush; it has no connection): rev 0.3's header was fitted with all 40.
 - [ ] `p`: DIOR#, DIOW#, CS0#, CS1#, RESET# = 1; IORDY = 1; INTRQ = 0; `DMARQ=0 DMACK#=1`.
 - [ ] `S`: **`CONFIG dmarq=wired`**. The drive tests DMARQ with a pull-up against the host's pull-down after switching the bus on. `absent` means DMARQ isn't reaching the host: check U5's channel and the IDE header's pin 21.
 - [ ] The adapter detects the drive: `CMD ... IDENTIFY`, `SET_FEATURES 3 11` (it chose PIO mode 3), and the host sees the disk.
@@ -55,6 +55,11 @@ The bus switches isolate the bus when the board is unpowered (Ioff), so the BB48
 ## 8. A soak
 
 - [ ] Overnight on the built-in disk (`host/runs/tools/overnight.cmd`, or `soak_dma.sh` for DMA). The rig's reference: 10 hours clean, 28.9 GB, 49.5 million sectors checked on the cable (0.16.0, PIO mode 3).
+
+## 9. A retro PC
+
+- [x] **The Evesham (Athlon XP, PCI, PIO 3), 9 Nov 2026:** `pcb_drive` serving `DOSBENCH.IMG`: early answers 2.29 MB/s reads, 1.25 writes; the data lane (`early_answers = off`) 4.24 and 2.03; a 15-minute soak with 2.39 million sectors checked on the cable, 0 bad; no read the PC didn't wait for. `bb48_hdcd` with Doom from the CD-ROM: none either (the BB48 had 26).
+- [ ] An ISA PC (the ICL 386) needs IOCS16#, which rev 0.3 doesn't wire (rev 0.4 does).
 
 ## If something fails
 

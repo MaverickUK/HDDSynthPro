@@ -7,7 +7,9 @@ IORDY. This walks the call graph from loop1 in the built firmware and fails
 if it reaches a function in flash, other than the few one-offs below.
 Flash calls crept in three times before this check (0.5.1, and twice in
 0.8.0: one, an out-of-line std::atomic<bool>::load, cost about 1 us a read).
-It can't see calls through function pointers; core 1 makes none.
+Calls through function pointers count too: a code address in a function's
+literal pool (odd, for Thumb, and a function's start) is taken as a call, so
+the early answers loop's `timers`, `command` and `bus` callbacks are checked.
 
 Usage: scripts/check_core1_ram.py [firmware.elf]
 """
@@ -24,12 +26,13 @@ RAM = (0x20000000, 0x20082000)
 
 # Called by core 1 only at start-up or on a bus reset, never per access.
 ONE_OFFS = (
-    "ata::Device::Device(",       # loop1's static device, constructed once
-    "atapi::Device::Device(",     # likewise, in the CD-ROM build
-    "hdcd::Device::Device(",      # likewise, in the bb48_hdcd build
+    "ata::Device::Device(",       # loop1's static device and its parts, constructed once
+    "atapi::Device::Device(",
+    "hdcd::Device::Device(",
     "ide_bus::restart(",          # when the host releases RESET#
     "iordy_timer::requestReset(",  # likewise
     "stayAbsent(",                # console `V`: the drive goes silent, once per absence
+    "void stayAbsent<",           # likewise, one per device type
     "__cxa_guard_acquire",        # guards for function-local statics
     "__cxa_guard_release",
 )
@@ -47,6 +50,7 @@ def main() -> int:
     dump = subprocess.run([tool("objdump"), "-d", "--no-show-raw-insn", ELF],
                           capture_output=True, text=True, check=True).stdout
     funcs: dict[str, tuple[int, list[str]]] = {}  # mangled name -> (address, callees)
+    pointers: dict[str, list[int]] = {}  # mangled name -> odd words in its literal pool
     current = None
     for line in dump.splitlines():
         m = re.match(r"^([0-9a-f]{8}) <(.+)>:$", line)
@@ -57,6 +61,15 @@ def main() -> int:
         call = re.search(r"\sbl?x?\s+[0-9a-f]+ <([^>+]+)>", line)
         if current and call and re.search(r"\sblx?\s", line):
             funcs[current][1].append(call.group(1))
+        word = re.search(r"\.word\s+0x([0-9a-f]{8})", line)
+        if current and word and int(word.group(1), 16) & 1:
+            pointers.setdefault(current, []).append(int(word.group(1), 16) - 1)
+
+    # A function's address taken (a Thumb code pointer, so odd) is a call
+    # through a pointer: core 1's early answers loop takes three.
+    by_address = {address: name for name, (address, _) in funcs.items()}
+    for name, words in pointers.items():
+        funcs[name][1].extend(by_address[w] for w in words if w in by_address)
 
     names = list(funcs)
     demangled = dict(zip(names, subprocess.run([tool("c++filt")], input="\n".join(names),

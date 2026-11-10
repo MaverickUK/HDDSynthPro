@@ -9,8 +9,8 @@ Build one (macOS: hdiutil; elsewhere xorriso, genisoimage or mkisofs):
 
     cd host && .venv/bin/python -m hddproto.test_iso build /Volumes/CARD/HDDSYNTH.ISO
 
-then serve it (`cdrom = HDDSYNTH.ISO`, the default) and run
-`PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom`. `check MOUNT_DIR` checks a
+then serve it (`device0 = cdrom` with `cdrom = HDDSYNTH.ISO`, the default) and run
+`PIO_ENV=bb48_drive scripts/rig.sh -m cdrom`. `check MOUNT_DIR` checks a
 mounted copy by hand.
 
 With NASM installed, the disc also holds CDCHECK.COM (tools/cdcheck), which

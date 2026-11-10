@@ -2,6 +2,19 @@
 
 28 Oct 2026, planned. Branch `atapi-cdrom`.
 
+## One build since 0.32.0 (9 Nov 2026, [one-build-per-board.md](one-build-per-board.md))
+
+The CD-ROM builds are gone: `bb48_drive` and `pcb_drive` hold the CD-ROM drive, chosen in `HDDSYNTH.INI` ([settings.md](settings.md)):
+
+| Up to 0.31.0 | Since 0.32.0 |
+|---|---|
+| `bb48_cdrom`: a CD-ROM drive alone, device 0 | `device0 = cdrom` (or an `.ISO`/`.CUE` name), `cdrom = DISC.ISO` |
+| `bb48_hdcd`: a hard disk, and a CD-ROM as device 1 | `device1 = cdrom` (or an `.ISO`/`.CUE` name) |
+
+Both are `hdcd::Device`, which keeps the CD-ROM on unit 0 or 1 (`cdSelected()` is one mask and one compare for either, or for none). With a CD-ROM, as device 0 or 1, the drive runs `ide_bus`, never the data lane or early answers (console `P e` still picks them): on early answers `hdcd::Device` answers Status in 1.8-2.4 µs and the USB adapter never detects the drive (`bb48_cdrom`'s own `atapi::Device` had managed there). The hard disk alone runs a loop of its own, compiled for `ata::Device` (0.32.0-dev.2), so a CD-ROM costs it nothing. The READY line no longer names a build (`READY HDDSynthPro 0.32.0 slice3`); `S` says where the CD-ROM is: `CONFIG device0=cdrom kind=cdrom disc=DOOM.ISO frames=N` (or `device1=`). The PCB serves discs over SDIO, as it serves images.
+
+The sections below are the history, with the build names of their time. To try the CD-ROM now: `PIO_ENV=bb48_drive scripts/rig.sh -m cdrom` with `E device0 = cdrom` (or `device1`), `E cdrom = none` and `!` (or `T`) for the test disc; on Windows `HDDPRO_CDROM_DEV=\\.\CdRom0` and `mode = mdma2`.
+
 ## A hard disk and a CD-ROM together: `bb48_hdcd` (4 Nov 2026, 0.30.0-dev.4, branch `hdd-cd`)
 
 **Through the USB adapter and on a retro PC (4 Nov, dev.10).** On the adapter: both drives in Windows, soaked an hour ([CHANGELOG](../CHANGELOG.md), dev.10). **On the Evesham** (Athlon XP, PCI IDE, `ide_bus`, PIO 3): the BIOS and the Windows 98 floppy's `OAKCDROM.SYS`/MSCDEX found both, C: as `ICL386MB.IMG`'s MS-DOS 5 and D: as the CD-ROM; Doom ran from `DOOM_SE.ISO` with its saves on C:, 3,361 commands, none failed, 5,360 sectors checked on the cable, 0 bad. The host didn't wait for IORDY on 26 CD data reads (none on the disk's), and held Status reads up to 3.6 µs (the slow reads below). Still to try: MS-DOS 5 booting from C: with the CD-ROM driver on it (`docs/bench-checklist.md`).
@@ -29,6 +42,8 @@ Console `M`, then a disc and Enter, in both CD-ROM builds: an ISO or a CUE sheet
 
 ## The Evesham's unwaited CD data reads (4 Nov 2026)
 
+**Update, 9 Nov 2026: not on the PCB.** The same session on the IDE Synth Bay PCB (`bb48_hdcd` 0.31.0, same core 1 code, same PC, same game, same settings) had **no** unwaited reads: 2,966 READ(10), 0 `NOIORDY`, and dev.13's counters show 3,663 data reads held past 400 ns (worst 1,100 ns), every one waited for. So the guess below, that this controller doesn't sample IORDY on the data port, was wrong. The likelier cause is the BB48's wiring: long, undamped DIOR# leads (the PCB has 33 Ω series resistors on DIOR# and DIOW#), whose ringing could look like the strobe ending early to `iordy_check.pio`, or make the controller end it early. Not proven either way; the PCB doesn't show it. The analysis below is kept as it was.
+
 On the Evesham with `bb48_hdcd` on `ide_bus` (dev.10), the host didn't wait for IORDY on 26 data reads during Doom (`NOIORDY ... last=DATA`), all while reading the CD and none while reading the hard disk; the CD-ROM build on early answers had 107 the same way (3 Nov). The game ran, so the words got there in time, but nothing promises that. What the logs and the code say (analysis only, no change yet):
 
 - **They're all data reads, and only the CD's.** Over the session's 1,700-odd reads held past 1,250 ns, all were Status or Alternate Status (worst 3,590 ns), one LBA Mid and one Device: **no data read was ever held that long**, and the host waited for every status read. So this host waits on the command block registers but not, or not always, on the data port. PCI IDE controllers time the data port apart from the 8-bit registers (fast PIO timing, with IORDY sampled only as the BIOS set it per drive), which fits. Then any data read the drive answers late counts, however little late.
@@ -48,6 +63,28 @@ On the rig the CD-ROM build held Alternate Status reads up to 2.8-3.6 µs (the h
 - **Not flash:** no function core 1 reaches from `loop1` loads from flash. Its literal pools hold only the identity strings, read once at start-up, and the sense constants are immediates in `mmc::execute`. (`check_core1_ram.py` follows calls, not data loads, so this was checked by scanning the literal pools.)
 - **The likely part:** in early answers' tight loop a command runs straight after the access that queued it, and for the CD-ROM that's the packet's last word: `runPacket` and `mmc::execute` (1,680 bytes, the biggest function on core 1), the trace's CMD and DONE records, then the device's next step, all before the host's next access, typically an Alternate Status poll, is answered. The hard disk's commands are short by comparison (IDENTIFY points at a buffer). Plus early answers' own latency, which the hard disk shows too.
 - **The measurement:** a build with `-DCMD_PROFILE=1` prints `cmd_run_max_ns` and `cmd_run_max` (command/packet) in `s`: the longest time core 1 spent on a command while the host waited. If it's near the slow reads' excess over about 1 µs, the packet is the cause, and the fix is to answer the host's first poll (BSY) before running it, or to hand `mmc::execute` to core 0 as a fetch is. The first is built, off: `-DEARLY_POLL_FIRST_NS=1000` (0.30.0-dev.8, `ide_bus.cpp`'s `servePollFirst`); core 1 waits up to that long after a command is queued for the host's next access, answers it, then runs the command. If it's small, the cause is early answers itself, and the CD-ROM build should try `ide_bus` (`P i`), whose worst read on the hard disk is about 1.2 µs.
+
+## Slow Device reads on `ide_bus` (10 Nov 2026, 0.32.0-dev.5)
+
+Since 0.30.0-dev.10 a CD-ROM always runs `ide_bus`, so the 4 Nov analysis above (early answers' tight loop running a packet straight after its last word) doesn't cover what the USB adapter showed on 10 Nov, at detection, with `device1 = cdrom` and DMA off (so with the diagnostics):
+
+| Before | Slow read | Held |
+|---|---|---|
+| every IDENTIFY (device 0 and 1) and IDENTIFY PACKET | Device | 4,900-5,620 ns |
+| straight after, the same commands | Alternate Status | 2,100-2,400 ns |
+| SET FEATURES (device 1), TEST UNIT READY | Alternate Status | 3,300-3,400 ns |
+| IDENTIFY PACKET's data | Status | 1,960-2,310 ns |
+
+ATA allows 1,250 ns. The adapter waits for IORDY on all of them; a host that doesn't would read them wrong. Repeatable to within 15% over three detections, so systematic, not contention.
+
+What the code says:
+- **Not flash:** of the flash addresses in core 1's literal pools, only `mmc::execute`'s and `modeSense`'s sense codes are loaded, per command, not per access. `atapi::Device::deliverSector`'s is a sense code too.
+- **Not the selection:** `ata::Device::deviceWritten` and `selectUnit` are a few loads and stores.
+- **A heavier write:** before a command the adapter writes five registers back to back (Device, Sector Count, LBA low, mid, high: `host/reference/slice0_probe_jmicron.txt`), about 0.8 us apart, then reads Device. With a CD-ROM each write is `hdcd::Device::write`: both devices' `write`, `noteStarts`, then `updateIntrq` calling `intrq()` and `intrqDriven()` on the selected one, all out of line, perhaps 0.6 us where the hard disk alone takes about 0.35. That makes a backlog, but not one of 5 us.
+
+**Measured (10 Nov, dev.5 and dev.6, CHANGELOG):** the access log never froze on these reads, so core 1 was idle, its FIFO empty, less than 1.25 us before answering each: not the register writes, and the two fixes below made no difference (dev.6 had them as build switches; dev.7 removed them). The slow Device reads show without a CD-ROM too (1.7 us at worst, at detection, slice 1). Next, at the desk: `ide_bus.pio`'s path from the strobe to its push, after a burst of register writes; and the access log's false alarm (core 1's PIO data loop doesn't note an empty FIFO).
+
+How it was measured: `-DHDDPRO_ACCESS_LOG=1` (`src/access_log.h`) prints, for a read answered late, everything core 1 did in the microseconds before it (`ACCLOG` lines). `host/runs/bench/after_replug.sh` (git-ignored) captures three detections with it. Fixes to weigh once it's known: the plain task-file registers written only to the selected device and copied to the other at selection or command time; `updateIntrq` only when the interrupt can have changed; the device calls inlined.
 
 ## Status (3 Nov 2026, 0.29.0): the MVP is built, and reads on a retro PC
 
@@ -207,7 +244,7 @@ A new pytest marker, `cdrom`, with tests that skip unless the board runs the `bb
 | Status after reset (DRDY clear for packet devices?) | Follow ATA/ATAPI-5 and the C0 trace; a host that sees the wrong status won't find the drive |
 
 **Questions for after this exploration:**
-- One binary with both a hard disk and a CD-ROM (devices 0 and 1), or a CD-ROM mode chosen in `HDDSYNTH.INI`? **Both, in `bb48_hdcd`** (above): device 1 a CD-ROM from `HDDSYNTH.INI`. A CD-ROM as device 0 alone stays `bb48_cdrom`'s.
+- One binary with both a hard disk and a CD-ROM (devices 0 and 1), or a CD-ROM mode chosen in `HDDSYNTH.INI`? **Both, in `bb48_hdcd`** (above): device 1 a CD-ROM from `HDDSYNTH.INI`. A CD-ROM as device 0 alone stays `bb48_cdrom`'s. **Since 0.32.0 one build does all of it** (top).
 - Swapping discs at run time from the console or the HDD Synth (UNIT ATTENTION, "medium may have changed", 06h/28h, and GET EVENT STATUS NOTIFICATION's media events). **From the console since 0.30.0-dev.7** (above); the HDD Synth to come.
 - Audio tracks: BIN/CUE images, PLAY AUDIO through the HDD Synth's speaker, READ CD for raw sectors.
 - The Amiga, which needs Kickstart 3.1.4 or later, or a third-party ATAPI driver, and a CD file system.

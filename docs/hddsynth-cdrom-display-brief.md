@@ -1,17 +1,19 @@
 # Brief: the HDD Synth's screen for the CD-ROM drive, and swapping discs from it
 
-> **Design, 4 Nov 2026; nothing built yet.** Protocol version 3 of the activity link ("Synth Link"), for the HDD Synth hardware revision that gives the link its own pins. Build the HDDSynthPro side only after the CD-ROM drive has run on a real PC through the bench ([bench-checklist.md](bench-checklist.md)).
+> **Design, 4 Nov 2026; nothing built yet.** Protocol version 3 of the activity link ("Synth Link"), for the HDD Synth hardware revision that gives the link its own pins. Build the IDE Synth Bay side only after the CD-ROM drive has run on a real PC through the bench ([bench-checklist.md](bench-checklist.md)).
 
-For whoever builds either side: Claude Code in **HDDSynth_Native** (the synth) or in **HDDSynthPro** (the drive). Each repo's CLAUDE.md comes first. On the HDDSynthPro side: core 1 never touches the UART or SD; core 0 never waits; pure, host-tested modules; SemVer and a CHANGELOG entry with every change.
+For whoever builds either side: Claude Code in **HDDSynth_Native** (the synth) or in **HDDSynthPro** (the drive). Each repo's CLAUDE.md comes first. On the IDE Synth Bay side: core 1 never touches the UART or SD; core 0 never waits; pure, host-tested modules; SemVer and a CHANGELOG entry with every change.
 
 ## Background
 
 [FDDSynthPro](https://github.com/MaverickUK/FDDSynthPro) shows its floppy drive on an SSD1306 OLED: a home screen (the image's name, track, head, reading or not), a head-trace screen, and a sounds screen, stepped through with an action button. The rotary encoder sets the volume, pressing it picks a disk image from the SD card and inserts it, and holding the action button ejects. It remembers the disk across power-off, as a GoTek does.
 
-The HDD Synth already has an OLED, and HDDSynthPro now has a CD-ROM drive: alone (`bb48_cdrom`), or as device 1 beside a hard disk (`bb48_hdcd`, `device1 = cdrom`), with discs changed at run time from its console (`M`, 0.30.0-dev.7). This brief gives the HDD Synth an FDDSynthPro-style screen for the CD-ROM, and lets it swap discs. **The synth draws the screen and owns the controls; HDDSynthPro reports and obeys.**
+The HDD Synth already has an OLED, and IDE Synth Bay now has a CD-ROM drive: alone (`bb48_cdrom`), or as device 1 beside a hard disk (`bb48_hdcd`, `device1 = cdrom`), with discs changed at run time from its console (`M`, 0.30.0-dev.7). This brief gives the HDD Synth an FDDSynthPro-style screen for the CD-ROM, and lets it swap discs. **The synth draws the screen and owns the controls; IDE Synth Bay reports and obeys.**
+
+**Since 0.32.0 there's one drive build** ([one-build-per-board.md](one-build-per-board.md)): read `bb48_cdrom` below as `device0 = cdrom` and `bb48_hdcd` as `device1 = cdrom`, both in `bb48_drive` and `pcb_drive`. What the synth is sent doesn't change.
 
 Two things have to change first:
-- **Pins.** On the HDD Synth Mk5, header J6 carries either the OLED or the link (UART1 on the OLED's I²C pins, GP24/GP25), so `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` switches the OLED off. **The next hardware revision gives the link dedicated pins** (TX, RX and GND, and 5 V for powering HDDSynthPro's PCB through its J3), so the OLED and the link run together. Everything below assumes that revision.
+- **Pins.** On the HDD Synth Mk5, header J6 carries either the OLED or the link (UART1 on the OLED's I²C pins, GP24/GP25), so `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` switches the OLED off. **The next hardware revision gives the link dedicated pins** (TX, RX and GND, and 5 V for powering IDE Synth Bay's PCB through its J3), so the OLED and the link run together. Everything below assumes that revision.
 - **Line length.** Both sides' receivers drop lines over 80 bytes (`SENTENCE_MAX_LINE` in the shared `sentence.h`, `activity_link::MAX_LINE`). Disc names can be longer, so they're sent shortened for display (below), and a disc is asked for by its place in the list plus a checksum of its full name. `sentence.h` stays unchanged.
 
 ## Is the link fast enough?
@@ -35,9 +37,9 @@ The same framing as versions 1 and 2: ASCII lines `$NAME,fields*hh\r\n`, the che
 
 **Names** in `$HDD` and `$HDL` are the last field, so they may contain commas (a FAT name can; it can't contain `*`). Printable ASCII only: any other byte becomes `?`. A name longer than 48 bytes is sent as its first 47 and `~`. The synth may sort and further shorten for its font.
 
-**Units:** `0` device 0 or `1` device 1, as HDDSynthPro's trace has them. The CD-ROM is unit 0 in `bb48_cdrom` and unit 1 in `bb48_hdcd`; `kind` says which drive is which. There's at most one CD-ROM.
+**Units:** `0` device 0 or `1` device 1, as IDE Synth Bay's trace has them. The CD-ROM is unit 0 in `bb48_cdrom` and unit 1 in `bb48_hdcd`; `kind` says which drive is which. There's at most one CD-ROM.
 
-### HDDSynthPro → synth
+### IDE Synth Bay → synth
 
 **`$HDU`: each drive's activity.** Sent for each unit on any change, and with every `$HDA` heartbeat.
 ```
@@ -79,7 +81,7 @@ $HDL,3,<total>,END*hh
 | `crc` | CRC-16/CCITT-FALSE of the full file name's bytes (poly 1021h, initial FFFFh, no reflection, no final XOR; `123456789` gives `29B1`), four upper-case hex digits |
 | `name` | Shortened as above |
 
-**The list:** the `*.ISO` files (any case) in the card's root folder, in directory order, which is stable while the card isn't changed. HDDSynthPro keeps no copy (RAM is short: `bb48_hdcd` uses 93%); it walks the directory for each page, a step per loop pass. The synth sorts what it shows if it wants to.
+**The list:** the `*.ISO` files (any case) in the card's root folder, in directory order, which is stable while the card isn't changed. IDE Synth Bay keeps no copy (RAM is short: `bb48_hdcd` uses 93%); it walks the directory for each page, a step per loop pass. The synth sorts what it shows if it wants to.
 
 **`$HDR`: the answer to a request** that changes something.
 ```
@@ -87,7 +89,7 @@ $HDR,3,<verb>,<OK|ERR>,<detail>*hh
 ```
 `OK` with the disc's name, or `ERR` with a short reason: `list changed`, `not found`, `no cd-rom`, `busy` (a change already under way), `no card`.
 
-### Synth → HDDSynthPro
+### Synth → IDE Synth Bay
 
 On the reply wire that already carries `$HDM`.
 
@@ -95,10 +97,10 @@ On the reply wire that already carries `$HDM`.
 |---|---|
 | `$HDQ,3,STATE*hh` | Send `$HDU` and `$HDD` now (the synth just started, or the link came back) |
 | `$HDQ,3,LIST,<first>,<count>*hh` | A page of the disc list: `count` up to 16 |
-| `$HDQ,3,LOAD,<index>,<crc>*hh` | Put in disc `index`; HDDSynthPro walks to it, checks the name's CRC, and answers `$HDR` (`ERR,list changed` if it differs) |
+| `$HDQ,3,LOAD,<index>,<crc>*hh` | Put in disc `index`; IDE Synth Bay walks to it, checks the name's CRC, and answers `$HDR` (`ERR,list changed` if it differs) |
 | `$HDQ,3,EJECT*hh` | Take the disc out |
 
-A load is the console's `M` underneath (0.30.0-dev.7): HDDSynthPro ejects (`$HDD ... C`), waits for core 1 to take it once the drive is idle, swaps the file, inserts (`$HDD ... I`), and the host gets a media-removal event, then new media and a unit attention (28h), as from a real tray.
+A load is the console's `M` underneath (0.30.0-dev.7): IDE Synth Bay ejects (`$HDD ... C`), waits for core 1 to take it once the drive is idle, swaps the file, inserts (`$HDD ... I`), and the host gets a media-removal event, then new media and a unit attention (28h), as from a real tray.
 
 ### Known answers
 
@@ -176,7 +178,7 @@ Drawn with the synth's own drawing primitives and 5×7 font (the `Canvas` HDDSyn
 | ![Laser trace](oled-cdrom/laser_trace.png) | **Laser trace:** FDDSynthPro's head trace for the CD-ROM. Each `$HDP` read's frame over time (the newest at the right), the disc's centre at the top and its edge at the bottom, so a game's loading shows as runs and seeks. Title: the time now. |
 | ![Both drives](oled-cdrom/drives.png) | **Drives** (`bb48_hdcd`): both units at once from `$HDU` and `$HDD`: a light per drive (lit while busy), its kind, its last operation and what it serves. The hard disk's name is `bb48_hdcd`'s `$HDD` for unit 0. |
 
-## HDDSynthPro's side
+## IDE Synth Bay's side
 
 All on core 0, in the CD-ROM builds (`bb48_cdrom`, `bb48_hdcd`); the hard disk build sends `$HDU` only.
 
@@ -189,6 +191,6 @@ All on core 0, in the CD-ROM builds (`bb48_cdrom`, `bb48_hdcd`); the hard disk b
 
 ## Decisions for the owner
 
-- **Remember the disc across power-off?** FDDSynthPro does. HDDSynthPro would have to write `cdrom = NAME` into `HDDSYNTH.INI` (the same code as console `E`), and today the firmware edits that file only from the console, by the owner's rule. Options: allow it for a disc chosen on the synth; keep the choice in RAM only (a power cycle goes back to `HDDSYNTH.INI`'s disc); or let the synth remember it and send `LOAD` after it starts.
+- **Remember the disc across power-off?** FDDSynthPro does. IDE Synth Bay would have to write `cdrom = NAME` into `HDDSYNTH.INI` (the same code as console `E`), and today the firmware edits that file only from the console, by the owner's rule. Options: allow it for a disc chosen on the synth; keep the choice in RAM only (a power cycle goes back to `HDDSYNTH.INI`'s disc); or let the synth remember it and send `LOAD` after it starts.
 - **Which folder holds the discs:** the root folder (as above, like every other image), or a `CD` folder, which would keep a long list out of the root.
 - **Multi-disc games:** a later step could group `GAME_1.ISO`, `GAME_2.ISO`... so "next disc" is one press.

@@ -411,18 +411,25 @@ bool servesDisc(const Config& c) { return notNone(c.cdrom); }
 
 bool hasDevice1(const Config& c) { return c.device1[0] != 0; }
 
-bool device1IsCdrom(const Config& c) {
-    Span name{c.device1, c.device1 + std::strlen(c.device1)};
+// `cdrom`, or a disc's file name (.ISO or .CUE): a CD-ROM drive.
+static bool namesCdrom(const char* device) {
+    Span name{device, device + std::strlen(device)};
     if (equalsNoCase(name, "cdrom")) return true;
     if (name.size() <= 4) return false;
     Span ext{name.end - 4, name.end};
     return equalsNoCase(ext, ".iso") || equalsNoCase(ext, ".cue");
 }
 
-const char* device1Disc(const Config& c) {
-    Span name{c.device1, c.device1 + std::strlen(c.device1)};
-    return equalsNoCase(name, "cdrom") ? c.cdrom : c.device1;
+// The disc a CD-ROM drive named by `device` serves.
+static const char* discFor(const Config& c, const char* device) {
+    Span name{device, device + std::strlen(device)};
+    return equalsNoCase(name, "cdrom") ? c.cdrom : device;
 }
+
+bool device0IsCdrom(const Config& c) { return namesCdrom(c.device0); }
+const char* device0Disc(const Config& c) { return discFor(c, c.device0); }
+bool device1IsCdrom(const Config& c) { return namesCdrom(c.device1); }
+const char* device1Disc(const Config& c) { return discFor(c, c.device1); }
 
 const char* defaultFile() {
     return "# HDDSynthPro settings. Changes take effect when the drive restarts.\r\n"
@@ -431,13 +438,13 @@ const char* defaultFile() {
            "# The disk image to serve as the first drive (device 0): a file in the\r\n"
            "# card's root folder. If it isn't there, the drive uses HDDSYNTH.IMG, or\r\n"
            "# else its welcome disk. none: the built-in test disk (64 MB; writes are\r\n"
-           "# lost when it restarts). Older files call this setting image.\r\n"
+           "# lost when it restarts). cdrom (or an .ISO or .CUE file's name): a CD-ROM\r\n"
+           "# drive instead, alone on the cable. Older files call this setting image.\r\n"
            "device0 = HDDSYNTH.IMG\r\n"
            "\r\n"
            "# A second drive (device 1), so a PC sees two hard disks: an image, or a\r\n"
            "# folder in the root folder, served read-only. cdrom (or an .ISO or .CUE\r\n"
-           "# file's name): a CD-ROM drive, in the bb48_hdcd firmware. none: no second\r\n"
-           "# drive.\r\n"
+           "# file's name): a CD-ROM drive. none: no second drive.\r\n"
            "device1 = none\r\n"
            "\r\n"
            "# The transfer mode to offer the host: auto (the fastest both sides\r\n"
@@ -485,7 +492,7 @@ const char* defaultFile() {
            "# and 63 sectors), or cylinders/heads/sectors, e.g. geometry = 756/13/51.\r\n"
            "geometry = auto\r\n"
            "\r\n"
-           "# The CD-ROM drive's disc (the CD-ROM firmware, or device1 = cdrom): an ISO,\r\n"
+           "# The CD-ROM drive's disc (device0 = cdrom or device1 = cdrom): an ISO,\r\n"
            "# or a CUE sheet and its BIN (the data track), in the root folder, read-only.\r\n"
            "# none: the built-in test disc.\r\n"
            "cdrom = HDDSYNTH.ISO\r\n";

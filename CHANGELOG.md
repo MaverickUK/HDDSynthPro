@@ -2,6 +2,122 @@
 
 All notable changes to this firmware. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+## [0.32.0] - 2026-11-10
+
+One drive build per board, from branch `one-build` (0.32.0-dev.1-7); each step is below. For the people flashing it: [docs/release-notes/v0.32.0.md](docs/release-notes/v0.32.0.md).
+
+- **`bb48_drive` and `pcb_drive` serve a hard disk, a CD-ROM drive or both, by `HDDSYNTH.INI`** (`device1 = cdrom` beside the disk, `device0 = cdrom` alone); `bb48_cdrom` and `bb48_hdcd` are gone. Core 1 has a loop per device kind, picked at boot, so the hard disk alone runs 0.31.0's code: PIO reads at 0.31.0's speed, writes within 2%.
+- **The CD-ROM on the PCB's SDIO card bus.** A CD-ROM always runs `ide_bus`.
+- **Core 1's hard disk code has a fixed place in RAM**, checked by CI (`scripts/core1_layout.py`, `check_core1_layout.py`); `check_core1_ram.py` follows calls through function pointers.
+- **The access log** (`-DHDDPRO_ACCESS_LOG=1`), a bench diagnostic: what core 1 did before a read it answered late.
+- Fixed: on the PCB, device 1's image or disc read through a PIO block the parked card had only borrowed.
+- Tested: an hour's soak of each drive build (8.9 million sectors checked on the cable, 0 bad), `-m cdrom` with the CD-ROM as device 0 and 1, slices 2-4, a 30-minute SDIO card soak (0 wrong). Known: the CD-ROM's slow register reads at detection (up to about 8 us; docs/atapi.md): core 1 isn't late for them, and two candidate fixes made no difference, so the cause is looked for before the access reaches core 1. Slice 1's IORDY check still fails, as on every build since 0.28.0.
+- The project is renamed IDE Synth Bay (below).
+
+### Changed
+- **The project is now IDE Synth Bay** (formerly HDD Synth Pro), as it serves CD-ROM drives as well as hard disks: the README (with the new logo, `media/IDESynthBay.png`), CLAUDE.md, the docs and these release notes use the new name. The repository, file names, identifiers, the console's `READY HDDSynthPro` and the drive's IDENTIFY model keep the old one, so nothing that matches them changes. The PCB (rev 0.4, branch `pcb-rev04`) carries the new logo.
+
+### Tested
+- **The PCB build in PIO (9 Nov, 0.31.0, the USB adapter):** `-m speed` from `HDDBENCH.IMG` over SDIO: reads 1.20 MB/s, 75 random 4 KB reads a second, writes 1.02 (the adapter's PIO pace); then `-m cardsoak` for 272 minutes: 4.97 GB written, 8.04 GB read, 606,804 commands, 8 full read-backs, **0 wrong**, no card lost or restarted, `iordy_ignored=0`. The IORDY timer, beside SDIO in that plan, counted 15.4 million reads past 1,250 ns (11.9 million Status, worst 2,070 ns; 3.5 million data, worst 1,710 ns), all waited for: early answers' known slow reads, at the rate the test disk showed without SDIO (8 Nov), so SDIO doesn't slow core 1.
+- **The PCB in a retro PC (9 Nov, the Evesham, PIO 3), the benchmark image (`DOSBENCH.IMG`):**
+  - `pcb_drive` on early answers: reads 2.29 MB/s (random 0.98 ms), writes 1.25 (the BB48 over SPI: 1.81 and 1.28); a 15-minute `HDDBENCH` soak: 64,792 commands, 2,390,875 sectors checked on the cable, 0 bad; no `NOIORDY`; worst Status read 1,020 ns, worst data read 500 ns. One data read at start-up was held 289 µs (at 52 s, as the BIOS started; waited for): not looked into yet.
+  - `pcb_drive` on the data lane (`early_answers = off`): **reads 4.24 MB/s** (random 0.76 ms), writes 2.03 (the BB48 on the lane: 2.18 and 1.98, so SPI was what held the lane's reads back); 0 bad; 2,741 Status reads past 1,250 ns (worst 1,650 ns, the lane's known ones, [docs/data-lane.md](docs/data-lane.md)), all waited for.
+- **The Evesham's unwaited CD data reads are gone on the PCB** (`bb48_hdcd`, `ide_bus`, Doom from `DOOM_SE.ISO` with its saves on C:, as on 4 Nov): 2,966 READ(10), **0 `NOIORDY`** (the BB48: 26); 3,663 data reads held past 400 ns, every one waited for, the worst 1,100 ns. So the 5 Nov guess (the Evesham doesn't sample IORDY on the data port) was wrong; the BB48's hand-wired, undamped DIOR# (the PCB has 33 Ω on DIOR#/DIOW#) is the likelier cause, by ringing seen as an early strobe end or a real one ([docs/atapi.md](docs/atapi.md)). The CD's slow Status reads are unchanged (worst 3,620 ns).
+
+## [0.32.0-dev.7] - 2026-11-10 (branch `one-build`)
+
+### Removed
+- **dev.6's two candidate fixes for the CD-ROM's slow register reads** (`HDDPRO_HDCD_FAST_WRITES`, `HDDPRO_HDCD_LAZY_INTRQ`), measured on the bench and no help (below). The firmware's code is dev.5's again; the two tests dev.6 added to `test_hdcd` stay, as plain tests of two devices on one cable.
+
+### Tested (10 Nov, the PCB, the USB adapter)
+- **Slices 1-2** (`device1 = none`, the test disk, `mode = mdma2`, re-detections from the console): slice 2 passes; slice 1 fails its IORDY check as every build has since 0.28.0, at 1,640 ns (213 reads past 1,250 ns at detection, worst 1,730 ns, on Device). So the slow Device reads at detection aren't the CD-ROM's alone; with a CD-ROM they're three to five times longer.
+- **A 30-minute card soak** (`-m cardsoak`, `HDDBENCH.IMG` over SDIO): 0 wrong, no card lost or restarted, writes 1.75 MB/s and reads 2.86 (0.31.0: 1.72 and 2.79).
+- **The access log on the CD-ROM's slow reads** (three re-detections, `device1 = cdrom`, `dma = off`): about 140 reads held 4.9-7.7 us, and none of them froze the log. So core 1 had found its FIFO empty less than 1.25 us before answering each one: no long step and no backlog of register writes. The time goes before the access reaches core 1, in `ide_bus.pio`'s path from the strobe to its push, or in a way the log can't see. Its one freeze was a false alarm: core 1's PIO data loop doesn't note an empty FIFO, so 11.7 ms waiting there for the adapter counted as busy.
+- **The candidate fixes, compared** (`cd_fixes.sh`, two re-detections each, the access log on; counts from the `SLOWREAD` lines): none 48 slow reads, worst 7,980 ns; fast writes 121 (twice the detections), worst 6,480; lazy INTRQ 213, worst 4,990. Per detection no fewer, and every variant far past 1,250 ns. Both together wasn't run (a console process held the port for its flash).
+
+## [0.32.0-dev.6] - 2026-11-10 (branch `one-build`)
+
+### Added
+- **The access log** (`src/access_log.h`), a bench diagnostic built in only with `-DHDDPRO_ACCESS_LOG=1`: core 1 keeps a ring of its last 48 jobs (each access taken from the FIFO, each command run, each loop step over 0.5 us, the FIFO found empty) with its cycle counter, and when it answers a read the host is already strobing after more than 1.25 us busy, it freezes a copy, which core 0 prints as `ACCLOG` lines (how long before the late answer each began). `SLOWREAD` names a slow read but not its cause, and comes up to half a millisecond later. Off, every call compiles to nothing: core 1's layout is unchanged (`check_core1_layout.py`), and no log data is built in. On: RAM 96.3%, `check_core1_ram.py` passes.
+
+### Build
+- **`check_core1_ram.py` follows calls through function pointers.** Its docstring said core 1 makes none, but the early answers loop (`serveBusEarly`) calls its `timers`, `command` and `bus` callbacks through pointers, since before 0.30.0, so nothing checked that they and what they call were in RAM. They were. A function's address in a literal pool (odd, for Thumb, and exactly a function's start) now counts as a call: 95 functions reachable from `loop1` instead of 85, all in RAM. Found reviewing `one-build` before its merge; the review found nothing else to fix.
+
+### Added, off
+- **Two candidate fixes for the CD-ROM's slow register reads**, build switches in `src/hdcd_device.h`, off until measured on the bench (`host/runs/bench/cd_fixes.sh`, git-ignored, compares them): `HDDPRO_HDCD_FAST_WRITES` sends a Data write to the selected device only (the other's `write()` ignored it anyway) and a task-file register's (Features, Sector Count, LBA) to both by an inlined `latch()` (new in `ata::Device` and `atapi::Device`: `write()`'s path for those registers), skipping `write()`'s calls and `noteStarts`; `HDDPRO_HDCD_LAZY_INTRQ` skips `updateIntrq` after a task-file register's write, which can't change the interrupt or who drives it. Both keep what the host sees as it is: `test/run_native_tests.sh` now also builds `test_hdcd` with the fast writes on (`run_hdcd_fast`), and both builds pass, with two new tests (`hdcd_disk_writes_with_a_cdrom_beside_it`, `hdcd_task_file_writes_reach_both_devices`). Off, the firmware's hard disk code is unchanged (`check_core1_layout.py`) and so is the CD-ROM's (`hdcd::Device::write` 128 bytes); on, `hdcd::Device::write` is 300 bytes and `check_core1_ram.py` passes.
+- **`docs/bench-checklist.md` rewritten** for the next session: the old one (4-5 Nov) named the builds 0.32.0 removed.
+
+### Found, to measure
+- **The CD-ROM's slow Device reads on `ide_bus`** (10 Nov, `pcb_drive` dev.5, `device1 = cdrom`, `dma = off`, detection through the USB adapter): one Device read held 4,900-5,620 ns just before every IDENTIFY and IDENTIFY PACKET, with an Alternate Status read of 2,100-2,400 ns after it, and Alternate Status at 3,300-3,400 ns before device 1's SET FEATURES and TEST UNIT READY. Repeatable to within 15%, so systematic. Not flash (core 1's literal pools hold flash addresses only in `mmc`'s per-command sense codes), not `selectUnit` (a few stores). The adapter's register check writes five registers back to back, then reads Device: with a CD-ROM each write runs both devices' `write`, `noteStarts` and `updateIntrq`'s two `intrq()` calls, perhaps 0.6 us, but that can't build a 5 us backlog by itself. The access log will say; [docs/atapi.md](docs/atapi.md) has the details.
+
+## [0.32.0-dev.5] - 2026-11-09 (branch `one-build`, overnight)
+
+### Build
+- **Core 1's hard disk code has a fixed place in RAM, and CI checks it.** Arduino-Pico's linker script took `.time_critical*` in link order, the source files' alphabetical order, which is how `atapi_device.cpp` once landed between `ata_device.cpp` and `ide_bus.cpp`. `scripts/core1_layout.py`, run by PlatformIO after it generates the linker script, puts `CORE1_RAM` code first in `.data`, file by file in a listed order (0.31.0's), any other file's after them, between the symbols `__core1_hd_start` and `__core1_hd_end`. `scripts/check_core1_layout.py` compares every function there (address, size, name) with `scripts/core1_layout/<env>.txt` and fails on a difference; CI runs it, `rig.sh` warns. Every symbol in both drive builds is where it was (`nm` compared), so the firmware is unchanged; swapping two files in the list moved them, and the check failed, as meant. `host/tests/test_core1_layout.py` tests the linker patch.
+
+### Changed
+- **The hard disk's core 1 code is back where 0.31.0 had it.** dev.2-4 read 2.5% slower in PIO than 0.31.0 with byte-identical functions: the CD-ROM's code (`atapi::Device`, from `atapi_device.cpp`, which links before `ide_bus.cpp`) sat between `ata::Device` and `ide_bus`, moving everything after it about 3.6 KB. The CD-ROM's core 1 code now has a section of its own, `CORE1_RAM_CD` (`.after_data.core1_cd`, still RAM, placed after all of `CORE1_RAM`): `atapi_device`, `hdcd_device`, `mmc`, and the `hdcd::Device` copies of `ide_bus`'s and `main.cpp`'s per-access functions, which are now a plain function per device around an inlined template (`IDE_BUS_FOR`, `CORE1_FOR`), defined in 0.31.0's order. `ide_bus`'s hard disk functions start at 0.31.0's addresses (`laneSyncSlow` 0x20000e2c on); GCC's own order puts `serveOther` before `serviceOnce`, so the rest are within 0x390 bytes of theirs, and `main.cpp`'s are together as before.
+- **Measured** (`pcb_drive` builds on the PCB, the USB adapter, PIO 3, early answers, the test disk): reads 1.20 MB/s at 337-338 µs a sector and 75.6-75.8 random reads a second, the same as 0.31.0's `pcb_drive` (1.20, 337 µs, 75.7); dev.4 1.18 (345 µs, 75.1). Writes 1.11 MB/s against 1.13 (dev.4 1.11): not core 1's per-access code, which matches 0.31.0's but for literal pools (disassembly compared) and `updateIntrq` (`intrqDriven()` forced inline, as GCC otherwise shares an out-of-line copy in flash); core 0, whose flash code grew, is the next suspect. Worst read 2,100 ns (0.31.0: 2,070).
+- **Soaked** (10 Nov, overnight, the PCB, the USB adapter, the test disk, PIO 3, early answers, the bus observer on full checks, an hour each): `bb48_drive` dev.5 2,537 MB, 87,615 commands, 4,350,249 sectors checked on the cable, 0 bad, 0 gaps, no mismatches; `pcb_drive` dev.5 (the card on SPI, left so by the `bb48_drive` run) 2,664 MB, 91,741 commands, 4,567,256 sectors, 0 bad, 0 gaps, no mismatches. Both: `iordy_ignored=0`, worst read 2,110 ns (Status, early answers; 0.31.0 reaches 2,070), worst data read 1,740 ns, no resets.
+- **The CD-ROM's code from its new section works** (10 Nov, `pcb_drive` on the PCB, the card on SDIO, the USB adapter, `device1 = cdrom`, `mode = mdma2`): Windows mounted `DOOM_SE.ISO` as D:, and with the test disc and the test disk `-m cdrom` passes (64 MB of the disc read at 3.46 MB/s, random and first and last frames), as do slices 3-4 beside it. Overnight it had looked broken: the card's settings were the Evesham's (`dma = off`), and this adapter sets the DMA bit on every PACKET (docs/atapi.md), so the drive refused TEST UNIT READY (ABRT), the adapter reset and detected again every 20 s, and Windows showed neither drive. Not a firmware fault; the release notes now say so.
+- **Rig tests:** with a CD-ROM configured, Windows polls it (GET EVENT STATUS NOTIFICATION) once a second, so `DriveLog.wait_quiet()` never saw a quiet second and slices 1-2 timed out before their first cycle. A CD-ROM's routine polls (`GET_EVENT`, `TEST_UNIT_READY` and the `DONE` after each) no longer count as activity (`PollFilter`, `tests/test_drive_log.py`). Not yet rerun on the rig: the adapter went silent after the drive restarted with a CD-ROM configured (the known limit) and needs a replug.
+
+## [0.32.0-dev.4] - 2026-11-09 (branch `one-build`)
+
+### Fixed
+- **`S` and `s` said the diagnostics ran after a disc had taken their PIO block** (console `M` into a CD-ROM that started with no disc on the card, on the PCB): `CONFIG pio ... iordy_timer=off bus_observer=off (the card took the diagnostics' block for a disc, until a restart)`, and `s` says `diag=off`.
+
+### Tested (the PCB, `pcb_drive` dev.3)
+- **SDIO with a CD-ROM as device 0:** after the BB48 builds the card ran over SPI with the warning; taken out and put back, it came up on SDIO, parked (`sdio-idle`) with the test disc served, and the adapter detected the CD-ROM on `ide_bus` from the settings alone. `M DOOM_SE.ISO` put the owner's ISO in over the borrowed block, which the card kept (`bus=sdio`); a following `S` didn't take it back. Windows read all 27 files (22.7 MB) at 6.70 MB/s, twice, the passes agreeing; no card lost or restarted, `iordy_ignored=0`.
+
+## [0.32.0-dev.3] - 2026-11-09 (branch `one-build`)
+
+### Fixed
+- **A CD-ROM as device 0 was never detected through the USB adapter** on early answers (the setting's default): the adapter polled Status, held 1.8-2.4 µs each, and never sent a command, then dropped off USB, as with a CD-ROM as device 1 on 4 Nov (0.30.0-dev.10). `bb48_cdrom` had managed on early answers with `atapi::Device` alone; through `hdcd::Device` each access costs more. Now any CD-ROM runs `ide_bus` (console `P e` still picks early answers); `S` says `CONFIG with a CD-ROM as device 0, ide_bus`.
+
+### Tested (the PCB, the USB adapter, Windows; dev.2 and dev.3)
+- **A CD-ROM as device 1** beside the test disk (`mode = mdma2`): `-m cdrom` reads the whole 64 MB test disc right at 3.37 MB/s (0.30.0-dev.3, without read-ahead: 2.42), random and first/last reads pass; 9,107 sectors checked on the cable, 0 bad, `iordy_ignored=0`. The hard disk beside it in MDMA 2: reads 8.63 MB/s, 1,066 random 4 KB reads a second, writes 12.94 MB/s (0.30.0's `bb48_hdcd`: 9.02, 13.25).
+- **A CD-ROM alone as device 0** (`device0 = cdrom`, `ide_bus`): the whole disc at 3.19 MB/s, random and first/last reads pass, 9,196 sectors checked on the cable, 0 bad, IDENTIFY PACKET DEVICE checked too; console `M`: `none`, `test`, a missing ISO (`not found`, then no disc), `test` again, and the host reads the disc after.
+
+## [0.32.0-dev.2] - 2026-11-09 (branch `one-build`)
+
+### Changed
+- **One binary, two loops.** dev.1 ran `hdcd::Device` for every configuration, and the hard disk alone paid for it: on the PCB through the USB adapter, PIO 3, early answers, the test disk, 0.31.0's `bb48_drive` read 1.20 MB/s and wrote 1.13; 0.31.0's `bb48_hdcd` (no CD-ROM) 1.14 and 0.90; dev.1 1.17 and **0.83**, its worst read 2,730 ns (2,070), and five times the data reads past 700 ns. Now core 1's bus code is compiled twice: for `ata::Device`, the hard disk alone (with a second disk or folder as device 1, or none), and for `hdcd::Device`, with a CD-ROM as device 0 or 1. `loop1` picks one at boot (`runDrive<Dev>`) and builds the device in storage both share, so RAM holds one. `ide_bus`'s functions are a `CORE1_RAM` overload per device around an always-inlined template (an explicit template instantiation goes to flash whatever its section attribute; `check_core1_ram.py` caught it). `ata::Device::intrqDriven()` is always inlined, as GCC stopped inlining it in the new copy. RAM 95.5% (dev.1: 94.1%; 0.31.0's `bb48_drive`: 91.7%).
+- **Measured, A-B-A-B** (each figure repeated to the digit on the same build, so differences are real):
+
+  | | 0.31.0 `bb48_drive` | dev.2 |
+  |---|---|---|
+  | Early answers: reads | 1.20 MB/s | 1.17 |
+  | Random 4 KB reads | 75.0-75.7 a second | 74.9-75.1 |
+  | Writes | 1.13 MB/s | 1.11 |
+  | Worst read | 2,070-2,080 ns | 2,130 |
+  | Data reads past 700 ns (a speed run) | 24,700-28,100 | 21,100-21,300 |
+  | Data lane: reads, random, writes | 1.53, 80.0, 1.68 | 1.53, 79.8-80.0, 1.64 |
+  | Data lane: worst read | 1,380-1,410 ns | 1,360-1,370 |
+
+  Slices 3-4 pass (259,397 sectors checked on the cable, 0 bad, `iordy_ignored=0`). The 2-2.5% left is where the code sits, not what it does: the hard disk's core 1 functions are byte for byte the size they were in 0.31.0, only about 3.6 KB further on in RAM, behind the CD-ROM code the linker now keeps (CLAUDE.md: *Core split*). A device at a fixed address in place of the pointer changed nothing (tried before dev.3, not kept).
+
+## [0.32.0-dev.1] - 2026-11-09 (branch `one-build`)
+
+One drive build per board ([docs/one-build-per-board.md](docs/one-build-per-board.md), step 2). Built and host-tested; not yet run on the board.
+
+### Changed
+- **`bb48_drive` and `pcb_drive` serve a hard disk, a CD-ROM drive or both, by `HDDSYNTH.INI`:** the `bb48_cdrom` and `bb48_hdcd` builds (and `HDDPRO_CDROM`, `HDDPRO_HDCD`) are gone. Core 1 always runs `hdcd::Device`, which before was `bb48_hdcd`'s alone, so the hard disk alone now pays its `cdSelected()` per access: to measure against 0.31.0's `bb48_drive` in PIO (the plan's step 1) before this merges. `cdSelected()` is now one mask and one compare, for no CD-ROM, one as device 1, or one alone as device 0.
+- **The CD-ROM on the PCB:** discs are served over SDIO, as images are.
+- **The READY line no longer names a build** (`READY HDDSynthPro 0.32.0-dev.1 slice3`). The rig tests find a CD-ROM drive by console `S` instead (`CONFIG device0=... kind=cdrom ...` or `device1=`); `host/bench_session.py` runs every step on `bb48_drive`, with each step's settings on top of those it found.
+- `S` reports a CD-ROM as device 0 as `CONFIG device0=NAME kind=cdrom disc=... frames=N` (`bb48_cdrom` said `CONFIG cdrom=... serving=...`).
+- CI builds, checks and releases three UF2s: `bb48-listen`, `bb48-drive` and `pcb-drive`.
+
+### Added
+- **`device0 = cdrom`** (or a `device0` name ending in `.ISO` or `.CUE`): a CD-ROM drive alone as device 0, as `bb48_cdrom` was: its disc from `cdrom`, the test disc with `cdrom = none` or console `T` (`J` still serves `HDDBENCH.IMG`, as a hard disk), on `ide_bus` (dev.3: below). `device1` is left out, and `S` says so. Settings files from 0.31.0 work unchanged (`device1 = cdrom`, `cdrom = NAME`).
+- Host tests: the CD-ROM alone as device 0 in `hdcd::Device`, by PIO and by DMA; `device0 = cdrom` in `drive_config`.
+
+### Fixed
+- **The PCB parked the card under device 1's image** when device 0 served nothing from the card (`device0 = none`, or a CD-ROM with no disc): the PIO blocks were shared out before device 1's image, folder or disc was opened, so it was read through a borrowed block that the next console `S` gave back to the diagnostics. Device 1 is now chosen first. On 0.31.0 this already struck `device0 = none` with a `device1` image.
+- **Console `M` on the PCB** putting a disc in a drive that started with none (the card parked): the disc now keeps the card's PIO block, as if served from boot, and the diagnostics stay off until a restart (it says so); a disc that can't be opened gives the block back.
+
 ## [0.31.0] - 2026-11-09
 
 The PCB build, from branch `sdio` (0.31.0-sdio.1-4); each step is below. For the people flashing it: [docs/release-notes/v0.31.0.md](docs/release-notes/v0.31.0.md).

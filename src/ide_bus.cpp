@@ -9,13 +9,9 @@
 #include <hardware/pio.h>
 #include <hardware/structs/m33.h>
 
+#include "access_log.h"
 #include "ata_device.h"
-#include "drive_device.h"
-#if HDDPRO_CDROM
-#include "atapi_device.h"
-#elif HDDPRO_HDCD
 #include "hdcd_device.h"
-#endif
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"
@@ -209,7 +205,8 @@ __attribute__((always_inline)) static inline bool laneDue() {
 
 // Keeps the lane in step with the device: steps 1-3 as they fall due, and a
 // block the device has dropped (a reset, an aborted command) is dropped too.
-CORE1_RAM __attribute__((noinline)) static void laneSyncSlow(DriveDevice& dev) {
+template <class Dev>
+__attribute__((always_inline)) static inline void laneSyncSlowT(Dev& dev) {
     const uint16_t* next;
     uint16_t left;
     if (s_lane_words && !s_lane_ahead) {
@@ -242,7 +239,13 @@ CORE1_RAM __attribute__((noinline)) static void laneSyncSlow(DriveDevice& dev) {
 // after the command that dropped it; until then its status shows as it is.
 // (Checking for that here too held status reads past 1.25 us: 0.29.0-2d.4,
 // about 1,400 a speed run, the adapter's first poll after each READ.)
-__attribute__((always_inline)) static inline void laneSync(DriveDevice& dev) {
+// laneSyncSlow and serveOther per device, out of line (the slow paths), each
+// copy in its device's section (core1_ram.h: the CD-ROM's after the rest).
+CORE1_RAM __attribute__((noinline)) static void laneSyncSlow(ata::Device& dev) { laneSyncSlowT(dev); }
+CORE1_RAM_CD __attribute__((noinline)) static void laneSyncSlow(hdcd::Device& dev) { laneSyncSlowT(dev); }
+
+template <class Dev>
+__attribute__((always_inline)) static inline void laneSync(Dev& dev) {
     if (!s_lane) return;
     if (s_lane_words) {
         // Only a block the host has read (step 3, or 2 and 3 if core 1 hadn't
@@ -263,7 +266,8 @@ __attribute__((always_inline)) static inline void laneSync(DriveDevice& dev) {
 }
 
 // After a command or a fetch: everything, a dropped block included.
-__attribute__((always_inline)) static inline void laneSyncFull(DriveDevice& dev) {
+template <class Dev>
+__attribute__((always_inline)) static inline void laneSyncFull(Dev& dev) {
     if (!s_lane) return;
     const uint16_t* next;
     uint16_t left;
@@ -286,7 +290,8 @@ void resetLaneStats() { s_lane_switch_max = 0; }
 CORE1_RAM bool dataLaneOn() { return s_lane; }
 const char* busName() { return s_bus_name; }
 
-CORE1_RAM bool syncDataLane(DriveDevice& dev) {
+template <class Dev>
+__attribute__((always_inline)) static inline bool syncDataLaneT(Dev& dev) {
     laneSyncFull(dev);
     updateIntrq(dev);
     return s_lane_words != nullptr;
@@ -569,7 +574,8 @@ __attribute__((always_inline)) static inline void waitCycles(uint32_t cycles) {
 
 // Inlined into both callers: a call here costs every access its register
 // saves and restores, about 100 ns (0.8.1's worst read).
-__attribute__((always_inline)) static inline void serve(DriveDevice& dev, uint32_t sample) {
+template <class Dev>
+__attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sample) {
     if (s_early) sample = earlyAddress(sample);
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (s_early) {
@@ -606,6 +612,7 @@ __attribute__((always_inline)) static inline void serve(DriveDevice& dev, uint32
             pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
             dev.consumeRead(reg);
         }
+        access_log::answered();
     }
     updateIntrq(dev);
 }
@@ -621,7 +628,8 @@ __attribute__((always_inline)) static inline void serve(DriveDevice& dev, uint32
 // which runs the command or handles the reset. (A command written mid-block,
 // as the USB adapter does when it abandons a half-read block, CLAUDE.md, must
 // not be left queued: returning true for it kept STATUS at BSY for good.)
-CORE1_RAM bool serveLane(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
+template <class Dev>
+__attribute__((always_inline)) static inline bool serveLaneT(Dev& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
     bool posted = false;
     while (s_lane_words) {
         if (dev.commandQueued()) return false;  // the pass runs it
@@ -648,12 +656,15 @@ CORE1_RAM bool serveLane(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox
     return true;
 }
 
-CORE1_RAM bool serviceOnce(DriveDevice& dev, uint32_t& sample) {
+template <class Dev>
+__attribute__((always_inline)) static inline bool serviceOnceT(Dev& dev, uint32_t& sample) {
     if (rxEmpty(s_pio, s_sm)) {
         fifoEmpty(SITE_MAIN);
+        access_log::empty();
         return false;
     }
     sample = pio_sm_get(s_pio, s_sm);
+    access_log::note(access_log::ACCESS, sample);
     serve(dev, sample);
     return true;
 }
@@ -661,23 +672,33 @@ CORE1_RAM bool serviceOnce(DriveDevice& dev, uint32_t& sample) {
 // The lane's rare case: an access mid-block that isn't a data read. Kept out
 // of line so the lane's loop keeps its values in registers (0.8.12 inline:
 // a third of data words held past 400 ns, against 2%).
-__attribute__((noinline)) CORE1_RAM static void serveOther(DriveDevice& dev, uint32_t sample, uint16_t served) {
+template <class Dev>
+__attribute__((always_inline)) static inline void serveOtherT(Dev& dev, uint32_t sample, uint16_t served) {
     if (bus::op(sample) == bus::Op::Read) {
         // A status poll (every sector boundary, with read-ahead): answer
         // first. Catching the device up can't change it: the block isn't
         // finished, so it's still DRQ.
         ata::Reg reg = s_reg_for[regIndex(sample)];
         pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
+        access_log::note(access_log::ACCESS, sample);
+        access_log::answered();
         dev.consumeDataWords(served);
         dev.consumeRead(reg);
         updateIntrq(dev);
         return;
     }
     dev.consumeDataWords(served);  // a write: catch the device up first
+    access_log::note(access_log::ACCESS, sample);
     serve(dev, sample);
 }
 
-CORE1_RAM bool serveDataIn(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
+// serveOther per device: defined with the others below (IDE_BUS_FOR), in the
+// order 0.31.0's code had, so the hard disk's sit where they did.
+static void serveOther(ata::Device& dev, uint32_t sample, uint16_t served);
+static void serveOther(hdcd::Device& dev, uint32_t sample, uint16_t served);
+
+template <class Dev>
+__attribute__((always_inline)) static inline bool serveDataInT(Dev& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
     const uint16_t* next;
     uint16_t left;
     if (!dev.dataInRemaining(next, left)) return true;
@@ -735,7 +756,8 @@ __attribute__((always_inline)) static inline bool rxWaiting(PIO pio, uint sm) {
 // catches the device up and is served as serviceOnce would.
 static constexpr uint32_t DATA_ADDRESS = bus::maskOf(cfg::PIN_CS1_N);  // CS0# low, CS1# high, DA2-0 = 0
 
-CORE1_RAM bool serveDataInEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
+template <class Dev>
+__attribute__((always_inline)) static inline bool serveDataInEarlyT(Dev& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {
     const uint16_t* next;
     uint16_t left;
     if (!dev.dataInRemaining(next, left)) return true;
@@ -804,7 +826,8 @@ CORE1_RAM bool serveDataInEarly(DriveDevice& dev, bool reset_low, FetchMailbox& 
 #if EARLY_POLL_FIRST_NS
 // EARLY_POLL_FIRST_NS: the host's next access, if it comes within that long,
 // answered before the command just queued runs.
-__attribute__((always_inline)) static inline void servePollFirst(DriveDevice& dev, PIO pio, uint sm,
+template <class Dev>
+__attribute__((always_inline)) static inline void servePollFirst(Dev& dev, PIO pio, uint sm,
                                                                   void (*bus)(uint32_t)) {
     const uint32_t start = m33_hw->dwt_cyccnt;
     while (!rxWaiting(pio, sm))
@@ -815,8 +838,9 @@ __attribute__((always_inline)) static inline void servePollFirst(DriveDevice& de
 }
 #endif
 
-CORE1_RAM void serveBusEarly(DriveDevice& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
-                             uint32_t quiet_cycles, void (*timers)(DriveDevice&), void (*command)(DriveDevice&),
+template <class Dev>
+__attribute__((always_inline)) static inline void serveBusEarlyT(Dev& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,
+                             uint32_t quiet_cycles, void (*timers)(Dev&), void (*command)(Dev&),
                              void (*bus)(uint32_t)) {
     PIO pio = s_pio;
     uint sm = s_sm;
@@ -918,7 +942,8 @@ void setDataReadDelay(uint32_t ns) {
 static volatile uint32_t s_intrq_rises = 0;  // interrupts raised (driven high from low), for `s`
 static bool s_intrq_high = false;
 
-CORE1_RAM void updateIntrq(DriveDevice& dev) {
+template <class Dev>
+__attribute__((always_inline)) static inline void updateIntrqT(Dev& dev) {
     // The lane's device moved on ahead of the host: its next interrupt waits
     // until the host has read the block.
     const bool asserted = dev.intrq() && !s_lane_ahead;
@@ -930,5 +955,33 @@ CORE1_RAM void updateIntrq(DriveDevice& dev) {
 }
 
 uint32_t intrqRises() { return s_intrq_rises; }
+
+// Core 1's code for each device it can run (drive_device.h): the hard disk
+// alone (ata::Device), or with a CD-ROM (hdcd::Device); loop1 picks one at
+// boot. Plain functions around the inlined templates above, because GCC puts
+// a template's explicit instantiation in flash whatever its section attribute.
+#define IDE_BUS_FOR(D, RAM)                                                                               \
+    RAM void updateIntrq(D& dev) { updateIntrqT(dev); }                                                    \
+    RAM bool syncDataLane(D& dev) { return syncDataLaneT(dev); }                                           \
+    RAM bool serviceOnce(D& dev, uint32_t& sample) { return serviceOnceT(dev, sample); }                   \
+    __attribute__((noinline)) RAM static void serveOther(D& dev, uint32_t sample, uint16_t served) {       \
+        serveOtherT(dev, sample, served);                                                                  \
+    }                                                                                                      \
+    RAM bool serveLane(D& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {            \
+        return serveLaneT(dev, reset_low, mailbox, posted_fetch);                                          \
+    }                                                                                                      \
+    RAM bool serveDataIn(D& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {          \
+        return serveDataInT(dev, reset_low, mailbox, posted_fetch);                                        \
+    }                                                                                                      \
+    RAM bool serveDataInEarly(D& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch) {     \
+        return serveDataInEarlyT(dev, reset_low, mailbox, posted_fetch);                                   \
+    }                                                                                                      \
+    RAM void serveBusEarly(D& dev, bool reset_low, FetchMailbox& mailbox, uint32_t& posted_fetch,          \
+                           uint32_t quiet_cycles, void (*timers)(D&), void (*command)(D&),                 \
+                           void (*bus)(uint32_t)) {                                                        \
+        serveBusEarlyT(dev, reset_low, mailbox, posted_fetch, quiet_cycles, timers, command, bus);         \
+    }
+IDE_BUS_FOR(ata::Device, CORE1_RAM)
+IDE_BUS_FOR(hdcd::Device, CORE1_RAM_CD)
 
 }  // namespace ide_bus

@@ -1,6 +1,6 @@
 # The benchmark image
 
-`DOSBENCH.IMG` is a standard disk for testing HDD Synth Pro in any PC with a 386 or later. It boots FreeDOS and runs `HDDBENCH`, which measures the drive and checks its data the same way on every machine. Results from different PCs therefore compare directly.
+`DOSBENCH.IMG` is a standard disk for testing IDE Synth Bay in any PC with a 386 or later. It boots FreeDOS and runs `HDDBENCH`, which measures the drive and checks its data the same way on every machine. Results from different PCs therefore compare directly.
 
 ## Use it
 

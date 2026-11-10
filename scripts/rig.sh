@@ -45,6 +45,10 @@ if [[ -z "${NO_FLASH:-}" ]]; then
     if [[ "${PIO_ENV:-bb48}" == bb48_drive ]]; then
         "$PYTHON" scripts/check_core1_ram.py  # nothing core 1 calls may be in flash
     fi
+    if [[ "${PIO_ENV:-bb48}" == bb48_drive || "${PIO_ENV:-bb48}" == pcb_drive ]]; then
+        # A warning here (CI fails on it): benchmark reads (-m speed) if core 1's code moved.
+        "$PYTHON" scripts/check_core1_layout.py "${PIO_ENV}" || echo "rig.sh: core 1's code moved: benchmark reads (-m speed) before trusting timings"
+    fi
     "$PIO" run -e "${PIO_ENV:-bb48}" -t upload
 fi
 

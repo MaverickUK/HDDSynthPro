@@ -17,7 +17,7 @@ Device::Device(const IdentifyInfo& info, uint8_t position)
     mmc::powerOn(mmc_, disc_);
 }
 
-CORE1_RAM void Device::resetToSignature(uint8_t device) {
+CORE1_RAM_CD void Device::resetToSignature(uint8_t device) {
     // The packet device signature, which tells a host this is ATAPI. Status
     // is 00h: DRDY stays clear until a command has run (ATA/ATAPI-5).
     sector_count_ = 1;
@@ -41,7 +41,7 @@ CORE1_RAM void Device::resetToSignature(uint8_t device) {
     ++fetch_id_;
 }
 
-CORE1_RAM void Device::consumeRead(Reg reg) {
+CORE1_RAM_CD void Device::consumeRead(Reg reg) {
     if (notSelected()) return;
     if (reg == Reg::Data) {
         if (!(status_ & ST_DRQ) || !data_) return;
@@ -51,13 +51,13 @@ CORE1_RAM void Device::consumeRead(Reg reg) {
     }
 }
 
-CORE1_RAM void Device::consumeDataWords(uint16_t n) {
+CORE1_RAM_CD void Device::consumeDataWords(uint16_t n) {
     if (n == 0 || notSelected() || !(status_ & ST_DRQ) || !data_) return;
     data_index_ = uint16_t(data_index_ + n);
     if (data_index_ >= data_count_) finishDataIn();
 }
 
-CORE1_RAM void Device::write(Reg reg, uint16_t value) {
+CORE1_RAM_CD void Device::write(Reg reg, uint16_t value) {
     uint8_t v = uint8_t(value);
     if (reg == Reg::AltStatusDevCtrl) {
         bool was_srst = (device_control_ & DC_SRST) != 0;
@@ -103,14 +103,14 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
     }
 }
 
-CORE1_RAM bool Device::acceptsCommand(uint8_t command) const {
+CORE1_RAM_CD bool Device::acceptsCommand(uint8_t command) const {
     if (in_reset_) return false;
     if (notSelected()) return command == CMD_EXECUTE_DEVICE_DIAGNOSTIC;
     // DEVICE RESET is how a host recovers a packet device that's stuck busy.
     return !(status_ & ST_BSY) || command == CMD_DEVICE_RESET;
 }
 
-CORE1_RAM void Device::queueCommand(uint8_t command) {
+CORE1_RAM_CD void Device::queueCommand(uint8_t command) {
     if (!acceptsCommand(command)) return;
     queued_command_ = command;
     command_queued_ = true;
@@ -118,7 +118,7 @@ CORE1_RAM void Device::queueCommand(uint8_t command) {
     irq_pending_ = false;  // writing Command clears a pending interrupt
 }
 
-CORE1_RAM void Device::runQueuedCommand() {
+CORE1_RAM_CD void Device::runQueuedCommand() {
     if (command_queued_) {
         command_queued_ = false;
         startCommand(queued_command_);
@@ -128,7 +128,7 @@ CORE1_RAM void Device::runQueuedCommand() {
     }
 }
 
-CORE1_RAM void Device::hardReset(bool asserted) {
+CORE1_RAM_CD void Device::hardReset(bool asserted) {
     if (asserted) {
         abandonCommand();
         in_reset_ = true;
@@ -149,18 +149,18 @@ CORE1_RAM void Device::hardReset(bool asserted) {
     }
 }
 
-CORE1_RAM bool Device::intrq() const {
+CORE1_RAM_CD bool Device::intrq() const {
     return irq_pending_ && !notSelected() && !(device_control_ & DC_NIEN);
 }
 
 // ---- ATA commands -------------------------------------------------------------
 
-CORE1_RAM void Device::beginCommand(uint8_t command) {
+CORE1_RAM_CD void Device::beginCommand(uint8_t command) {
     last_ = CommandInfo{command, 0, 0, 0};
     ++commands_started_;
 }
 
-CORE1_RAM void Device::startCommand(uint8_t command) {
+CORE1_RAM_CD void Device::startCommand(uint8_t command) {
     // Whatever was running ends here (a host that gave up on a block, as
     // ata::Device describes, or DEVICE RESET on a stuck one).
     abandonCommand();
@@ -224,7 +224,7 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
     }
 }
 
-CORE1_RAM void Device::setFeatures() {
+CORE1_RAM_CD void Device::setFeatures() {
     last_.lba = features_;
     last_.count = sector_count_;
     uint8_t pio_mode = info_.pio_mode > MAX_PIO_MODE ? MAX_PIO_MODE : info_.pio_mode;
@@ -252,7 +252,7 @@ CORE1_RAM void Device::setFeatures() {
         fail(ER_ABRT);
 }
 
-CORE1_RAM void Device::abortWithSignature() {
+CORE1_RAM_CD void Device::abortWithSignature() {
     // ATA: a packet device aborts these with its signature in the registers,
     // so a host that probes for a hard disk learns what it found.
     sector_count_ = 1;
@@ -262,13 +262,13 @@ CORE1_RAM void Device::abortWithSignature() {
     fail(ER_ABRT);
 }
 
-CORE1_RAM void Device::completeNoData() {
+CORE1_RAM_CD void Device::completeNoData() {
     status_ = ST_DRDY;
     irq_pending_ = true;
     ++commands_completed_;
 }
 
-CORE1_RAM void Device::fail(uint8_t error) {
+CORE1_RAM_CD void Device::fail(uint8_t error) {
     data_ = nullptr;
     dma_ = dma_burst_running_ = false;
     error_ = error;
@@ -279,7 +279,7 @@ CORE1_RAM void Device::fail(uint8_t error) {
 
 // ---- PACKET -------------------------------------------------------------------
 
-CORE1_RAM void Device::startPacket() {
+CORE1_RAM_CD void Device::startPacket() {
     if (features_ & FEATURES_DMA) {
         if (info_.mdma_mode == NO_DMA) {  // not offered
             beginCommand(CMD_PACKET);
@@ -297,7 +297,7 @@ CORE1_RAM void Device::startPacket() {
     status_ = uint8_t((status_ & ST_DRDY) | ST_DRQ);  // no interrupt: DRQ within 50 us (IDENTIFY PACKET word 0)
 }
 
-CORE1_RAM void Device::runPacket() {
+CORE1_RAM_CD void Device::runPacket() {
     last_ = CommandInfo{CMD_PACKET, 0, 0, packet_[0]};
     ++commands_started_;
     packet_command_ = true;
@@ -333,7 +333,7 @@ CORE1_RAM void Device::runPacket() {
     }
 }
 
-CORE1_RAM void Device::packetDone() {
+CORE1_RAM_CD void Device::packetDone() {
     packet_command_ = false;
     dma_ = dma_burst_running_ = false;  // the status phase: core 1 ends the DMA command
     sector_count_ = IR_COD | IR_IO;  // status
@@ -342,7 +342,7 @@ CORE1_RAM void Device::packetDone() {
     ++commands_completed_;
 }
 
-CORE1_RAM void Device::packetFail() {
+CORE1_RAM_CD void Device::packetFail() {
     // CHECK CONDITION: the sense key in the Error register's top four bits;
     // ABRT too for a packet the drive refused.
     packet_command_ = false;
@@ -358,7 +358,7 @@ CORE1_RAM void Device::packetFail() {
     ++commands_completed_;
 }
 
-CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
+CORE1_RAM_CD void Device::startDataIn(const uint16_t* words, uint16_t count) {
     data_ = words;
     data_count_ = count;
     data_index_ = 0;
@@ -366,7 +366,7 @@ CORE1_RAM void Device::startDataIn(const uint16_t* words, uint16_t count) {
     irq_pending_ = !dma_;  // in DMA, DMARQ asks for each block; the interrupt is the status phase's
 }
 
-CORE1_RAM void Device::sendBlock() {
+CORE1_RAM_CD void Device::sendBlock() {
     uint16_t left = uint16_t(buf_bytes_ - buf_pos_);
     uint16_t block = left;
     if (block > limit_ && !dma_) block = uint16_t(limit_ & ~1u);  // a block that isn't the last stays whole words
@@ -377,7 +377,7 @@ CORE1_RAM void Device::sendBlock() {
     startDataIn(buf_ + buf_pos_ / 2, uint16_t((block + 1) / 2));
 }
 
-CORE1_RAM void Device::finishDataIn() {
+CORE1_RAM_CD void Device::finishDataIn() {
     data_ = nullptr;
     data_count_ = data_index_ = 0;
     if (!packet_command_) {  // IDENTIFY PACKET DEVICE: no interrupt at the end
@@ -402,7 +402,7 @@ CORE1_RAM void Device::finishDataIn() {
     }
 }
 
-CORE1_RAM void Device::requestFetch(bool busy) {
+CORE1_RAM_CD void Device::requestFetch(bool busy) {
     if (busy) status_ = ST_BSY | ST_DRDY;
     fetch_pending_ = true;
     if (++fetch_id_ == 0) ++fetch_id_;
@@ -411,14 +411,14 @@ CORE1_RAM void Device::requestFetch(bool busy) {
     fetch_buf_ = buf_ == sectors_[0] ? 1 : 0;  // never the sector being sent
 }
 
-CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
+CORE1_RAM_CD bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
     fetch = Fetch{fetch_id_ | id_tag_, fetch_lba_, sectors_[fetch_buf_], false, false, command_sectors_, command_lba_,
                   position_};
     return true;
 }
 
-CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
+CORE1_RAM_CD void Device::fetchDone(uint32_t id, bool ok) {
     if (!fetch_pending_ || id != (fetch_id_ | id_tag_)) return;  // stale: a reset or a newer command
     fetch_pending_ = false;
     if (data_) {  // a read-ahead, done while the host takes the sector before
@@ -429,7 +429,7 @@ CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
     deliverSector(ok);  // the host is waiting for it (BSY)
 }
 
-CORE1_RAM void Device::deliverSector(bool ok) {
+CORE1_RAM_CD void Device::deliverSector(bool ok) {
     if (!ok) {
         mmc_.sense = mmc::SENSE_READ_ERROR;
         packetFail();
@@ -444,7 +444,7 @@ CORE1_RAM void Device::deliverSector(bool ok) {
 
 // ---- Changing the disc ------------------------------------------------------------
 
-CORE1_RAM void Device::changeDisc(uint32_t total_sectors) {
+CORE1_RAM_CD void Device::changeDisc(uint32_t total_sectors) {
     info_.total_sectors = total_sectors;
     disc_.frames = total_sectors / SECTORS_PER_FRAME;
     mmc::discChanged(mmc_, disc_);
@@ -452,14 +452,14 @@ CORE1_RAM void Device::changeDisc(uint32_t total_sectors) {
 
 // ---- DMA -----------------------------------------------------------------------
 
-CORE1_RAM bool Device::dmaBurstReady(DmaBurst& burst) {
+CORE1_RAM_CD bool Device::dmaBurstReady(DmaBurst& burst) {
     if (!dma_ || dma_burst_running_ || !data_ || !(status_ & ST_DRQ) || notSelected()) return false;
     burst = DmaBurst{data_ + data_index_, nullptr, uint16_t(data_count_ - data_index_)};
     dma_burst_running_ = true;
     return true;
 }
 
-CORE1_RAM void Device::dmaBurstDone() {
+CORE1_RAM_CD void Device::dmaBurstDone() {
     if (!dma_burst_running_) return;
     dma_burst_running_ = false;
     if (data_) {

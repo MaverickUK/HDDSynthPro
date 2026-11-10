@@ -3,6 +3,7 @@ plus helpers to send console commands and wait for output."""
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 
@@ -27,6 +28,32 @@ def find_port() -> str | None:
     return picos[0].device if len(picos) == 1 else None
 
 
+# A CD-ROM drive's routine polling: Windows asks for events (GET EVENT STATUS
+# NOTIFICATION) about once a second, and other hosts test the unit's readiness,
+# so with a CD-ROM configured the trace is never quiet for a second.
+_POLL_CMD = re.compile(r"CMD \d+ a0 (GET_EVENT|TEST_UNIT_READY)\b")
+_PACKET_DONE = re.compile(r"DONE \d+ a0 ")
+
+
+class PollFilter:
+    """Tells a CD-ROM's routine polls (their CMD line, the DONE that follows
+    it) from activity that should keep wait_quiet() waiting."""
+
+    def __init__(self):
+        self._in_poll = False
+
+    def is_activity(self, line: str) -> bool:
+        if _POLL_CMD.match(line):
+            self._in_poll = True
+            return False
+        if self._in_poll and _PACKET_DONE.match(line):
+            self._in_poll = False
+            return False
+        if line.startswith("CMD ") or line.startswith("DONE "):
+            self._in_poll = False
+        return True
+
+
 class DriveLog:
     def __init__(self, raw_log_path=None):
         self._ser: serial.Serial | None = None
@@ -37,6 +64,7 @@ class DriveLog:
         self._thread: threading.Thread | None = None
         self._raw = open(raw_log_path, "a", encoding="utf-8") if raw_log_path else None
         self.ready = ""  # the board's READY line, once seen
+        self._polls = PollFilter()
 
     def open(self, timeout: float = 20.0):
         """Opens the port, waiting for it to appear (e.g. after a flash)."""
@@ -78,9 +106,11 @@ class DriveLog:
             if not complete:
                 continue
             text = [c.decode("utf-8", "replace").rstrip("\r") for c in complete]
+            active = [self._polls.is_activity(line) for line in text]
             with self._lock:
                 self._lines.extend(text)
-                self._last_line_at = time.monotonic()
+                if any(active):
+                    self._last_line_at = time.monotonic()
             if self._raw:
                 self._raw.write("\n".join(text) + "\n")
                 self._raw.flush()
@@ -113,7 +143,8 @@ class DriveLog:
             time.sleep(0.05)
 
     def wait_quiet(self, quiet: float, timeout: float):
-        """Waits until the drive has printed nothing for `quiet` seconds."""
+        """Waits until the drive has printed nothing for `quiet` seconds, but
+        for a CD-ROM's routine polls (PollFilter)."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self._lock:

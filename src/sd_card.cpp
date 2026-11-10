@@ -183,6 +183,26 @@ struct Lend {
     ~Lend() { giveBack(); }
 };
 
+// A file opened to be served while the card was parked (console `M` putting a
+// disc in a drive that started with none): the card keeps the PIO block it
+// borrowed, as if it had been served from boot, and the diagnostics that
+// lent it stay off until a restart. Called before the Lend ends.
+static bool s_kept_block = false;
+bool keptDiagnosticsBlock() { return s_kept_block; }
+
+static void keepBorrowed(Print& log) {
+#if SD_SDIO
+    if (!s_borrowed) return;
+    s_borrowed = false;
+    s_parked = false;
+    s_on_sdio = true;
+    s_kept_block = true;
+    log.println("# the card keeps the diagnostics' PIO block until a restart (iordy_timer and bus_observer off)");
+#else
+    (void)log;
+#endif
+}
+
 // "open" (being served), "present" or "none".
 static const char* imageState(const char* name) {
     if (s_image.isOpen() && s_open_name && strcasecmp(s_open_name, name) == 0) return "open";
@@ -614,6 +634,7 @@ public:
 static SdImageFile s_image_file;
 
 ImageFile* openImage(const char* name, Print& log, bool read_only) {
+    Lend lend;  // given back unless the image is served (keepBorrowed)
     if (s_image.isOpen()) s_image.close();
     s_open_name = nullptr;
     s_watch = media_watch::Watch();
@@ -651,6 +672,7 @@ ImageFile* openImage(const char* name, Print& log, bool read_only) {
     s_open_name = name;
     s_served_size = id.size;
     s_watch.serve(id);
+    keepBorrowed(log);
     return &s_image_file;
 }
 
@@ -853,6 +875,7 @@ bool SdCardOps::reopenDevice1() {
 }
 
 ImageFile* openDevice1Image(const char* name, Print& log, bool read_only) {
+    Lend lend;  // given back unless the image is served (keepBorrowed)
     if (s_device1_image.isOpen()) s_device1_image.close();
     s_device1_name[0] = '\0';
     if (!mount(log) || !wakeIfSilent(log)) {
@@ -871,6 +894,7 @@ ImageFile* openDevice1Image(const char* name, Print& log, bool read_only) {
     std::snprintf(s_device1_name, sizeof s_device1_name, "%s", name);
     s_device1_flags = read_only ? O_RDONLY : O_RDWR;
     s_device1_image_file.size_ = s_device1_image.fileSize();
+    keepBorrowed(log);
     return &s_device1_image_file;
 }
 

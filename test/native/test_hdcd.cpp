@@ -1,5 +1,6 @@
-// Tests for the bb48_hdcd build's device (hdcd_device): a hard disk as
-// device 0 and a CD-ROM drive as device 1 on one cable, through a virtual
+// Tests for the drive build's device (hdcd_device): a hard disk as device 0
+// and a CD-ROM drive as device 1 on one cable, or the CD-ROM alone as device
+// 0 (`device0 = cdrom`), through a virtual
 // host that talks to both as a BIOS and a CD-ROM driver do, with core 0's
 // share serving each unit's fetches from its own disk.
 #include <cstdint>
@@ -84,13 +85,14 @@ struct Host {
         return reg(Reg::StatusCommand);
     }
 
-    // A PACKET to device 1, the PIO way; `out` gets the data.
-    uint8_t packet(std::initializer_list<uint8_t> bytes, std::vector<uint8_t>& out) {
+    // A PACKET to device `unit` (the CD-ROM's: 1 unless it's alone), the PIO
+    // way; `out` gets the data.
+    uint8_t packet(std::initializer_list<uint8_t> bytes, std::vector<uint8_t>& out, int unit = 1) {
         uint8_t p[12] = {};
         unsigned n = 0;
         for (uint8_t b : bytes) p[n++] = b;
         out.clear();
-        select(1);
+        select(unit);
         dev.write(Reg::ErrorFeatures, 0);
         dev.write(Reg::LbaMid, 0xFE);
         dev.write(Reg::LbaHigh, 0xFF);
@@ -510,6 +512,163 @@ TEST(hdcd_changing_the_disc_leaves_the_disk_alone) {
     CHECK(!none.discIdle());
 }
 
+TEST(hdcd_a_cdrom_alone_as_device_0) {
+    // device0 = cdrom: the CD-ROM is the only drive, its disc device 0's disk.
+    Device dev(DISK, &DISK1, &DISC, 0);
+    DiscSource disc;
+    GeneratedDisk unused(DISK.total_sectors);
+    Host host{dev, {&disc, &unused}};
+    CHECK(dev.hasCdrom());
+    CHECK_EQ(dev.cdUnit(), 0);
+    // Device 0: the packet signature
+    CHECK_EQ(host.signature(), 0xEB14);
+    CHECK(dev.cdSelected());
+    // IDENTIFY DEVICE aborted, IDENTIFY PACKET DEVICE answered
+    host.command(ata::CMD_IDENTIFY_DEVICE);
+    CHECK(host.waitNotBusy());
+    CHECK(host.reg(Reg::StatusCommand) & ata::ST_ERR);
+    host.command(atapi::CMD_IDENTIFY_PACKET_DEVICE);
+    CHECK(host.waitNotBusy());
+    CHECK(host.reg(Reg::StatusCommand) & ata::ST_DRQ);
+    uint16_t w[256];
+    for (auto& word : w) word = dev.read(Reg::Data);
+    CHECK_EQ(w[0], 0x85C0);
+    CHECK_EQ(dev.lastCommand().unit, 0);
+    // Reads: from unit 0, the disc
+    std::vector<uint8_t> d;
+    host.packet({mmc::OP_TEST_UNIT_READY}, d, 0);  // the unit attention
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 7, 0, 0, 2}, d, 0), ata::ST_DRDY);
+    CHECK(d == discFrames(7, 2));
+    CHECK_EQ(host.fetches[0], 8);
+    CHECK_EQ(host.fetches[1], 0);
+    CHECK_EQ(dev.lastCommand().unit, 0);
+    CHECK_EQ(dev.lastCommand().packet, mmc::OP_READ_10);
+    // No device 1, and no hard disk behind it: Status 00h, nothing runs
+    host.select(1);
+    CHECK_EQ(host.altStatus(), 0x00);
+    uint32_t started = dev.commandsStarted();
+    host.command(ata::CMD_IDENTIFY_DEVICE);
+    host.pump();
+    CHECK_EQ(dev.commandsStarted(), started);
+    CHECK_EQ(dev.disk().commandsStarted(), 0u);  // the hard disk never saw a thing
+    // A reset: the packet signature again, device 0 selected
+    dev.hardReset(true);
+    dev.hardReset(false);
+    CHECK_EQ(host.signature(), 0xEB14);
+    CHECK(dev.cdSelected());
+    // A disc change, as console M does it
+    CHECK(dev.discIdle());
+    dev.changeDisc(0);
+    CHECK(host.packet({mmc::OP_TEST_UNIT_READY}, d, 0) & ata::ST_ERR);  // no disc
+    CHECK_EQ(dev.disk().commandsStarted(), 0u);
+}
+
+TEST(hdcd_a_cdrom_as_device_0_by_dma) {
+    IdentifyInfo dma_disc = DISC;
+    dma_disc.mdma_mode = 2;
+    Device dev(DISK, nullptr, &dma_disc, 0);
+    DiscSource disc;
+    Host host{dev, {&disc, &disc}};
+    std::vector<uint8_t> d;
+    host.packet({mmc::OP_TEST_UNIT_READY}, d, 0);
+    // READ (10) of one frame with PACKET's DMA bit: four bursts of a sector each
+    uint8_t p[12] = {mmc::OP_READ_10, 0, 0, 0, 0, 3, 0, 0, 1};
+    host.select(0);
+    dev.write(Reg::ErrorFeatures, atapi::FEATURES_DMA);
+    dev.write(Reg::LbaMid, 0xFE);
+    dev.write(Reg::LbaHigh, 0xFF);
+    host.command(atapi::CMD_PACKET);
+    CHECK(host.waitNotBusy());
+    for (unsigned i = 0; i < 6; ++i) dev.write(Reg::Data, uint16_t(p[2 * i] | p[2 * i + 1] << 8));
+    CHECK(dev.dmaCommand());
+    std::vector<uint8_t> got;
+    for (int guard = 0; guard < 10000 && dev.dmaCommand(); ++guard) {
+        host.pump();
+        ata::DmaBurst burst;
+        if (dev.dmaBurstReady(burst)) {
+            for (unsigned i = 0; i < burst.count; ++i) {
+                got.push_back(uint8_t(burst.from[i]));
+                got.push_back(uint8_t(burst.from[i] >> 8));
+            }
+            dev.dmaBurstDone();
+        }
+    }
+    CHECK(got == discFrames(3, 1));
+    CHECK_EQ(host.fetches[0], 4);
+    CHECK_EQ(host.fetches[1], 0);
+}
+
+// Writes to the disk with the CD-ROM beside it: the data goes to the disk
+// alone, and the CD-ROM reads as before.
+TEST(hdcd_disk_writes_with_a_cdrom_beside_it) {
+    Device dev(DISK, nullptr, &DISC);
+    GeneratedDisk base(DISK.total_sectors);
+    RamOverlayDisk<8> disk(base);
+    DiscSource disc;
+    Host host{dev, {&disk, &disc}};
+    std::vector<uint8_t> d;
+    host.packet({mmc::OP_TEST_UNIT_READY}, d);  // the unit attention
+    const uint32_t lba = 2000;
+    std::vector<uint16_t> written;
+    for (int w = 0; w < 2 * 256; ++w) written.push_back(uint16_t(0xA500 + w));
+    host.select(0);
+    dev.write(Reg::SectorCount, 2);
+    dev.write(Reg::LbaLow, lba & 0xFF);
+    dev.write(Reg::LbaMid, (lba >> 8) & 0xFF);
+    dev.write(Reg::LbaHigh, 0);
+    dev.write(Reg::Device, 0xE0);
+    host.command(ata::CMD_WRITE_SECTORS);
+    for (int s = 0; s < 2; ++s) {
+        CHECK(host.waitNotBusy());
+        CHECK(host.altStatus() & ata::ST_DRQ);
+        for (int w = 0; w < 256; ++w) dev.write(Reg::Data, written[size_t(s * 256 + w)]);
+    }
+    CHECK(host.waitNotBusy());
+    CHECK_EQ(host.reg(Reg::StatusCommand), ata::ST_DRDY | ata::ST_DSC);
+    std::vector<uint16_t> words;
+    CHECK_EQ(host.readSectors(lba, 2, words), ata::ST_DRDY | ata::ST_DSC);
+    CHECK(words == written);
+    CHECK_EQ(host.fetches[1], 0);  // the CD-ROM saw none of it
+    CHECK_EQ(host.packet({mmc::OP_READ_10, 0, 0, 0, 0, 7, 0, 0, 1}, d), ata::ST_DRDY);
+    CHECK(d == discFrames(7, 1));
+    CHECK_EQ(dev.commandsStarted(), dev.commandsCompleted());
+}
+
+// Both devices on a cable take every task-file register write, whichever is
+// selected, and keep it while the other is selected.
+TEST(hdcd_task_file_writes_reach_both_devices) {
+    Device dev(DISK, nullptr, &DISC);
+    GeneratedDisk disk(DISK.total_sectors);
+    DiscSource disc;
+    Host host{dev, {&disk, &disc}};
+    host.select(1);
+    dev.write(Reg::SectorCount, 0x12);
+    dev.write(Reg::LbaLow, 0x34);
+    dev.write(Reg::LbaMid, 0x56);
+    dev.write(Reg::LbaHigh, 0x78);
+    CHECK_EQ(host.reg(Reg::SectorCount), 0x12);
+    CHECK_EQ(host.reg(Reg::LbaLow), 0x34);
+    host.select(0);
+    CHECK_EQ(host.reg(Reg::SectorCount), 0x12);
+    CHECK_EQ(host.reg(Reg::LbaLow), 0x34);
+    CHECK_EQ(host.reg(Reg::LbaMid), 0x56);
+    CHECK_EQ(host.reg(Reg::LbaHigh), 0x78);
+    dev.write(Reg::LbaLow, 0x9A);  // device 0 selected: device 1 takes it too
+    host.select(1);
+    CHECK_EQ(host.reg(Reg::LbaLow), 0x9A);
+    CHECK_EQ(host.reg(Reg::LbaHigh), 0x78);
+    // A busy device ignores them: the CD-ROM mid-packet, the disk still takes it
+    dev.write(Reg::ErrorFeatures, 0);
+    dev.write(Reg::LbaMid, 0xFE);
+    dev.write(Reg::LbaHigh, 0xFF);
+    host.command(atapi::CMD_PACKET);
+    CHECK(host.waitNotBusy());
+    CHECK(host.altStatus() & ata::ST_DRQ);  // waiting for the packet: not busy, so it takes writes
+    host.select(0);
+    dev.write(Reg::LbaLow, 0x21);
+    CHECK_EQ(host.reg(Reg::LbaLow), 0x21);
+}
+
 void runHdcdTests() {
     RUN(hdcd_each_device_shows_its_signature);
     RUN(hdcd_a_bios_probe_finds_a_disk_and_a_cdrom);
@@ -523,4 +682,8 @@ void runHdcdTests() {
     RUN(hdcd_selecting_the_disk_while_the_cdrom_is_busy);
     RUN(hdcd_resets_select_device_0);
     RUN(hdcd_changing_the_disc_leaves_the_disk_alone);
+    RUN(hdcd_a_cdrom_alone_as_device_0);
+    RUN(hdcd_a_cdrom_as_device_0_by_dma);
+    RUN(hdcd_disk_writes_with_a_cdrom_beside_it);
+    RUN(hdcd_task_file_writes_reach_both_devices);
 }

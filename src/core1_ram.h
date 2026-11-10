@@ -7,7 +7,9 @@
 // up on IORDY. Everything core 1 runs per bus access is marked CORE1_RAM.
 //
 // The Arduino-Pico linker script copies `.time_critical*` sections to RAM at
-// boot. On the host (unit tests) the macro is empty.
+// boot; scripts/core1_layout.py puts CORE1_RAM's first, file by file in a
+// fixed order, and scripts/check_core1_layout.py fails CI if any of it moves.
+// On the host (unit tests) the macro is empty.
 #pragma once
 
 #include <atomic>
@@ -15,8 +17,15 @@
 
 #if defined(ARDUINO)
 #define CORE1_RAM __attribute__((section(".time_critical.core1")))
+// The CD-ROM's core 1 code (atapi_device, hdcd_device, mmc, and ide_bus's
+// copy for hdcd::Device): in RAM too, but placed after all of CORE1_RAM's
+// (the linker script takes .after_data.* after .data), so the hard disk's
+// functions sit where they did before the CD-ROM joined the build. Where core
+// 1's code sits moves its timings (CLAUDE.md, Core split).
+#define CORE1_RAM_CD __attribute__((section(".after_data.core1_cd")))
 #else
 #define CORE1_RAM
+#define CORE1_RAM_CD
 #endif
 
 // A flag shared between the cores, for core 1 to read or set per access.

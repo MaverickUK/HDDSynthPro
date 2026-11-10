@@ -21,7 +21,7 @@ Evidence: `host/runs/20261025-205710-test_soak` and `20261025-205710-serial.log`
 
 `MacHost.open_raw()` (`host/hddproto/host_macos.py`) runs `sudo chown $USER /dev/diskN /dev/rdiskN` when the raw device isn't writable. macOS gives every re-created disk node back to root (`crw-r----- root operator`), so after a reset `sudo` asks for a password. With no terminal it fails at once.
 
-Fix: a root-owned helper that can only claim the HDDSynthPro disk, with a sudoers rule that lets it run without a password.
+Fix: a root-owned helper that can only claim the IDE Synth Bay disk, with a sudoers rule that lets it run without a password.
 
 1. **`scripts/hddpro-claim-disk`**, installed to `/usr/local/sbin/hddpro-claim-disk`, owned `root:wheel`, mode `755`, so the user can't edit what sudo runs.
    - Argument: a whole-disk name, `diskN`. Reject anything else (`^disk[0-9]+$`, no slices, no paths).

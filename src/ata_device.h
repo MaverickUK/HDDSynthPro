@@ -220,7 +220,7 @@ public:
     // clear, it drives the line both ways (intrq()); otherwise it releases it.
     // ATA has the host pull INTRQ down, but older ISA cards don't, and an
     // undriven line floats high, so their edge-triggered IRQ never fires.
-    bool intrqDriven() const { return !absent_selected_ && !(device_control_ & DC_NIEN); }
+    __attribute__((always_inline)) bool intrqDriven() const { return !absent_selected_ && !(device_control_ & DC_NIEN); }
 
     // ---- Sector fetches (handed to core 0) ---------------------------------
 

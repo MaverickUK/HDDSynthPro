@@ -3,9 +3,10 @@
 // per line, `#` starts a comment; any editor will do (Notepad's CRLF line
 // endings and UTF-8 byte-order mark are fine).
 //
-//   device0 = HDDSYNTH.IMG # device 0's disk image, in the card's root folder; none: the built-in disk
-//                          # (`image`, its old name, still works)
-//   device1 = GAMES        # a second drive, device 1: an image or a folder (read-only); none by default
+//   device0 = HDDSYNTH.IMG # device 0's disk image, in the card's root folder; none: the built-in disk;
+//                          # cdrom (or an .ISO/.CUE): a CD-ROM drive alone (`image`, its old name, still works)
+//   device1 = GAMES        # a second drive, device 1: an image or a folder (read-only), or cdrom
+//                          # (or an .ISO/.CUE) for a CD-ROM drive; none by default
 //   mode = auto           # auto, or a transfer mode such as pio0
 //   dma = off              # whether auto may offer multiword DMA (where DMARQ is wired)
 //   write_behind = on      # acknowledge a write while it's stored (faster)
@@ -16,7 +17,8 @@
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
 //   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
-//   cdrom = HDDSYNTH.ISO   # the CD-ROM builds: the disc, an ISO or a CUE sheet; none: the test disc
+//   cdrom = HDDSYNTH.ISO   # the CD-ROM drive's disc (device0 or device1 = cdrom): an ISO or a CUE
+//                          # sheet; none: the test disc
 //
 // A missing file, or a missing key, means the default. A mistake (an unknown
 // key, a bad value, a key given twice) is reported and skipped: the drive
@@ -38,8 +40,9 @@ constexpr const char* DEFAULT_IMAGE = "HDDSYNTH.IMG";
 // `device0 = none`: no image, the built-in 64 MB test disk (writes kept in RAM
 // until a restart), whose data the bus observer can check on the cable.
 constexpr const char* NO_IMAGE = "none";
-// The CD-ROM build's disc (docs/atapi.md): an ISO or a CUE sheet (with its BIN) in the root folder, or
-// `cdrom = none` for the generated test disc. No such file: no disc in the drive.
+// The CD-ROM drive's disc (docs/atapi.md), for `device0 = cdrom` or `device1 = cdrom`: an ISO or a
+// CUE sheet (with its BIN) in the root folder, or `cdrom = none` for the generated test disc. No
+// such file: no disc in the drive.
 constexpr const char* DEFAULT_CDROM = "HDDSYNTH.ISO";
 constexpr size_t MAX_FILE = 4096;      // longer files are read this far, with a warning
 constexpr size_t MAX_NAME = 64;        // an image name, without the NUL
@@ -111,7 +114,7 @@ struct Config {
     // file or a folder in the card's root folder (served read-only); empty (or
     // `none`): no device 1, as before.
     char device1[MAX_NAME + 1];
-    char cdrom[MAX_NAME + 1];  // the CD-ROM build's disc; the hard disk build ignores it
+    char cdrom[MAX_NAME + 1];  // the CD-ROM drive's disc, for `device0` or `device1 = cdrom`
     Mode mode = Mode::Auto;
     bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
@@ -140,9 +143,15 @@ void defaults(Config& out);
 bool servesImage(const Config& c);
 // True if `device1` names a disk for device 1.
 bool hasDevice1(const Config& c);
-// False for `cdrom = none`: the CD-ROM build serves the test disc.
+// False for `cdrom = none`: the CD-ROM drive serves the test disc.
 bool servesDisc(const Config& c);
-// True if device 1 is to be a CD-ROM drive (the bb48_hdcd build): `device1 =
+// True if device 0 is to be a CD-ROM drive, alone on the cable: `device0 =
+// cdrom` (the `cdrom` setting's disc), or a device0 name ending in .ISO or
+// .CUE. Device 1 is then left out, whatever `device1` says.
+bool device0IsCdrom(const Config& c);
+// That drive's disc: the ISO device0 names, or `cdrom`'s (which may be `none`).
+const char* device0Disc(const Config& c);
+// True if device 1 is to be a CD-ROM drive beside device 0's disk: `device1 =
 // cdrom` (the `cdrom` setting's disc), or a device1 name ending in .ISO or .CUE.
 bool device1IsCdrom(const Config& c);
 // That drive's disc: the ISO device1 names, or `cdrom`'s (which may be `none`).

@@ -1,9 +1,9 @@
-"""The CD-ROM build (bb48_cdrom, docs/atapi.md): the generated test disc
+"""A CD-ROM drive (docs/atapi.md): the generated test disc
 read through the adapter. CD frame n is generated sectors 4n to 4n+3
 (hddproto/gen_disk.py), so every byte read can be checked.
 
 It needs a CD-ROM drive serving the test disc (`E cdrom = none` and `!`, or
-console `T`): the CD-ROM build, or bb48_hdcd with `device1 = cdrom` (device 1).
+console `T`), as device 0 (`device0 = cdrom`) or device 1 (`device1 = cdrom`).
 Through the Windows rig's adapter it passes in DMA (`mode = mdma2`; 0.30.0-dev.3).
 
 The disc: $HDDPRO_CDROM_DEV if set (e.g. /dev/rdisk5, or \\\\.\\CdRom0 on
@@ -34,8 +34,7 @@ CHUNK_FRAMES = 32  # 64 KB a read
 @pytest.fixture(scope="module", autouse=True)
 def cdrom_build(drive):
     if not serves_cdrom(drive):
-        pytest.skip("needs a CD-ROM drive: PIO_ENV=bb48_cdrom scripts/rig.sh -m cdrom, "
-                    "or bb48_hdcd with `device1 = cdrom`")
+        pytest.skip("needs a CD-ROM drive: `E device0 = cdrom` or `E device1 = cdrom`, then `!`")
     require_generated_disk(drive)
 
 

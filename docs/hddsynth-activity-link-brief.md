@@ -1,17 +1,17 @@
-# Brief: activity link from HDDSynthPro, and `sequential.wav`
+# Brief: activity link from IDE Synth Bay, and `sequential.wav`
 
-> **Done:** implemented in HDDSynth_Native **v0.18.0**, behind the feature flag `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` (in place of the `ACTIVITY_LINK` setting proposed below). It also adds `SEQUENTIAL_LED_COLOUR` (default orange, `#FF1800`): the activity LED's colour during sequential transfers, as a debugging aid. Verified there in simulation mode; not yet with HDDSynthPro attached. The brief is kept as written, apart from the setting's name.
+> **Done:** implemented in HDDSynth_Native **v0.18.0**, behind the feature flag `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` (in place of the `ACTIVITY_LINK` setting proposed below). It also adds `SEQUENTIAL_LED_COLOUR` (default orange, `#FF1800`): the activity LED's colour during sequential transfers, as a debugging aid. Verified there in simulation mode; not yet with IDE Synth Bay attached. The brief is kept as written, apart from the setting's name.
 
 For Claude Code working in **HDDSynth_Native** (the MK5 firmware). Read this repo's CLAUDE.md first; everything below fits its rules (core 0 owns all I/O, core 1 only mixes from RAM, host-testable pure C++, SemVer and CHANGELOG with every change).
 
 ## Goal
 
-HDDSynthPro is a separate board that emulates an IDE hard disk, so it knows exactly what the drive is doing. It will send that over a one-way UART. When a new setting is on, the HDD Synth listens for it and uses it instead of the optocoupler input:
+IDE Synth Bay is a separate board that emulates an IDE hard disk, so it knows exactly what the drive is doing. It will send that over a one-way UART. When a new setting is on, the HDD Synth listens for it and uses it instead of the optocoupler input:
 
 - **busy** drives the access sound exactly as the activity input does today (with the same `ACCESS_HOLD_TIME_MS` release);
 - **class** chooses the sample: a new, optional per-pack **`sequential.wav`** while the drive is reading or writing sequentially, `access.wav` for random access.
 
-Without the setting, or without HDDSynthPro attached, nothing changes.
+Without the setting, or without IDE Synth Bay attached, nothing changes.
 
 ## Hardware
 
@@ -19,9 +19,9 @@ The link uses header **J6**, the OLED's header, so the OLED and the link can't b
 
 | J6 pin | MK5 signal | Link use |
 |---|---|---|
-| 1 | 3.3 V | not connected on the Mk5 (each board has its own supply). HDDSynthPro's PCB takes **5 V** on this pin to power it from the synth: a later synth revision could put 5 V here, never 3.3 V |
-| 2 | GND | ground, to HDDSynthPro's GND |
-| 3 | GP25 (OLED SCL) | **UART1 RX**: data from HDDSynthPro (through a 1 kΩ resistor at its end) |
+| 1 | 3.3 V | not connected on the Mk5 (each board has its own supply). IDE Synth Bay's PCB takes **5 V** on this pin to power it from the synth: a later synth revision could put 5 V here, never 3.3 V |
+| 2 | GND | ground, to IDE Synth Bay's GND |
+| 3 | GP25 (OLED SCL) | **UART1 RX**: data from IDE Synth Bay (through a 1 kΩ resistor at its end) |
 | 4 | GP24 (OLED SDA) | UART1 TX: reserved, not used in version 1 |
 
 On the RP2350, GP24/GP25 are UART1 TX/RX (function 2). In Arduino-Pico that is `Serial2`: `Serial2.setRX(25); Serial2.setTX(24); Serial2.begin(115200);`. Check the pin assignment against the RP2350 datasheet's GPIO function table before relying on it.
@@ -60,7 +60,7 @@ $HDA,1,0,R,R*4C      not busy this instant, recent mix still random
 
 1. **Setting `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT`** (bool, default `false`) in `settings.cpp`, and in the README's settings table. If both `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` and `OLED_ENABLED` are true, the link wins: don't start the OLED, and log why.
 2. **`src/link_parser.h/.cpp`, pure C++ (no Arduino headers), host-tested:**
-   - feed it bytes one at a time; it assembles lines (dropping anything over 80 bytes) and validates them. HDDSynthPro's `activity_link::parseLine` and `Receiver` (`src/activity_link.*`, with its tests in `test/native/test_activity_link.cpp`) do exactly this and are pure C++: copy them;
+   - feed it bytes one at a time; it assembles lines (dropping anything over 80 bytes) and validates them. IDE Synth Bay's `activity_link::parseLine` and `Receiver` (`src/activity_link.*`, with its tests in `test/native/test_activity_link.cpp`) do exactly this and are pure C++: copy them;
    - it yields `LinkState { bool busy; Class cls; Op op; }` for each valid sentence;
    - `LinkWatch`, a pure helper: given "valid sentence at t" and "now", is the link present (1 s timeout)?
 3. **Receiving, on core 0:** start `Serial2` in `setup()` when the setting is on, with `setFIFOSize(512)` or so, so a slow loop pass (an SD refill) can't overflow the 32-byte hardware FIFO. In the main loop, read whatever is available without blocking, feed the parser, keep the latest state. Core 1 never touches the UART.
@@ -73,7 +73,7 @@ $HDA,1,0,R,R*4C      not busy this instant, recent mix still random
    - check the RAM budget: one more ring of `RING_SAMPLES` (32 KB); `HEAP_RESERVE_BYTES` must still hold.
 6. **Console and OLED:** add the link state (present or lost, last class, valid and rejected sentence counts) to the stats/`h` output.
 7. **Docs:**
-   - README: the setting, a section "Activity link (HDDSynthPro)" with the J6 wiring above, and `sequential.wav` in the sample pack file list (optional);
+   - README: the setting, a section "Activity link (IDE Synth Bay)" with the J6 wiring above, and `sequential.wav` in the sample pack file list (optional);
    - note for the HDDSynth_Samples repo: `sequential.wav` is optional; same format and sample rate as the pack's other files; a seamless loop, like `access.wav`.
 8. **Version:** a MINOR bump, a CHANGELOG entry, and a `vX.Y.Z` tag, as CLAUDE.md describes.
 
@@ -88,7 +88,7 @@ $HDA,1,0,R,R*4C      not busy this instant, recent mix still random
 - Run the host tests under ASan/UBSan as usual. On hardware:
   - with `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT` on and nothing attached, the synth behaves exactly as now (optocoupler);
   - with a USB-serial adapter on J6 pin 3, typing or pasting the example sentences switches the sound;
-  - with HDDSynthPro attached, a large file copy plays `sequential.wav`, and random access plays `access.wav`.
+  - with IDE Synth Bay attached, a large file copy plays `sequential.wav`, and random access plays `access.wav`.
 
 ## Not in scope
 
