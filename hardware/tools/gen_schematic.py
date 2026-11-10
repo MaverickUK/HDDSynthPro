@@ -437,6 +437,7 @@ LCSC = {
     **{r: "C25744" for r in _refs("R", 44, 45, 46, 47)},           # 10k 0402
     "R48": "C25900",                                               # 4.7k 0402
     **{r: "C11702" for r in _refs("R", 49, 50, 51, 52)},           # 1k 0402
+    "R53": "C25744",                                               # 10k 0402 (IORDY pull-up, 10 Nov)
     "C30": "C1525", "C31": "C52923",                               # 100nF, 1uF 0402
     **{r: "C15195" for r in _refs("C", 32, 33, 34, 35)},           # 10nF 0402
     "C36": "C15850", "C37": "C15850",                              # 10uF 0805
@@ -627,7 +628,7 @@ SERIES_R = [f"DD{i}" for i in range(16)] + ["DA0", "DA1", "DA2", "CS0_N", "CS1_N
 def ide_sheet(sh):
     sh.note("IDE bus through four SN74CB3T3245 FET bus switches: A side to the RP2350, B side to the IDE header.\n"
             "OE# low = connected. They cap what the RP2350 sees at about 3.3 V and isolate it when unpowered (Ioff).\n"
-            "No pull-ups or pull-downs on the bus: the host provides them. IORDY stays open drain.", 20, 20, 1.6)
+            "The host provides the bus pulls, but for IORDY's weak backup (R53). IORDY stays open drain.", 20, 20, 1.6)
     # Each switch takes eight consecutive IDE header signals, in the header's pin order from
     # B8 (nearest the header's pin 1) to B1, so the B side, facing the header, runs straight.
     # Channel -> net, or (A-side net, B-side net) where a resistor sits on the A side.
@@ -665,6 +666,13 @@ def ide_sheet(sh):
         sh.r(ref, "10k", 175.26 + 12.7 * i, 228.6, "+3V3", sig, R0402)
     sh.note("R44-R46: 10k pull-ups on CSEL, PDIAG# and DASP# (open drain).\n"
             "IOCS16# (open drain) is pulled up by the host.", 170.18, 246.38)
+    # IORDY: the host should pull it up (ATA puts about 1k to 5 V on the host), but one USB
+    # adapter seems not to, and a floating IORDY can read as "not ready" for good
+    # (docs/pcb-rev04.md). A weak pull-up on the header side, so it holds with the bus
+    # switches off too; to 3.3 V, a valid high, so no net crosses from the power sheet.
+    sh.r("R53", "10k", 213.36, 228.6, "+3V3", "IDE_IORDY", R0402)
+    sh.note("R53 (rev 0.4): 10k pull-up on IORDY, header side, for hosts\n"
+            "without one. The drive only ever pulls IORDY low.", 170.18, 256.54)
 
     sh.r("R14", "33", 66.04, 182.88, "DIOR_N", "DIOR_N_SW")
     sh.r("R15", "33", 81.28, 182.88, "DIOW_N", "DIOW_N_SW")

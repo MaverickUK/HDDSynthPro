@@ -125,6 +125,7 @@ PLACE = {
     "R44": (134.5, 157.2, 90),     # CSEL, PDIAG#, DASP# pull-ups, below U6
     "R45": (135.7, 157.2, 90),
     "R46": (136.9, 157.2, 90),
+    "R53": (124.7, 136.5, 270),    # IORDY's pull-up (10 Nov), between U5 and J5, above the IDE traces
     "Q1": (178.5, 145.5, 0),       # the microSD's power switch
     "R48": (181.5, 146.0, 90),
     "C31": (181.5, 143.0, 90),

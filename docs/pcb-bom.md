@@ -63,7 +63,7 @@ All bus-side buffers run from **3.3 V**. The ATA bus uses TTL levels (inputs hig
 | Strobes | DIOR#, DIOW#, DMACK# | In | 74LVC2G17 (Schmitt) ×2; the spare input takes RESET# | PIO | Footprint for 22–33 Ω series, fitted only if ringing shows up |
 | Reset | RESET# | In | Schmitt, the spare 74LVC2G17 input | Core 1 | — |
 | Flow control | DMARQ | Out, tri-state | 74LVC1G125 (data and OE from PIO) | PIO | 22 Ω series |
-| Flow control | IORDY | Out, open drain | 74LVC07A | PIO | — (the host pulls up) |
+| Flow control | IORDY | Out, open drain | 74LVC07A | PIO | The host's; rev 0.4 adds a 10 kΩ backup to 3.3 V on the header side (R53) |
 | Legacy | IOCS16# | Out, open drain | 74LVC07A | PIO, which asserts it when the data register is addressed (see section 4) | — |
 | Interrupt | INTRQ | Out, tri-state | 74LVC1G125 (input tied high; OE from core 1) | Core 1 | 22 Ω series |
 | Handshake | DASP#, PDIAG# | Both, open drain | 74LVC07A to drive; read back through the 74LVC244A | Expander (slow: milliseconds) | 10 kΩ pull-ups per spec (check which side owns which) |

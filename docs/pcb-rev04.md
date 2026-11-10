@@ -92,6 +92,14 @@ A CD-ROM drive lives in a 5.25-inch bay, so the board will live inside the PC, w
 
 With the diodes, the board can take power from several inputs at once, USB included, without feeding one into another. Rev 0.3's note "never connect the IDE adapter's 5 V to this board" was about a direct connection; it doesn't apply to a diode-ORed input.
 
+## 9. A backup pull-up on IORDY (added 10 Nov)
+
+R53, 10 kΩ (0402, LCSC C25744), from IORDY on the header's side of its bus switch (U5's B side, header pin 27) to +3V3, fitted. ATA puts IORDY's pull-up on the host (about 1 kΩ to 5 V), and the drive only pulls it low or lets go. A host without one leaves IORDY floating, which it may read as "not ready" for good: the likeliest reason a second NS1081 adapter (serial `0123456789ABCDE`) never detected the rev 0.3 board, where the rig's adapter did.
+- **On a host that pulls up:** beside its 1 kΩ, 10 kΩ barely moves the high level, and pulling IORDY low sinks about 0.5 mA more than the 5 mA it already does through the switch.
+- **Header side:** it holds IORDY high (ready) while the bus switches are off, at start-up.
+- **To 3.3 V, not VB:** 3.3 V is a valid high (ATA's is 2.0 V), the host's 5 V pull-up pushes only about 0.15 mA back through it, and VB is local to the power sheet. With the board off, the host's own pull-up still holds IORDY high.
+- **On the board:** between U5 and J5, above the IDE traces, at (124.7, 136.5); its +3V3 pad goes by a via to the 3V3 plane, its IORDY pad by a via and a 3.5 mm bottom-layer trace to IORDY's via at (124.71, 141.37). Placed by script on the routed board (no other trace moved); DRC as before (two silkscreen-to-edge warnings, nothing unconnected), and `check_netlist.py` now requires the pull-up on the header's side.
+
 ## Dropped since 29 Oct
 
 - **The debug header:** USB-C carries the console, and has been enough for every measurement (core 1's profiles print in `s`). GPIO 46 stays spare.

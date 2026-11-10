@@ -809,8 +809,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "ba8bfc1e-4808-51ea-838c-21c089729197")
-		(property "Reference" "#PWR119"
+		(uuid "b5e682f7-29ea-5e20-ba9f-0ce610bf8d5a")
+		(property "Reference" "#PWR120"
 			(at 78.74 88.9 0)
 			(effects
 				(font
@@ -855,12 +855,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "fdbd2f00-e2b2-5289-aec1-e57bf59a5b5e")
+			(uuid "3fe677b8-32ee-5ece-a413-33880a09c06d")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/81e372a4-da49-5ad3-ad08-c414a2047160"
-					(reference "#PWR119")
+					(reference "#PWR120")
 					(unit 1)
 				)
 			)
@@ -1072,8 +1072,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "b5e682f7-29ea-5e20-ba9f-0ce610bf8d5a")
-		(property "Reference" "#PWR120"
+		(uuid "f062e7c7-c376-52d3-a233-d0325743fed8")
+		(property "Reference" "#PWR121"
 			(at 109.22 88.9 0)
 			(effects
 				(font
@@ -1118,12 +1118,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "3fe677b8-32ee-5ece-a413-33880a09c06d")
+			(uuid "89604cfe-068d-59ec-aecb-204e843576d5")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/81e372a4-da49-5ad3-ad08-c414a2047160"
-					(reference "#PWR120")
+					(reference "#PWR121")
 					(unit 1)
 				)
 			)
@@ -1435,8 +1435,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "f062e7c7-c376-52d3-a233-d0325743fed8")
-		(property "Reference" "#PWR121"
+		(uuid "9a37b111-7c54-5bfb-af00-e14674d0aa84")
+		(property "Reference" "#PWR122"
 			(at 78.74 139.7 0)
 			(effects
 				(font
@@ -1481,12 +1481,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "89604cfe-068d-59ec-aecb-204e843576d5")
+			(uuid "c6a30099-7a30-58ef-a6e5-e61a4536bd45")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/81e372a4-da49-5ad3-ad08-c414a2047160"
-					(reference "#PWR121")
+					(reference "#PWR122")
 					(unit 1)
 				)
 			)
@@ -1698,8 +1698,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "9a37b111-7c54-5bfb-af00-e14674d0aa84")
-		(property "Reference" "#PWR122"
+		(uuid "15d72709-3c56-59b4-9709-b88b3a89c4a9")
+		(property "Reference" "#PWR123"
 			(at 109.22 139.7 0)
 			(effects
 				(font
@@ -1744,12 +1744,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "c6a30099-7a30-58ef-a6e5-e61a4536bd45")
+			(uuid "02642eac-07ad-55f5-b641-6feccc33e084")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/81e372a4-da49-5ad3-ad08-c414a2047160"
-					(reference "#PWR122")
+					(reference "#PWR123")
 					(unit 1)
 				)
 			)
@@ -1958,8 +1958,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "15d72709-3c56-59b4-9709-b88b3a89c4a9")
-		(property "Reference" "#PWR123"
+		(uuid "2c30a1f4-4752-505e-8c84-2c006988756a")
+		(property "Reference" "#PWR124"
 			(at 176.53 101.6 0)
 			(effects
 				(font
@@ -2004,12 +2004,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "02642eac-07ad-55f5-b641-6feccc33e084")
+			(uuid "09f4cf76-b8e0-5cf0-829c-90ee2fc2ff11")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/81e372a4-da49-5ad3-ad08-c414a2047160"
-					(reference "#PWR123")
+					(reference "#PWR124")
 					(unit 1)
 				)
 			)
@@ -2034,8 +2034,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "2c30a1f4-4752-505e-8c84-2c006988756a")
-		(property "Reference" "#PWR124"
+		(uuid "325c3478-b2c1-5bfe-9c1c-a1fcc2607552")
+		(property "Reference" "#PWR125"
 			(at 176.53 104.14 0)
 			(effects
 				(font
@@ -2080,12 +2080,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "09f4cf76-b8e0-5cf0-829c-90ee2fc2ff11")
+			(uuid "74252a63-5a6d-57a1-a774-9ef452bdb0c3")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/81e372a4-da49-5ad3-ad08-c414a2047160"
-					(reference "#PWR124")
+					(reference "#PWR125")
 					(unit 1)
 				)
 			)

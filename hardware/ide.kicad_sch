@@ -3733,7 +3733,7 @@
 			(embedded_fonts no)
 		)
 	)
-	(text "IDE bus through four SN74CB3T3245 FET bus switches: A side to the RP2350, B side to the IDE header.\nOE# low = connected. They cap what the RP2350 sees at about 3.3 V and isolate it when unpowered (Ioff).\nNo pull-ups or pull-downs on the bus: the host provides them. IORDY stays open drain."
+	(text "IDE bus through four SN74CB3T3245 FET bus switches: A side to the RP2350, B side to the IDE header.\nOE# low = connected. They cap what the RP2350 sees at about 3.3 V and isolate it when unpowered (Ioff).\nThe host provides the bus pulls, but for IORDY's weak backup (R53). IORDY stays open drain."
 		(exclude_from_sim no)
 		(at 20 20 0)
 		(effects
@@ -8210,6 +8210,180 @@
 	)
 	(symbol
 		(lib_id "Device:R")
+		(at 213.36 228.6 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "4fab2bb0-d774-5bbb-834b-48d99b35cb11")
+		(property "Reference" "R53"
+			(at 215.392 228.6 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "10k"
+			(at 213.36 228.6 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_SMD:R_0402_1005Metric"
+			(at 211.582 228.6 90)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 213.36 228.6 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Resistor"
+			(at 213.36 228.6 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C25744"
+			(at 213.36 228.6 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "b7aa47db-f711-58cc-85a2-27c97c209c62")
+		)
+		(pin "2"
+			(uuid "2f711b4e-283b-5b18-8e31-515ebbbfbe01")
+		)
+		(instances
+			(project "hddsynthpro"
+				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
+					(reference "R53")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(wire
+		(pts
+			(xy 213.36 224.79)
+			(xy 213.36 222.25)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "c40fa697-db81-5e51-a810-cf2e1e73273e")
+	)
+	(symbol
+		(lib_id "power:+3V3")
+		(at 213.36 222.25 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(dnp no)
+		(uuid "0cb299ad-64cd-5014-98e5-a65f67571ab0")
+		(property "Reference" "#PWR085"
+			(at 213.36 226.06 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Value" "+3V3"
+			(at 213.36 218.694 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 213.36 222.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" ""
+			(at 213.36 222.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+3V3\""
+			(at 213.36 222.25 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "1688d941-c141-5a60-a385-15db5924f5e4")
+		)
+		(instances
+			(project "hddsynthpro"
+				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
+					(reference "#PWR085")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(wire
+		(pts
+			(xy 213.36 232.41)
+			(xy 213.36 234.95)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d92bb21d-424d-5429-b214-5897fbeff0a4")
+	)
+	(text "R53 (rev 0.4): 10k pull-up on IORDY, header side, for hosts\nwithout one. The drive only ever pulls IORDY low."
+		(exclude_from_sim no)
+		(at 170.18 256.54 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left top)
+		)
+		(uuid "85e60b5c-fdd1-5a5e-a2f7-4739d7fdea6e")
+	)
+	(symbol
+		(lib_id "Device:R")
 		(at 66.04 182.88 0)
 		(unit 1)
 		(exclude_from_sim no)
@@ -8510,8 +8684,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "0cb299ad-64cd-5014-98e5-a65f67571ab0")
-		(property "Reference" "#PWR085"
+		(uuid "1eafabd7-6242-5947-a708-855fc5750c91")
+		(property "Reference" "#PWR086"
 			(at 66.04 96.52 0)
 			(effects
 				(font
@@ -8556,12 +8730,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "1688d941-c141-5a60-a385-15db5924f5e4")
+			(uuid "36686253-8820-5fdc-b612-0036e757fb40")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR085")
+					(reference "#PWR086")
 					(unit 1)
 				)
 			)
@@ -8675,8 +8849,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "1eafabd7-6242-5947-a708-855fc5750c91")
-		(property "Reference" "#PWR086"
+		(uuid "cec0f1dd-ac23-584d-81f0-279a6da637e0")
+		(property "Reference" "#PWR087"
 			(at 85.09 124.46 0)
 			(effects
 				(font
@@ -8721,12 +8895,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "36686253-8820-5fdc-b612-0036e757fb40")
+			(uuid "350d7f3b-178b-5afc-8556-25c1b375bd35")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR086")
+					(reference "#PWR087")
 					(unit 1)
 				)
 			)
@@ -8840,8 +9014,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "cec0f1dd-ac23-584d-81f0-279a6da637e0")
-		(property "Reference" "#PWR087"
+		(uuid "22ce6a7a-9d3e-55a5-8b78-d7ae3e89c9a8")
+		(property "Reference" "#PWR088"
 			(at 50.8 66.04 0)
 			(effects
 				(font
@@ -8886,12 +9060,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "350d7f3b-178b-5afc-8556-25c1b375bd35")
+			(uuid "73c59a9b-7a57-5f17-ac77-70d2cdf3cea4")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR087")
+					(reference "#PWR088")
 					(unit 1)
 				)
 			)
@@ -8916,8 +9090,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "22ce6a7a-9d3e-55a5-8b78-d7ae3e89c9a8")
-		(property "Reference" "#PWR088"
+		(uuid "2a3f165c-ade8-57e1-a369-d4cb5fa2b982")
+		(property "Reference" "#PWR089"
 			(at 50.8 81.28 0)
 			(effects
 				(font
@@ -8962,12 +9136,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "73c59a9b-7a57-5f17-ac77-70d2cdf3cea4")
+			(uuid "a8c1fdc4-ca71-596a-b677-63b0a45f2b60")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR088")
+					(reference "#PWR089")
 					(unit 1)
 				)
 			)
@@ -9070,8 +9244,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "2a3f165c-ade8-57e1-a369-d4cb5fa2b982")
-		(property "Reference" "#PWR089"
+		(uuid "eba51952-dd30-5d8f-91fc-6fa10c53a7cf")
+		(property "Reference" "#PWR090"
 			(at 66.04 66.04 0)
 			(effects
 				(font
@@ -9116,12 +9290,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "a8c1fdc4-ca71-596a-b677-63b0a45f2b60")
+			(uuid "254d2400-0f0c-5c7b-8985-a3108f8d8ae1")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR089")
+					(reference "#PWR090")
 					(unit 1)
 				)
 			)
@@ -9146,8 +9320,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "eba51952-dd30-5d8f-91fc-6fa10c53a7cf")
-		(property "Reference" "#PWR090"
+		(uuid "276c3526-6ef7-5d5c-9e07-34d8b35b2e40")
+		(property "Reference" "#PWR091"
 			(at 66.04 81.28 0)
 			(effects
 				(font
@@ -9192,12 +9366,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "254d2400-0f0c-5c7b-8985-a3108f8d8ae1")
+			(uuid "e050a9ef-dd18-53bb-94fb-a1b0298ccd15")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR090")
+					(reference "#PWR091")
 					(unit 1)
 				)
 			)
@@ -9300,8 +9474,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "276c3526-6ef7-5d5c-9e07-34d8b35b2e40")
-		(property "Reference" "#PWR091"
+		(uuid "b3fe3e9e-3d44-55b6-9539-e08f5148b400")
+		(property "Reference" "#PWR092"
 			(at 81.28 66.04 0)
 			(effects
 				(font
@@ -9346,12 +9520,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "e050a9ef-dd18-53bb-94fb-a1b0298ccd15")
+			(uuid "9e628be2-571e-5248-98ff-97d38e7f9ced")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR091")
+					(reference "#PWR092")
 					(unit 1)
 				)
 			)
@@ -9376,8 +9550,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "b3fe3e9e-3d44-55b6-9539-e08f5148b400")
-		(property "Reference" "#PWR092"
+		(uuid "860c06c6-6ae4-56f4-9a43-88306cd86b97")
+		(property "Reference" "#PWR093"
 			(at 81.28 81.28 0)
 			(effects
 				(font
@@ -9422,12 +9596,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "9e628be2-571e-5248-98ff-97d38e7f9ced")
+			(uuid "e3e380f7-148d-5fbb-8f19-e9f434d70554")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR092")
+					(reference "#PWR093")
 					(unit 1)
 				)
 			)
@@ -9530,8 +9704,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "860c06c6-6ae4-56f4-9a43-88306cd86b97")
-		(property "Reference" "#PWR093"
+		(uuid "dbd39525-7d03-500b-a2f0-87cf5feaf937")
+		(property "Reference" "#PWR094"
 			(at 96.52 66.04 0)
 			(effects
 				(font
@@ -9576,12 +9750,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "e3e380f7-148d-5fbb-8f19-e9f434d70554")
+			(uuid "276c8652-0229-5332-a348-9d350893ee95")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR093")
+					(reference "#PWR094")
 					(unit 1)
 				)
 			)
@@ -9606,8 +9780,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "dbd39525-7d03-500b-a2f0-87cf5feaf937")
-		(property "Reference" "#PWR094"
+		(uuid "6a31016a-7f85-57e3-a8f3-d293e0e65f2a")
+		(property "Reference" "#PWR095"
 			(at 96.52 81.28 0)
 			(effects
 				(font
@@ -9652,12 +9826,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "276c8652-0229-5332-a348-9d350893ee95")
+			(uuid "62a257ed-4b17-5510-a821-b9d9d89bdc22")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR094")
+					(reference "#PWR095")
 					(unit 1)
 				)
 			)
@@ -9903,8 +10077,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "6a31016a-7f85-57e3-a8f3-d293e0e65f2a")
-		(property "Reference" "#PWR095"
+		(uuid "4071331f-dc75-55c7-8820-4db38cea88fb")
+		(property "Reference" "#PWR096"
 			(at 306.07 129.54 0)
 			(effects
 				(font
@@ -9949,12 +10123,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "62a257ed-4b17-5510-a821-b9d9d89bdc22")
+			(uuid "43479070-5cf0-5b3a-8677-a20f94db05f2")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR095")
+					(reference "#PWR096")
 					(unit 1)
 				)
 			)
@@ -10155,8 +10329,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "4071331f-dc75-55c7-8820-4db38cea88fb")
-		(property "Reference" "#PWR096"
+		(uuid "6be3dfc1-216a-5d04-ad86-374bf422715f")
+		(property "Reference" "#PWR097"
 			(at 275.59 152.4 0)
 			(effects
 				(font
@@ -10201,12 +10375,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "43479070-5cf0-5b3a-8677-a20f94db05f2")
+			(uuid "351aca9b-590a-5d19-b7c1-4300e295f667")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR096")
+					(reference "#PWR097")
 					(unit 1)
 				)
 			)
@@ -10246,8 +10420,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "6be3dfc1-216a-5d04-ad86-374bf422715f")
-		(property "Reference" "#PWR097"
+		(uuid "15e6095d-11a3-5860-9808-f5dc0d76cdc6")
+		(property "Reference" "#PWR098"
 			(at 306.07 154.94 0)
 			(effects
 				(font
@@ -10292,12 +10466,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "351aca9b-590a-5d19-b7c1-4300e295f667")
+			(uuid "c8516738-6639-5b1c-8f9f-3456ee04be6e")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR097")
+					(reference "#PWR098")
 					(unit 1)
 				)
 			)
@@ -10333,8 +10507,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "15e6095d-11a3-5860-9808-f5dc0d76cdc6")
-		(property "Reference" "#PWR098"
+		(uuid "7be32194-73ff-5a5f-92aa-78fa52433b7e")
+		(property "Reference" "#PWR099"
 			(at 306.07 157.48 0)
 			(effects
 				(font
@@ -10379,12 +10553,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "c8516738-6639-5b1c-8f9f-3456ee04be6e")
+			(uuid "9a79666c-fe86-5c18-b621-b010e903da72")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR098")
+					(reference "#PWR099")
 					(unit 1)
 				)
 			)
@@ -10420,8 +10594,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "7be32194-73ff-5a5f-92aa-78fa52433b7e")
-		(property "Reference" "#PWR099"
+		(uuid "a544a49c-199c-553a-affc-d18f69118177")
+		(property "Reference" "#PWR100"
 			(at 306.07 160.02 0)
 			(effects
 				(font
@@ -10466,12 +10640,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "9a79666c-fe86-5c18-b621-b010e903da72")
+			(uuid "1a7bb864-0cc7-5e77-b869-646984babba3")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR099")
+					(reference "#PWR100")
 					(unit 1)
 				)
 			)
@@ -10529,8 +10703,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "a544a49c-199c-553a-affc-d18f69118177")
-		(property "Reference" "#PWR100"
+		(uuid "c66a9e33-e2a7-5ac3-a8e9-d8475cc3a2fe")
+		(property "Reference" "#PWR101"
 			(at 306.07 165.1 0)
 			(effects
 				(font
@@ -10575,12 +10749,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "1a7bb864-0cc7-5e77-b869-646984babba3")
+			(uuid "c86cafa6-864f-564f-8028-7b865830f62e")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR100")
+					(reference "#PWR101")
 					(unit 1)
 				)
 			)
@@ -10704,8 +10878,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "c66a9e33-e2a7-5ac3-a8e9-d8475cc3a2fe")
-		(property "Reference" "#PWR101"
+		(uuid "30045137-1c2f-5b08-bd60-6689bf602689")
+		(property "Reference" "#PWR102"
 			(at 306.07 177.8 0)
 			(effects
 				(font
@@ -10750,12 +10924,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "c86cafa6-864f-564f-8028-7b865830f62e")
+			(uuid "2ad09be1-796f-5385-a127-0c1459f88c4e")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR101")
+					(reference "#PWR102")
 					(unit 1)
 				)
 			)
@@ -11013,8 +11187,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "30045137-1c2f-5b08-bd60-6689bf602689")
-		(property "Reference" "#PWR102"
+		(uuid "dbe7e38f-1515-5664-8a8c-0b653a1e5723")
+		(property "Reference" "#PWR103"
 			(at 382.27 127 0)
 			(effects
 				(font
@@ -11059,12 +11233,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "2ad09be1-796f-5385-a127-0c1459f88c4e")
+			(uuid "256b1d81-7441-57e5-b1f7-7612faa21701")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR102")
+					(reference "#PWR103")
 					(unit 1)
 				)
 			)
@@ -11265,8 +11439,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "dbe7e38f-1515-5664-8a8c-0b653a1e5723")
-		(property "Reference" "#PWR103"
+		(uuid "8dc44aa0-a9bb-5047-aa6c-e380de47e1ab")
+		(property "Reference" "#PWR104"
 			(at 351.79 149.86 0)
 			(effects
 				(font
@@ -11311,12 +11485,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "256b1d81-7441-57e5-b1f7-7612faa21701")
+			(uuid "27555671-4572-5c3d-94a2-7548e5d498c5")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR103")
+					(reference "#PWR104")
 					(unit 1)
 				)
 			)
@@ -11356,8 +11530,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "8dc44aa0-a9bb-5047-aa6c-e380de47e1ab")
-		(property "Reference" "#PWR104"
+		(uuid "9e10ce63-f94e-5401-8b21-bb3b2d4dbd33")
+		(property "Reference" "#PWR105"
 			(at 382.27 152.4 0)
 			(effects
 				(font
@@ -11402,12 +11576,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "27555671-4572-5c3d-94a2-7548e5d498c5")
+			(uuid "657ceac5-4b73-52c3-b920-a4a784d42949")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR104")
+					(reference "#PWR105")
 					(unit 1)
 				)
 			)
@@ -11443,8 +11617,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "9e10ce63-f94e-5401-8b21-bb3b2d4dbd33")
-		(property "Reference" "#PWR105"
+		(uuid "93cf7c0b-9bdf-5460-b749-45f5a8c42343")
+		(property "Reference" "#PWR106"
 			(at 382.27 154.94 0)
 			(effects
 				(font
@@ -11489,12 +11663,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "657ceac5-4b73-52c3-b920-a4a784d42949")
+			(uuid "cbb542bf-cfe9-5fd4-8d3a-50dcf7c6566c")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR105")
+					(reference "#PWR106")
 					(unit 1)
 				)
 			)
@@ -11530,8 +11704,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "93cf7c0b-9bdf-5460-b749-45f5a8c42343")
-		(property "Reference" "#PWR106"
+		(uuid "e0548483-2b7e-5239-a1dc-983383b8a438")
+		(property "Reference" "#PWR107"
 			(at 382.27 157.48 0)
 			(effects
 				(font
@@ -11576,12 +11750,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "cbb542bf-cfe9-5fd4-8d3a-50dcf7c6566c")
+			(uuid "a76d430a-64ec-536b-b8ac-211785ebe8aa")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR106")
+					(reference "#PWR107")
 					(unit 1)
 				)
 			)
@@ -11639,8 +11813,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "e0548483-2b7e-5239-a1dc-983383b8a438")
-		(property "Reference" "#PWR107"
+		(uuid "9a084afe-00ea-5025-99c5-989f819b986f")
+		(property "Reference" "#PWR108"
 			(at 382.27 162.56 0)
 			(effects
 				(font
@@ -11685,12 +11859,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "a76d430a-64ec-536b-b8ac-211785ebe8aa")
+			(uuid "a0160257-0a7b-5744-b979-7b84416ceb33")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR107")
+					(reference "#PWR108")
 					(unit 1)
 				)
 			)
@@ -11814,8 +11988,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "9a084afe-00ea-5025-99c5-989f819b986f")
-		(property "Reference" "#PWR108"
+		(uuid "5881d365-d859-5cde-a3a0-9255ce9d3c0e")
+		(property "Reference" "#PWR109"
 			(at 382.27 175.26 0)
 			(effects
 				(font
@@ -11860,12 +12034,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "a0160257-0a7b-5744-b979-7b84416ceb33")
+			(uuid "ef0fa5c8-2dd1-5cb3-99e4-df93be50411b")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR108")
+					(reference "#PWR109")
 					(unit 1)
 				)
 			)
@@ -11912,8 +12086,8 @@
 		(in_bom no)
 		(on_board yes)
 		(dnp no)
-		(uuid "5881d365-d859-5cde-a3a0-9255ce9d3c0e")
-		(property "Reference" "#PWR109"
+		(uuid "f1a19458-7079-5f72-ab9e-6b2e67e3ca96")
+		(property "Reference" "#PWR110"
 			(at 351.79 180.34 0)
 			(effects
 				(font
@@ -11958,12 +12132,12 @@
 			)
 		)
 		(pin "1"
-			(uuid "ef0fa5c8-2dd1-5cb3-99e4-df93be50411b")
+			(uuid "6f066da9-fb7d-53a0-b44c-b45254025962")
 		)
 		(instances
 			(project "hddsynthpro"
 				(path "/1f1928de-57c1-5ffb-9b24-ae415e42f504/27aad505-f942-5a85-bf6a-bbb5070a2707"
-					(reference "#PWR109")
+					(reference "#PWR110")
 					(unit 1)
 				)
 			)
@@ -13633,6 +13807,17 @@
 				(hide yes)
 			)
 		)
+	)
+	(label "IDE_IORDY"
+		(at 213.36 234.95 270)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right bottom)
+		)
+		(uuid "03601054-d582-532a-96fc-dec81ae25945")
 	)
 	(global_label "DIOR_N"
 		(shape bidirectional)

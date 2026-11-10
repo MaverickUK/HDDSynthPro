@@ -243,6 +243,14 @@ def main():
         if not any(nl.lib[r] == "Device:R" and ohms(nl.value[r]) >= 4700
                    and "+3V3" in (nl.net_of.get((r, "1")), nl.net_of.get((r, "2"))) for r, _ in reach(sig)):
             errors.append(f"{sig} has no pull-up to +3V3")
+    # IORDY's weak backup pull-up (R53, 10 Nov): on the header's side of the bus switch, so it
+    # holds with the switches off too, for hosts that don't pull IORDY up (docs/pcb-rev04.md).
+    if j_ide:
+        header_iordy = nl.net_of.get((j_ide, str(IDE_PIN["IORDY"])))
+        if not any(nl.lib[r] == "Device:R" and ohms(nl.value[r]) >= 4700
+                   and {nl.net_of.get((r, "1")), nl.net_of.get((r, "2"))} == {header_iordy, "+3V3"}
+                   for r in nl.lib):
+            errors.append("IORDY has no pull-up to +3V3 on the header's side of its bus switch")
 
     # The 44-pin header (rev 0.4): pins 1-40 on the 40-pin header's nets, 41-42 +5 V into VB
     # through a fuse and a Schottky, 43 GND.
