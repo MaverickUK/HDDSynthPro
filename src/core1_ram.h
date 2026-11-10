@@ -7,7 +7,9 @@
 // up on IORDY. Everything core 1 runs per bus access is marked CORE1_RAM.
 //
 // The Arduino-Pico linker script copies `.time_critical*` sections to RAM at
-// boot. On the host (unit tests) the macro is empty.
+// boot; scripts/core1_layout.py puts CORE1_RAM's first, file by file in a
+// fixed order, and scripts/check_core1_layout.py fails CI if any of it moves.
+// On the host (unit tests) the macro is empty.
 #pragma once
 
 #include <atomic>

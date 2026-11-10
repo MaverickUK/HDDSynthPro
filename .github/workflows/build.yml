@@ -32,6 +32,10 @@ jobs:
         run: |
           python3 scripts/check_core1_ram.py
           python3 scripts/check_core1_ram.py .pio/build/pcb_drive/firmware.elf
+      # Core 1's speed depends on where its code sits: a move needs a benchmark
+      # on the rig, then `scripts/check_core1_layout.py --update`.
+      - name: Core 1's hard disk code hasn't moved
+        run: python3 scripts/check_core1_layout.py
       - name: C++ unit tests
         run: test/run_native_tests.sh
       - name: Folder drive image, checked by fsck.fat, mtools and pyfatfs
