@@ -95,6 +95,24 @@ On the adapter (Windows), with the merged `bb48_drive` and `pcb_drive`:
 
 Then: CHANGELOG `## [0.32.0]`, the release notes, fast-forward `main`, tag `v0.32.0`, and delete the branch.
 
+**The release, step by step** (with the owner's go):
+1. `src/version.h`: `FIRMWARE_VERSION "0.32.0"`. Build all three (`pio run -e bb48 -e bb48_drive -e pcb_drive`); `scripts/check_core1_layout.py` (the version string sits outside core 1's block, so nothing should move) and `check_core1_ram.py`.
+2. `CHANGELOG.md`: above the dev entries, this, dated the release day:
+
+   ```
+   ## [0.32.0] - 2026-11-DD
+
+   One drive build per board, from branch `one-build` (0.32.0-dev.1-6); each step is below. For the people flashing it: [docs/release-notes/v0.32.0.md](docs/release-notes/v0.32.0.md).
+
+   - **`bb48_drive` and `pcb_drive` serve a hard disk, a CD-ROM drive or both, by `HDDSYNTH.INI`** (`device1 = cdrom` beside the disk, `device0 = cdrom` alone); `bb48_cdrom` and `bb48_hdcd` are gone. Core 1 has a loop per device kind, picked at boot, so the hard disk alone runs 0.31.0's code: PIO reads at 0.31.0's speed, writes within 2%.
+   - **The CD-ROM on the PCB's SDIO card bus.** A CD-ROM always runs `ide_bus`.
+   - **Core 1's hard disk code has a fixed place in RAM**, checked by CI (`scripts/core1_layout.py`, `check_core1_layout.py`); `check_core1_ram.py` follows calls through function pointers.
+   - Fixed: on the PCB, device 1's image or disc read through a PIO block the parked card had only borrowed.
+   - Tested: an hour's soak of each drive build (8.9 million sectors checked on the cable, 0 bad), `-m cdrom` with the CD-ROM as device 0 and 1, slices 1-4. Known: the CD-ROM's slow register reads (docs/atapi.md), being measured.
+   ```
+3. The release notes' *Tested* section: add slices 1-2 and the card soak once run.
+4. Commit, fast-forward `main` (`git checkout main && git merge --ff-only one-build`), tag `v0.32.0`, push both; CI publishes the release with the three UF2s. Then delete `one-build` here and on GitHub, and the worktree.
+
 ## Things to know on the rig
 
 - **The card's SPI trap:** any SPI build (`bb48_*`) leaves the card in SPI mode until its power is cut. After one, `pcb_drive` runs the card over SPI with a warning in `S`; take the card out and put it back, and it restarts onto SDIO by itself.
