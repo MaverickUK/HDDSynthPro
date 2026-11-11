@@ -128,11 +128,11 @@ Console:
 
 SemVer in `src/version.h` (`FIRMWARE_VERSION`, plus `FIRMWARE_SLICE`). Bump it with any firmware change, add a `CHANGELOG.md` entry (Keep a Changelog), and tag `vX.Y.Z`.
 
-## Status (10 Nov 2026: v0.32.0 released from `main`)
+## Status (11 Nov 2026: v0.32.1 released from `main`)
 
 The current state only; the history, with every measurement, is in `CHANGELOG.md` and `docs/speed-log.md`.
 
-- **Releases:** v0.32.0 (10 Nov) is the latest, from `main`: one drive build per board ([docs/one-build-per-board.md](docs/one-build-per-board.md)), soaked an hour per build, the CD-ROM checked, slices 2-4 and a 30-minute SDIO card soak.
+- **Releases:** v0.32.1 (11 Nov) is the latest, from `main`: the CD-ROM no longer turns `isa` on, which fixed a wrong CD-ROM data word on the Evesham (82,176 sectors clean since). v0.32.0 (10 Nov): one drive build per board ([docs/one-build-per-board.md](docs/one-build-per-board.md)), soaked an hour per build, the CD-ROM checked, slices 2-4 and a 30-minute SDIO card soak.
 - **Hardware:** PCB rev 0.3 is up ([docs/pcb-bringup.md](docs/pcb-bringup.md); pin 20 of its IDE header cut for keyed cables). **Rev 0.4 was ordered on 10 Nov** ([docs/pcb-rev04.md](docs/pcb-rev04.md); its files and `hardware/production/` are on `main`): DASP#, PDIAG#, CSEL, PSRAM, an SD power switch, CD audio, the 44-pin header, R53 (IORDY's backup pull-up) and the IDE Synth Bay logo.
 - **Proven on the rig:** PIO modes 0-3 and multiword DMA 2; detection, re-detection, standby and wake (from macOS), FLUSH CACHE, no card at boot, a card pulled and put back; two drives (an image or a folder as device 1); a CD-ROM as device 0 or 1 (ISO, BIN/CUE); the data lane; the card on SDIO. **Soaks:** 10 hours in PIO 3 (0.16.0), 10 hours in MDMA 2 (0.17.1), 10 hours of card soak over SDIO (0.31.0), an hour of each drive build (0.32.0-dev.5); no sector wrong on the cable since 0.8.22.
 - **Speeds through the adapter:** PIO 3 about 1.2-1.4 MB/s (the adapter's pace); MDMA 2 from RAM 7.7 MB/s reads and 13.9 writes; the card over SPI tops out near 1.8 MB/s for reads, over SDIO 6.2-6.6.
@@ -147,7 +147,7 @@ The current state only; the history, with every measurement, is in `CHANGELOG.md
   - Core 1's speed depends on where its code sits (0.32.0-dev.2-4 read 2.5% slower with byte-identical functions 3.6 KB further on); since dev.5 the layout is fixed and checked (*Core split*).
   - RAM is 95.5% used.
   - PIO writes on 0.32.0 are 2% below 0.31.0's (core 0 suspected).
-  - **The IORDY watchdog with `isa = on`** checks IORDY once every 45 ns, so back-to-back data reads can look like one 23 µs hold, and it releases IORDY mid-read. Until 0.32.1-dev.5 a CD-ROM forced `isa` on, so it ran on PCI hosts too: on the Evesham the host read about one data word in 2.5 million before the drive drove it (Doom quit: `GSTONE1` read as `GSTOTO1`). Fixed for PCI hosts (the CD-ROM leaves `isa` alone); a fast ISA host could still hit it. A sturdier watchdog would restart its count at every strobe. [docs/atapi.md](docs/atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
+  - **The IORDY watchdog with `isa = on`** checks IORDY once every 45 ns, so back-to-back data reads can look like one 23 µs hold, and it releases IORDY mid-read. Up to 0.32.0 a CD-ROM forced `isa` on, so it ran on PCI hosts too: on the Evesham the host read about one data word in 2.5 million before the drive drove it (Doom quit). Fixed for PCI hosts in 0.32.1 (the CD-ROM leaves `isa` alone); a fast ISA host could still hit it. The fix, a watchdog that starts over at every strobe (0.32.1-dev.6), is on branch `watchdog-strobes`, waiting for the ICL 386 test (*Next*, 1). [docs/atapi.md](docs/atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
   - macOS reads the CD-ROM's whole device with READ CD (0xBE), which the drive refuses; the data volume reads.
   - The bus observer's sector check is unreliable behind ISA cards, which strobe DIOR# with no chip select (counted as DMA words).
 - **The drive builds** hold:
@@ -157,7 +157,7 @@ The current state only; the history, with every measurement, is in `CHANGELOG.md
   - `ata_device` (IDENTIFY, READ/WRITE SECTORS and DMA, DIAGNOSTIC and the housekeeping commands bridges send; everything else gets ABRT), `atapi_device` and `mmc` for the CD-ROM, `hdcd_device` for both;
   - the disk through the mailbox: the SD image, the welcome disk with no card or image (not yet tried on the rig), or the generated disk (`device0 = none`, console `T`), with the RAM overlay; settings from `HDDSYNTH.INI` (`drive_config`).
 - **Next:**
-  1. Bring up PCB rev 0.4 when it arrives (a checklist like [docs/pcb-bringup.md](docs/pcb-bringup.md), and firmware for its new parts).
+  1. Bring up PCB rev 0.4 when it arrives (a checklist like [docs/pcb-bringup.md](docs/pcb-bringup.md), and firmware for its new parts). **With it, the ICL 386 on branch `watchdog-strobes`** (`isa = on`; rev 0.4 wires IOCS16#): it boots and runs as on 0.32.0, then merge that branch ([docs/pcb-rev04.md](docs/pcb-rev04.md#bring-up-tests-owed)).
   2. The rig: a second working adapter, and a way to cut its VBUS from a script, so replugs stop needing the owner.
   3. The CD-ROM's slow Status and Device reads: core 1 isn't late for them (the access log, 10 Nov), so look at `ide_bus.pio`'s path from the strobe to its push; fix the access log's false alarm first (core 1's PIO data loop doesn't note an empty FIFO).
   4. DMA as the default (`drive_config::DEFAULT_DMA`): soaked on the rig since 0.17.1, kept off so far.

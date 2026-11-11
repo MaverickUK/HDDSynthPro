@@ -1,36 +1,25 @@
 ; Drive build, HDDSYNTH.INI `isa = on`: releases IORDY when ide_bus has held
-; it low for about 23 us with no strobe. ISA IDE cards select the drive from
-; the address alone, so a memory cycle or DRAM refresh whose address aliases
-; 1F0h-1F7h selects it too, and pass IORDY to IOCHRDY: ide_bus pulls IORDY low
-; at the chip select (as ATA's timing needs) and, with no strobe to end the
-; access, the cycle would stall for good (an ICL 386 froze, 0.21.0). The
-; longest gap the ICL's BIOS left between a status read and its data, with
-; the drive still selected, was 11 us. Once released, IORDY stays released
-; until ide_bus pulls it low again (its next `arm` or `read`): a stalled
-; cycle ends however slowly the host's pull-up raises the line, which a 60 ns
-; release (0.21.2) didn't allow.
+; it low for about 23 us. ISA IDE cards select the drive from the address
+; alone, so a memory cycle or DRAM refresh whose address aliases 1F0h-1F7h
+; selects it too, and pass IORDY to IOCHRDY: ide_bus pulls IORDY low at the
+; chip select (as ATA's timing needs) and, with no strobe to end the access,
+; the cycle would stall for good (an ICL 386 froze, 0.21.0). A real access
+; never holds IORDY that long (core 1 answers within about 1 us), and the
+; longest gap the ICL's BIOS left between a status read and its data, with the
+; drive still selected, was 11 us. Once released, IORDY stays released until
+; ide_bus pulls it low again (its next `arm` or `read`): a stalled cycle ends
+; however slowly the host's pull-up raises the line, which a 60 ns release
+; (0.21.2) didn't allow.
 ;
-; The count starts over whenever IORDY reads high or a strobe (DIOR# or
-; DIOW#) is asserted: a strobe means a real access, which core 1 answers.
-; Up to 0.32.1-dev.5 only IORDY high started it over, and between back-to-back
-; data reads IORDY is high at the pin for only a moment (ide_bus pulls it low
-; again about 25 ns after DIOR# rises, before the host's pull-up has raised
-; it far). Missing those moments for 23 us, the watchdog took a run of reads
-; for one hold and released IORDY mid-read: the Evesham read about one data
-; word in 2.5 million before the drive drove it (docs/atapi.md). A strobe
-; lasts at least 70 ns (t2, PIO mode 4) and this loop looks every 30 ns.
-;
-; Runs in ide_bus's PIO block (ide_bus.cpp), whose 32 instructions the two
-; fill (23 + 9), so both write the same pin direction register: this program only ever writes 0 (release). DIOR# skips
-; the input synchroniser there; a level is all this program needs of it.
+; Runs in ide_bus's PIO block (iordy_watchdog.cpp), so both write the same pin
+; direction register: this program only ever writes 0 (release).
 ;
 ; Pin mapping:
-;   IN_BASE  = GPIO4 (DD0), as in bus_sample.h: DIOR# is bit 22, DIOW# bit 23
 ;   JMP_PIN  = GPIO28 (IORDY): high once released, by either program
 ;   SET      = GPIO28, as a pin direction
 ;   wait 0 gpio 28: ide_bus has pulled it low
-; ISR holds the count, passes - 1, put there before the program starts (it
-; never shifts in); a pass is 6 cycles: 767 passes, 23 us at 200 MHz
+;
+; Timing: 16 x 32 passes of 9 cycles, 4,608 cycles: 23 us at 200 MHz
 ; (host/tests/test_iordy_watchdog_sim.py).
 
 .pio_version 1
@@ -38,13 +27,12 @@
 .wrap_target
 top:
     wait 0 gpio 28                  ; ide_bus has pulled IORDY low
-    mov y, isr                      ; the count
+    set x, 15
+outer:
+    set y, 31
 hold:
     jmp pin top                     ; released meanwhile: start over
-    mov osr, ~pins                  ; sample, inverted (asserted = 1)
-    out null, 22                    ; drop DD0-15, DA0-2, CS0#, CS1#, LED
-    out x, 2                        ; DIOR#, DIOW#
-    jmp x-- top                     ; a strobe: a real access, start over
-    jmp y-- hold
+    jmp y-- hold            [7]
+    jmp x-- outer
     set pindirs, 0                  ; held too long: release it
 .wrap

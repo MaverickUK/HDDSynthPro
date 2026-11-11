@@ -128,6 +128,10 @@ What the retro PCs taught that firmware covers: IORDY on ISA cards that assert c
 - **SD card detect on GPIO 40**: the re-mount code (0.13.0) can use it instead of probing.
 - **DAT0-3 on consecutive GPIOs (36-39)**, as PIO SDIO needs, and CLK/CMD on 34/35.
 
+## Bring-up: tests owed
+
+- [ ] **The ICL 386 with the strobe-aware IORDY watchdog** (branch `watchdog-strobes`, 0.32.1-dev.6; CHANGELOG). Rev 0.3 can't run it: the 386's ISA card needs IOCS16#, which rev 0.4 wires. With `isa = on` and `ICL386MB.IMG`: MS-DOS boots and runs as on 0.32.0 (no freeze from the card's aliased chip selects, which the watchdog is for), and `s` shows `iordy_early` low. Then merge `watchdog-strobes` to `main`. Why: [atapi.md](atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
+
 ## Firmware for rev 0.3 itself
 
 Done in 0.16.6: the firmware drives **BUS_EN# (GPIO 41) low** once the bus pins are set up, so JP1 can stay open, and `p` reads **SD_CD (GPIO 40)**. The first day with the board: [pcb-bringup.md](pcb-bringup.md).

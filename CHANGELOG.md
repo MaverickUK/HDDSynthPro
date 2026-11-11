@@ -4,7 +4,17 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
-## [0.32.1-dev.6] - 2026-11-11 (branch `cd-stale-word`)
+## [0.32.1] - 2026-11-11
+
+A CD-ROM on a PCI PC could hand it a wrong data word, about one in 2.5 million: fixed. From branch `cd-stale-word` (0.32.1-dev.1-6, below). For the people flashing it: [docs/release-notes/v0.32.1.md](docs/release-notes/v0.32.1.md).
+
+- **Fixed:** a CD-ROM no longer turns `isa` on (dev.5), so the IORDY watchdog runs only where `HDDSYNTH.INI` asks for it. On the Evesham it had released IORDY mid-read, and Doom quit with a texture not found. 82,176 sectors were checked on the cable since the fix, none wrong, where the old rate gave about one per 15,000.
+- **Changed:** with a CD-ROM on an ISA PC, set `isa = on` yourself; up to 0.32.0 the CD-ROM set it.
+- **Added:** `EARLYDATA` and `iordy_early_data` (dev.4); the bus observer's strobe timing, `-DHDDPRO_OBSERVER_STROBE=1` (dev.1); `-m cdsoak` (dev.1); `STUCK` names a CD-ROM's command (dev.1).
+- **Not in this release:** dev.6's watchdog, which starts its count over at every strobe. It's on branch `watchdog-strobes` until it has run on the ICL 386, which needs IOCS16# and so the BB48 rig or PCB rev 0.4. This release's watchdog is 0.32.0's.
+- Tested: builds `bb48`, `bb48_drive` and `pcb_drive`, the core 1 checks (layout unchanged), 5,708 native checks and 426 simulation tests, and the Evesham (above).
+
+## [0.32.1-dev.6] - 2026-11-11 (branch `cd-stale-word`; not in 0.32.1, kept on branch `watchdog-strobes`)
 
 ### Fixed
 - **The IORDY watchdog (`isa = on`) starts its count over at every strobe**, not only when it sees IORDY high. Between back-to-back data reads IORDY is high at the pin only for a moment, so the old watchdog could take 23 µs of reads for one hold and release IORDY mid-read: the Evesham's wrong word (dev.5), which any host fast enough with `isa = on` could still have hit. It now also reads DIOR# and DIOW# on each 30 ns pass (a strobe lasts at least 70 ns), and its count, 767 passes, sits in ISR, set by `ide_bus.cpp` from the clock. A chip select left asserted with no strobe is released as before, 23 µs after the last strobe. 9 instructions (7 before): with `ide_bus`'s 23 they fill the block. Tested in simulation (`test_iordy_watchdog_sim.py`): back-to-back reads with IORDY never reading high between them are left alone (the old program released IORDY among them, and fails the new tests), and a stuck chip select after reads is still released. On the Evesham with `isa = on` (console `P i`, so the observer's image checks are off): it boots and serves Doom. Early reads came at a steady 1.3 per command (98 in 75, 2 of them `EARLYDATA`). The old watchdog gave about 4 per command and dev.5 none, so the new one still releases IORDY at times: perhaps legitimately, in gaps over 23 µs with the drive selected and no strobe (the ICL 386's longest was 11 µs), after which a read starts with IORDY high. Not proven safe on a PCI host: keep `isa = off` there. With the card's own settings (`isa = off`): Doom's demo on the Evesham read 40,536 sectors, all checked on the cable, with none wrong, no early reads, `iordy_ignored=0` and no card lost. With dev.5 that's about 82,000 sectors clean since the fix, where the old rate would have given about 5. Not yet tried on the ICL 386.
