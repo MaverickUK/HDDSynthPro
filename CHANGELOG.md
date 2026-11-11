@@ -4,6 +4,15 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.32.2-dev.3] - 2026-11-11 (branch `cd-slow-status`)
+
+### Changed
+- **Register accesses with a CD-ROM cost core 1 less**, so the CD-ROM's Status polls are held less. On the Evesham, slow reads per READ(10) went from 1.32 to 0.49, and the worst from 4,270 ns to 2,420. Each register write had cost core 1 about 1.6 µs, so a poll after the DOS driver's Device Control and Device writes waited behind both. `hdcd::Device::writeQuiet` handles the writes that can't start a command without `write()`'s bookkeeping; Device Control rewritten unchanged does nothing. Core 1 skips the INTRQ update after accesses that can't change it, and INTRQ is worked out inline. For `hdcd::Device` only: the hard disk alone keeps its code (layout unchanged). New test `hdcd_quiet_writes_match_write`. On the USB adapter (`bb48_drive`, the test disk and disc, MDMA 2): `-m cdrom` passes (64 MB of the disc at 2.95 MB/s), and slices 3 and 4 beside it (1,000 write-and-read-back cycles). Slice 2 sticks after its first re-detection on 0.32.1 just the same: with a CD-ROM configured the adapter goes silent after a `V` as after a restart, until a physical replug. Details: [docs/atapi.md](docs/atapi.md).
+
+### Added
+- `s` shows core 1's enabled interrupts (`c1_irq`): IRQ 26, the doorbell Arduino-Pico rings only for flash writes. `-DHDDPRO_C1_NO_IRQ=1` (bench) masks them.
+- The access log (`-DHDDPRO_ACCESS_LOG=1`) splits each write into the device's part and INTRQ's, and no longer flags data reads falsely (core 1's PIO data loop now notes an empty FIFO).
+
 ## [0.32.1] - 2026-11-11
 
 A CD-ROM on a PCI PC could hand it a wrong data word, about one in 2.5 million: fixed. From branch `cd-stale-word` (0.32.1-dev.1-6, below). For the people flashing it: [docs/release-notes/v0.32.1.md](docs/release-notes/v0.32.1.md).

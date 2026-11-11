@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from conftest import require_build
+from conftest import cdrom_device, require_build
 from hddproto import gen_disk, trace
 
 pytestmark = pytest.mark.slice2
@@ -33,6 +33,10 @@ def replug_count(rig) -> int:
 
 
 def test_disk_appears_with_right_capacity(drive, rig, run_dir):
+    # A CD-ROM drive beside the disk aborts IDENTIFY DEVICE, as ATAPI
+    # devices must (the host then sends IDENTIFY PACKET DEVICE): only the
+    # disk's have to succeed.
+    cdrom_unit = cdrom_device(drive)
     for n in range(replug_count(rig)):
         mark = drive.mark()
         rig.replug()
@@ -43,7 +47,7 @@ def test_disk_appears_with_right_capacity(drive, rig, run_dir):
         lines = drive.lines_since(mark)
         (run_dir / f"trace-{n + 1}.txt").write_text("\n".join(lines) + "\n")
         t = trace.parse(lines)
-        identifies = [c for c in t.commands if c.command == IDENTIFY_COMMAND]
+        identifies = [c for c in t.commands if c.command == IDENTIFY_COMMAND and c.unit != cdrom_unit]
         assert identifies, f"replug {n + 1}: no IDENTIFY DEVICE in the trace"
         assert all(c.ok for c in identifies), f"replug {n + 1}: {identifies}"
         assert not t.stalls and not t.dropped

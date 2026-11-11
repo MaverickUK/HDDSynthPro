@@ -669,6 +669,61 @@ TEST(hdcd_task_file_writes_reach_both_devices) {
     CHECK_EQ(host.reg(Reg::LbaLow), 0x21);
 }
 
+// Core 1's path for a write with a CD-ROM (ide_bus.cpp's serve): writeQuiet,
+// then write() only for what it doesn't handle. Two devices driven alike, one
+// through write() alone, must agree on every register and on INTRQ after each
+// write: the quick path skips only bookkeeping and INTRQ updates that can't
+// change anything (11 Nov 2026).
+static void quietWrite(Device& dev, Reg reg, uint16_t value) {
+    if (reg != Reg::StatusCommand && dev.writeQuiet(reg, value) != Device::QUIET_NO) return;
+    dev.write(reg, value);
+}
+
+TEST(hdcd_quiet_writes_match_write) {
+    Device plain(DISK, nullptr, &DISC), quick(DISK, nullptr, &DISC);
+    GeneratedDisk disk_a(DISK.total_sectors), disk_b(DISK.total_sectors);
+    DiscSource disc_a, disc_b;
+    Host a{plain, {&disk_a, &disc_a}}, b{quick, {&disk_b, &disc_b}};
+    auto same = [&] {
+        CHECK_EQ(plain.intrq(), quick.intrq());
+        CHECK_EQ(plain.intrqDriven(), quick.intrqDriven());
+        CHECK_EQ(plain.cdSelected(), quick.cdSelected());
+        for (Reg r : {Reg::ErrorFeatures, Reg::SectorCount, Reg::LbaLow, Reg::LbaMid, Reg::LbaHigh, Reg::Device,
+                      Reg::AltStatusDevCtrl})
+            CHECK_EQ(plain.peek(r), quick.peek(r));
+    };
+    // The Evesham's sequence before a CD read, and the disk's, with nIEN set and cleared
+    const struct { Reg reg; uint8_t value; } steps[] = {
+        {Reg::AltStatusDevCtrl, 0x08}, {Reg::Device, 0xB0}, {Reg::AltStatusDevCtrl, 0x08},
+        {Reg::ErrorFeatures, 0},       {Reg::LbaMid, 0x00}, {Reg::LbaHigh, 0x08},
+        {Reg::Device, 0xA0},           {Reg::SectorCount, 1}, {Reg::LbaLow, 5},
+        {Reg::Device, 0xE0},           {Reg::AltStatusDevCtrl, 0x0A}, {Reg::Device, 0xB0},
+        {Reg::AltStatusDevCtrl, 0x0A}, {Reg::AltStatusDevCtrl, 0x08}, {Reg::Device, 0xB0},
+    };
+    for (auto& st : steps) {
+        plain.write(st.reg, st.value);
+        quietWrite(quick, st.reg, st.value);
+        same();
+    }
+    // A command on each device, then the same writes while one is busy and after
+    for (int unit : {1, 0}) {
+        plain.write(Reg::Device, unit ? 0xB0 : 0xE0);
+        quietWrite(quick, Reg::Device, unit ? 0xB0 : 0xE0);
+        uint8_t cmd = unit ? atapi::CMD_PACKET : ata::CMD_READ_SECTORS;
+        plain.write(Reg::StatusCommand, cmd);
+        quietWrite(quick, Reg::StatusCommand, cmd);
+        same();
+        for (auto& st : steps) {
+            plain.write(st.reg, st.value);
+            quietWrite(quick, st.reg, st.value);
+            same();
+        }
+        a.pump();
+        b.pump();
+        same();
+    }
+}
+
 void runHdcdTests() {
     RUN(hdcd_each_device_shows_its_signature);
     RUN(hdcd_a_bios_probe_finds_a_disk_and_a_cdrom);
@@ -686,4 +741,5 @@ void runHdcdTests() {
     RUN(hdcd_a_cdrom_as_device_0_by_dma);
     RUN(hdcd_disk_writes_with_a_cdrom_beside_it);
     RUN(hdcd_task_file_writes_reach_both_devices);
+    RUN(hdcd_quiet_writes_match_write);
 }

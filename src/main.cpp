@@ -280,6 +280,10 @@ constexpr unsigned GAP_KINDS = GAP_STEP0 + 5;
 static volatile uint32_t g_c1_gap[GAP_KINDS];
 static volatile uint32_t g_c1_fifo_cycles, g_c1_fifo_max;  // the FIFO check alone (diagnostic)
 static volatile uint32_t g_c1_passes;
+static volatile uint32_t g_c1_iser[2], g_c1_primask;  // core 1's interrupt set-up, captured in setup1
+#ifndef HDDPRO_C1_NO_IRQ
+#define HDDPRO_C1_NO_IRQ 0  // -DHDDPRO_C1_NO_IRQ=1: core 1 masks all interrupts (a bench test)
+#endif
 static uint32_t g_bench_pio, g_bench_ram, g_bench_sio, g_bench_nop;  // cycles per 1000, measured in setup1
 static volatile uint32_t g_bench_var;
 static uint32_t g_bench_pio_ram, g_bench_nop_ram;  // the same loops, from core 1's RAM code
@@ -372,6 +376,20 @@ void setup1() {
     // Core 1 wins bus arbitration, so core 0's USB and other traffic can't
     // delay its PIO accesses while the host waits on a read.
     busctrl_hw->priority = BUSCTRL_BUS_PRIORITY_PROC1_BITS;
+    // Which interrupts core 1 takes (its own NVIC), for `s` (`c1_irq`): a
+    // handler running from flash would stall it for microseconds while core 0
+    // is busy in flash (the CD-ROM's slow Status polls during a card read).
+    g_c1_iser[0] = m33_hw->nvic_iser[0];
+    g_c1_iser[1] = m33_hw->nvic_iser[1];
+#if HDDPRO_C1_NO_IRQ
+    // Bench: none at all from here (PRIMASK). Arduino-Pico's idleOtherCore,
+    // which flash writes use, would then wait for good; the drive build never
+    // writes flash.
+    __asm volatile("cpsid i" ::: "memory");
+#endif
+    uint32_t primask;
+    __asm volatile("mrs %0, primask" : "=r"(primask));
+    g_c1_primask = primask;
 }
 
 
@@ -2141,6 +2159,8 @@ static void printStats() {
                   (unsigned long)bus_observer::identifyBad());
     Serial.printf(" bus_image=%s bus_expect_missed=%lu", bus_observer::imageChecks() ? "on" : "off",
                   (unsigned long)bus_observer::expectMissed());
+    Serial.printf(" c1_irq=%08lx,%08lx,primask:%lu", (unsigned long)g_c1_iser[0], (unsigned long)g_c1_iser[1],
+                  (unsigned long)g_c1_primask);
     Serial.printf(" bus_contested=%lu bus_stalls=%lu", (unsigned long)iordy_timer::contestedAccesses(),
                   (unsigned long)iordy_timer::stallCycles());
 #if CMD_PROFILE

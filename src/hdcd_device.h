@@ -90,6 +90,36 @@ public:
     // Both devices see every write; a Command write is run by the one selected
     // (and EXECUTE DEVICE DIAGNOSTIC by both).
     void write(Reg reg, uint16_t value);
+    // A write that can't start a command, done without write()'s bookkeeping:
+    // QUIET_INTRQ if it can't change INTRQ either (core 1 then skips the
+    // update), QUIET_DONE if it can (Device: the selection), QUIET_NO if it
+    // needs write(). Device Control rewritten with the value it holds changes
+    // nothing (the Evesham's DOS writes 08h before most commands). Each
+    // write() cost core 1 about 1 us with its INTRQ update, and the host's
+    // status poll after a few of them waited behind them all, up to 5 us
+    // (11 Nov 2026, docs/atapi.md).
+    enum Quiet : uint8_t { QUIET_NO, QUIET_DONE, QUIET_INTRQ };
+    __attribute__((always_inline)) Quiet writeQuiet(Reg reg, uint16_t value) {
+        switch (reg) {
+            case Reg::AltStatusDevCtrl:
+                return uint8_t(value) == device_control_ ? QUIET_INTRQ : QUIET_NO;
+            case Reg::ErrorFeatures:
+            case Reg::SectorCount:
+            case Reg::LbaLow:
+            case Reg::LbaMid:
+            case Reg::LbaHigh:
+                if (hd_on_) hd_.write(reg, value);
+                if (cd_on_) cd_.write(reg, value);
+                return QUIET_INTRQ;
+            case Reg::Device:  // can't start a command: both devices, without the bookkeeping, then INTRQ
+                device_reg_ = uint8_t(value);
+                if (hd_on_) hd_.write(reg, value);
+                if (cd_on_) cd_.write(reg, value);
+                return QUIET_DONE;
+            default:
+                return QUIET_NO;
+        }
+    }
     void queueCommand(uint8_t command);
     __attribute__((always_inline)) bool commandQueued() const { return hd_.commandQueued() || (cd_on_ && cd_.commandQueued()); }
     void runQueuedCommand();
@@ -101,7 +131,7 @@ public:
 
     void hardReset(bool asserted);
 
-    __attribute__((always_inline)) bool intrq() const { return cdSelected() ? cd_.intrq() : hd_.intrq(); }
+    __attribute__((always_inline)) bool intrq() const { return cdSelected() ? cd_.intrqInline() : hd_.intrqInline(); }
     __attribute__((always_inline)) bool intrqDriven() const { return cdSelected() ? cd_.intrqDriven() : hd_.intrqDriven(); }
 
     // ---- Sector fetches (handed to core 0) ---------------------------------

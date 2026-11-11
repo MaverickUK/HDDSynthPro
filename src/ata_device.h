@@ -216,6 +216,11 @@ public:
 
     // Level the INTRQ line should have: true = assert.
     bool intrq() const;
+    // The same, always inlined, for hdcd::Device's per-access INTRQ update
+    // (intrq() stays out of line, so the hard disk alone keeps its code).
+    __attribute__((always_inline)) bool intrqInline() const {
+        return irq_pending_ && !absent_selected_ && !(device_control_ & DC_NIEN);
+    }
     // Whether the drive drives INTRQ at all: while it's selected and nIEN is
     // clear, it drives the line both ways (intrq()); otherwise it releases it.
     // ATA has the host pull INTRQ down, but older ISA cards don't, and an
