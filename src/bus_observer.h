@@ -66,6 +66,7 @@ uint32_t identifyChecked();
 uint32_t identifyBad();
 uint32_t gaps();
 uint64_t dmaWords();  // multiword DMA read words seen (checked like PIO data)
+uint64_t dmaWordsTotal();  // the same, never cleared by resetCounts() (auto_bus)
 // The most samples ever waiting in the ring for core 0, of ringSize(): near
 // the size, samples were overwritten before they were checked (gaps).
 uint32_t ringMax();

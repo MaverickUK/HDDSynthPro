@@ -41,6 +41,10 @@ const char* earlyRegister();
 // modes 0-2, and some older controllers do; they'd read garbage. The last
 // such read's register.
 uint32_t ignoredReads();
+// auto_bus's evidence, never cleared: reads the host didn't wait for, and
+// reads held past 1,000 ns (all of them waited for unless ignoredTotal() moved).
+uint32_t ignoredTotal();
+uint32_t longTotal();
 const char* ignoredRegister();
 // Of those, the data register's (a PCI controller may time its data port
 // apart from the other registers, and ignore IORDY there: the Evesham's CD

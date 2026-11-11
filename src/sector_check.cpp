@@ -180,7 +180,10 @@ bool Checker::observe(uint32_t word, bool data) {
         aligned_ = true;
         return false;
     }
-    if (dma) ++dma_words_;
+    if (dma) {
+        ++dma_words_;
+        ++dma_words_total_;
+    }
     strobes_[count_] = uint16_t(strobeNs(word));
     words_[count_++] = bus::data(sample);
     if (count_ < 256) return false;

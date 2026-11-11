@@ -21,7 +21,7 @@ from hddproto.drive_log import DriveLog  # noqa: E402
 
 DATA_COMMANDS = {"READ_SECTORS", "READ_SECTORS_NR", "WRITE_SECTORS", "WRITE_SECTORS_NR", "READ_MULTIPLE",
                  "READ_DMA", "READ_DMA_NR", "WRITE_DMA", "WRITE_DMA_NR", "READ_VERIFY", "READ_VERIFY_NR"}
-ALERTS = ("NOIORDY", "BUSERR", "STUCK", "SLOWREAD", "CARD", "ABSENT")
+ALERTS = ("NOIORDY", "BUSERR", "STUCK", "SLOWREAD", "CARD", "ABSENT", "AUTOBUS", "EARLYDATA")
 SUMMARY_FIELDS = ("iordy_ignored", "iordy_max_ns", "iordy_max_reg", "bus_sectors", "bus_bad", "bus_gaps",
                   "bus_identify", "bus_identify_bad", "card", "image_name")
 

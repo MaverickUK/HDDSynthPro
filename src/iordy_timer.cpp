@@ -33,6 +33,11 @@ static uint32_t s_ignored = 0;
 static const char* s_ignored_register = "-";
 static uint32_t s_ignored_data = 0;
 static uint32_t s_ignored_at_us = 0;
+// For auto_bus: never cleared, so differences across a reset stay right.
+static uint32_t s_ignored_total = 0;
+static uint32_t s_long_total = 0;          // reads held past LONG_NS
+static uint32_t s_long_iterations = 0;
+constexpr uint32_t LONG_NS = 1000;  // longer than any host's strobe seen (ISA 375-500 ns, a PIIX 340)
 // The data port's slow reads apart (a host may time it apart from the other
 // registers): counts by how long IORDY held them, and the longest.
 static uint32_t s_data_buckets[DATA_BUCKETS] = {};
@@ -79,6 +84,7 @@ void begin(uint32_t threshold_ns) {
     // report against it, and converts only the reads past the limit.
     s_limit_iterations = nsToIterations(cfg::IORDY_LIMIT_NS);
     for (int i = 0; i < DATA_BUCKETS - 1; ++i) s_data_bucket_iterations[i] = nsToIterations(DATA_BUCKET_EDGES_NS[i]);
+    s_long_iterations = nsToIterations(LONG_NS);
     pio_sm_put(s_pio, s_sm, s_threshold_iterations);
     pio_sm_set_enabled(s_pio, s_sm, true);
 
@@ -128,6 +134,7 @@ void poll() {
         uint32_t iterations = s_threshold_iterations + (0xFFFFu - (report >> 16));
         const char* reg = bus::registerName(bus::block(sample), bus::address(sample), false);
         ++s_slow;
+        if (iterations > s_long_iterations) ++s_long_total;
         if (isData(sample)) {
             int b = 0;
             while (b < DATA_BUCKETS - 1 && iterations > s_data_bucket_iterations[b]) ++b;
@@ -151,6 +158,7 @@ void poll() {
     for (int i = 0; i < 4 && !pio_sm_is_rx_fifo_empty(s_check_pio, s_check_sm); ++i) {
         uint32_t sample = pio_sm_get(s_check_pio, s_check_sm);
         ++s_ignored;
+        ++s_ignored_total;
         s_ignored_register = bus::registerName(bus::block(sample), bus::address(sample), false);
         s_ignored_at_us = time_us_32();
         if (isData(sample)) ++s_ignored_data;
@@ -169,6 +177,8 @@ void end() {
 bool running() { return s_started.load(std::memory_order_acquire); }
 
 uint32_t ignoredReads() { return s_ignored; }
+uint32_t ignoredTotal() { return s_ignored_total; }
+uint32_t longTotal() { return s_long_total; }
 const char* ignoredRegister() { return s_ignored_register; }
 uint32_t ignoredDataReads() { return s_ignored_data; }
 uint32_t ignoredAtUs() { return s_ignored_at_us; }

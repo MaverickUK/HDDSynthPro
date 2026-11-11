@@ -431,6 +431,7 @@ void runFolderDiskTests();
 void runMmcTests();
 void runAtapiDeviceTests();
 void runHdcdTests();
+void runAutoBusTests();
 
 int main() {
     RUN(test_pin_layout);
@@ -474,6 +475,7 @@ int main() {
     runMmcTests();
     runAtapiDeviceTests();
     runHdcdTests();
+    runAutoBusTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

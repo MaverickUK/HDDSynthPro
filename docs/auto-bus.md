@@ -1,6 +1,6 @@
 # The drive choosing its own bus program: a design
 
-**Design, 4 Nov 2026 (0.30.0-dev.9); nothing built.** How the drive could pick the fastest safe bus program for the computer it's plugged into, so nobody has to know what an ISA card or a PIIX is. It needs evidence from more machines first: [what to record](#what-to-record-on-each-pc) on each PC is at the end, and in [bench-checklist.md](bench-checklist.md).
+**Design, 4 Nov 2026 (0.30.0-dev.9). Step one built in 0.32.3-dev.1 (11 Nov): the drive works out what it would choose and says so (`AUTOBUS` lines, `autobus` in `s`), without switching.** Step two, switching live, waits until that advice has proved right on the PCs below. How the drive could pick the fastest safe bus program for the computer it's plugged into, so nobody has to know what an ISA card or a PIIX is. It needs evidence from more machines first: [what to record](#what-to-record-on-each-pc) on each PC is at the end, and in [bench-checklist.md](bench-checklist.md).
 
 ## Today
 
@@ -11,7 +11,7 @@
 | `ide_bus` with `iordy_watchdog` | `isa = on` | (the 386: 1.51 reads, 0.72 writes) | the ICL 386, where it was proven first |
 | `ide_bus_noiordy` | `iordy = off` | | the Amiga 1200, in progress |
 
-The program is chosen once, when core 1 starts (`ide_bus::begin`), from `HDDSYNTH.INI` or console `P`, which restarts the board. The CD-ROM builds always run early answers (the lane was written for the hard disk's 256-word blocks).
+The program is chosen once, when core 1 starts (`ide_bus::begin`), from `HDDSYNTH.INI` or console `P`, which restarts the board. A CD-ROM always runs `ide_bus` (since 0.30.0-dev.10; not early answers, which answered it too slowly, nor the lane, written for the hard disk's 256-word blocks), so `auto` would choose for the hard disk alone.
 
 **Early answers are the safe default** and the ICL 386 boots on them, so `isa = on` is no longer needed. **What a choice could gain is the lane's speed** on machines that can take it: about 20% faster reads and 60% faster writes on the Evesham. Only in PIO: with multiword DMA the data goes by DMA whatever the program.
 
@@ -26,11 +26,11 @@ Two kinds of host, and the lane is wrong for both:
 
 | Signal | What it shows | Known values |
 |---|---|---|
-| `dior_no_cs` (and the `NOCS` line, ms after RESET# release) | DIOR# with no chip select, while no DMA is offered (`bus_observer`): an ISA card passes every I/O read the PC makes | ICL 386: about 19.9 million in a session (0.27.0). USB adapter: 0. **Evesham, Pentium: not yet measured** (the counter came after) |
+| `dior_no_cs` (and the `NOCS` line, ms after RESET# release) | DIOR# with no chip select, while no DMA is offered (`bus_observer`): an ISA card passes every I/O read the PC makes | ICL 386: about 19.9 million in a session (0.27.0). USB adapter: 0. **Evesham: 0** (11 Nov, two Doom sessions on `ide_bus`). Pentium: not yet measured |
 | `iordy_ignored` (`NOIORDY` lines) | reads the host ended while IORDY was still low (`iordy_check.pio`): a host that didn't wait | Pentium (BIOS detection): above 0. Evesham, USB adapter: 0. Under early answers it also counts reads whose data was already on DD when the strobe ended (the program lets IORDY go 40 ns after driving DD): the data was good, but the host still didn't wait, which is what the rule needs to know |
 | `iordy_slow` (with `iordy_max_ns`) | reads IORDY held over 400 ns (`iordy_timer.pio`) | On the lane, both waited through every long hold: the Evesham about 1,400 reads over 1,250 ns a benchmark, the USB adapter about 10 a speed run, `iordy_ignored` 0 on both. Under early answers most holds are shorter, so a long one is the test of whether a host waits |
 | `rd_t1_ns`, `rd_strobe_ns` (`bus_timing.pio`, when no DMA is offered) | each read's chip-select-to-strobe time and strobe length: compatible timing has a t1 of a cycle or two | Pentium, Windows 95's driver: t1 80 ns, strobes 175-195 ns |
-| `iordy_early` | reads that started before IORDY was low | most reads in PIO 3, harmlessly: not a signal by itself |
+| `iordy_early` | reads that started before IORDY was low | not a signal by itself. On the Evesham up to 0.32.0 they came from `iordy_watchdog` releasing IORDY while the drive sat selected (a CD-ROM forced `isa` on); with no watchdog, none at all (0.32.1, docs/atapi.md) |
 
 ## The design
 
@@ -63,6 +63,16 @@ Today switching means restarting the board. In `auto`, core 1 would swap block 0
 - **A host that changes timing without a reset.** If Windows 95's driver moved the PIIX to compatible timing with no SRST, the lane would answer a few register reads too late before the drive noticed, and those reads would be wrong (the Pentium's boots with that driver already corrupted files on early answers). Rule 3 and the switch back on any unwaited read narrow it; only the Pentium can show whether it happens. Until then, `auto` stays opt-in.
 - **An ISA card the signature misses.** None known: every I/O read reaches the drive's lines on an ISA card, so the count should be in the millions. The recordings below test that on every ISA machine.
 - **The alternative: a lane safe on ISA cards.** If the lane could release IORDY on a stall as early answers do, rule 1 would go. It needs the program to report chip selects to core 1, which needs instructions the block doesn't have; the register table ([no-iordy.md](no-iordy.md)) reshuffles the blocks and might make room. Worth weighing when the table is built.
+
+## Step one: the advice (0.32.3-dev.1)
+
+`src/auto_bus.*` (plain C++, `test_auto_bus.cpp`) applies the rule above to counters core 0 already keeps, from each RESET# release (and boot), and core 0 prints an `AUTOBUS` line whenever its advice changes:
+
+`AUTOBUS lane (ok) 5210 ms after reset: 1043 sectors, 27 long reads waited; running lane`
+
+`s` adds `autobus=early|lane`, `autobus_why=` (the first rule not met: `cdrom`, `dma`, `no-evidence` (the bus observer or IORDY check isn't running, e.g. the card on SDIO with DMA offered), `isa`, `not-waited`, `no-proof`, `detecting`, or `ok`), `autobus_sectors=` and `autobus_long=`. Its inputs are running totals never cleared (by `r` or a reset): `bus_observer::dmaWordsTotal()` (DIOR# with no chip select), `iordy_timer::ignoredTotal()` (reads not waited for), `iordy_timer::longTotal()` (reads held past 1,000 ns, longer than any host's strobe seen) and the data sectors core 0 served. Thresholds: 1,000 sectors and 20 long reads (`auto_bus::Config`). SRST isn't seen yet (only RESET#). A host caught as ISA or not waiting stays `early` until the next reset.
+
+What to look for on each PC: the line it settles on after the BIOS, DOS and a benchmark, and whether it ever says `lane` on a PC where the lane fails (the Pentium) or `early (isa)` late.
 
 ## Cost
 

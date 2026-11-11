@@ -218,6 +218,7 @@ uint32_t identifyChecked() { return s_checker ? s_checker->identifyChecked() : 0
 uint32_t identifyBad() { return s_checker ? s_checker->identifyBad() : 0; }
 uint32_t gaps() { return s_checker ? s_checker->gaps() : 0; }
 uint64_t dmaWords() { return s_checker ? s_checker->dmaWords() : 0; }
+uint64_t dmaWordsTotal() { return s_checker ? s_checker->dmaWordsTotal() : 0; }
 uint32_t ringMax() { return s_ring_max; }
 uint32_t ringSize() { return RING_WORDS; }
 uint64_t dropped() { return s_dropped; }

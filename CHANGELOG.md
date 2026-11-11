@@ -4,6 +4,11 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.32.3-dev.1] - 2026-11-11 (on `main`)
+
+### Added
+- **The drive says which bus program it would choose for the host** (step one of [docs/auto-bus.md](docs/auto-bus.md); nothing switches). `src/auto_bus.*` applies the design's rule from each RESET# release: no DMA offered, no ISA signature (DIOR# with no chip select), no read the host didn't wait for, 20 reads held past 1,000 ns all waited for, and 1,000 data sectors served. Core 0 prints `AUTOBUS lane|early (why) ... ms after reset` on each change; `s` adds `autobus`, `autobus_why`, `autobus_sectors` and `autobus_long`. Its inputs are new never-cleared totals (`bus_observer::dmaWordsTotal`, `iordy_timer::ignoredTotal` and `longTotal`, sectors served), so `r` and the timer's reset at RESET# can't upset it. Core 0 only: core 1's code unchanged (layout check). `test_auto_bus.cpp`: 7 tests. `retro_log.py` shows `AUTOBUS` and `EARLYDATA` lines. Not yet run on hardware.
+
 ## [0.32.2] - 2026-11-11
 
 The CD-ROM's status polls held less: with a CD-ROM configured, register writes that can't change anything take a short path, and INTRQ is worked out inline (dev.1-4, below; [docs/release-notes/v0.32.2.md](docs/release-notes/v0.32.2.md)). The hard disk alone runs 0.32.1's code (layout unchanged).

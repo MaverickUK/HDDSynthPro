@@ -125,6 +125,7 @@ public:
     uint32_t identifyBad() const { return identify_bad_; }
     uint32_t gaps() const { return gaps_; }  // reads missed (sequence jumps)
     uint64_t dmaWords() const { return dma_words_; }  // DMA read words seen (data checked as any other)
+    uint64_t dmaWordsTotal() const { return dma_words_total_; }  // the same, never cleared (auto_bus)
 
     // After reads were discarded on purpose: start afresh, without a gap.
     // Within a DMA command only the word count says where sectors start,
@@ -163,6 +164,7 @@ private:
     unsigned count_ = 0;
     bool aligned_ = true;  // count_ is known to start at a sector (see resync)
     uint64_t dma_words_ = 0;  // 64-bit: DMA's rate wraps 32 bits in a few hours
+    uint64_t dma_words_total_ = 0;
     bool have_seq_ = false;
     uint32_t last_seq_ = 0;
     Mismatch mismatch_{};

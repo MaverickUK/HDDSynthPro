@@ -39,6 +39,7 @@
 
 #include "access_log.h"
 #include "activity.h"
+#include "auto_bus.h"
 #include "activity_link.h"
 #include "drive_config.h"
 #include "drive_params.h"
@@ -188,6 +189,14 @@ static SharedFlag g_dma_auto{false};                    // HDDSYNTH.INI dma: aut
 // once by core 1 at start-up, then g_pio_planned set; core 0 reads it after.
 static pio_plan::Plan g_pio_plan;
 static std::atomic<bool> g_pio_planned{false};  // start-up only, so std::atomic is fine (not per access)
+
+// Which bus program the drive would choose for this host (docs/auto-bus.md):
+// advice only, printed as AUTOBUS lines and in `s`; nothing switches yet.
+// Core 0 only. g_sectors_served counts the data sectors serveFetches() moves.
+static auto_bus::Advisor g_auto_bus;
+static bool g_auto_bus_started = false;
+static uint32_t g_sectors_served = 0;
+static auto_bus::Counters autoBusCounters();
 
 // HDDSYNTH.INI's geometry for core 1, packed (cylinders << 16 | heads << 8 |
 // sectors), or 0 for auto; stored with the disk's size (geometryFor).
@@ -1788,6 +1797,7 @@ static void noteActivity(const TraceEvent& e) {
         g_release_ms = millis();
         g_no_cs_at_release = bus_observer::dmaWords();
         g_no_cs_reported = false;
+        if (g_auto_bus_started) g_auto_bus.reset(autoBusCounters(), millis());
     }
     uint8_t command = uint8_t(e.extra);
     if (!activity::isMediaCommand(command)) return;
@@ -1843,6 +1853,7 @@ static void serveFetches() {
                                 : disk->read(fetch.lba, fetch.buffer);
         if (ok && fetch.flush) ok = disk->flush();
         if (ok && !fetch.store && !fetch.flush) bus_observer::expect(fetch.lba, fetch.buffer);  // before core 1 can send it
+        if (ok && !fetch.flush) ++g_sectors_served;  // auto_bus: past detection?
         uint64_t ready = now;
         if (fetch.store || !fetch.flush) {  // a sector read or written
             seek_timing::Release r = g_seek.onSector(now, fetch.command_lba, fetch.lba);
@@ -1952,6 +1963,40 @@ static void printCardChanges() {
         shown_losses = losses;
         shown_restarts = restarts;
     }
+}
+
+// auto_bus's evidence, as counted since boot (never cleared: `r` and the
+// IORDY timer's reset at RESET# release clear the other counters).
+static auto_bus::Counters autoBusCounters() {
+    auto_bus::Counters c;
+    c.dma_offered = g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA;
+    c.no_cs_known = g_pio_plan.bus_observer && !c.dma_offered;
+    c.dior_no_cs = bus_observer::dmaWordsTotal();
+    c.iordy_known = g_pio_plan.iordy_timer;
+    c.iordy_ignored = iordy_timer::ignoredTotal();
+    c.long_reads = iordy_timer::longTotal();
+    c.sectors = g_sectors_served;
+    c.cdrom = g_device0_cdrom || g_device1_cdrom;
+    return c;
+}
+
+// An AUTOBUS line when the advice changes: the program the drive would run
+// now, why, and when since the reset. Every 100 ms is plenty.
+static void printAutoBus() {
+    static uint32_t last_ms = 0;
+    if (!g_pio_planned.load(std::memory_order_acquire)) return;
+    uint32_t now = millis();
+    if (!g_auto_bus_started) {
+        g_auto_bus.reset(autoBusCounters(), now);
+        g_auto_bus_started = true;
+    }
+    if (now - last_ms < 100) return;
+    last_ms = now;
+    if (!g_auto_bus.update(autoBusCounters(), now)) return;
+    Serial.printf("AUTOBUS %s (%s) %lu ms after reset: %lu sectors, %lu long reads waited; running %s\n",
+                  g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early",
+                  auto_bus::whyName(g_auto_bus.why()), (unsigned long)g_auto_bus.sinceResetMs(now),
+                  (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads(), ide_bus::busName());
 }
 
 // A NOCS line the first time after each RESET# release (or boot) that the host
@@ -2123,6 +2168,9 @@ static void printStats() {
     Serial.printf(" c1_bench_ram_per1000=nop:%lu,pio:%lu", (unsigned long)g_bench_nop_ram, (unsigned long)g_bench_pio_ram);
     s_passes_then = passes, s_ms_then = ms;
     Serial.printf(" bus=%s iordy_stall_released=%lu", ide_bus::busName(), (unsigned long)ide_bus::iordyStallReleases());
+    Serial.printf(" autobus=%s autobus_why=%s autobus_sectors=%lu autobus_long=%lu",
+                  g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early", auto_bus::whyName(g_auto_bus.why()),
+                  (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads());
     if (ide_bus::dataLaneOn())
         Serial.printf(" lane_blocks=%lu lane_switch_max_ns=%lu", (unsigned long)ide_bus::laneSwitches(),
                       (unsigned long)ide_bus::laneSwitchMaxNs());
@@ -2537,6 +2585,7 @@ void loop() {
     printAccessLog();
     printIgnoredIordy();
     printNoChipSelect();
+    printAutoBus();
     // Data sectors only on the generated disk; IDENTIFY there, and around detection.
     bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0, serveFetches);
     updateLed();
