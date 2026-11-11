@@ -4,10 +4,17 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.32.2] - 2026-11-11
+
+The CD-ROM's status polls held less: with a CD-ROM configured, register writes that can't change anything take a short path, and INTRQ is worked out inline (dev.1-4, below; [docs/release-notes/v0.32.2.md](docs/release-notes/v0.32.2.md)). The hard disk alone runs 0.32.1's code (layout unchanged).
+
+- **On the Evesham** (`pcb_drive`, the card on SDIO, Doom's demo from `DOOM_SE.ISO`, 25 minutes): 0.55 reads per READ(10) past 1,250 ns, against 0.32.1's 1.32, all Alternate Status; the worst 2,390 ns, against 4,270. 1,405 READ(10), 20,546 sectors checked on the cable, 0 bad, `iordy_ignored=0`, no early reads, no card lost or restarted.
+- **On the USB adapter:** `-m cdrom` on both drive builds, slices 3-4 with the CD-ROM beside the disk, and an hour's `-m cdsoak` (dev.4's entry). Slice 2 with a CD-ROM needs physical replugs (the adapter goes silent after `V`, as on 0.32.1).
+
 ## [0.32.2-dev.4] - 2026-11-11 (on `main`)
 
 ### Changed
-- **Reads keep their INTRQ update with a CD-ROM again**, undoing that part of dev.2-3. On the USB adapter, which reads the CD-ROM by DMA, it made `-m cdrom` on `pcb_drive` a quarter slower (2.2-2.4 MB/s against 0.32.1's 3.1). The drive's time per READ(10) was unchanged at 7.1 ms; the gap to the next command grew from 13 to 19 ms. With it built out, 3.06 MB/s. The cause, something in the DMA path that still relies on a poll's INTRQ update, isn't found yet. The quiet writes and inline INTRQ stay. Not yet run on the Evesham.
+- **Reads keep their INTRQ update with a CD-ROM again**, undoing that part of dev.2-3. On the USB adapter, which reads the CD-ROM by DMA, it made `-m cdrom` on `pcb_drive` a quarter slower (2.2-2.4 MB/s against 0.32.1's 3.1). The drive's time per READ(10) was unchanged at 7.1 ms; the gap to the next command grew from 13 to 19 ms. With it built out, 3.06 MB/s. The cause, something in the DMA path that still relies on a poll's INTRQ update, isn't found yet. The quiet writes and inline INTRQ stay. On the Evesham: 0.55 slow reads per READ(10), worst 2,390 ns (0.32.2's entry).
 
 ### Tested
 - **`-m cdsoak`'s first run, an hour** on `pcb_drive` (dev.3 built without the read-side skip, the same core 1 code as dev.4), the USB adapter, the test disc as device 1 and the test disk as device 0: 498,293 CD reads (1,891,118 frames, by multiword DMA) and 99,935 disk reads between them, 0 wrong; 8,414,965 sectors checked on the cable, 0 bad, no gaps; `iordy_ignored=0`, worst read 2,850 ns. `-m cdrom` 3.06 MB/s (0.32.1: 3.1).

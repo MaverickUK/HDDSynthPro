@@ -144,7 +144,7 @@ On the Evesham (Doom's demo from the CD-ROM as device 1, `ide_bus`, PIO 3) 0.32.
 | 0.32.1 (2 h) | 1.32 | 4,270 ns |
 | dev.2 (quiet writes, reads) | 0.64 | 2,810 ns |
 | dev.3 (and Device, inline INTRQ) | 0.49 | 2,420 ns |
-| dev.4 (dev.3 without the read-side skip) | not yet measured | |
+| dev.4 (dev.3 without the read-side skip; `pcb_drive`, the card on SDIO) | 0.55 | 2,390 ns |
 
 No sector wrong on the cable, `iordy_ignored=0`, no card lost, throughout.
 
