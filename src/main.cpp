@@ -160,7 +160,8 @@ static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
 static SharedFlag g_early{false};       // HDDSYNTH.INI early_answers: ide_bus_early (ide_bus::begin)
-static SharedFlag g_isa{false};         // HDDSYNTH.INI isa: IORDY from the strobe (ide_bus::begin)
+static SharedFlag g_isa{false};         // HDDSYNTH.INI isa: iordy_watchdog and IOCS16# (ide_bus::begin)
+static SharedFlag g_no_lane{false};     // a CD-ROM: ide_bus, never the data lane (ide_bus::begin)
 static SharedFlag g_iordy{true};        // HDDSYNTH.INI iordy: off leaves IORDY alone (ide_bus::begin)
 static SharedFlag g_read_ahead{true};  // HDDSYNTH.INI read_ahead; console `A` (debug)
 // Off by default: with it on, writes hold some status reads 1.5-2 us (ATA
@@ -343,7 +344,7 @@ void setup1() {
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (!g_disk_chosen.load(std::memory_order_acquire)) tight_loop_contents();  // a CD-ROM with no disc: 0 sectors
-    ide_bus::begin(g_isa.load(), g_early.load(), g_iordy.load());
+    ide_bus::begin(g_isa.load(), g_early.load(), g_iordy.load(), !g_no_lane.load());
     busSwitchesOn();
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
@@ -1169,8 +1170,12 @@ static void chooseDisk() {
     // the drive and dropped off USB (device 1: 4 Nov, 0.30.0-dev.10; device 0:
     // 9 Nov, 0.32.0-dev.2, where bb48_cdrom's own atapi::Device had managed).
     // Console `P e` still picks early answers, to reproduce it.
+    // `isa` stays as set: forcing it on here (up to 0.32.1-dev.4) also started
+    // iordy_watchdog on PCI hosts, which released IORDY mid-read on the
+    // Evesham about once in 2.5 million data words, so the host latched DD
+    // before the drive drove it (docs/atapi.md).
     if ((g_device0_cdrom || g_device1_cdrom) && busRequested() != 'e') {
-        g_isa.store(true);
+        g_no_lane.store(true);
         g_early.store(false);
     }
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_relaxed);
@@ -1724,11 +1729,12 @@ static void serviceAbsence() {
     if (millis() - g_absent_since_ms >= ABSENT_MAX_MS) setAbsent(false, " timeout");
 }
 
-// The last media command seen, for the STUCK line (checkStuck).
+// The last command started, of any kind and on either device, for the STUCK
+// line (checkStuck): a CD-ROM's READ(10) is a PACKET, not a media command.
 static struct {
-    uint8_t command = 0;
+    uint8_t command = 0, packet = 0, unit = 0;
     uint32_t lba = 0, count = 0;
-} g_last_command;
+} g_last_started;
 
 // On an SD image the bus observer checks IDENTIFY only around detection,
 // which comes about 2.6 s after RESET# is released: for this long after each
@@ -1752,6 +1758,13 @@ static CommandHistory g_commands;
 
 static void noteActivity(const TraceEvent& e) {
     g_commands.note(e);
+    if (e.kind == TraceKind::CommandStart) {
+        g_last_started.command = uint8_t(e.extra);
+        g_last_started.packet = uint8_t(e.extra >> 24);
+        g_last_started.unit = e.unit;
+        g_last_started.lba = e.pins;
+        g_last_started.count = commandCount(e);
+    }
     if (e.kind == TraceKind::ResetRelease) {
         g_identify_check_until_ms = millis() + IDENTIFY_CHECK_MS;
         g_release_ms = millis();
@@ -1761,9 +1774,6 @@ static void noteActivity(const TraceEvent& e) {
     uint8_t command = uint8_t(e.extra);
     if (!activity::isMediaCommand(command)) return;
     if (e.kind == TraceKind::CommandStart) {
-        g_last_command.command = command;
-        g_last_command.lba = e.pins;
-        g_last_command.count = commandCount(e);
         activity_link::Op op = activity_link::opOf(command);
         bool seek_only = (command >= 0x10 && command <= 0x1F) || (command >= 0x70 && command <= 0x7F);
         if (op != activity_link::Op::None)
@@ -1854,9 +1864,13 @@ static void checkStuck() {
     }
     if (reported || now - since_ms < STUCK_MS) return;
     reported = true;
-    Serial.printf("STUCK cmd=%02x lba=%lu count=%lu busy_ms=%lu fetches=%lu last_fetch=%lu lba=%lu %s ok=%d "
+    // The command named is the last one started, on either device: what
+    // core 1 is running, unless its CMD event is still in the trace ring.
+    const auto& c = g_last_started;
+    Serial.printf("STUCK cmd=%02x%s%s lba=%lu count=%lu%s busy_ms=%lu fetches=%lu last_fetch=%lu lba=%lu %s ok=%d "
                   "ago_ms=%lu results_waiting=%u\n",
-                  g_last_command.command, (unsigned long)g_last_command.lba, (unsigned long)g_last_command.count,
+                  c.command, c.command == 0xA0 ? " " : "", c.command == 0xA0 ? mmc::name(c.packet) : "",
+                  (unsigned long)c.lba, (unsigned long)c.count, c.unit ? " d1" : "",
                   (unsigned long)(now - since_ms), (unsigned long)g_last_fetch.count, (unsigned long)g_last_fetch.id,
                   (unsigned long)g_last_fetch.lba, g_last_fetch.store ? "store" : "read", (int)g_last_fetch.ok,
                   (unsigned long)(now - g_last_fetch.at_ms), unsigned(g_mailbox.resultsWaiting()));
@@ -1975,8 +1989,9 @@ static void printSlowReads() {
         if (!has_pending && !iordy_timer::takeOverLimit(pending)) return;
         has_pending = true;
         char line[48];
-        int n = std::snprintf(line, sizeof line, "SLOWREAD %lu %s %lu\n", (unsigned long)pending.at_us,
-                              pending.reg, (unsigned long)pending.ns);
+        int n = pending.ns ? std::snprintf(line, sizeof line, "SLOWREAD %lu %s %lu\n", (unsigned long)pending.at_us,
+                                           pending.reg, (unsigned long)pending.ns)
+                           : std::snprintf(line, sizeof line, "EARLYDATA %lu\n", (unsigned long)pending.at_us);
         if (n <= 0 || !printLine(line, size_t(n) < sizeof line ? size_t(n) : sizeof line - 1)) return;
         has_pending = false;
     }
@@ -2068,8 +2083,8 @@ static void printStats() {
     Serial.printf(" iordy_slow=%lu iordy_max_ns=%lu iordy_max_reg=%s iordy_max_at_us=%lu",
                   (unsigned long)iordy_timer::slowReads(), (unsigned long)iordy_timer::maxNs(),
                   iordy_timer::maxRegister(), (unsigned long)iordy_timer::maxAtUs());
-    Serial.printf(" iordy_early=%lu iordy_early_reg=%s", (unsigned long)iordy_timer::earlyReads(),
-                  iordy_timer::earlyRegister());
+    Serial.printf(" iordy_early=%lu iordy_early_reg=%s iordy_early_data=%lu", (unsigned long)iordy_timer::earlyReads(),
+                  iordy_timer::earlyRegister(), (unsigned long)iordy_timer::earlyDataReads());
     Serial.printf(" iordy_ignored=%lu iordy_ignored_reg=%s iordy_ignored_data=%lu", (unsigned long)iordy_timer::ignoredReads(),
                   iordy_timer::ignoredRegister(), (unsigned long)iordy_timer::ignoredDataReads());
     Serial.printf(" iordy_data_slow=%lu/%lu/%lu/%lu iordy_data_max_ns=%lu", (unsigned long)iordy_timer::dataSlowReads(0),

@@ -24,6 +24,7 @@ static const char* s_max_register = "-";
 static uint32_t s_max_at_us = 0;
 static uint32_t s_early = 0;
 static const char* s_early_register = "-";
+static uint32_t s_early_data = 0;  // of them, data register reads (an EARLYDATA line each)
 // iordy_check.pio: reads the host ended while IORDY was still low.
 static PIO s_check_pio;
 static uint s_check_sm;
@@ -114,6 +115,14 @@ void poll() {
         if (bus::high(sample, cfg::PIN_IORDY)) {  // started before IORDY was low
             ++s_early;
             s_early_register = bus::registerName(bus::block(sample), bus::address(sample), false);
+            if (isData(sample)) {  // a data read the host may not wait for: an EARLYDATA line (ns 0)
+                ++s_early_data;
+                s_over[(s_over_head + s_over_count) % 8] = OverLimit{0, "DATA", time_us_32()};
+                if (s_over_count < 8)
+                    ++s_over_count;
+                else
+                    s_over_head = (s_over_head + 1) % 8;
+            }
             continue;
         }
         uint32_t iterations = s_threshold_iterations + (0xFFFFu - (report >> 16));
@@ -172,6 +181,7 @@ const char* maxRegister() { return s_max_register; }
 uint32_t maxAtUs() { return s_max_at_us; }
 uint32_t earlyReads() { return s_early; }
 const char* earlyRegister() { return s_early_register; }
+uint32_t earlyDataReads() { return s_early_data; }
 bool takeOverLimit(OverLimit& read) {
     if (s_over_count == 0) return false;
     read = s_over[s_over_head];
@@ -192,6 +202,7 @@ void reset() {
     s_max_at_us = 0;
     s_early = 0;
     s_early_register = "-";
+    s_early_data = 0;
     s_ignored = 0;
     s_ignored_register = "-";
     s_ignored_data = 0;

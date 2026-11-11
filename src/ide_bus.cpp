@@ -431,7 +431,7 @@ static constexpr uint32_t ACCESS_BITS = (31u << REG_INDEX_SHIFT) | bus::maskOf(c
                                         bus::maskOf(cfg::PIN_DIOW_N);
 static constexpr uint32_t DATA_READ = bus::maskOf(cfg::PIN_CS1_N) | bus::maskOf(cfg::PIN_DIOW_N);
 
-void begin(bool isa, bool early, bool iordy) {
+void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
     s_early = early;
     for (unsigned i = 0; i < 32; ++i) {
         uint32_t sample = i << REG_INDEX_SHIFT;
@@ -452,8 +452,9 @@ void begin(bool isa, bool early, bool iordy) {
     // early_answers with iordy = off: ide_bus_noiordy, for hosts whose address
     // lines change as the strobe starts (an Amiga 1200), and that never use IORDY
     const bool noiordy = early && !iordy;
-    // The data lane, unless early answers or an ISA card's watchdog need the block
-    const bool lane = !early && !isa;
+    // The data lane, unless early answers or an ISA card's watchdog need the
+    // block, or the device can't use it (a CD-ROM)
+    const bool lane = !early && !isa && lane_allowed;
     s_lane = lane;
     s_lane_words = nullptr;
     s_stall_release = early && iordy;

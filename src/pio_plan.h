@@ -33,7 +33,11 @@ constexpr unsigned MACHINES = 4;
 constexpr unsigned IDE_DMA_SLOTS = 17 + 15;       // ide_dma_read, ide_dma_write
 constexpr unsigned IOCS16_SLOTS = 6;
 constexpr unsigned IORDY_TIMER_SLOTS = 16 + 5;    // iordy_timer, iordy_check
+#if HDDPRO_OBSERVER_STROBE
+constexpr unsigned BUS_OBSERVER_SLOTS = 10;       // bus_observer_strobe, a bench diagnostic
+#else
 constexpr unsigned BUS_OBSERVER_SLOTS = 8;
+#endif
 constexpr unsigned BUS_TIMING_SLOTS = 22;
 constexpr unsigned SDIO_SLOTS = 10 + 5 + 4 + 4 + 4;  // sdio_card: cmd_rsp, rd_clk, rd_data, wr_data, wr_resp
 

@@ -4,6 +4,59 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-11-11
+
+A CD-ROM on a PCI PC could hand it a wrong data word, about one in 2.5 million: fixed. From branch `cd-stale-word` (0.32.1-dev.1-6, below). For the people flashing it: [docs/release-notes/v0.32.1.md](docs/release-notes/v0.32.1.md).
+
+- **Fixed:** a CD-ROM no longer turns `isa` on (dev.5), so the IORDY watchdog runs only where `HDDSYNTH.INI` asks for it. On the Evesham it had released IORDY mid-read, and Doom quit with a texture not found. 82,176 sectors were checked on the cable since the fix, none wrong, where the old rate gave about one per 15,000.
+- **Changed:** with a CD-ROM on an ISA PC, set `isa = on` yourself; up to 0.32.0 the CD-ROM set it.
+- **Added:** `EARLYDATA` and `iordy_early_data` (dev.4); the bus observer's strobe timing, `-DHDDPRO_OBSERVER_STROBE=1` (dev.1); `-m cdsoak` (dev.1); `STUCK` names a CD-ROM's command (dev.1).
+- **Not in this release:** dev.6's watchdog, which starts its count over at every strobe. It's on branch `watchdog-strobes` until it has run on the ICL 386, which needs IOCS16# and so the BB48 rig or PCB rev 0.4. This release's watchdog is 0.32.0's.
+- Tested: builds `bb48`, `bb48_drive` and `pcb_drive`, the core 1 checks (layout unchanged), 5,708 native checks and 426 simulation tests, and the Evesham (above).
+
+## [0.32.1-dev.6] - 2026-11-11 (branch `cd-stale-word`; not in 0.32.1, kept on branch `watchdog-strobes`)
+
+### Fixed
+- **The IORDY watchdog (`isa = on`) starts its count over at every strobe**, not only when it sees IORDY high. Between back-to-back data reads IORDY is high at the pin only for a moment, so the old watchdog could take 23 µs of reads for one hold and release IORDY mid-read: the Evesham's wrong word (dev.5), which any host fast enough with `isa = on` could still have hit. It now also reads DIOR# and DIOW# on each 30 ns pass (a strobe lasts at least 70 ns), and its count, 767 passes, sits in ISR, set by `ide_bus.cpp` from the clock. A chip select left asserted with no strobe is released as before, 23 µs after the last strobe. 9 instructions (7 before): with `ide_bus`'s 23 they fill the block. Tested in simulation (`test_iordy_watchdog_sim.py`): back-to-back reads with IORDY never reading high between them are left alone (the old program released IORDY among them, and fails the new tests), and a stuck chip select after reads is still released. On the Evesham with `isa = on` (console `P i`, so the observer's image checks are off): it boots and serves Doom. Early reads came at a steady 1.3 per command (98 in 75, 2 of them `EARLYDATA`). The old watchdog gave about 4 per command and dev.5 none, so the new one still releases IORDY at times: perhaps legitimately, in gaps over 23 µs with the drive selected and no strobe (the ICL 386's longest was 11 µs), after which a read starts with IORDY high. Not proven safe on a PCI host: keep `isa = off` there. With the card's own settings (`isa = off`): Doom's demo on the Evesham read 40,536 sectors, all checked on the cable, with none wrong, no early reads, `iordy_ignored=0` and no card lost. With dev.5 that's about 82,000 sectors clean since the fix, where the old rate would have given about 5. Not yet tried on the ICL 386.
+
+## [0.32.1-dev.5] - 2026-11-11 (branch `cd-stale-word`)
+
+The Evesham's wrong CD-ROM data word, found and fixed. dev.2-4 were bench builds for the hunt. Their two experiments are gone again; dev.4's report stays.
+
+### Fixed
+- **A CD-ROM no longer turns `isa` on, so the IORDY watchdog no longer runs on PCI hosts.** To keep a CD-ROM on `ide_bus` (the data lane serves only the hard disk's blocks), the firmware forced `isa` on, which also starts `iordy_watchdog.pio`. On the Evesham (PCI, PIO 3, `isa = off` in `HDDSYNTH.INI`), the watchdog released IORDY in the middle of about one data read in 2.5 million words. It took a run of back-to-back reads for a single 23 µs hold, because it checks IORDY once every 45 ns and IORDY is high only for a moment between reads. The host then ended that read at its minimum, 225 ns, and latched DD before the drive drove it. It read the previous word, with DD7 drained low by its pull-down. Doom quit with `R_TextureNumForName: GST0T01` (10 Nov) and `DOORORAK` (11 Nov) not found. `ide_bus::begin` takes a new `lane` argument instead, and `isa` stays as `HDDSYNTH.INI` sets it, so the watchdog and IOCS16# run only with `isa = on`. Evidence, run by run: [docs/atapi.md](docs/atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
+
+### Added
+- **`EARLYDATA t`**, a line for each data register read that starts with IORDY still high (the IORDY timer's early reads, data only), and `iordy_early_data` in `s`. On the Evesham it found one, at IDENTIFY PACKET during boot, and none near a wrong word.
+
+### Tested
+- **The Evesham, Doom's demo, observer on full checks, strobe timed:** 0.32.1-dev.1 gave 2 bad words in 20,344 sectors. dev.2 (DIOR# through the input synchroniser) gave 1 in 14,432 and dev.3 (DD at 8 mA) 1 in 20,545, so it isn't a DIOR# spike or slow drive. dev.4 (`EARLYDATA`) gave 1 in 19,284, with IORDY low at the bad read's start. dev.5 gave none in 41,640 sectors (where the four before averaged one per 15,000), with no early reads at all. Every bad word had a 225 ns strobe, the shortest in its sector.
+- Builds `bb48`, `bb48_drive` and `pcb_drive`, the core 1 checks (layout unchanged), 5,708 native checks and 426 simulation tests.
+
+### Known
+- **The watchdog's weakness remains with `isa = on`:** an ISA host fast enough to read back to back with IORDY high only briefly between reads could hit it. A sturdier watchdog would start its count again at every strobe.
+
+## [0.32.1-dev.1] - 2026-11-11 (branch `cd-stale-word`)
+
+Diagnostics for the Evesham's wrong data word (below, *Found*). Core 1's code is unchanged: `check_core1_layout.py` finds every function of both drive builds where 0.32.0 had it, with and without the new build flag.
+
+### Added
+- **The bus observer can time each read's strobe** (`-DHDDPRO_OBSERVER_STROBE=1`, a bench diagnostic, off by default): `bus_observer_strobe`, a second program in `bus_observer.pio` (10 instructions to 8; the diagnostics' block then holds 31 of 32), counts its sampling loop's 15 ns passes while DIOR# is low. Its words keep the 21 sample bits and give 6 bits to the count (wrapping every 960 ns) and 5 to the sequence number (gaps still show, modulo 32). `BUSERR` then ends with `strobe_ns=` (the wrong word's read), `before_ns=`/`after_ns=` (the reads either side) and `sector_ns=min-max`. That tells the two explanations left apart: a read the host cut short (tens of ns, against hundreds for the rest) points at something electrical ending the strobe early; one as long as its neighbours means the drive offered the wrong word. Without the flag the observer, its words and `BUSERR` are as before. Tested: `test_bus_observer_sim.py` (the program's lengths, wrap and sequence), `test_pio_plan_sizes.py` (its 10 slots), and `test/run_native_tests.sh` now builds the C++ tests a second time with the flag (`run_tests_strobe`, the new `test_sector_check_reports_the_strobe_of_the_wrong_word` in both). On the PCB (`bb48_drive`, no host): it boots with the observer and the IORDY timer both on.
+- **`-m cdsoak`** (`host/tests/test_cdrom_soak.py`): the test disc as device 1 read for `HDDPRO_SOAK_MINUTES` in Doom's pattern (mostly 1-3 frames anywhere), every byte checked, the observer on full checks, and device 0 read between if `HDDPRO_DISK_DEV` names it. Through the rig's adapter the CD's data goes by multiword DMA (it sets the DMA bit on every PACKET), so it can't reproduce a fault in `ide_bus`'s PIO data path; the test says which path it ran on. Not yet run.
+- **The simulator's host model** (`ide_host_model.run_host`) can run read-only state machines beside the bus program (`observers=`), keep the last value on undriven DD lines (`dd_keeper=`), let IORDY rise slowly through the host's pull-up (`iordy_rise_ns=`), and end a chosen strobe after t2 whatever IORDY says (`Access.ignore_iordy`). Defaults unchanged.
+
+### Changed
+- **`STUCK` names the last command started on either device**, a CD-ROM's packet command included (`STUCK cmd=a0 READ_10 lba=3812 count=3 d1 ...`): it named the last hard disk command, as it recorded only ATA media commands.
+
+### Tested (simulation; `host/tests/test_stale_word_sim.py`)
+- **IORDY isn't late for back-to-back data reads:** `ide_bus` pulls it low again about 25-30 ns after DIOR# rises, so it's low at the next strobe's tA with recovery (t2i) down to 20 ns, far below PIO mode 3's 70 ns. The race guessed on 10 Nov (candidate 1 in docs/atapi.md) can't happen in the model.
+- **A data read the host doesn't wait for, and so reads wrong, is always flagged** by `iordy_check` running beside `ide_bus`: in 1,165 such cases over core 1 latencies of 40-300 ns, strobes of 60-300 ns, recovery of 10-70 ns, a DD keeper and IORDY rising over 0-25 ns, every one flagged. So the Evesham's wrong word, with `iordy_ignored=0`, wasn't a host skipping its wait as the model knows it. Found on the way: with strobes 10 ns apart the synchronised observer can merge two reads into one word (iordy_check still flags the unwaited one).
+
+### Found (0.32.0)
+- **A wrong data word on the cable from the CD-ROM, in a retro PC** (10 Nov, the Evesham, PCB, 0.32.0, `ICL386MB.IMG` as C: and `DOOM_SE.ISO` as device 1, `ide_bus`, PIO 3). Doom's demo quit after about an hour with `R_TextureNumForName: GST0T01 not found`. The bus observer (`bb48_drive`, with the card on SPI to make room for it, full checks) flagged one sector: frame 4341, word 93 carried word 92's value (`TO` for `NE`), so `GSTONE1` arrived as `GSTOTO1`. The rest of the sector was right, and the card had read it right. That was 1 bad word in 11,294 sectors checked, with `iordy_ignored=0`. The same session's earlier failures fit it: errors on D: on dev.6, and a freeze with a striped screen on 0.32.0 over SDIO. The likeliest cause is the host reading a data word without waiting for IORDY, from a stale DD that `ide_bus.pio` had released; perhaps IORDY is pulled low too late for back-to-back reads. Analysis and next steps: [docs/atapi.md](docs/atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
+- **`STUCK` names the wrong command for a CD-ROM:** it records only ATA media commands, so it showed the last hard disk READ SECTORS while device 1's READ(10) was the one stuck.
+- On 0.32.0 the Evesham also ran Doom cleanly for a session: 2,550 READ(10) and 253 READ SECTORS, none failed.
+
 ## [0.32.0] - 2026-11-10
 
 One drive build per board, from branch `one-build` (0.32.0-dev.1-7); each step is below. For the people flashing it: [docs/release-notes/v0.32.0.md](docs/release-notes/v0.32.0.md).

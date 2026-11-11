@@ -17,22 +17,9 @@ esac
 mkdir -p .pio/native-tests
 "${PYTHON:-python3}" scripts/embed_welcome.py  # src/welcome_text.h, from welcome/README.TXT
 SANITIZE="${SANITIZE:-address,undefined}"
+TEST_SOURCES="test/native/test_main.cpp test/native/test_ata_device.cpp test/native/test_short_test.cpp test/native/test_activity.cpp src/activity.cpp test/native/test_activity_link.cpp src/activity_link.cpp test/native/test_drive_config.cpp src/drive_config.cpp test/native/test_seek_timing.cpp src/seek_timing.cpp src/drive_params.cpp src/drive_timing.cpp src/sentence.cpp test/native/test_sector_check.cpp src/sector_check.cpp test/native/test_image_parts.cpp src/image_parts.cpp test/native/test_cue_sheet.cpp src/cue_sheet.cpp test/native/test_media_watch.cpp src/media_watch.cpp test/native/test_card_retry.cpp test/native/test_command_history.cpp test/native/test_pio_plan.cpp test/native/test_welcome_disk.cpp src/welcome_disk.cpp test/native/test_two_drives.cpp test/native/test_folder_disk.cpp src/folder_disk.cpp test/native/test_mmc.cpp test/native/test_atapi_device.cpp src/mmc.cpp src/atapi_device.cpp test/native/test_hdcd.cpp src/hdcd_device.cpp src/trace_format.cpp src/identify.cpp src/ata_device.cpp src/short_test.cpp"
 "$CXX" -std=c++17 -O2 -g -Wall -Wextra -pthread -fsanitize="$SANITIZE" ${SANITIZE_EXTRA:-} \
-    -Isrc test/native/test_main.cpp test/native/test_ata_device.cpp test/native/test_short_test.cpp \
-    test/native/test_activity.cpp src/activity.cpp \
-    test/native/test_activity_link.cpp src/activity_link.cpp \
-    test/native/test_drive_config.cpp src/drive_config.cpp \
-    test/native/test_seek_timing.cpp src/seek_timing.cpp src/drive_params.cpp src/drive_timing.cpp src/sentence.cpp \
-    test/native/test_sector_check.cpp src/sector_check.cpp \
-    test/native/test_image_parts.cpp src/image_parts.cpp \
-    test/native/test_cue_sheet.cpp src/cue_sheet.cpp \
-    test/native/test_media_watch.cpp src/media_watch.cpp test/native/test_card_retry.cpp test/native/test_command_history.cpp test/native/test_pio_plan.cpp \
-    test/native/test_welcome_disk.cpp src/welcome_disk.cpp \
-    test/native/test_two_drives.cpp \
-    test/native/test_folder_disk.cpp src/folder_disk.cpp \
-    test/native/test_mmc.cpp test/native/test_atapi_device.cpp src/mmc.cpp src/atapi_device.cpp \
-    test/native/test_hdcd.cpp src/hdcd_device.cpp \
-    src/trace_format.cpp src/identify.cpp src/ata_device.cpp src/short_test.cpp \
+    -Isrc $TEST_SOURCES \
     -o .pio/native-tests/run_tests
 "$CXX" -std=c++17 -O2 -Wall -Wextra -Isrc test/tools/classify_trace.cpp src/activity.cpp \
     -o .pio/native-tests/classify_trace
@@ -42,3 +29,9 @@ SANITIZE="${SANITIZE:-address,undefined}"
     src/seek_timing.cpp src/drive_params.cpp src/drive_timing.cpp src/sentence.cpp \
     -o .pio/native-tests/make_welcome_img
 .pio/native-tests/run_tests "$@"
+# Again as the bench build that counts each read's strobe in the bus observer
+# (HDDPRO_OBSERVER_STROBE: the observer's word layout differs, sector_check.h).
+"$CXX" -std=c++17 -O2 -g -Wall -Wextra -pthread -fsanitize="$SANITIZE" ${SANITIZE_EXTRA:-} \
+    -DHDDPRO_OBSERVER_STROBE=1 -Isrc $TEST_SOURCES \
+    -o .pio/native-tests/run_tests_strobe
+.pio/native-tests/run_tests_strobe "$@"

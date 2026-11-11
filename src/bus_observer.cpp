@@ -7,6 +7,16 @@
 #include <pico/time.h>
 
 #include "bus_observer.pio.h"
+
+// The program: with HDDPRO_OBSERVER_STROBE, the one that also counts how
+// long DIOR# was low (sector_check.h has its word layout).
+#if HDDPRO_OBSERVER_STROBE
+#define OBSERVER_PROGRAM bus_observer_strobe_program
+#define OBSERVER_CONFIG bus_observer_strobe_program_get_default_config
+#else
+#define OBSERVER_PROGRAM bus_observer_program
+#define OBSERVER_CONFIG bus_observer_program_get_default_config
+#endif
 #include "bus_sample.h"
 #include "config.h"
 #include "identify.h"
@@ -46,7 +56,7 @@ static constexpr uint32_t OVERRUN_US = 400;
 // Whether an observer word is a read that ends a block of data: anything but
 // the data register or a DMA strobe (no chip select), e.g. a status poll.
 static bool endsData(uint32_t word) {
-    uint32_t sample = word & ((1u << sector_check::SEQ_SHIFT) - 1);
+    uint32_t sample = word & sector_check::SAMPLE_MASK;
     bus::Block block = bus::block(sample);
     return block != bus::Block::None && !(block == bus::Block::Command && bus::address(sample) == 0);
 }
@@ -97,11 +107,11 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyIn
     s_read = 0;  // the DMA starts again at the ring's start (after an end())
     checker.resync();
     bool ok = pio_claim_free_sm_and_add_program_for_gpio_range(
-        &bus_observer_program, &s_pio, &s_sm, &offset, cfg::PIN_DD0,
+        &OBSERVER_PROGRAM, &s_pio, &s_sm, &offset, cfg::PIN_DD0,
         cfg::PIN_IORDY - cfg::PIN_DD0 + 1, true);
     hard_assert(ok);
     s_offset = offset;
-    pio_sm_config c = bus_observer_program_get_default_config(offset);
+    pio_sm_config c = OBSERVER_CONFIG(offset);
     sm_config_set_in_pins(&c, cfg::PIN_DD0);
     sm_config_set_in_shift(&c, true, false, 32);  // `in` shifts right: new bits on top
     sm_config_set_jmp_pin(&c, cfg::PIN_DIOR_N);
@@ -126,7 +136,7 @@ void end() {
     pio_sm_set_enabled(s_pio, s_sm, false);
     dma_channel_abort(s_dma);
     dma_channel_unclaim(s_dma);
-    pio_remove_program_and_unclaim_sm(&bus_observer_program, s_pio, s_sm, s_offset);
+    pio_remove_program_and_unclaim_sm(&OBSERVER_PROGRAM, s_pio, s_sm, s_offset);
 }
 
 bool running() { return s_started.load(std::memory_order_acquire); }
@@ -178,10 +188,18 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
                        unsigned(m.bad_words), unsigned(m.bits_lost), unsigned(m.bits_gained));
             continue;
         }
-        out.printf("BUSERR %lu lba=%lu word=%u seen=%04x want=%04x bad_words=%u bits_lost=%u bits_gained=%u\n",
+        out.printf("BUSERR %lu lba=%lu word=%u seen=%04x want=%04x bad_words=%u bits_lost=%u bits_gained=%u",
                    (unsigned long)time_us_32(), (unsigned long)m.lba, unsigned(m.first_word),
                    unsigned(m.seen), unsigned(m.want), unsigned(m.bad_words), unsigned(m.bits_lost),
                    unsigned(m.bits_gained));
+        // How long the host held DIOR# low for the wrong word and the reads
+        // either side (HDDPRO_OBSERVER_STROBE): a read it cut short, against
+        // one it waited for. Wraps every 960 ns.
+        if (sector_check::HAS_STROBE)
+            out.printf(" strobe_ns=%u before_ns=%u after_ns=%u sector_ns=%u-%u", unsigned(m.strobe_ns),
+                       unsigned(m.strobe_before_ns), unsigned(m.strobe_after_ns), unsigned(m.strobe_min_ns),
+                       unsigned(m.strobe_max_ns));
+        out.printf("\n");
     }
 }
 
