@@ -2,7 +2,7 @@
 
 #include <atomic>
 #include <cstdio>
-
+#include <type_traits>
 #include <hardware/clocks.h>
 #include <hardware/dma.h>
 #include <hardware/gpio.h>
@@ -591,13 +591,27 @@ __attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sampl
             return;
         }
     }
+    [[maybe_unused]] uint32_t t_write = 0, t_written = 0;  // the access log's split of a write (steps 20, 21)
     if (bus::op(sample) == bus::Op::Write) {
         if (s_lane_ahead) laneStop();  // a write before the block's end: the host has abandoned it
+        if constexpr (access_log::ON) t_write = access_log::now();
+        // With a CD-ROM: a write that can't change INTRQ skips its update and
+        // write()'s bookkeeping (hdcd::Device::writeQuiet). The hard disk alone
+        // keeps its code as measured.
+        bool written = false;
+        if constexpr (std::is_same_v<Dev, hdcd::Device>) {
+            auto quiet = dev.writeQuiet(reg, bus::data(sample));
+            if (quiet == hdcd::Device::QUIET_INTRQ) return;
+            written = quiet == hdcd::Device::QUIET_DONE;
+        }
         // A command only sets BSY here; core 1 runs it next (Device::queueCommand).
-        if (reg == ata::Reg::StatusCommand)
-            dev.queueCommand(uint8_t(bus::data(sample)));
-        else
-            dev.write(reg, bus::data(sample));
+        if (!written) {
+            if (reg == ata::Reg::StatusCommand)
+                dev.queueCommand(uint8_t(bus::data(sample)));
+            else
+                dev.write(reg, bus::data(sample));
+        }
+        if constexpr (access_log::ON) t_written = access_log::now();
     } else {
         // Every read must be answered, or the PIO holds IORDY low forever.
         // The host waits until it is, so answer first and catch up after.
@@ -614,8 +628,21 @@ __attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sampl
             dev.consumeRead(reg);
         }
         access_log::answered();
+        // With a CD-ROM: only a Status read (which clears the interrupt) or a
+        // Data read (which can end a block) changes INTRQ; Alternate Status
+        // polls and the byte count don't, so they skip its update.
+        if constexpr (std::is_same_v<Dev, hdcd::Device>) {
+            if (reg != ata::Reg::StatusCommand && reg != ata::Reg::Data) return;
+        }
     }
     updateIntrq(dev);
+    if constexpr (access_log::ON) {
+        if (t_written) {
+            uint32_t end = access_log::now();
+            access_log::note(access_log::STEP, 20 | (t_written - t_write) << 8);  // the device's write
+            access_log::note(access_log::STEP, 21 | (end - t_written) << 8);      // updateIntrq
+        }
+    }
 }
 
 // While a block is on the lane core 1 has nothing to do on the bus, so it
@@ -712,6 +739,7 @@ __attribute__((always_inline)) static inline bool serveDataInT(Dev& dev, bool re
     bool to_post = false;
     while (served < left) {
         while (rxEmpty(s_pio, s_sm)) {
+            access_log::empty();  // (else a data read after a quiet spell looks late to it)
             if (gpio_get(cfg::PIN_RESET_N) == reset_low) {  // high when it was low, or low when high
                 reset_changed = true;
                 break;

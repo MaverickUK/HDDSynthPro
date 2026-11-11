@@ -103,6 +103,10 @@ public:
     void hardReset(bool asserted);
 
     bool intrq() const;
+    // The same, always inlined, for hdcd::Device's per-access INTRQ update.
+    __attribute__((always_inline)) bool intrqInline() const {
+        return irq_pending_ && !notSelected() && !(device_control_ & ata::DC_NIEN);
+    }
     bool intrqDriven() const { return !notSelected() && !(device_control_ & ata::DC_NIEN); }
 
     // ---- Sector fetches (handed to core 0) ---------------------------------
