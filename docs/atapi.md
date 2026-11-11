@@ -134,7 +134,7 @@ On the Evesham (Doom's demo from the CD-ROM as device 1, `ide_bus`, PIO 3) 0.32.
 
 **The changes**, all for `hdcd::Device` only (`if constexpr` in `serve`; the hard disk alone keeps its code, layout unchanged):
 - `hdcd::Device::writeQuiet`: Device Control rewritten with the value it holds does nothing; Features, Sector Count and LBA go to both devices without `write()`'s command bookkeeping, and skip the INTRQ update; Device does the same but keeps it (the selection changes INTRQ).
-- Reads other than Status (which clears the interrupt) and Data (which can end a block) skip the INTRQ update. Every other place core 1 changes a device's state updates INTRQ itself (commands, fetch results, DMA bursts, the data-out and wake timers, RESET#).
+- Reads other than Status (which clears the interrupt) and Data (which can end a block) skipped the INTRQ update in dev.2-3, as every other place core 1 changes a device's state seemed to update INTRQ itself (commands, fetch results, DMA bursts, the data-out and wake timers, RESET#). **Undone in dev.4:** on the USB adapter, which reads the CD-ROM by DMA, it slowed `-m cdrom` from 3.1 MB/s to 2.2-2.4 (`pcb_drive`, the same Mac and adapter). The drive's time per READ(10) stayed at 7.1 ms, but the gap from one DONE to the next command grew from 13 to 19 ms. With the skip built out (dev.3 with `-DHDDPRO_NO_QUIET_READS=1`) it read at 3.06 MB/s again. So something in the CD-ROM's DMA path still relies on a poll's INTRQ update; not found yet.
 - INTRQ is worked out inline (`intrqInline`, both devices).
 - A Device write that doesn't change the DEV bit still updates INTRQ: a device ignores writes while busy, so its own Device register can lag, and skipping could leave a host waiting for an interrupt.
 - Tested: `hdcd_quiet_writes_match_write` drives two devices alike, one through `write()` only, and checks every register and INTRQ after each write (486 checks).
@@ -144,6 +144,7 @@ On the Evesham (Doom's demo from the CD-ROM as device 1, `ide_bus`, PIO 3) 0.32.
 | 0.32.1 (2 h) | 1.32 | 4,270 ns |
 | dev.2 (quiet writes, reads) | 0.64 | 2,810 ns |
 | dev.3 (and Device, inline INTRQ) | 0.49 | 2,420 ns |
+| dev.4 (dev.3 without the read-side skip) | not yet measured | |
 
 No sector wrong on the cable, `iordy_ignored=0`, no card lost, throughout.
 

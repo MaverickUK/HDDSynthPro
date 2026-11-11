@@ -628,12 +628,11 @@ __attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sampl
             dev.consumeRead(reg);
         }
         access_log::answered();
-        // With a CD-ROM: only a Status read (which clears the interrupt) or a
-        // Data read (which can end a block) changes INTRQ; Alternate Status
-        // polls and the byte count don't, so they skip its update.
-        if constexpr (std::is_same_v<Dev, hdcd::Device>) {
-            if (reg != ata::Reg::StatusCommand && reg != ata::Reg::Data) return;
-        }
+        // Every read keeps its INTRQ update, even with a CD-ROM. Skipping it
+        // after reads other than Status and Data (0.32.2-dev.2-3) slowed the
+        // USB adapter's CD-ROM reads by DMA by a quarter (13 ms between commands
+        // became 19): something there still relies on a poll's update. Not
+        // found yet (docs/atapi.md).
     }
     updateIntrq(dev);
     if constexpr (access_log::ON) {

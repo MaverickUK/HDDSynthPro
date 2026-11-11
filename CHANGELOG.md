@@ -4,6 +4,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.32.2-dev.4] - 2026-11-11 (on `main`)
+
+### Changed
+- **Reads keep their INTRQ update with a CD-ROM again**, undoing that part of dev.2-3. On the USB adapter, which reads the CD-ROM by DMA, it made `-m cdrom` on `pcb_drive` a quarter slower (2.2-2.4 MB/s against 0.32.1's 3.1). The drive's time per READ(10) was unchanged at 7.1 ms; the gap to the next command grew from 13 to 19 ms. With it built out, 3.06 MB/s. The cause, something in the DMA path that still relies on a poll's INTRQ update, isn't found yet. The quiet writes and inline INTRQ stay. Not yet run on the Evesham.
+
+### Tested
+- **`-m cdsoak`'s first run, an hour** on `pcb_drive` (dev.3 built without the read-side skip, the same core 1 code as dev.4), the USB adapter, the test disc as device 1 and the test disk as device 0: 498,293 CD reads (1,891,118 frames, by multiword DMA) and 99,935 disk reads between them, 0 wrong; 8,414,965 sectors checked on the cable, 0 bad, no gaps; `iordy_ignored=0`, worst read 2,850 ns. `-m cdrom` 3.06 MB/s (0.32.1: 3.1).
+
 ## [0.32.2-dev.3] - 2026-11-11 (branch `cd-slow-status`)
 
 ### Changed
