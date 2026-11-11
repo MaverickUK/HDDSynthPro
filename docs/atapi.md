@@ -124,6 +124,31 @@ On the rig the CD-ROM build held Alternate Status reads up to 2.8-3.6 µs (the h
 - **The likely part:** in early answers' tight loop a command runs straight after the access that queued it, and for the CD-ROM that's the packet's last word: `runPacket` and `mmc::execute` (1,680 bytes, the biggest function on core 1), the trace's CMD and DONE records, then the device's next step, all before the host's next access, typically an Alternate Status poll, is answered. The hard disk's commands are short by comparison (IDENTIFY points at a buffer). Plus early answers' own latency, which the hard disk shows too.
 - **The measurement:** a build with `-DCMD_PROFILE=1` prints `cmd_run_max_ns` and `cmd_run_max` (command/packet) in `s`: the longest time core 1 spent on a command while the host waited. If it's near the slow reads' excess over about 1 µs, the packet is the cause, and the fix is to answer the host's first poll (BSY) before running it, or to hand `mmc::execute` to core 0 as a fetch is. The first is built, off: `-DEARLY_POLL_FIRST_NS=1000` (0.30.0-dev.8, `ide_bus.cpp`'s `servePollFirst`); core 1 waits up to that long after a command is queued for the host's next access, answers it, then runs the command. If it's small, the cause is early answers itself, and the CD-ROM build should try `ide_bus` (`P i`), whose worst read on the hard disk is about 1.2 µs.
 
+## Slow Status polls with a CD-ROM: core 1's register writes (11 Nov 2026, 0.32.2-dev.1-3, branch `cd-slow-status`)
+
+On the Evesham (Doom's demo from the CD-ROM as device 1, `ide_bus`, PIO 3) 0.32.1 held 1.32 reads per READ(10) past ATA's 1,250 ns, 9,312 of 9,373 of them Alternate Status polls, median 1,780 ns, worst 4,270. They came 0.4-1.6 ms into each READ(10), while the drive showed BSY for the card read.
+
+**Not interrupts:** core 1 has one interrupt enabled (`s` now prints `c1_irq`): IRQ 26, the SIO doorbell, which Arduino-Pico rings only to pause core 1 for a flash write (`idleOtherCore`), and whose handler is in RAM. A bench switch, `-DHDDPRO_C1_NO_IRQ=1`, masks it anyway.
+
+**What the access log showed** (`-DHDDPRO_ACCESS_LOG=1`, its false alarm in the PIO data loop fixed): the worst polls came after the DOS driver's switch to the CD-ROM, Device Control (`08`) and Device (`b0`) written back to back and then Alternate Status read, with no empty FIFO between them. So the samples queued, and the poll waited behind both writes. With a CD-ROM each register write cost core 1 about 1.6 us: the two-device `write` about 0.7 us (whatever the register, even Device Control), the INTRQ update 0.33 us, and about 0.5 us either side for taking the sample, `serve`'s dispatch and the main loop. Reads cost about 1 us the same way.
+
+**The changes**, all for `hdcd::Device` only (`if constexpr` in `serve`; the hard disk alone keeps its code, layout unchanged):
+- `hdcd::Device::writeQuiet`: Device Control rewritten with the value it holds does nothing; Features, Sector Count and LBA go to both devices without `write()`'s command bookkeeping, and skip the INTRQ update; Device does the same but keeps it (the selection changes INTRQ).
+- Reads other than Status (which clears the interrupt) and Data (which can end a block) skip the INTRQ update. Every other place core 1 changes a device's state updates INTRQ itself (commands, fetch results, DMA bursts, the data-out and wake timers, RESET#).
+- INTRQ is worked out inline (`intrqInline`, both devices).
+- A Device write that doesn't change the DEV bit still updates INTRQ: a device ignores writes while busy, so its own Device register can lag, and skipping could leave a host waiting for an interrupt.
+- Tested: `hdcd_quiet_writes_match_write` drives two devices alike, one through `write()` only, and checks every register and INTRQ after each write (486 checks).
+
+| On the Evesham | Slow per READ(10) | Worst |
+|---|---|---|
+| 0.32.1 (2 h) | 1.32 | 4,270 ns |
+| dev.2 (quiet writes, reads) | 0.64 | 2,810 ns |
+| dev.3 (and Device, inline INTRQ) | 0.49 | 2,420 ns |
+
+No sector wrong on the cable, `iordy_ignored=0`, no card lost, throughout.
+
+**What's left:** a poll after a Device write: about 0.5 us of main loop either side of each access, plus the write (0.43 us) and INTRQ (0.26 us) with the access log on. Under 1,250 ns for every poll would need a fast path for register accesses ahead of the main loop. Hosts that wait for IORDY (all tried so far) only lose time.
+
 ## Slow Device reads on `ide_bus` (10 Nov 2026, 0.32.0-dev.5)
 
 Since 0.30.0-dev.10 a CD-ROM always runs `ide_bus`, so the 4 Nov analysis above (early answers' tight loop running a packet straight after its last word) doesn't cover what the USB adapter showed on 10 Nov, at detection, with `device1 = cdrom` and DMA off (so with the diagnostics):
