@@ -82,6 +82,7 @@ So either:
 | dev.3 | DD at 8 mA | 20,545 | 1 |
 | dev.4 | `EARLYDATA`: data reads that start with IORDY high | 19,284 | 1 (no `EARLYDATA` near it) |
 | dev.5 | no watchdog (the fix) | 41,640 | 0 |
+| dev.6 | the watchdog restarted at every strobe (`isa = off`, so it doesn't run here) | 40,536 | 0 |
 
 Every bad word looked the same:
 - **The cable held the previous word, with DD7 low:** `01a8` for `0190`, `fea0` for `fce8` (both read with bit 7 clear), `494e`, `0001`, `524f` (the previous word itself, its DD7 already 0). That's DD left undriven: the lines keep their last level, and the host's pull-down drains DD7. None of the lines that should have changed had moved, at 4 mA or 8 mA. The 10 Nov word fits too.
