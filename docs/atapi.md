@@ -42,6 +42,8 @@ Console `M`, then a disc and Enter, in both CD-ROM builds: an ISO or a CUE sheet
 
 ## A wrong data word on the Evesham: Doom quits (10 Nov 2026, 0.32.0)
 
+*Found on 11 Nov: the IORDY watchdog, started by mistake for the CD-ROM, released IORDY mid-read. Fixed in 0.32.1-dev.5 (below, "What the Evesham showed").*
+
 **The fault:** on the PCB in the Evesham (PIO 3, `ICL386MB.IMG` as C:, `DOOM_SE.ISO` on the CD-ROM as device 1, `ide_bus`, the Windows 98 startup floppy and MSCDEX), Doom's demo ran for over an hour and then quit with `R_TextureNumForName: GST0T01 not found`. The bus observer, on full checks, flagged one sector at the same moment: `BUSERR lba=17366 word=93 seen=4f54 want=454e bad_words=1`. That's frame 4341, block 2. The ISO there holds `GSTONE1` twice. Word 92 is `TO` (4f54) and word 93 `NE` (454e), and the cable carried `TO` for both. So Doom read `GSTOTO1` (`GST0T01` on screen) and couldn't find the texture.
 
 **What the evidence says:**
@@ -70,6 +72,30 @@ So either:
 - **The drive offered `TO`:** core 1's word for that read was word 92 again, from a sector buffer changed under it. Reading the code, no path of core 1's answers a data read with a stale word and still steps past it (the direct answer, `serveOther`'s catch-up, a sample with DIOW# or the address misread). Each gives the right word or shifts the rest, and the rest wasn't shifted. A buffer written under core 1 is still open.
 
 **The measurement that decides:** 0.32.1-dev.1's `-DHDDPRO_OBSERVER_STROBE=1` makes the bus observer time each read's strobe, and `BUSERR` report the wrong word's against its neighbours'. A short one (tens of ns, against hundreds) is the electrical case; one as long as the rest is the drive offering the wrong word. The board was left on `bb48_drive` built with it (the card on SPI, so the observer has its block). Next on the Evesham: Doom's demo with the observer on full checks (console `O`) until a `BUSERR`, then read its `strobe_ns`.
+
+**What the Evesham showed (11 Nov, 0.32.1-dev.1-5): the IORDY watchdog.** Doom's demo with the observer on full checks and the strobe timed, one build per run (logs `host/runs/retro-20261111-*-evesham-*.log`):
+
+| Build | What changed | Sectors checked | Bad words |
+|---|---|---|---|
+| dev.1 | strobe timing only | 20,344 | 2 |
+| dev.2 | DIOR# through the input synchroniser | 14,432 | 1 |
+| dev.3 | DD at 8 mA | 20,545 | 1 |
+| dev.4 | `EARLYDATA`: data reads that start with IORDY high | 19,284 | 1 (no `EARLYDATA` near it) |
+| dev.5 | no watchdog (the fix) | 41,640 | 0 |
+
+Every bad word looked the same:
+- **The cable held the previous word, with DD7 low:** `01a8` for `0190`, `fea0` for `fce8` (both read with bit 7 clear), `494e`, `0001`, `524f` (the previous word itself, its DD7 already 0). That's DD left undriven: the lines keep their last level, and the host's pull-down drains DD7. None of the lines that should have changed had moved, at 4 mA or 8 mA. The 10 Nov word fits too.
+- **The strobe was 225 ns, the shortest in its sector**, against 345-465 ns either side: the host's own minimum, not waiting on IORDY.
+- **IORDY was low as the read started** (no `EARLYDATA`) and high as it ended (`iordy_ignored=0`). Only one word was wrong, so core 1 served it once.
+- **Doom read what the observer saw:** the dev.4 run's bad word (`OR` for `TR`, sector 13998) made it quit with `R_TextureNumForName: DOORORAK not found` (`DOORTRAK`).
+
+So something released IORDY mid-read before core 1's answer, without driving DD: `iordy_watchdog.pio`. A CD-ROM forced `isa` on, only to keep `ide_bus` rather than the data lane, and `isa` also starts the watchdog, although `HDDSYNTH.INI` said `isa = off` and the Evesham is a PCI host. The watchdog releases IORDY once it has been held 23 µs, and it starts its count again only when it sees IORDY high, checking once every 9 cycles (45 ns). In a run of data reads IORDY is high at the pin only for a moment between reads (the host's pull-up raises it through the bus switch, and `ide_bus` pulls it low again about 25 ns after DIOR# rises). Miss those moments for 23 µs and the watchdog takes back-to-back reads for one long hold and releases IORDY in the middle of one. The host then ends the read at its minimum and latches DD before the drive has driven it; core 1's word goes onto the bus after the strobe, so the sequence stays in step.
+
+**The watchdog's other trace:** `iordy_early`, reads that start with IORDY still high, almost all Status. Each run up to dev.4 counted 9,698-13,880 of them, the watchdog having released IORDY while the drive sat selected between accesses. dev.5 counted none in 36,456 sectors. CLAUDE.md's note that in PIO mode 3 "most" reads start early came from runs with the watchdog on, it seems.
+
+**The fix (0.32.1-dev.5):** a CD-ROM keeps `ide_bus` through `ide_bus::begin`'s new `lane` argument and leaves `isa` as `HDDSYNTH.INI` sets it, so the watchdog (and IOCS16#) runs only with `isa = on`.
+
+**Still open:** the watchdog has the same weakness wherever it runs. An ISA host fast enough to put data reads back to back with IORDY high only briefly between them would hit it too. The ICL 386 (PIO 0, slow) hasn't. A sturdier watchdog would start its count again at every strobe (DIOR# or DIOW# low), not only when it sees IORDY high.
 
 **On the bench:** `-m cdsoak` reads the test disc in Doom's pattern for an hour with every sector checked. But through the rig's adapter the CD's data goes by multiword DMA, not `ide_bus`'s PIO data path, so it soaks the CD-ROM's commands and the card, not this fault. A host that reads a CD-ROM by PIO is what reproduces it.
 

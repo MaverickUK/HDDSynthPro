@@ -65,7 +65,8 @@ struct OverLimit {
     const char* reg;
     uint32_t at_us;
 };
-bool takeOverLimit(OverLimit& read);
+bool takeOverLimit(OverLimit& read);  // ns 0: a data read that started with IORDY high (EARLYDATA)
+uint32_t earlyDataReads();
 uint32_t contestedAccesses();  // fast peripheral bus, since the last reset
 uint32_t stallCycles();
 void reset();

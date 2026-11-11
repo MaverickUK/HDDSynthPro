@@ -25,7 +25,9 @@ namespace ide_bus {
 // `iordy` false (HDDSYNTH.INI `iordy = off`): IORDY stays an SIO input, so
 // the programs' side-set on it does nothing, for hosts that check IORDY
 // before starting a strobe (an Amiga 1200).
-void begin(bool isa, bool early, bool iordy = true);
+// `lane` false: ide_bus even where the data lane would run (`isa` and `early`
+// off), without the watchdog: for a CD-ROM, which the lane doesn't serve.
+void begin(bool isa, bool early, bool iordy = true, bool lane = true);
 
 // Serves at most one register access. Call in a tight loop on core 1.
 // Returns true if there was one; `sample` gets the pin sample for the trace.

@@ -4,6 +4,28 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.32.1-dev.6] - 2026-11-11 (branch `cd-stale-word`)
+
+### Fixed
+- **The IORDY watchdog (`isa = on`) starts its count over at every strobe**, not only when it sees IORDY high. Between back-to-back data reads IORDY is high at the pin only for a moment, so the old watchdog could take 23 µs of reads for one hold and release IORDY mid-read: the Evesham's wrong word (dev.5), which any host fast enough with `isa = on` could still have hit. It now also reads DIOR# and DIOW# on each 30 ns pass (a strobe lasts at least 70 ns), and its count, 767 passes, sits in ISR, set by `ide_bus.cpp` from the clock. A chip select left asserted with no strobe is released as before, 23 µs after the last strobe. 9 instructions (7 before): with `ide_bus`'s 23 they fill the block. Tested in simulation (`test_iordy_watchdog_sim.py`): back-to-back reads with IORDY never reading high between them are left alone (the old program released IORDY among them, and fails the new tests), and a stuck chip select after reads is still released. On the Evesham with `isa = on` (console `P i`, so the observer's image checks are off): it boots and serves Doom. A first count, during the CD-ROM driver's recovery after the board's restart, was 48 early reads in 38 commands. The old watchdog gave about 4 per command, and none run without it, so this is not yet conclusive. Not yet tried on the ICL 386.
+
+## [0.32.1-dev.5] - 2026-11-11 (branch `cd-stale-word`)
+
+The Evesham's wrong CD-ROM data word, found and fixed. dev.2-4 were bench builds for the hunt. Their two experiments are gone again; dev.4's report stays.
+
+### Fixed
+- **A CD-ROM no longer turns `isa` on, so the IORDY watchdog no longer runs on PCI hosts.** To keep a CD-ROM on `ide_bus` (the data lane serves only the hard disk's blocks), the firmware forced `isa` on, which also starts `iordy_watchdog.pio`. On the Evesham (PCI, PIO 3, `isa = off` in `HDDSYNTH.INI`), the watchdog released IORDY in the middle of about one data read in 2.5 million words. It took a run of back-to-back reads for a single 23 µs hold, because it checks IORDY once every 45 ns and IORDY is high only for a moment between reads. The host then ended that read at its minimum, 225 ns, and latched DD before the drive drove it. It read the previous word, with DD7 drained low by its pull-down. Doom quit with `R_TextureNumForName: GST0T01` (10 Nov) and `DOORORAK` (11 Nov) not found. `ide_bus::begin` takes a new `lane` argument instead, and `isa` stays as `HDDSYNTH.INI` sets it, so the watchdog and IOCS16# run only with `isa = on`. Evidence, run by run: [docs/atapi.md](docs/atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
+
+### Added
+- **`EARLYDATA t`**, a line for each data register read that starts with IORDY still high (the IORDY timer's early reads, data only), and `iordy_early_data` in `s`. On the Evesham it found one, at IDENTIFY PACKET during boot, and none near a wrong word.
+
+### Tested
+- **The Evesham, Doom's demo, observer on full checks, strobe timed:** 0.32.1-dev.1 gave 2 bad words in 20,344 sectors. dev.2 (DIOR# through the input synchroniser) gave 1 in 14,432 and dev.3 (DD at 8 mA) 1 in 20,545, so it isn't a DIOR# spike or slow drive. dev.4 (`EARLYDATA`) gave 1 in 19,284, with IORDY low at the bad read's start. dev.5 gave none in 41,640 sectors (where the four before averaged one per 15,000), with no early reads at all. Every bad word had a 225 ns strobe, the shortest in its sector.
+- Builds `bb48`, `bb48_drive` and `pcb_drive`, the core 1 checks (layout unchanged), 5,708 native checks and 426 simulation tests.
+
+### Known
+- **The watchdog's weakness remains with `isa = on`:** an ISA host fast enough to read back to back with IORDY high only briefly between reads could hit it. A sturdier watchdog would start its count again at every strobe.
+
 ## [0.32.1-dev.1] - 2026-11-11 (branch `cd-stale-word`)
 
 Diagnostics for the Evesham's wrong data word (below, *Found*). Core 1's code is unchanged: `check_core1_layout.py` finds every function of both drive builds where 0.32.0 had it, with and without the new build flag.
