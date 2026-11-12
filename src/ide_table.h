@@ -31,12 +31,16 @@ void publish(const Image& image);
 
 // The next write from W's ring (the sample as ide_bus's write samples read).
 bool popWrite(uint32_t& sample);
-// A Status read since the last call (it acknowledges the interrupt), from
-// bus_observer's ring.
-bool statusReadSeen();
+// bus_observer's ring, in order: its absolute position now, and whether a
+// Status read (which acknowledges the interrupt) came at or after `since`.
+uint32_t observerPosition();
+bool statusReadSince(uint32_t since);
 
 // C's busy write: armed for the next Command write. Core 1 re-arms it once
 // it has taken that command from W's ring.
+// Console V: off the bus until restart().
+void stop();
+void restart();
 void armCommandBusy();
 bool commandBusyPending();
 // INTRQ (R1 lowers it as Status is answered): set when the device's interrupt changes.

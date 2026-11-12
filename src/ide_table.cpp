@@ -29,6 +29,8 @@ constexpr uint32_t DRIVEN_PINS = (0xFFFFu << cfg::PIN_DD0) | (1u << cfg::PIN_IOR
 constexpr uint32_t PULL_NOBLOCK = 0x8080;  // pio_encode_pull(false, false), for core 1
 constexpr uint32_t SET_PINS_0 = 0xe000, SET_PINS_1 = 0xe001;        // pio_encode_set(pio_pins, v)
 constexpr uint32_t SET_PINDIRS_0 = 0xe080, SET_PINDIRS_1 = 0xe081;  // pio_encode_set(pio_pindirs, v)
+constexpr uint32_t MOV_PINDIRS_NULL = 0xa063;  // mov pindirs, null
+constexpr uint32_t SIDE_IORDY_RELEASE = 0xb042;  // nop side 0 (D: side-set 1 bit + enable)
 
 PIO s_pio = nullptr;      // block 0: the read side
 uint s_r0, s_r1, s_r2, s_d;
@@ -36,6 +38,7 @@ PIO s_wpio = nullptr;     // block 1: the write side
 uint s_w, s_wd, s_c;
 bool s_running = false;
 uint32_t s_d_start = 0;  // `jmp` to D's start, for dReset
+uint32_t s_reg_start = 0;  // `jmp` to R0-R2's start (rise), for restart
 
 // DMA channels (the design note's table)
 uint s_stream;            // a data-in block (and a spare word) into D's TX FIFO; chains Ka
@@ -132,6 +135,7 @@ void begin() {
         sm_config_set_out_pins(&c, cfg::PIN_DD0, 16);
         sm_config_set_out_shift(&c, true, false, 32);
         pio_sm_init(s_pio, regs[k], reg_offset + ide_table_reg_offset_rise, &c);
+        s_reg_start = pio_encode_jmp(reg_offset + ide_table_reg_offset_rise);
         pio_sm_exec(s_pio, regs[k], pio_encode_set(pio_x, claims[k]));  // its claim, in ISR
         pio_sm_exec(s_pio, regs[k], pio_encode_mov(pio_isr, pio_x));
     }
@@ -331,19 +335,51 @@ CORE1_RAM_TABLE bool popWrite(uint32_t& sample) {
     return true;
 }
 
-CORE1_RAM_TABLE bool statusReadSeen() {
-    if (!s_obs_ring) return false;  // the observer isn't running
+// The observer's ring, read in order: s_obs_count counts every entry taken, so
+// a position is absolute (it doesn't wrap as the ring's index does).
+uint32_t s_obs_count = 0;
+
+CORE1_RAM_TABLE uint32_t observerPosition() {
+    if (!s_obs_ring) return 0;
+    uint32_t written = (dma_hw->ch[s_obs_dma].write_addr - uint32_t(uintptr_t(s_obs_ring))) / 4;
+    return s_obs_count + (written - s_obs_read + s_obs_words) % s_obs_words;
+}
+
+// A Status read at or after absolute position `since` (when the interrupt it
+// would acknowledge was raised): earlier ones belong to an earlier interrupt.
+CORE1_RAM_TABLE bool statusReadSince(uint32_t since) {
+    if (!s_obs_ring) return false;
     uint32_t written = (dma_hw->ch[s_obs_dma].write_addr - uint32_t(uintptr_t(s_obs_ring))) / 4;
     bool seen = false;
     while (s_obs_read != written) {
         uint32_t word = s_obs_ring[s_obs_read];
         s_obs_read = (s_obs_read + 1) % s_obs_words;
-        if (((word >> 16) & 0x1F) == COMMAND_ADDRESS) seen = true;  // Status: DA 7 under CS0#
+        if (((word >> 16) & 0x1F) == COMMAND_ADDRESS && int32_t(s_obs_count - since) >= 0) seen = true;  // Status
+        s_obs_count = s_obs_count + 1;
     }
     return seen;
 }
 
 volatile uint32_t s_cmds_taken = 0, s_cmds_c1_fired = 0;
+// Console V: the drive off the bus, as if unplugged. R0-R2 and D stopped and
+// DD, IORDY and INTRQ released; restart() brings them back at their starts.
+CORE1_RAM_TABLE void stop() {
+    hw_clear_bits(&s_pio->ctrl, (1u << s_r0) | (1u << s_r1) | (1u << s_r2) | (1u << s_d));
+    s_pio->sm[s_d].instr = MOV_PINDIRS_NULL;   // DD released (D's OUT mapping is DD0-15)
+    s_pio->sm[s_d].instr = SIDE_IORDY_RELEASE;  // IORDY released (D's side-set)
+    setIntrq(false, false);
+}
+
+CORE1_RAM_TABLE void restart() {
+    uint32_t mask = (1u << s_r0) | (1u << s_r1) | (1u << s_r2) | (1u << s_d);
+    for (uint sm : {s_r0, s_r1, s_r2}) {
+        hw_set_bits(&s_pio->ctrl, 1u << (PIO_CTRL_SM_RESTART_LSB + sm));
+        s_pio->sm[sm].instr = s_reg_start;
+    }
+    dReset();  // D at its start, its FIFO empty (and enabled)
+    hw_set_bits(&s_pio->ctrl, mask);
+}
+
 CORE1_RAM_TABLE void armCommandBusy() {
     s_cmds_taken = s_cmds_taken + 1;
     if (s_c1_armed && !dmaBusy(s_c1)) s_cmds_c1_fired = s_cmds_c1_fired + 1;  // bench: C's busy fired for it
@@ -420,8 +456,8 @@ CORE1_RAM_TABLE void stopDataOut() {
     s_out_active = false;
 }
 
-uint32_t blocksIn() { return s_blocks_in; }
-uint32_t blocksOut() { return s_blocks_out; }
+CORE1_RAM_TABLE uint32_t blocksIn() { return s_blocks_in; }
+CORE1_RAM_TABLE uint32_t blocksOut() { return s_blocks_out; }
 // Bench: can D drive DD? Stops it, gives it a word, runs its own drive
 // instructions, reads the lines back, releases them and starts it again.
 bool s_selftest_released = false;

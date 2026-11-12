@@ -1,6 +1,6 @@
 # The register table: every read answered without core 1
 
-**Status (12 Nov 2026): branch `register-table`, console `P t`; works through the JMicron USB adapter (the whole 64 MB test disk read back, writes read back), not yet through the Innostor bridge, whose sector reads come back one command behind (*Open*). The bench hooks (console `Q`, `R`, `Z`, extra `s` fields, `HDDPRO_FETCH_DELAY_US`) come out before it merges.**
+**Status (12 Nov 2026): branch `register-table`, console `P t`. Through the JMicron USB adapter it passes rig slices 3 and 4 (the whole disk at 1.16 MB/s, 1,000 write-and-read-back cycles); slices 1-2 need console `V` to work in this mode (*Open*). Through the Innostor bridge, not yet (*Open*). The bench hooks (console `Q`, `R`, `Z`, extra `s` fields, `HDDPRO_FETCH_DELAY_US`) come out before it merges.**
 
 ## Why
 
@@ -140,10 +140,11 @@ It comes in as a fourth bus program (console `P t`), so the others stay as measu
 - **Never abort an idle DMA channel** before restarting it.
 - **IORDY on data reads:** the Innostor bridge's IORDY rises about a microsecond after release, so holding it for every word (1.3 µs each) made it give up on sectors. D holds IORDY on register reads only; DIOR# skips the synchroniser in block 0 so D can decide inside tA.
 - **Publish after starting the block:** DRQ published before the stream started let the host read before it.
-- **INTRQ** is C's: low as a Command write starts, raised by core 1.
+- **INTRQ** is C's: low as a Command write starts, raised by core 1 on each new interrupt event (a command done, a block started or done), not on a change of level: with data ready at once, the interrupt went off and on within one pass and INTRQ was never raised again (the JMicron adapter waited for good). A Status read acknowledges it only if it comes after the raise in the observer's ring, so a late-seen read for one block can't clear the next block's interrupt.
 
 ## Open
 
 - **The Innostor bridge, after the first sector:** it reads data straight after its next Command write, and gets the previous block's leftover words; the drive streams the right sector each time. Not BSY timing (BSY by one DMA hop, about 70 ns), not INTRQ, not the data being ready too soon (results held 200 µs). The captures (core 1 sampling, starting up to 2 µs after the command) may miss its first Status read: next, a PIO logic-analyser capture.
+- **Console `V` (rig re-detection):** in table mode the drive stops answering, but the JMicron adapter doesn't reset, so slices 1-2 time out.
 - **Console `E`/`C` with the test disk:** the card borrows the diagnostics' PIO block, which the write side now holds.
 - **The core 1 layout** of `main.cpp`'s functions moved (`loop1` grew): benchmark reads before recording it.

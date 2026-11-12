@@ -843,9 +843,15 @@ __attribute__((always_inline)) static inline ide_table::Image tableImage(Dev& de
 // time for a host that checks it straight after (the Innostor bridge waited for
 // it); core 1 sets it only when the device's interrupt changes, so a Status read
 // it hasn't yet seen doesn't raise it again.
+// The level core 1 last set (bit 0 asserted, bit 1 driven), or -1. C lowers
+// INTRQ itself at a Command write, so taking one clears bit 0 here: with data
+// ready at once, the interrupt went off and on again within one pass, and
+// INTRQ was never raised again (the JMicron adapter then waited for good).
+static int8_t g_table_intrq = -1;
+
 template <class Dev>
 __attribute__((always_inline)) static inline void tableIntrq(Dev& dev) {
-    static int8_t shown = -1;  // the last level set: bit 0 asserted, bit 1 driven
+    int8_t& shown = g_table_intrq;
     int8_t now = int8_t((dev.intrq() ? 1 : 0) | (dev.intrqDriven() ? 2 : 0));
     if (now == shown) return;
     shown = now;
@@ -860,6 +866,12 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
     dev.hardReset(reset_low);
     bool dirty = true;
     uint32_t shown_status = ~0u;
+    // Interrupts: the device's events (a command done, a block ready or wanted)
+    // raise INTRQ, and only a Status read after the raise acknowledges it (the
+    // observer's ring lags; a Status read for the last block mustn't clear the
+    // next block's interrupt). irq_events counts what could raise one.
+    uint32_t irq_raised_at = 0;
+    uint32_t irq_events = 0, irq_events_shown = ~0u;
     for (;;) {
         // Writes, in order. A Command write's busy came from C's DMA chain;
         // queueCommand makes the device busy too, so C1 is armed again.
@@ -871,13 +883,14 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             if (reg == ata::Reg::StatusCommand) {
                 dev.queueCommand(uint8_t(bus::data(sample)));
                 ide_table::armCommandBusy();
+                if (g_table_intrq > 0) g_table_intrq = int8_t(g_table_intrq & ~1);  // C lowered INTRQ
             } else {
                 dev.write(reg, bus::data(sample));
             }
             dirty = true;
         }
-        if (ide_table::statusReadSeen()) {
-            dev.consumeRead(ata::Reg::StatusCommand);
+        if (ide_table::statusReadSince(irq_raised_at) && dev.intrq()) {
+            dev.consumeRead(ata::Reg::StatusCommand);  // acknowledges the interrupt raised at irq_raised_at
             dirty = true;
         }
         if (dev.commandQueued()) {
@@ -897,6 +910,20 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         busyTimers(dev);
         recordDone(dev);
 
+        if (g_absent.load()) {  // console V: off the bus, as if unplugged, until it's lifted
+            ide_table::stopDataIn();
+            ide_table::stopDataOut();
+            dev.hardReset(true);
+            ide_table::stop();
+            while (g_absent.load()) {
+            }
+            dev.hardReset(false);
+            ide_table::restart();
+            iordy_timer::requestReset();
+            g_command_active.store(false);
+            reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
+            dirty = true;
+        }
         uint32_t pins = pinsAsSample();
         bool low = !bus::high(pins, cfg::PIN_RESET_N);
         if (low != reset_low) {
@@ -957,10 +984,18 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             dirty = true;
         }
 
+        irq_events = dev.commandsCompleted() + dev.commandsStarted() + ide_table::blocksIn() + ide_table::blocksOut() +
+                     (ide_table::dataInActive() ? 1u : 0u) + (ide_table::dataOutActive() ? 1u : 0u) * 2u;
         // The registers as the device now has them, before anything else is read
-        if (dirty || dev.status() != shown_status) {
+        if (dirty || dev.status() != shown_status || irq_events != irq_events_shown) {
             ide_table::publish(tableImage(dev));
             shown_status = dev.status();
+            if (irq_events != irq_events_shown && dev.intrq()) {  // a new interrupt: raise it, whatever was shown
+                irq_events_shown = irq_events;
+                irq_raised_at = ide_table::observerPosition();
+                g_table_intrq = -1;
+            }
+            irq_events_shown = irq_events;
             tableIntrq(dev);
             dirty = false;
         }
