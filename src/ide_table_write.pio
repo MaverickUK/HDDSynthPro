@@ -1,0 +1,58 @@
+; The register table's write side (docs/register-table.md): block 1, beside
+; bus_observer. These only read pins, so they need no output and can sit in a
+; block that doesn't own DD; they feed DMA channels, never core 1 directly.
+;
+; Pin mapping (ide_table.cpp): IN_BASE = GPIO4 (DD0), as in bus_sample.h;
+; wait gpio 27 = DIOW#. Every pin through the input synchroniser, as in
+; block 0, so a strobe and the address and data with it are seen together.
+
+; ---- W: every write, for core 1 ------------------------------------------------
+;
+; The sample as DIOW# rises (the data valid then, held 10-30 ns, t4), with the
+; DIOW# bit and up as 0, as ide_bus's write samples read, into a DMA ring that
+; core 1 drains. Autopush at 32. Data register writes come too (core 1 skips
+; them: WD has them).
+.pio_version 1
+.program ide_table_write
+.wrap_target
+    wait 0 gpio 27                  ; DIOW# falls
+    wait 1 gpio 27                  ; and rises
+    in pins, 23                     ; DD0-15, DA0-2, CS0#, CS1#, LED, DIOR#
+    in null, 9                      ; DIOW# (and up) as 0; autopush
+.wrap
+
+; ---- WD: data register writes, for the sector buffer ----------------------------
+;
+; One 16-bit word per data register write, for a DMA channel that copies 256
+; of them into the sector buffer and then chains to the busy Status write.
+; Autopush at 16, shifting left (the word in the low half). Y = 16, the data
+; register's address bits (DA2-0 = 0, CS0# low, CS1# high).
+.program ide_table_data_out
+public top:
+.wrap_target
+    wait 1 gpio 27                  ; DIOW# high
+    wait 0 gpio 27                  ; DIOW# falls: a write
+    mov osr, pins
+    out null, 16
+    out x, 5                        ; DA2-0, CS0#, CS1#
+    jmp x!=y top                    ; not the data register
+    wait 1 gpio 27                  ; DIOW# rises: the data is valid
+    in pins, 16                     ; the word; autopush
+.wrap
+
+; ---- C: a Command write -------------------------------------------------------
+;
+; Pushes a word as a Command write starts, for a DMA chain that writes the
+; busy Status entry into R1 and R2, so the host's Status read 400 ns later
+; shows BSY whatever core 1 is doing. Y = 23 (DA2-0 = 7, CS0# low, CS1# high).
+.program ide_table_command
+public top:
+.wrap_target
+    wait 1 gpio 27                  ; DIOW# high
+    wait 0 gpio 27                  ; DIOW# falls: a write
+    mov osr, pins
+    out null, 16
+    out x, 5                        ; DA2-0, CS0#, CS1#
+    jmp x!=y top                    ; not the Command register
+    push noblock                    ; for the busy write's DMA chain
+.wrap

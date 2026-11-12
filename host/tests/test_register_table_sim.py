@@ -209,3 +209,110 @@ def test_busy_is_written_well_inside_the_hosts_400_ns(programs):
     assert table.busy_written_at is not None
     assert (table.busy_written_at * CYCLE_PS / 1000) - run.results[-1].fall_ns < 400
     assert table.busy_written_at < last_rise_cycle + 400_000 / CYCLE_PS
+
+
+# ---- The write side: block 1 (src/ide_table_write.pio) ----------------------------
+
+COMMAND_ADDRESS = 23  # DA2-0 = 7, CS0# low, CS1# high: C's Y
+
+
+@pytest.fixture(scope="module")
+def write_programs(assemble):
+    return (assemble("ide_table_write", "ide_table_write"), assemble("ide_table_write", "ide_table_data_out"),
+            assemble("ide_table_write", "ide_table_command"))
+
+
+class Writes:
+    """Block 1's W, WD and C, as ide_table.cpp configures them, beside a
+    Table, with C's and WD's DMA chains writing the busy Status into it."""
+
+    def __init__(self, write_programs, table: Table, data_block: int = 256, dma_latency: int = 4):
+        w_program, wd_program, c_program = write_programs
+        self.w = PioSim(w_program, autopush=True, fifo_depth=8)
+        self.wd = PioSim(wd_program, autopush=True, push_threshold=16, in_shift_left=True, fifo_depth=8)
+        self.wd.y = DATA_ADDRESS
+        self.c = PioSim(c_program, fifo_depth=4)
+        self.c.y = COMMAND_ADDRESS
+        self.block = PioBlock(self.w, self.wd, self.c)
+        self.block.on_cycle = self.dma
+        self.table = table
+        self.latency = dma_latency
+        self.ring: list[int] = []        # W's DMA ring
+        self.buffer: list[int] = []      # WD's channel: the sector buffer
+        self.data_block = data_block
+        self._busy_wait = None
+        self.busy_written_at = None
+
+    def dma(self, block):
+        while self.w.rx_fifo:
+            self.ring.append(self.w.rx_fifo.pop(0))
+        start_busy = False
+        while self.wd.rx_fifo and len(self.buffer) < self.data_block:
+            self.buffer.append(self.wd.rx_fifo.pop(0) & 0xFFFF)
+            if len(self.buffer) == self.data_block:
+                start_busy = True        # the channel's done: it chains to the busy write
+        if self.c.rx_fifo:
+            self.c.rx_fifo.pop(0)
+            start_busy = True
+        if start_busy and self._busy_wait is None:
+            self._busy_wait = 2 * self.latency  # two hops: the trigger, then the constant
+        if self._busy_wait is not None:
+            self._busy_wait -= 1
+            if self._busy_wait <= 0:
+                self.table.r["R1"].rxf[3] = BUSY
+                self.table.r["R2"].rxf[2] = BUSY
+                self._busy_wait = None
+                self.busy_written_at = block.cycle
+
+
+def decode_write(sample: int) -> tuple[str, int, int]:
+    block = {(1, 0): "CMD", (0, 1): "CTL"}.get((((sample >> 19) & 1) ^ 1, ((sample >> 20) & 1) ^ 1), "NONE")
+    return block, (sample >> 16) & 7, sample & 0xFFFF
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_every_write_reaches_the_ring_as_ide_bus_samples_it(programs, write_programs, mode):
+    table = Table(programs)
+    writes = Writes(write_programs, table)
+    accesses = [Access(True, "CMD", a, 0x11 * a + 0x20) for a in range(1, 7)] + [Access(True, "CTL", 6, 0x0A)]
+    run = run_host(table.block, idle_core1(), accesses, timing=ALL_MODES[mode], observers=(writes.block,))
+    assert not run.errors
+    assert [decode_write(s) for s in writes.ring] == [(a.block, a.addr, a.data) for a in accesses]
+    assert all(not (s >> 23) & 1 for s in writes.ring)  # DIOW# bit 0: a write, as ide_bus's samples
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_a_data_block_written_lands_in_the_buffer_then_status_shows_busy(programs, write_programs, mode):
+    table = Table(programs)
+    writes = Writes(write_programs, table)
+    data = sector(9)
+    accesses = [Access(True, "CMD", 0, w, hold_cs=True) for w in data[:-1]] + [Access(True, "CMD", 0, data[-1])]
+    accesses += [Access(False, "CTL", 6)]
+    run = run_host(table.block, idle_core1(), accesses, timing=ALL_MODES[mode], observers=(writes.block,))
+    assert not run.errors
+    assert writes.buffer == data
+    assert run.results[-1].read_value & 0xFF == 0x80
+
+
+@pytest.mark.parametrize("timing", [NO_WAIT[0], PIIX, ALL_MODES[3], ALL_MODES[4]],
+                         ids=["mode0-no-wait", "piix", "mode3", "mode4"])
+def test_status_shows_busy_400_ns_after_a_command_write(programs, write_programs, timing):
+    table = Table(programs)
+    writes = Writes(write_programs, table)
+    accesses = [Access(True, "CMD", 7, 0x20), Access(False, "CMD", 7), Access(False, "CTL", 6)]
+    run = run_host(table.block, idle_core1(), accesses, timing=timing, observers=(writes.block,))
+    assert not run.errors
+    command, status, alt = run.results
+    assert writes.busy_written_at is not None
+    busy_ns = writes.busy_written_at * CYCLE_PS / 1000
+    assert busy_ns - command.rise_ns < 400, f"busy {busy_ns - command.rise_ns:.0f} ns after the write"
+    if status.fall_ns - command.rise_ns >= 400:  # as ATA lets the host read it
+        assert status.read_value & 0xFF == 0x80 and alt.read_value & 0xFF == 0x80
+
+
+def test_reads_never_reach_the_write_side(programs, write_programs):
+    table = Table(programs)
+    writes = Writes(write_programs, table)
+    run = run_host(table.block, idle_core1(), register_reads(), timing=ALL_MODES[0], observers=(writes.block,))
+    assert not run.errors
+    assert writes.ring == [] and writes.buffer == [] and writes.busy_written_at is None

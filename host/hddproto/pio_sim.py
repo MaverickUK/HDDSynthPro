@@ -96,7 +96,8 @@ class PioSim:
     fifo_depth: int = 8          # 8 = RX (or TX) joined; the slice 1 program uses 4 each way
     tx_depth: int = 4
     bypass_mask: int = 0         # pins that skip the input synchroniser
-    autopush: bool = False       # push when 32 bits have been shifted in (threshold 32 only)
+    autopush: bool = False       # push when `push_threshold` bits have been shifted in
+    push_threshold: int = 32
     in_shift_left: bool = False  # IN shifts left (new bits at the bottom)
     set_base: int = 0            # SET pins/pindirs mapping
     set_count: int = 1
@@ -230,7 +231,7 @@ class PioSim:
             if value is None:
                 raise NotImplementedError(f"in source {src}")
             value &= (1 << count) - 1
-            full = self.autopush and self.isr_count + count >= 32
+            full = self.autopush and self.isr_count + count >= self.push_threshold
             if full and len(self.rx_fifo) >= self.fifo_depth:
                 self.rx_stall = True
                 return False  # stalls, as `push block` does, until there's room

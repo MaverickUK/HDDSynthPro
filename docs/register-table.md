@@ -1,6 +1,6 @@
 # The register table: every read answered without core 1
 
-**Status (12 Nov 2026): design, branch `register-table`.** It replaces the table sketch in [no-iordy.md](no-iordy.md) with one that fits the PIO blocks, using the RP2350's FIFO-as-registers mode (`.fifo txget`), which that sketch predates.
+**Status (12 Nov 2026): branch `register-table`. Steps 1-2 done: the PIO programs, in simulation (`test_register_table_sim.py`, 35 tests). Next: core 1 and the DMA channels.** It replaces the table sketch in [no-iordy.md](no-iordy.md) with one that fits the PIO blocks, using the RP2350's FIFO-as-registers mode (`.fifo txget`), which that sketch predates.
 
 ## Why
 
@@ -25,7 +25,9 @@ The RP2350's `.fifo txget` mode turns a state machine's RX FIFO into four 32-bit
 | R0 | CS0#, DA2 = 0 | 0 Data (never driven here: D's), 1 Error, 2 Sector Count, 3 LBA Low |
 | R1 | CS0#, DA2 = 1 | 0 LBA Mid, 1 LBA High, 2 Device, 3 Status |
 | R2 | CS1#, DA2 = 1 | 0, 1 not the drive's, 2 Alternate Status, 3 Drive Address |
-| D | the data register, and IORDY | its TX FIFO, fed by DMA from the sector buffer (as the data lane's `ide_data_in`) |
+| D | IORDY, and the data register's pace | its TX FIFO: a control word per data read, fed by DMA |
+
+Every pin goes through the input synchroniser (no bypass): with the PIIX's chip select and strobe together, a bypassed DIOR# arrived before the address it went with.
 
 Each entry is the TX answer word `ide_bus` already uses: bits 0-15 the value for DD0-15, bits 16-31 which of them to drive (all, or none for an address that isn't the drive's, such as an ISA card's floppy registers under CS1#).
 
@@ -51,16 +53,18 @@ rise:   wait 1 gpio 26          ; DIOR# high
 
 14 instructions, about 12 cycles (60 ns) from DIOR# falling to DD driven, plus the input synchroniser.
 
-**D runs `ide_table_data`:** it pulls IORDY low at each strobe, drives the next data word if the data register is read, and releases IORDY after a fixed hold long enough for any of the four to have driven DD (about 80 ns). Hosts that wait get that short wait; hosts that don't have strobes of 165 ns or more (PIO mode 0) and the answer well inside them. IORDY is only ever held during a strobe, never at a chip select, so an ISA card's address-only cycles can't stall on it (no watchdog needed).
+**Data words go through R0's entry 0**, so only R0-R2 ever drive DD (two state machines writing DD's output latch in one read would race). After each data read a DMA pair puts the next word there and the next control word in D's TX FIFO.
+
+**D runs `ide_table_data`:** it pulls IORDY low at each strobe and releases it after a fixed hold long enough for R0-R2 to have driven DD (about 80 ns). On a data read it pulls that read's control word, but only once R0 has read its entry (seven cycles' wait: pulling at once let the DMA put the next word there first). A non-zero control word marks the block's last word: it's the busy Status entry, and D pushes it for a DMA channel to write into the Status entries. Hosts that wait get that short wait; hosts that don't have strobes of 165 ns or more (PIO mode 0) and the answer well inside them. IORDY is only ever held during a strobe, never at a chip select, so an ISA card's address-only cycles can't stall on it (no watchdog needed).
 
 ## Block 1: the write side (reads pins only)
 
 | State machine | Does |
 |---|---|
-| W | every register write, and Status reads (which clear INTRQ), into a DMA ring that core 1 drains, as `bus_observer`'s ring is drained |
+| W | every write, sampled as `ide_bus` samples it, into a DMA ring that core 1 drains |
 | WD | data register writes, by DMA straight into the sector buffer, 256 words per block |
 | C | a Command write: DMA writes BSY into R1's Status and R2's Alternate Status entries at once |
-| O | `bus_observer`, as now |
+| O | `bus_observer`, as now; core 1 also reads its ring for Status reads, which clear INTRQ |
 
 `iordy_timer` and `iordy_check` are off in this mode: IORDY is never held long, so there's nothing for them to measure.
 
@@ -84,8 +88,8 @@ Core 1 keeps the device logic as it is. What changes is how it shows its state:
 
 | Block | Table mode |
 |---|---|
-| 0 | `ide_table_reg` (14) on R0-R2, `ide_table_data` (about 12): 26-28 of 32, 4 state machines |
-| 1 | W, WD, C and `bus_observer`: about 28 of 32 |
+| 0 | `ide_table_reg` (15) on R0-R2, `ide_table_data` (14): 29 of 32, 4 state machines |
+| 1 | W (4), WD (8), C (7) and `bus_observer` (8): 27 of 32 |
 | 2 | as now: SDIO on the PCB; `iocs16` and `bus_timing`, or `ide_dma`, on the BB48 |
 
 DMA channels: D's feed, WD's, the two busy writes (command, block end), W's ring and the observer's: six.
