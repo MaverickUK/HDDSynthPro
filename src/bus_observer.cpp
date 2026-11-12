@@ -141,6 +141,28 @@ void end() {
 
 bool running() { return s_started.load(std::memory_order_acquire); }
 
+#ifdef HDDPRO_OBS_REGS  // bench: what the host latched, as it leaves the ring
+static void obsShow(Print& out, uint32_t word) {
+    static unsigned regs = 0, data = 0;
+    static uint16_t line[8];
+    if (((word >> 16) & 0x1F) != 0x10) {
+        if (regs < 120) {
+            ++regs;
+            out.printf("OBSREG da=%u value=%04x after_data=%u\n", unsigned((word >> 16) & 7), unsigned(word & 0xFFFF), data);
+        }
+        return;
+    }
+    if (data >= 2600) return;
+    line[data % 8] = uint16_t(word);
+    if (++data % 8 == 0)
+        out.printf("OBSDATA %3u %04x %04x %04x %04x %04x %04x %04x %04x\n", data - 8, line[0], line[1], line[2],
+                   line[3], line[4], line[5], line[6], line[7]);
+}
+#define OBS_SHOW(w) obsShow(out, (w))
+#else
+#define OBS_SHOW(w) ((void)0)
+#endif
+
 void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
     if (!s_started.load(std::memory_order_acquire)) return;
     static bool checking = false;
@@ -173,6 +195,7 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
                 s_checker->alignAt();
                 break;
             }
+            OBS_SHOW(s_ring[s_read]);
             s_read = (s_read + 1) % RING_WORDS;
             ++s_dropped;
         }
@@ -180,6 +203,7 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
         if (s_read == written) break;
         uint32_t word = s_ring[s_read];
         s_read = (s_read + 1) % RING_WORDS;
+        OBS_SHOW(word);
         if (!s_checker->observe(word, check)) continue;
         const sector_check::Mismatch& m = s_checker->mismatch();
         if (m.lba == sector_check::IDENTIFY_LBA) {
