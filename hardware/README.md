@@ -46,6 +46,7 @@ cd hardware
 kicad-cli sch erc hddsynthpro.kicad_sch                      # electrical rules: 0 violations
 python3 tools/check_netlist.py                               # GPIO map and RP2350 support circuit
 kicad-cli pcb drc --schematic-parity hddsynthpro.kicad_pcb   # 0 errors, 0 unconnected, 0 parity issues
+$KICAD_PYTHON tools/check_mask_webs.py hddsynthpro.kicad_pcb  # no solder mask strip under 0.22 mm (KiCad's Python)
 ```
 
 On Windows (KiCad 10 in `C:\Program Files\KiCad\10.0`), from Git Bash: put `/c/Program Files/KiCad/10.0/bin` on `PATH`, set `KICAD_SHARE="C:/Program Files/KiCad/10.0/share/kicad"` for `gen_schematic.py`, and run `layout_pcb.py` with that folder's `python.exe`. `gen_schematic.py` reproduces the committed schematic byte for byte there.
