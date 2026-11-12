@@ -11,7 +11,9 @@ built. Modelled:
   - MOV from STATUS, as the RX FIFO level test (EXECCTRL STATUS_SEL = RX);
   - IRQ set and clear, and WAIT on an IRQ flag (this block's), in `irq_flags`;
   - several state machines in one block (PioBlock): shared pin outputs,
-    directions and IRQ flags.
+    directions and IRQ flags;
+  - the RP2350's `.fifo txget`: MOV OSR from one of four RX FIFO registers
+    (`rxf`), which the C side or a DMA channel writes (Program.fifo_txget).
 Anything else raises NotImplementedError rather than guessing.
 
 Pins use the sample layout of src/bus_sample.h throughout: bit n is GPIO
@@ -54,6 +56,7 @@ class Program:
     sideset_optional: bool = False
     sideset_pindirs: bool = False
     offsets: dict[str, int] = field(default_factory=dict)  # public labels
+    fifo_txget: bool = False   # `.fifo txget`: the RX FIFO is four registers
 
 
 def assemble(pio_file: Path, pioasm: str, program: str | None = None) -> Program:
@@ -74,6 +77,7 @@ def assemble(pio_file: Path, pioasm: str, program: str | None = None) -> Program
     wrap = int(re.search(r"_wrap (\d+)", out).group(1))
     program = Program(instructions, wrap_target, wrap)
     program.offsets = {name: int(n) for name, n in re.findall(r"#define \w+?_offset_(\w+) (\d+)u", out)}
+    program.fifo_txget = "PIO_FIFO_JOIN_TXGET" in out
     m = re.search(r"sm_config_set_sideset\(&c, (\d+), (true|false), (true|false)\)", out)
     if m:
         program.sideset_bits = int(m.group(1))
@@ -111,6 +115,7 @@ class PioSim:
     tx_fifo: list[int] = field(default_factory=list)
     rx_stall: bool = False
     irq_flags: int = 0           # IRQ 0-7, as IRQ SET/CLEAR leave them
+    rxf: list[int] = field(default_factory=lambda: [0, 0, 0, 0])  # `.fifo txget`'s registers
     _delay: int = 0
 
     def __post_init__(self):
@@ -287,6 +292,16 @@ class PioSim:
                 self.osr = value
             else:
                 raise NotImplementedError(f"mov destination {dest}")
+            self._advance()
+            return True
+
+        if opcode == 0b100 and (instr >> 4) & 1:  # MOV to/from an RX FIFO register (PIO v1)
+            if not (instr >> 7) & 1 or (instr >> 5) & 3:
+                raise NotImplementedError("mov rxfifo[], isr (txput/putget)")
+            if not getattr(self.program, "fifo_txget", False):
+                raise NotImplementedError("mov osr, rxfifo[] without `.fifo txget`")
+            index = instr & 3 if (instr >> 3) & 1 else self.y & 3
+            self.osr = self.rxf[index]
             self._advance()
             return True
 

@@ -1,0 +1,102 @@
+# The register table: every read answered without core 1
+
+**Status (12 Nov 2026): design, branch `register-table`.** It replaces the table sketch in [no-iordy.md](no-iordy.md) with one that fits the PIO blocks, using the RP2350's FIFO-as-registers mode (`.fifo txget`), which that sketch predates.
+
+## Why
+
+Every bus program today answers register reads from core 1, between about 0.4 and 2.5 µs after the strobe. Hosts that wait for IORDY get the answer late but right. Hosts that don't wait get whatever is on the cable:
+
+- **The Innostor USB bridge** (`1F75:0611`, 12 Nov 2026), until it has set a transfer mode: chip select 170 ns before DIOR#, a fixed 600 ns strobe. On `ide_bus` it latched each register's value one read late (Error read as the Status before it, so the drive "failed" its self-test). Early answers was in time but stale: the bridge holds its chip select between reads, so an answer prepared at the chip select belonged to the read before (a whole IDENTIFY block one word late; sector data read on a Status that had already changed). With early answers it once sized the disk right; on `ide_bus` it reported 2.2 TB, from a late IDENTIFY.
+- **The Pentium 200's PIIX** in compatible timing: chip select and strobe together, strobes of 175-195 ns ([no-iordy.md](no-iordy.md)).
+- **The Amiga 1200's Gayle**, which checks IORDY before each strobe.
+
+And on hosts that wait, the same late answers are the slow reads in *Known issues*: early answers up to 2.1 µs, the CD-ROM's Status polls up to 2.4 µs, the adapter's Device reads at detection 3.6-5.5 µs.
+
+## The idea
+
+Core 1 keeps the drive's registers in the PIO's own FIFO storage, and the PIO answers each read from there at the strobe, in a few cycles. Nothing on the read path waits for core 1, so every answer is both fresh (read at the strobe, not prepared at the chip select) and fast (within about 60 ns of DIOR# falling).
+
+The RP2350's `.fifo txget` mode turns a state machine's RX FIFO into four 32-bit registers: core 1 writes them (`pio->rxf_putget[sm][i]`, or a DMA channel does), and the program reads one with `mov osr, rxfifo[y]` in one cycle. Four registers per state machine is the limit, so the registers are shared out between three state machines, by address.
+
+## Block 0: the read side (owns DD and IORDY)
+
+| State machine | Serves | Its four entries (index DA1-0) |
+|---|---|---|
+| R0 | CS0#, DA2 = 0 | 0 Data (never driven here: D's), 1 Error, 2 Sector Count, 3 LBA Low |
+| R1 | CS0#, DA2 = 1 | 0 LBA Mid, 1 LBA High, 2 Device, 3 Status |
+| R2 | CS1#, DA2 = 1 | 0, 1 not the drive's, 2 Alternate Status, 3 Drive Address |
+| D | the data register, and IORDY | its TX FIFO, fed by DMA from the sector buffer (as the data lane's `ide_data_in`) |
+
+Each entry is the TX answer word `ide_bus` already uses: bits 0-15 the value for DD0-15, bits 16-31 which of them to drive (all, or none for an address that isn't the drive's, such as an ISA card's floppy registers under CS1#).
+
+**R0-R2 run one program, `ide_table_reg`,** each with its claim (DA2, CS0#, CS1#) in ISR, loaded once:
+
+```
+rise:   wait 1 gpio 26          ; DIOR# high
+        wait 0 gpio 26          ; DIOR# falls: a read
+        mov osr, pins
+        out null, 18            ; DD0-15, DA0-1
+        out x, 3                ; DA2, CS0#, CS1#
+        mov y, isr              ; my claim
+        jmp x!=y rise           ; not mine
+        mov osr, pins
+        out null, 16
+        out y, 2                ; DA1-0: the entry
+        mov osr, rxfifo[y]      ; value and drive mask
+        out pins, 16
+        out pindirs, 16
+        wait 1 gpio 26          ; hold until DIOR# rises
+        mov pindirs, null       ; release DD (then wrap)
+```
+
+14 instructions, about 12 cycles (60 ns) from DIOR# falling to DD driven, plus the input synchroniser.
+
+**D runs `ide_table_data`:** it pulls IORDY low at each strobe, drives the next data word if the data register is read, and releases IORDY after a fixed hold long enough for any of the four to have driven DD (about 80 ns). Hosts that wait get that short wait; hosts that don't have strobes of 165 ns or more (PIO mode 0) and the answer well inside them. IORDY is only ever held during a strobe, never at a chip select, so an ISA card's address-only cycles can't stall on it (no watchdog needed).
+
+## Block 1: the write side (reads pins only)
+
+| State machine | Does |
+|---|---|
+| W | every register write, and Status reads (which clear INTRQ), into a DMA ring that core 1 drains, as `bus_observer`'s ring is drained |
+| WD | data register writes, by DMA straight into the sector buffer, 256 words per block |
+| C | a Command write: DMA writes BSY into R1's Status and R2's Alternate Status entries at once |
+| O | `bus_observer`, as now |
+
+`iordy_timer` and `iordy_check` are off in this mode: IORDY is never held long, so there's nothing for them to measure.
+
+## Busy, without core 1
+
+ATA lets a host read Status 400 ns after a Command write, or at once after a data block, and expects BSY (or the next block's DRQ). Core 1 can't promise 400 ns, so DMA does it:
+
+- **After a Command write:** C pushes one word; a DMA channel copies the busy Status word core 1 keeps ready into the Status entries. Core 1 then runs the command and writes the real registers.
+- **After a data-in block:** the channel feeding D's TX FIFO completes after the block's last word, and chains to a channel that writes the busy word. (It completes when the last word enters the FIFO, up to four words before the host reads it; a host reading Status mid-block would see BSY early. None seen does.)
+- **After a data-out block:** WD's channel completes after the 256th word, and chains the same way.
+- **SRST** (Device Control bit 2): core 1, as now; ATA gives the drive 5 µs before the host clears it.
+
+## Core 1
+
+Core 1 keeps the device logic as it is. What changes is how it shows its state:
+- After every state change (a write, a command step, a fetch done, a reset), it writes the register entries: a `publish()` of eight words.
+- Before showing DRQ for a data-in block, it starts the channel feeding D; for data-out, WD's channel.
+- It drains W's ring for writes and Status reads, in place of the bus FIFO.
+
+## Fitting it in
+
+| Block | Table mode |
+|---|---|
+| 0 | `ide_table_reg` (14) on R0-R2, `ide_table_data` (about 12): 26-28 of 32, 4 state machines |
+| 1 | W, WD, C and `bus_observer`: about 28 of 32 |
+| 2 | as now: SDIO on the PCB; `iocs16` and `bus_timing`, or `ide_dma`, on the BB48 |
+
+DMA channels: D's feed, WD's, the two busy writes (command, block end), W's ring and the observer's: six.
+
+Not with DMA offered, at first: `ide_dma` needs DD in block 0 for its bursts.
+
+## Testing
+
+1. **The simulator:** `pio_sim` learns `.fifo txget`, `mov osr, rxfifo[]`, several state machines sharing pins, and a DMA write into an entry. A host model that never waits (PIO mode 0's timings, and the PIIX's: no t1, 175 ns strobes) must read every register right, and Status as BSY 400 ns after a Command write. One that waits (PIO 3 and 4) must see IORDY within 35 ns of the strobe.
+2. **The Innostor bridge on the Mac:** detection, the size, `-m slice2`-style reads, writes.
+3. **The old USB adapter:** slices 1-4 and a soak, for hosts that wait.
+4. **The Evesham, then the Pentium 200 and the ICL 386.**
+
+It comes in as a fourth bus program (console `P t`), so the others stay as measured until it has earned its place.
