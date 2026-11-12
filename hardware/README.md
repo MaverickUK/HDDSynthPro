@@ -7,6 +7,7 @@ Status: **rev 0.4, ordered 10 Nov 2026**; `production/` holds the files sent. Re
 ## Rev 0.4: where it stands
 
 - **Pin 20 (9 Nov):** J5 and J7 use copies of KiCad's footprints with pin 20 as an unplated hole (`make_footprints.py`), since no stocked header leaves it out; rev 0.3's had to be cut. KiCad drops an unplated hole's pin number, so DRC's schematic check gives two expected `net_conflict` warnings, "No pad found for pin 20" on J5 and J7.
+- **Solder mask (12 Nov):** the RP2350B (U1) and the USB-C socket (J1) use copies of KiCad's footprints (`make_footprints.py`) with one mask opening per row of fine-pitch pads. Their pads are 0.2 mm apart, and PCBWay can't make a strip of black mask narrower than 0.22 mm between pads, so it asked whether to leave those strips out. For rev 0.4's order the answer was to leave them out on U1 and keep the black. The narrowest strip left on the board is 0.25 mm (the bus switches). The files in `production/` are still the ones sent, without this change.
 - **Done:** the schematic (ERC: 0 errors, 0 warnings; `check_netlist.py` passes, and was checked to fail on a wrong pin), the Molex footprint, the placement and the routing (Freerouting 2.5.0 on Windows, then `tools/widen_power.py`). DRC with `--schematic-parity`: 0 unconnected pads, 0 differences from the schematic, only rev 0.3's two expected USB-C silkscreen warnings.
 - **VB, the 5 V supply:** Freerouting ignores the Power class's 0.6 mm, so `layout_pcb.py` lays VB's two long branches (D6, Molex, up the right side; D7, 44-pin, along the bottom edge) 0.6 mm wide and locked before routing: about 0.08 ohm, 16 mV at 200 mA. The run along the top (D5, D1, C1, D2) is the router's, widened to mostly 0.3-0.5 mm (about 19 mm at 0.15-0.2 mm near pads; about 0.13 ohm from USB). Fixing that run too was tried three ways (8 Nov): each crowded the PSRAM and flash's QSPI lines, the board's tightest spot, and left one or two of them unrouted.
 - **Worth a look in review:** SD_VDD (mostly 0.2-0.4 mm), and the chip side's detours, as on rev 0.3.
@@ -26,10 +27,10 @@ Status: **rev 0.4, ordered 10 Nov 2026**; `production/` holds the files sent. Re
 | `sd.kicad_sch` | The microSD socket, its pull-ups and (rev 0.4) its power switch |
 | `audio.kicad_sch` | Rev 0.4's CD audio out: PWM, RC filters and the 4-pin header |
 | `hddsynthpro.kicad_pcb` | The board: 100.33 × 69.88 mm, the HDD Synth Mk5's outline and M3 holes, 4 layers (signals, GND plane, 3V3 plane, signals) |
-| `HDDSynthPro.kicad_sym`, `HDDSynthPro.pretty/` | Parts KiCad lacks: the SN74CB3T3245's symbol (pinout from TI's datasheet); Raspberry Pi's polarity-marked inductor and wide-pad 0402 footprints; the TF PUSH microSD socket; the logo and the easter eggs. (The old PGA2350 symbol and footprint stay for reference.) |
+| `HDDSynthPro.kicad_sym`, `HDDSynthPro.pretty/` | Parts KiCad lacks: the SN74CB3T3245's symbol (pinout from TI's datasheet); Raspberry Pi's polarity-marked inductor and wide-pad 0402 footprints; the TF PUSH microSD socket; the RP2350B's QFN-80 and the USB-C socket with one mask opening per row of pads; the logo and the easter eggs. (The old PGA2350 symbol and footprint stay for reference.) |
 | `tools/gen_schematic.py` | Generated the schematic, with an LCSC part number and any Fabrication Toolkit offsets on every part |
 | `tools/layout_pcb.py` | Placed the parts and laid the fixed copper (run with KiCad's own Python) |
-| `tools/make_footprints.py` | Made the inductor, wide 0402, TF PUSH and (rev 0.4) Molex disk-power footprints |
+| `tools/make_footprints.py` | Made the inductor, wide 0402, TF PUSH, (rev 0.4) Molex disk-power, pin-20-unplated IDE header and one-mask-opening QFN-80 and USB-C footprints |
 | `tools/make_logo.py` | Makes the silkscreen logo footprint from `media/IDESynthBay.png` |
 | `tools/make_eggs.py` | Makes the easter eggs on the back (silkscreen footprints) from `media/Defrag.png` and `media/ParkHeads.png` |
 | `tools/autoroute.py` | Routed the rest with Freerouting |

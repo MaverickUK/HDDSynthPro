@@ -32,7 +32,7 @@ JLC_FIX = {
     "SOT-23-6": (270, 0.0, 0.0),                               # USBLC6
     "SOIC-8_5.3x5.3mm_P1.27mm": (270, 0.0, 0.0),               # flash
     "SOT-223-3_TabPin2": (180, -0.18, 0.0),                    # AMS1117
-    "USB_C_Receptacle_HRO_TYPE-C-31-M-12": (0, 0.0, -1.571),
+    "USB_C_Receptacle_HRO_TYPE-C-31-M-12_OneMaskOpening": (0, 0.0, -1.571),
     "JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical": (180, 1.25, 0.0),  # KiCad's origin is pin 1
     "PinSocket_1x04_P2.54mm_Vertical": (270, 0.0, 3.81),
     "PinHeader_1x03_P2.54mm_Vertical": (270, 0.0, 2.54),

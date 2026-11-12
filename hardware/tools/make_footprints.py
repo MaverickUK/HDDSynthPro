@@ -20,6 +20,10 @@ the two IDE headers with pin 20 unplated)
   four pins on 5.08 mm, the housing's two chamfered corners drawn on the +y side
   (the keyed side). Pin 1 is +12 V. Check the drill and outline against the part
   chosen before ordering: KiCad has no footprint for it.
+- QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias_OneMaskOpening (the RP2350B) and
+  USB_C_Receptacle_HRO_TYPE-C-31-M-12_OneMaskOpening: KiCad's, with one solder mask
+  opening per row of fine-pitch pads. Their pads are 0.2 mm apart, too close for a strip
+  of black mask between them (PCBWay, 11 Nov 2026).
 """
 import os
 import sys
@@ -196,9 +200,74 @@ def keyed(lib, name, ring):
     return new
 
 
+MASK_WEB_MIN = 0.22  # mm: the narrowest solder mask strip PCBWay makes in black (11 Nov 2026)
+
+
+def _mask_box(pad):
+    """A pad's outline (x0, y0, x1, y1) on the mask: its copper, as the board adds no margin."""
+    at, size = first(pad, "at"), first(pad, "size")
+    x, y, w, h = float(at[1]), float(at[2]), float(size[1]), float(size[2])
+    if len(at) > 3 and round(float(at[3])) % 180 == 90:
+        w, h = h, w
+    return [x - w / 2, y - h / 2, x + w / 2, y + h / 2]
+
+
+def one_mask_opening(lib, name):
+    """KiCad's footprint with one solder mask opening per row of pads too close for a strip.
+
+    Between pads closer than MASK_WEB_MIN, a fab can't make the strip of mask (the "bridge")
+    in black, and asks what to do. Here each such row gets one opening, an F.Mask rectangle
+    over the row, so the Gerbers never ask for a strip that thin, whatever the colour. The
+    footprint allows mask bridges (KiCad's attribute), so DRC doesn't flag pads of different
+    nets sharing an opening. The copper and the paste are KiCad's, unchanged.
+    """
+    src = parse((KICAD_FOOTPRINTS / f"{lib}.pretty" / f"{name}.kicad_mod").read_text(encoding="utf-8"))
+    pads = [p for p in find(src, "pad") if '"F.Mask"' in dump(first(p, "layers")) and p[2] == "smd"]
+    boxes = [_mask_box(p) for p in pads]
+    # Group pads whose mask strip would be too thin (or that overlap, as the USB-C's A1/B12 do).
+    group = list(range(len(boxes)))
+
+    def root(i):
+        while group[i] != i:
+            i = group[i]
+        return i
+
+    for i, a in enumerate(boxes):
+        for j in range(i + 1, len(boxes)):
+            b = boxes[j]
+            dx, dy = max(b[0] - a[2], a[0] - b[2], 0), max(b[1] - a[3], a[1] - b[3], 0)
+            if (dx * dx + dy * dy) ** 0.5 < MASK_WEB_MIN:
+                group[root(j)] = root(i)
+    rows = {}
+    for i, b in enumerate(boxes):
+        r = rows.setdefault(root(i), [b[0], b[1], b[2], b[3], 0])
+        r[:4] = [min(r[0], b[0]), min(r[1], b[1]), max(r[2], b[2]), max(r[3], b[3])]
+        r[4] += 1
+    rows = sorted((r for r in rows.values() if r[4] > 1), key=lambda r: (round(r[1], 3), round(r[0], 3)))
+
+    new = name + "_OneMaskOpening"
+    fp = [S("footprint"), new]
+    for item in src[2:]:
+        if isinstance(item, list) and item and item[0] == "descr":
+            item = [S("descr"), item[1] + f". One solder mask opening per row of pads closer than {MASK_WEB_MIN} mm"
+                    " (no mask strips between them)"]
+        elif isinstance(item, list) and item and item[0] == "attr":
+            item = item + [S("allow_soldermask_bridges")]
+        fp.append(item)
+        if isinstance(item, list) and item and item[0] == "attr":
+            for k, (x0, y0, x1, y1, _) in enumerate(rows):
+                fp.append([S("fp_rect"), [S("start"), round(x0, 4), round(y0, 4)], [S("end"), round(x1, 4), round(y1, 4)],
+                           [S("stroke"), [S("width"), 0], [S("type"), S("solid")]], [S("fill"), S("yes")],
+                           [S("layer"), "F.Mask"], u(new, "mask", k)])
+    (PRETTY / f"{new}.kicad_mod").write_text(dump(fp) + "\n")
+    return new
+
+
 def main():
     drawn = [tf_push(), molex_8981(), keyed("Connector_IDC", "IDC-Header_2x20_P2.54mm_Vertical", 1.15),
-             keyed("Connector_PinHeader_2.00mm", "PinHeader_2x22_P2.00mm_Vertical", 0.95)]
+             keyed("Connector_PinHeader_2.00mm", "PinHeader_2x22_P2.00mm_Vertical", 0.95),
+             one_mask_opening("Package_DFN_QFN", "QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias"),
+             one_mask_opening("Connector_USB", "USB_C_Receptacle_HRO_TYPE-C-31-M-12")]
     if len(sys.argv) == 1:
         print("wrote", ", ".join(drawn))
         return

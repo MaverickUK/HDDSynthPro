@@ -3538,7 +3538,7 @@
 				(justify left)
 			)
 		)
-		(property "Footprint" "Package_DFN_QFN:QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias"
+		(property "Footprint" "HDDSynthPro:QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias_OneMaskOpening"
 			(at 205.74 152.4 0)
 			(effects
 				(font

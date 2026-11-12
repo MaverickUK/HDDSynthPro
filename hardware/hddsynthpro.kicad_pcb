@@ -18045,7 +18045,7 @@
 			)
 		)
 	)
-	(footprint "Package_DFN_QFN:QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias"
+	(footprint "HDDSynthPro:QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias_OneMaskOpening"
 		(layer "F.Cu")
 		(uuid "b2758a78-ecf3-44ab-acf6-607347970cae")
 		(at 151 132)
@@ -18132,8 +18132,52 @@
 			)
 		)
 		(path "/a7697fa6-7690-5cb6-93b1-03592d7bdfa7/b092e9ca-db17-51a9-82e5-3a77e185d579")
-		(attr smd)
+		(attr smd allow_soldermask_bridges)
 		(duplicate_pad_numbers_are_jumpers no)
+		(fp_rect
+			(start -5.35 -3.9)
+			(end -4.55 3.9)
+			(stroke
+				(width 0)
+				(type solid)
+			)
+			(fill yes)
+			(layer "F.Mask")
+			(uuid "e583334a-cea9-4540-8348-b36e39a49951")
+		)
+		(fp_rect
+			(start -3.9 -5.35)
+			(end 3.9 -4.55)
+			(stroke
+				(width 0)
+				(type solid)
+			)
+			(fill yes)
+			(layer "F.Mask")
+			(uuid "5fb87844-c92a-45b0-9d65-01e87bd8d8ed")
+		)
+		(fp_rect
+			(start -3.9 4.55)
+			(end 3.9 5.35)
+			(stroke
+				(width 0)
+				(type solid)
+			)
+			(fill yes)
+			(layer "F.Mask")
+			(uuid "0c2e4984-b18a-4fb4-8067-1af2794a305c")
+		)
+		(fp_rect
+			(start 4.55 -3.9)
+			(end 5.35 3.9)
+			(stroke
+				(width 0)
+				(type solid)
+			)
+			(fill yes)
+			(layer "F.Mask")
+			(uuid "d4c02f02-f1a6-49dc-994e-c601f80e144b")
+		)
 		(fp_line
 			(start -5.11 -4.16)
 			(end -5.11 -4.87)
@@ -23404,7 +23448,7 @@
 			)
 		)
 	)
-	(footprint "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12"
+	(footprint "HDDSynthPro:USB_C_Receptacle_HRO_TYPE-C-31-M-12_OneMaskOpening"
 		(layer "F.Cu")
 		(uuid "ddf71fbc-fdbe-42fe-8344-c0d1e23338f9")
 		(at 158 103.64 180)
@@ -23495,8 +23539,41 @@
 			)
 		)
 		(path "/6a60ff82-27b4-567a-b4d6-c1b6fcfcc09c/71997d7b-8feb-5be5-ae9c-ba18d4174985")
-		(attr smd)
+		(attr smd allow_soldermask_bridges)
 		(duplicate_pad_numbers_are_jumpers no)
+		(fp_rect
+			(start 2.15 -4.77)
+			(end 3.55 -3.32)
+			(stroke
+				(width 0)
+				(type solid)
+			)
+			(fill yes)
+			(layer "F.Mask")
+			(uuid "4bd779bf-d1e5-4672-9646-62a0b41c1afb")
+		)
+		(fp_rect
+			(start -1.9 -4.77)
+			(end 1.9 -3.32)
+			(stroke
+				(width 0)
+				(type solid)
+			)
+			(fill yes)
+			(layer "F.Mask")
+			(uuid "14aca09b-6c67-4cf6-acbc-e475741a7b6f")
+		)
+		(fp_rect
+			(start -3.55 -4.77)
+			(end -2.15 -3.32)
+			(stroke
+				(width 0)
+				(type solid)
+			)
+			(fill yes)
+			(layer "F.Mask")
+			(uuid "6a6d0c89-c2ce-4b30-9fdf-104f4c57913d")
+		)
 		(fp_line
 			(start 4.7 2)
 			(end 4.7 3.9)

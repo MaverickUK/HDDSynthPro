@@ -388,7 +388,7 @@ class Sheet:
 # same differences). The toolkit centres each part on its pads and adds its own rotation table;
 # these fields cover where that table, or the pad centre, is wrong for JLCPCB's part.
 FT_FIELDS = {
-    "QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias": [("FT Rotation Offset", "-90")],
+    "QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias_OneMaskOpening": [("FT Rotation Offset", "-90")],
     "SOT-23-6": [("FT Rotation Offset", "90")],
     "JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical": [("FT Rotation Offset", "180")],
     "PinSocket_1x04_P2.54mm_Vertical": [("FT Rotation Offset", "-90")],
@@ -396,7 +396,7 @@ FT_FIELDS = {
     "IDC-Header_2x20_P2.54mm_Vertical_Pin20Unplated": [("FT Rotation Offset", "-90")],  # KiCad's, pin 20 unplated
     "PinHeader_2x22_P2.00mm_Vertical_Pin20Unplated": [("FT Rotation Offset", "-90")],  # as the 2x20 (unchecked)
     "SOT-223-3_TabPin2": [("FT Position Offset", "-0.18,0")],
-    "USB_C_Receptacle_HRO_TYPE-C-31-M-12": [("FT Position Offset", "0,0.111")],
+    "USB_C_Receptacle_HRO_TYPE-C-31-M-12_OneMaskOpening": [("FT Position Offset", "0,0.111")],
     "microSD_TF-PUSH": [("FT Position Offset", "0,0.15")],
     "L_Abracon_AOTA-B201610S3R3": [("FT Rotation Offset", "180")],  # JLCPCB marks the dot at the other end
 }
@@ -463,7 +463,7 @@ def power_sheet(sh):
            "A5": "CC1", "B5": "CC2", "A6": "USB_DP", "B6": "USB_DP", "A7": "USB_DM", "B7": "USB_DM",
            "A8": None, "B8": None}
     sh.part("Connector:USB_C_Receptacle_USB2.0_16P", "J1", "USB-C", 50.8, 81.28, usb,
-            "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12", fields=[("MPN", "HRO TYPE-C-31-M-12")])
+            "HDDSynthPro:USB_C_Receptacle_HRO_TYPE-C-31-M-12_OneMaskOpening", fields=[("MPN", "HRO TYPE-C-31-M-12")])
     sh.r("R1", "5.1k", 101.6, 76.2, "CC1", "GND")
     sh.r("R2", "5.1k", 116.84, 76.2, "CC2", "GND")
     sh.note("CC pull-downs: without them a\nC-to-C cable gives no power.", 96.52, 91.44)
@@ -543,7 +543,7 @@ def mcu_sheet(sh):
             name, num = first(p, "name")[1], first(p, "number")[1]
             pins[num] = gp[int(name[4:].split("/")[0])] if name.startswith("GPIO") else power[name]
     sh.part("MCU_RaspberryPi:RP2350B", "U1", "RP2350B", 205.74, 152.4, pins,
-            "Package_DFN_QFN:QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias")
+            "HDDSynthPro:QFN-80-1EP_10x10mm_P0.4mm_EP3.4x3.4mm_ThermalVias_OneMaskOpening")
 
     # Core regulator, as in Raspberry Pi's layout: the polarity-marked inductor (pad 1 to 1.1 V),
     # 4.7 uF on VREG_VIN and on the 1.1 V output, and an RC filter (33 R, 4.7 uF) on VREG_AVDD.

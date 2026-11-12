@@ -2987,7 +2987,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12"
+		(property "Footprint" "HDDSynthPro:USB_C_Receptacle_HRO_TYPE-C-31-M-12_OneMaskOpening"
 			(at 54.61 81.28 0)
 			(effects
 				(font
