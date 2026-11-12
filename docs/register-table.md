@@ -218,7 +218,12 @@ Read from the note above and the code at d4b9088, on the Windows PC, with no boa
 
 **What would explain a whole previous sector.** The drive can only have given sector N whole between N's DRQ and the next Command write. If the block records show it did (`fetched - end_level` near 256, `why=3`), the bridge reads the data, the drive's count is short, and the fault is ours: look at the block's first and last reads in `OBSSNAP`. If they show 0, the data the host got for the next command came from the bridge itself, and the question is what the bridge was waiting for: INTRQ (count it), or a Status value (the snapshot's `a=17`/`a=0e` reads).
 
-**Changes to make for the next rig session** (next commit): empty D's FIFO when a block is abandoned; count the table's INTRQ rises and show them in `s`; print the words the host took in each block record.
+**Changes made for the next rig session** (built for `pcb_drive` and `bb48_drive`, core 1's code all in RAM; not run on hardware):
+- **D's FIFO is emptied when a block is cut short** (`stopDataIn`: the stream was still running, or more than the spare word is left). A data read before the next block's DRQ now gets junk, never the block before. If the bridge in PIO 3 now returns junk where it returned the previous sector, those sectors came from the drive after all.
+- **`intrq_rises` in `s` counts the table's own** (`ide_table::intrqRises()`: each time core 1 drives INTRQ high) while the table runs. One per READ SECTORS block is right.
+- **The block records say what the host took:** `R`'s `TABLETEST blocks=` entries gain `taken=` (`fetched - end_level`). It is exact for a block cut short while the stream ran (`why=3` or `2`), and 256 of a 256-word block; a whole block reads 257 - 1 = 256.
+
+**To run on the Mac** (as *To pick it up* above: `T`, `P t`, `mode = auto`, the bridge replugged): `s` for `intrq_rises` before; three raw reads of different LBAs; `R` and `s`. Wanted: what each read returned; `taken=` and `why=` for each block; `intrq_rises` against the number of reads; and the `OBSSNAP` after the last Command write.
 
 ## Open
 

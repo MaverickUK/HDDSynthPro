@@ -416,7 +416,10 @@ CORE1_RAM_TABLE void armCommandBusy() {
 // INTRQ: C lowers it itself as a Command write starts; core 1 sets it here when
 // the device's interrupt changes (forced instructions on C, which waits
 // meanwhile, with SET pins = INTRQ).
+volatile uint32_t s_intrq_rises = 0;  // times core 1 drove INTRQ high, for `s`
+uint32_t intrqRises() { return s_intrq_rises; }
 CORE1_RAM_TABLE void setIntrq(bool asserted, bool driven) {
+    if (asserted && driven) s_intrq_rises = s_intrq_rises + 1;
     s_wpio->sm[s_c].instr = asserted ? SET_PINS_1 : SET_PINS_0;
     s_wpio->sm[s_c].instr = driven ? SET_PINDIRS_1 : SET_PINDIRS_0;
 }
@@ -462,7 +465,14 @@ CORE1_RAM_TABLE void stopDataIn() {
         s_rec_n = s_rec_n + 1;
     }
     if (s_in_active && !dmaBusy(s_stream)) s_blocks_in = s_blocks_in + 1;
-    if (dmaBusy(s_stream)) dmaAbort(s_stream);  // never an idle channel (see startDataIn)
+    // A block cut short (a new command, SRST, a reset) leaves words behind: the
+    // stream's, and up to 8 in D's FIFO, which a host reading data before the
+    // next block's DRQ would get as if they were its answer. Empty it, so such a
+    // read gets junk, as outside any block. A block read to its end leaves only
+    // the spare word, which startDataIn's reset takes.
+    const bool running = dmaBusy(s_stream);
+    if (running) dmaAbort(s_stream);  // never an idle channel (see startDataIn)
+    if (running || ((s_pio->flevel >> (s_d * 8)) & 0xF) > 1) dReset();
     s_in_active = false;
 }
 

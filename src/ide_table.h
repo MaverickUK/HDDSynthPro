@@ -47,6 +47,7 @@ void restart();
 void armCommandBusy();
 bool commandBusyPending();
 // INTRQ (R1 lowers it as Status is answered): set when the device's interrupt changes.
+uint32_t intrqRises();  // times core 1 drove INTRQ high (tableIntrq calls setIntrq only on a change)
 void setIntrq(bool asserted, bool driven);  // fired, and the command not yet taken
 
 // A data-in block: the DMA stream into D's FIFO under way (its completion

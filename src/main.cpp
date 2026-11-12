@@ -2406,7 +2406,7 @@ static void printStats() {
         char early_profile[900];
         if (ide_bus::formatEarlyProfile(early_profile, sizeof early_profile)) Serial.print(early_profile);
     }
-    Serial.printf(" intrq_rises=%lu commands=%lu", (unsigned long)ide_bus::intrqRises(),
+    Serial.printf(" intrq_rises=%lu commands=%lu", (unsigned long)(ide_table::running() ? ide_table::intrqRises() : ide_bus::intrqRises()),
                   (unsigned long)g_command_starts.load());
     if (C1_PROFILE) Serial.print(" c1_gap_ns=");
     for (unsigned k = 1; k < GAP_KINDS; ++k)
@@ -2801,8 +2801,9 @@ static void handleConsole() {
                         ide_table::blockRecords(b);
                         Serial.printf("TABLETEST blocks=%lu", (unsigned long)b[0]);
                         for (unsigned i = 0; i < b[0] && i < 16; ++i)
-                            Serial.printf(" [start_level=%lu fetched=%lu end_level=%lu first=%04lx count=%lu why=%lu]",
+                            Serial.printf(" [start_level=%lu fetched=%lu end_level=%lu taken=%ld first=%04lx count=%lu why=%lu]",
                                           (unsigned long)b[1 + i * 5], (unsigned long)b[2 + i * 5], (unsigned long)b[3 + i * 5],
+                                          long(b[2 + i * 5]) - long(b[3 + i * 5]),  // words D gave the host
                                           (unsigned long)(b[4 + i * 5] & 0xFFFF), (unsigned long)(b[4 + i * 5] >> 16),
                                           (unsigned long)b[5 + i * 5]);
                         Serial.printf("\n");
