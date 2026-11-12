@@ -84,6 +84,34 @@ Core 1 keeps the device logic as it is. What changes is how it shows its state:
 - Before showing DRQ for a data-in block, it starts the channel feeding D; for data-out, WD's channel.
 - It drains W's ring for writes and Status reads, in place of the bus FIFO.
 
+### Core 1's loop in table mode (step 3)
+
+Hard disk (`ata::Device`) only at first: no CD-ROM, no DMA offered.
+
+1. **Drain W's ring:** each write sample to `dev.write()` or `dev.queueCommand()`, except data register writes (WD has them).
+2. **Drain the observer's ring for Status reads:** `dev.consumeRead(Status)`, which acknowledges the interrupt (core 1 keeps its own read position; core 0 keeps checking sectors as now).
+3. **Run a queued command,** post and take fetches, as the other loops do.
+4. **Data in:** when `dev.dataInRemaining()` gives a block and none is streaming, prime R0's entry 0 with its first word and D's TX FIFO with the first four control words, set the pair's sources, then publish (the host now sees DRQ). When the block-end busy has fired, `dev.consumeDataWords()` moves the device on.
+5. **Data out:** when the device is receiving, start WD's channel on the buffer (`dev.dataOutRemaining()`, new), then publish. When it completes, `dev.consumeDataOut()` (new) finishes the block.
+6. **Publish** when anything changed: `peek()` each register into its entry (eight register writes).
+
+**The busy rule.** C's and the block ends' DMA writes of BSY come before core 1 knows of the command or the block's end, so core 1 must never publish a Status over them that predates them. Their channels count down per event (TRANS_COUNT); core 1 compares those counts with the commands it has taken from W's ring and the blocks it has finished, and while either is behind, it publishes BSY in the Status entries whatever the device says.
+
+### DMA channels
+
+| Channel | DREQ | From | To |
+|---|---|---|---|
+| F1 | D's TX | the block's next word | R0's entry 0; chains F2 |
+| F2 | (chained) | the next control word | D's TX FIFO |
+| B1 | D's RX | the busy word D pushed | R1's Status entry; chains K2 |
+| C1 | C's RX | C's word | a dummy; chains K1 |
+| K1 | (chained) | the busy word | R1's Status entry; chains K2 |
+| K2 | (chained) | the busy word | R2's Alternate Status entry |
+| WD | WD's RX | 16-bit data words | the sector buffer, 256; chains K1 |
+| W | W's RX | write samples | a ring core 1 drains |
+
+With `bus_observer`'s, nine. F1, F2, K1 and K2 run one transfer per trigger, reloaded each time (TRANS_COUNT's reload value); B1, C1 and W run endless, and their counts are the event counters.
+
 ## Fitting it in
 
 | Block | Table mode |
