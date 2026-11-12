@@ -40,6 +40,7 @@ constexpr unsigned BUS_OBSERVER_SLOTS = 8;
 #endif
 constexpr unsigned BUS_TIMING_SLOTS = 22;
 constexpr unsigned SDIO_SLOTS = 10 + 5 + 4 + 4 + 4;  // sdio_card: cmd_rsp, rd_clk, rd_data, wr_data, wr_resp
+constexpr unsigned TABLE_WRITE_SLOTS = 4 + 8 + 8;     // ide_table_write: write, data_out, command
 
 struct Plan {
     bool ide_dma = false;
@@ -47,14 +48,25 @@ struct Plan {
     bool iordy_timer = false;   // with iordy_check: slow reads, reads the host didn't wait for
     bool bus_observer = false;  // data and IDENTIFY checked on the cable
     bool bus_timing = false;    // the read timing probe (RDTIME)
+    bool table_write = false;   // the register table's write side (docs/register-table.md)
     // Why the diagnostics are partly or wholly off, or nullptr if they're all on.
     const char* why = nullptr;
 };
 
 // `sdio`: the card runs over SDIO (taking a block); `dma`: multiword DMA is
 // offered; `isa`: the host is an ISA card (isa = on), which needs IOCS16#.
-inline Plan choose(bool sdio, bool dma, bool isa) {
+// `table`: the register table serves the bus (docs/register-table.md). Its
+// write side and bus_observer share what the diagnostics had: IORDY is never
+// held long there, so iordy_timer and iordy_check have nothing to measure.
+// Not with DMA (the caller doesn't offer it in this mode).
+inline Plan choose(bool sdio, bool dma, bool isa, bool table = false) {
     Plan p;
+    if (table) {
+        p.table_write = p.bus_observer = true;
+        if (!sdio) p.iocs16 = p.bus_timing = true;  // as without the table
+        else p.why = "the register table and the card on SDIO: no room for IOCS16# or the read timing probe";
+        return p;
+    }
     if (!sdio) {  // two blocks: the diagnostics in one, the rest in the other
         p.iordy_timer = p.bus_observer = true;
         if (dma) {
@@ -92,12 +104,14 @@ inline void blocks(const Plan& p, bool sdio, Use out[2]) {
         if (p.ide_dma) b.slots += IDE_DMA_SLOTS, b.machines += 1;
         if (p.iocs16) b.slots += IOCS16_SLOTS, b.machines += 1;
         if (p.iordy_timer) b.slots += IORDY_TIMER_SLOTS, b.machines += 2;
+        if (p.table_write) b.slots += TABLE_WRITE_SLOTS, b.machines += 3;
         if (p.bus_observer) b.slots += BUS_OBSERVER_SLOTS, b.machines += 1;
         if (p.bus_timing) b.slots += BUS_TIMING_SLOTS, b.machines += 1;
         return;
     }
     Use& diag = out[0];
     if (p.iordy_timer) diag.slots += IORDY_TIMER_SLOTS, diag.machines += 2;
+    if (p.table_write) diag.slots += TABLE_WRITE_SLOTS, diag.machines += 3;
     if (p.bus_observer) diag.slots += BUS_OBSERVER_SLOTS, diag.machines += 1;
     Use& rest = out[1];
     if (p.ide_dma) rest.slots += IDE_DMA_SLOTS, rest.machines += 1;

@@ -29,6 +29,11 @@ void begin(uint32_t disk_sectors, const IdentifyInfo& identity, const IdentifyIn
 // it again, from an empty ring. The counts are kept. Core 0 only.
 void end();
 bool running();
+// Its ring and the channel filling it (while running()), for the register
+// table's core 1, which reads Status reads from it with its own position.
+const uint32_t* ring();
+uint32_t ringWords();
+unsigned ringChannel();
 
 // Checks the samples so far; call often from core 0: data sectors with
 // `check` (the disk is the generated one), and IDENTIFY blocks with `check`

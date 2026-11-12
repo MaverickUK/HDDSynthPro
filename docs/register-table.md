@@ -1,6 +1,6 @@
 # The register table: every read answered without core 1
 
-**Status (12 Nov 2026): branch `register-table`. Steps 1-2 done: the PIO programs, in simulation (`test_register_table_sim.py`, 35 tests). Next: core 1 and the DMA channels.** It replaces the table sketch in [no-iordy.md](no-iordy.md) with one that fits the PIO blocks, using the RP2350's FIFO-as-registers mode (`.fifo txget`), which that sketch predates.
+**Status (12 Nov 2026): branch `register-table`, console `P t`; works through the JMicron USB adapter (the whole 64 MB test disk read back, writes read back), not yet through the Innostor bridge, whose sector reads come back one command behind (*Open*). The bench hooks (console `Q`, `R`, `Z`, extra `s` fields, `HDDPRO_FETCH_DELAY_US`) come out before it merges.**
 
 ## Why
 
@@ -132,3 +132,18 @@ Not with DMA offered, at first: `ide_dma` needs DD in block 0 for its bursts.
 4. **The Evesham, then the Pentium 200 and the ICL 386.**
 
 It comes in as a fourth bus program (console `P t`), so the others stay as measured until it has earned its place.
+
+## What the hardware taught (12 Nov 2026)
+
+- **FIFO registers only after `pio_sm_init`:** written before, the entries kept stale values, and R0's entry 0 answered every data read over D.
+- **Emptying a TX-joined FIFO:** toggling FJOIN_RX (as `pio_sm_clear_fifos` does) leaves it as it was; toggling FJOIN_TX empties it behind the DMA's back, and the stream's channel then stopped after its first FIFO-full. D's reset pulls the words out instead. The data lane uses the FJOIN_RX toggle too: a block cut short may leave words in `ide_data_in`'s FIFO.
+- **Never abort an idle DMA channel** before restarting it.
+- **IORDY on data reads:** the Innostor bridge's IORDY rises about a microsecond after release, so holding it for every word (1.3 µs each) made it give up on sectors. D holds IORDY on register reads only; DIOR# skips the synchroniser in block 0 so D can decide inside tA.
+- **Publish after starting the block:** DRQ published before the stream started let the host read before it.
+- **INTRQ** is C's: low as a Command write starts, raised by core 1.
+
+## Open
+
+- **The Innostor bridge, after the first sector:** it reads data straight after its next Command write, and gets the previous block's leftover words; the drive streams the right sector each time. Not BSY timing (BSY by one DMA hop, about 70 ns), not INTRQ, not the data being ready too soon (results held 200 µs). The captures (core 1 sampling, starting up to 2 µs after the command) may miss its first Status read: next, a PIO logic-analyser capture.
+- **Console `E`/`C` with the test disk:** the card borrows the diagnostics' PIO block, which the write side now holds.
+- **The core 1 layout** of `main.cpp`'s functions moved (`loop1` grew): benchmark reads before recording it.

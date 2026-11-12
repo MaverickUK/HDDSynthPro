@@ -57,6 +57,7 @@
 #include <hardware/watchdog.h>
 #include "fetch_mailbox.h"
 #include "ide_bus.h"
+#include "ide_table.h"
 #include "ide_dma.h"
 #include "iocs16.h"
 #include "bus_timing.h"
@@ -161,6 +162,7 @@ static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
 static SharedFlag g_early{false};       // HDDSYNTH.INI early_answers: ide_bus_early (ide_bus::begin)
+static SharedFlag g_table{false};       // console `P t`: the register table (ide_table, docs/register-table.md)
 static SharedFlag g_isa{false};         // HDDSYNTH.INI isa: iordy_watchdog and IOCS16# (ide_bus::begin)
 static SharedFlag g_no_lane{false};     // a CD-ROM: ide_bus, never the data lane (ide_bus::begin)
 static SharedFlag g_iordy{true};        // HDDSYNTH.INI iordy: off leaves IORDY alone (ide_bus::begin)
@@ -357,20 +359,25 @@ void setup1() {
     // Until core 0 has chosen the disk the bus pins stay inputs, so the host
     // sees no drive for that moment (well under a second with an SD card).
     while (!g_disk_chosen.load(std::memory_order_acquire)) tight_loop_contents();  // a CD-ROM with no disc: 0 sectors
-    ide_bus::begin(g_isa.load(), g_early.load(), g_iordy.load(), !g_no_lane.load());
+    if (g_table.load())
+        ide_table::begin();  // every read answered from the PIO's registers (docs/register-table.md)
+    else
+        ide_bus::begin(g_isa.load(), g_early.load(), g_iordy.load(), !g_no_lane.load());
     busSwitchesOn();
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
     // Both builds by the same settings (`mode`, `dma`): the CD-ROM drive moves
     // PACKET's data by DMA when offered (0.30.0-dev.3).
-    g_mdma_mode.store(drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
-                                                    g_dmarq_wired.load(), g_dma_auto.load()),
+    g_mdma_mode.store(g_table.load() ? NO_DMA  // not with the register table, yet
+                                     : drive_config::mdmaModeOffered(drive_config::Mode(g_mode_asked.load(std::memory_order_relaxed)),
+                                                                     g_dmarq_wired.load(), g_dma_auto.load()),
                       std::memory_order_relaxed);
     // The other PIO blocks, shared out by what this configuration needs
     // (pio_plan.h): the card's SDIO takes one on the PCB build.
     const bool dma = g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA;
-    g_pio_plan = pio_plan::choose(sd_card::sdio(), dma, g_isa.load());
+    g_pio_plan = pio_plan::choose(sd_card::sdio(), dma, g_isa.load(), g_table.load());
     startDiagnostics();  // here, so these never race to claim a PIO
+    if (g_table.load()) ide_table::attachObserver();
     // Multiword DMA if it's offered, otherwise IOCS16# for ISA cards (which
     // never use DMA).
     if (g_pio_plan.ide_dma) ide_dma::begin();  // after ide_bus: its block's function on DD0-15 is the one to hand back to
@@ -812,6 +819,155 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
 CORE1_FOR(ata::Device, CORE1_RAM)
 CORE1_FOR(hdcd::Device, CORE1_RAM_CD)
 
+// Core 1's loop with the register table (console `P t`, docs/register-table.md):
+// no read reaches core 1, so instead of serving accesses it keeps the PIO's
+// register image in step with the device. Writes come from W's ring, Status
+// reads (which acknowledge the interrupt) from the observer's; data blocks
+// move by DMA, started before the device's DRQ is published and caught up
+// once the block is done. The hard disk only. Never returns.
+template <class Dev>
+__attribute__((always_inline)) static inline ide_table::Image tableImage(Dev& dev) {
+    constexpr uint32_t DRIVE = 0xFFFF0000;
+    ide_table::Image m;
+    m.error = DRIVE | dev.peek(ata::Reg::ErrorFeatures);
+    m.sector_count = DRIVE | dev.peek(ata::Reg::SectorCount);
+    m.lba_low = DRIVE | dev.peek(ata::Reg::LbaLow);
+    m.lba_mid = DRIVE | dev.peek(ata::Reg::LbaMid);
+    m.lba_high = DRIVE | dev.peek(ata::Reg::LbaHigh);
+    m.device = DRIVE | dev.peek(ata::Reg::Device);
+    m.status = DRIVE | dev.peek(ata::Reg::StatusCommand);
+    return m;
+}
+
+// INTRQ with the register table: R1 lowers it as it answers a Status read, in
+// time for a host that checks it straight after (the Innostor bridge waited for
+// it); core 1 sets it only when the device's interrupt changes, so a Status read
+// it hasn't yet seen doesn't raise it again.
+template <class Dev>
+__attribute__((always_inline)) static inline void tableIntrq(Dev& dev) {
+    static int8_t shown = -1;  // the last level set: bit 0 asserted, bit 1 driven
+    int8_t now = int8_t((dev.intrq() ? 1 : 0) | (dev.intrqDriven() ? 2 : 0));
+    if (now == shown) return;
+    shown = now;
+    ide_table::setIntrq(now & 1, now & 2);
+}
+
+template <class Dev>
+__attribute__((always_inline)) static inline void runTableT(Dev& dev) {
+    g_done_recorded = dev.commandsCompleted();
+    uint32_t posted_fetch = 0;
+    bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
+    dev.hardReset(reset_low);
+    bool dirty = true;
+    uint32_t shown_status = ~0u;
+    for (;;) {
+        // Writes, in order. A Command write's busy came from C's DMA chain;
+        // queueCommand makes the device busy too, so C1 is armed again.
+        uint32_t sample;
+        while (ide_table::popWrite(sample)) {
+            bus::Block block = bus::block(sample);
+            ata::Reg reg = ata::regFor(block == bus::Block::Command, block == bus::Block::Control, bus::address(sample));
+            if (reg == ata::Reg::Data || reg == ata::Reg::None) continue;  // WD has the data words
+            if (reg == ata::Reg::StatusCommand) {
+                dev.queueCommand(uint8_t(bus::data(sample)));
+                ide_table::armCommandBusy();
+            } else {
+                dev.write(reg, bus::data(sample));
+            }
+            dirty = true;
+        }
+        if (ide_table::statusReadSeen()) {
+            dev.consumeRead(ata::Reg::StatusCommand);
+            dirty = true;
+        }
+        if (dev.commandQueued()) {
+            if (ide_table::dataInActive()) ide_table::stopWhy(3), ide_table::stopDataIn();  // a new command abandons a block
+            if (ide_table::dataOutActive()) ide_table::stopDataOut();
+            runCommandEarly(dev);  // its CMD line, and it runs
+            dirty = true;
+        }
+
+        // Core 0's side, and the timers
+        postFetch(dev, posted_fetch);
+        FetchResult result;
+        if (g_mailbox.takeResult(result)) {
+            dev.fetchDone(result.id, result.ok);
+            dirty = true;
+        }
+        busyTimers(dev);
+        recordDone(dev);
+
+        uint32_t pins = pinsAsSample();
+        bool low = !bus::high(pins, cfg::PIN_RESET_N);
+        if (low != reset_low) {
+            reset_low = low;
+            ide_table::stopWhy(4);
+            ide_table::stopDataIn();
+            ide_table::stopDataOut();
+            dev.hardReset(low);
+            if (!low) iordy_timer::requestReset();
+            record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
+            dirty = true;
+        }
+
+        if (ide_table::benchHold()) continue;  // bench: console Q is driving the blocks
+        {
+            const uint16_t* n_;
+            uint16_t l_;
+            ide_table::notePass(dev.dataInRemaining(n_, l_) ? 1u : 0u);
+        }
+        // Data blocks, after everything that can start one (a command, a fetch, a
+        // timer) and before publishing: the host must not see DRQ before its block
+        // is on its way (0.32.3-dev: a sector's first five reads came before it).
+        // Data in: a block streams by DMA; once its busy write has fired the host
+        // has read it all, and the device moves on.
+        const uint16_t* next;
+        uint16_t left;
+        if (ide_table::dataInActive()) {
+            if (ide_table::dataInDone()) {
+                ide_table::stopWhy(1);
+                ide_table::stopDataIn();
+                if (dev.dataInRemaining(next, left)) dev.consumeDataWords(left);
+                dirty = true;
+            } else if (!dev.dataInRemaining(next, left)) {  // the device dropped it (SRST, a reset)
+                ide_table::stopWhy(2);
+                ide_table::stopDataIn();
+                dirty = true;
+            }
+        }
+        if (!ide_table::dataInActive() && dev.dataInRemaining(next, left)) {
+            ide_table::startDataIn(next, left);  // before the host can see DRQ
+            dirty = true;
+        }
+
+        // Data out: WD's channel fills the buffer, then the device takes the block.
+        uint16_t* dest;
+        if (ide_table::dataOutActive()) {
+            if (ide_table::dataOutDone()) {
+                ide_table::stopDataOut();
+                if (dev.dataOutRemaining(dest, left)) dev.consumeDataOut(left);
+                dirty = true;
+            } else if (!dev.dataOutRemaining(dest, left)) {
+                ide_table::stopDataOut();
+                dirty = true;
+            }
+        }
+        if (!ide_table::dataOutActive() && dev.dataOutRemaining(dest, left)) {
+            ide_table::startDataOut(dest, left);
+            dirty = true;
+        }
+
+        // The registers as the device now has them, before anything else is read
+        if (dirty || dev.status() != shown_status) {
+            ide_table::publish(tableImage(dev));
+            shown_status = dev.status();
+            tableIntrq(dev);
+            dirty = false;
+        }
+    }
+}
+CORE1_RAM_TABLE __attribute__((noinline)) static void runTable(ata::Device& dev) { runTableT(dev); }
+
 // The device, constructed by loop1 in storage both kinds share, so RAM holds
 // only the one that runs.
 alignas(hdcd::Device) static unsigned char g_device_mem[sizeof(hdcd::Device)];
@@ -826,6 +982,8 @@ CORE1_RAM void loop1() {
     const IdentifyInfo device0 = driveIdentity();
     const IdentifyInfo device1 = device1Identity();
     const bool cdrom0 = g_device0_cdrom, cdrom1 = g_device1_cdrom;
+    if (g_table.load() && !cdrom0 && !cdrom1)  // the register table: the hard disk only
+        runTable(*new (g_device_mem) ata::Device(device0, device1.total_sectors ? &device1 : nullptr));
     if (cdrom0 || cdrom1)  // a CD-ROM alone as device 0 (core 0 leaves device 1 out), or as device 1
         runDrive(*new (g_device_mem) hdcd::Device(device0, nullptr, cdrom0 ? &device0 : &device1, cdrom0 ? 0 : 1));
     else
@@ -901,7 +1059,7 @@ static constexpr uint32_t BUS_MAGIC = 0x48445000;  // "HDP", then the program's 
 static char busRequested() {
     uint32_t v = watchdog_hw->scratch[1];
     char c = char(v & 0xff);
-    return (v & 0xffffff00) == BUS_MAGIC && (c == 'e' || c == 'l' || c == 'i') ? c : 0;
+    return (v & 0xffffff00) == BUS_MAGIC && (c == 'e' || c == 'l' || c == 'i' || c == 't') ? c : 0;
 }
 
 // The generated test disk instead of the welcome disk, under the RAM overlay.
@@ -1156,6 +1314,7 @@ static void chooseDisk() {
     g_early.store(g_config.early_answers && !g_config.isa);
     switch (busRequested()) {  // console `P`
         case 'e': g_isa.store(false); g_early.store(true); break;
+        case 't': g_isa.store(false); g_early.store(false); g_table.store(true); break;
         case 'l': g_isa.store(false); g_early.store(false); break;
         case 'i': g_isa.store(true); g_early.store(false); break;
         default: break;
@@ -1201,6 +1360,7 @@ static void chooseDisk() {
     // iordy_watchdog on PCI hosts, which released IORDY mid-read on the
     // Evesham about once in 2.5 million data words, so the host latched DD
     // before the drive drove it (docs/atapi.md).
+    if (g_device0_cdrom || g_device1_cdrom) g_table.store(false);  // the register table is the hard disk's, so far
     if ((g_device0_cdrom || g_device1_cdrom) && busRequested() != 'e') {
         g_no_lane.store(true);
         g_early.store(false);
@@ -1862,6 +2022,9 @@ static void serveFetches() {
                 postHeadTarget(fetch.command_lba, fetch.command_sectors,
                                fetch.store ? activity_link::Op::Write : activity_link::Op::Read, r.seek_start_us);
         }
+#ifdef HDDPRO_FETCH_DELAY_US  // bench: every result held at least this long, as a real drive's access time
+        if (ready < now + HDDPRO_FETCH_DELAY_US) ready = now + HDDPRO_FETCH_DELAY_US;
+#endif
         g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok}, ready};
         ++g_held_count;
         releaseHeld();
@@ -1996,7 +2159,7 @@ static void printAutoBus() {
     Serial.printf("AUTOBUS %s (%s) %lu ms after reset: %lu sectors, %lu long reads waited; running %s\n",
                   g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early",
                   auto_bus::whyName(g_auto_bus.why()), (unsigned long)g_auto_bus.sinceResetMs(now),
-                  (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads(), ide_bus::busName());
+                  (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads(), (ide_table::running() ? "table" : ide_bus::busName()));
 }
 
 // A NOCS line the first time after each RESET# release (or boot) that the host
@@ -2167,7 +2330,14 @@ static void printStats() {
                   (unsigned long)g_bench_pio, (unsigned long)g_bench_ram, (unsigned long)g_bench_sio);
     Serial.printf(" c1_bench_ram_per1000=nop:%lu,pio:%lu", (unsigned long)g_bench_nop_ram, (unsigned long)g_bench_pio_ram);
     s_passes_then = passes, s_ms_then = ms;
-    Serial.printf(" bus=%s iordy_stall_released=%lu", ide_bus::busName(), (unsigned long)ide_bus::iordyStallReleases());
+    Serial.printf(" bus=%s iordy_stall_released=%lu", ide_table::running() ? "table" : ide_bus::busName(), (unsigned long)ide_bus::iordyStallReleases());
+    if (ide_table::running()) {
+        uint32_t d[6];
+        ide_table::debug(d);
+        Serial.printf(" table_in=%lu table_out=%lu table_dpc=%lu table_dtx=%lu table_left=%lu table_ctrl=%08lx table_dinstr=%04lx table_r0e0=%08lx",
+                      (unsigned long)ide_table::blocksIn(), (unsigned long)ide_table::blocksOut(), (unsigned long)d[0],
+                      (unsigned long)d[1], (unsigned long)d[2], (unsigned long)d[3], (unsigned long)d[4], (unsigned long)d[5]);
+    }
     Serial.printf(" autobus=%s autobus_why=%s autobus_sectors=%lu autobus_long=%lu",
                   g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early", auto_bus::whyName(g_auto_bus.why()),
                   (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads());
@@ -2354,11 +2524,12 @@ static void handleConsole() {
         static bool bus_letter_next = false;  // `P` then e, l, i or 0
         if (bus_letter_next) {
             bus_letter_next = false;
-            if (c == 'e' || c == 'l' || c == 'i' || c == '0') {
+            if (c == 'e' || c == 'l' || c == 'i' || c == 't' || c == '0') {
                 watchdog_hw->scratch[1] = c == '0' ? 0 : BUS_MAGIC | uint32_t(c);
                 Serial.printf("# restarting with %s\n", c == 'e'   ? "early answers"
                                                         : c == 'l' ? "the data lane"
                                                         : c == 'i' ? "ide_bus"
+                                                        : c == 't' ? "the register table"
                                                                    : "the settings' bus program");
                 Serial.flush();
                 delay(50);
@@ -2433,6 +2604,106 @@ static void handleConsole() {
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 'P': bus_letter_next = true; break;  // a bus program until a power cycle
+            case 'Z':  // bench: the register table's timeline from the next Command write
+                if (ide_table::running()) ide_table::armCommandCapture(), Serial.printf("# armed\n");
+                break;
+            case 'R':  // bench: the register table's records (no tests)
+                if (ide_table::running()) {
+                    {
+                        const uint32_t* pins;
+                        const uint16_t* d;
+                        uint32_t n = ide_table::capture(pins, d);
+                        Serial.printf("TABLECAP n=%lu (100 ns steps; dior cs0 cs1 da dd | d_pc d_lvl)\n", (unsigned long)n);
+                        uint64_t last = ~0ull;
+                        for (uint32_t i = 0; i < n; ++i) {
+                            uint32_t p = pins[i];
+                            uint32_t key = ((p >> 4) & 0xFFFFFF) | ((p >> cfg::PIN_INTRQ) & 1) << 24;  // DD, DA, CS, DIOR#, DIOW#, INTRQ
+                            uint64_t v = uint64_t(key) << 12 | d[i];
+                            if (v == last) continue;
+                            last = v;
+                            Serial.printf("CAP %4lu intrq=%lu dior=%lu diow=%lu cs0=%lu cs1=%lu da=%lu dd=%04lx | pc=%2u lvl=%u\n", (unsigned long)i,
+                                          (unsigned long)((p >> cfg::PIN_INTRQ) & 1),
+                                          (unsigned long)((p >> cfg::PIN_DIOR_N) & 1), (unsigned long)((p >> cfg::PIN_DIOW_N) & 1),
+                                          (unsigned long)((p >> cfg::PIN_CS0_N) & 1),
+                                          (unsigned long)((p >> cfg::PIN_CS1_N) & 1), (unsigned long)((p >> cfg::PIN_DA0) & 7),
+                                          (unsigned long)((p >> cfg::PIN_DD0) & 0xFFFF), unsigned(d[i] & 0x1F), unsigned(d[i] >> 8));
+                            if (i % 64 == 0) delay(5);
+                        }
+                    }
+                    {
+                        uint32_t b[81];
+                        ide_table::blockRecords(b);
+                        Serial.printf("TABLETEST blocks=%lu", (unsigned long)b[0]);
+                        for (unsigned i = 0; i < b[0] && i < 16; ++i)
+                            Serial.printf(" [start_level=%lu fetched=%lu end_level=%lu first=%04lx count=%lu why=%lu]",
+                                          (unsigned long)b[1 + i * 5], (unsigned long)b[2 + i * 5], (unsigned long)b[3 + i * 5],
+                                          (unsigned long)(b[4 + i * 5] & 0xFFFF), (unsigned long)(b[4 + i * 5] >> 16),
+                                          (unsigned long)b[5 + i * 5]);
+                        Serial.printf("\n");
+                    }
+                }
+                break;
+            case 'Q':  // bench: the register table's D drives a word
+                if (ide_table::running()) {
+                    static const uint32_t waits[] = {0, 20, 100, 400};
+                    for (uint32_t w : waits) {
+                        uint32_t r = ide_table::busyTest(w);
+                        Serial.printf("TABLETEST busy after %lu cycles: status %02lx -> %02lx (C1 fired=%lu)\n", (unsigned long)w,
+                                      (unsigned long)(r & 0xFF), (unsigned long)((r >> 8) & 0xFF), (unsigned long)(r >> 16));
+                    }
+                    {
+                        uint32_t f = ide_table::flushTest();
+                        Serial.printf("TABLETEST flush: level %lu -> %lu\n", (unsigned long)(f & 0xFF), (unsigned long)(f >> 8));
+                    }
+                    {
+                        ide_table::fakeCycles(200);
+                        const uint32_t* f = ide_table::fakeReads();
+                        Serial.printf("TABLETEST fake data reads at 200 cycles (want b000 ... b027):");
+                        for (unsigned k = 0; k < 40; ++k)
+                            Serial.printf(" %04lx%s%s", (unsigned long)(f[k] & 0xFFFF), (f[k] >> 17) & 1 ? "" : "(not driven)",
+                                          (f[k] >> 16) & 1 ? "" : "(held after)");
+                        Serial.printf(" padout=%04lx funcsel=%lu pio=%lu stream_left=%08lx\n", (unsigned long)ide_table::fakeInfo(0),
+                                      (unsigned long)ide_table::fakeInfo(1), (unsigned long)ide_table::fakeInfo(2),
+                                      (unsigned long)ide_table::fakeInfo(3));
+                    }
+                    {
+                        ide_table::fakeCycles(40);
+                        const uint32_t* f = ide_table::fakeReads();
+                        Serial.printf("TABLETEST fake data reads at 40 cycles (want b000 ... b027):");
+                        for (unsigned k = 0; k < 40; ++k)
+                            Serial.printf(" %04lx%s%s", (unsigned long)(f[k] & 0xFFFF), (f[k] >> 17) & 1 ? "" : "(not driven)",
+                                          (f[k] >> 16) & 1 ? "" : "(held after)");
+                        Serial.printf(" padout=%04lx funcsel=%lu pio=%lu stream_left=%08lx\n", (unsigned long)ide_table::fakeInfo(0),
+                                      (unsigned long)ide_table::fakeInfo(1), (unsigned long)ide_table::fakeInfo(2),
+                                      (unsigned long)ide_table::fakeInfo(3));
+                    }
+                    {
+                        ide_table::fakeCycles(16);
+                        const uint32_t* f = ide_table::fakeReads();
+                        Serial.printf("TABLETEST fake data reads at 16 cycles (want b000 ... b027):");
+                        for (unsigned k = 0; k < 40; ++k)
+                            Serial.printf(" %04lx%s%s", (unsigned long)(f[k] & 0xFFFF), (f[k] >> 17) & 1 ? "" : "(not driven)",
+                                          (f[k] >> 16) & 1 ? "" : "(held after)");
+                        Serial.printf(" padout=%04lx funcsel=%lu pio=%lu stream_left=%08lx\n", (unsigned long)ide_table::fakeInfo(0),
+                                      (unsigned long)ide_table::fakeInfo(1), (unsigned long)ide_table::fakeInfo(2),
+                                      (unsigned long)ide_table::fakeInfo(3));
+                    }
+                    {
+                        const uint32_t* r = ide_table::streamTest();
+                        Serial.printf("TABLETEST stream: ctrl=%08lx count0=%lu", (unsigned long)r[0], (unsigned long)r[1]);
+                        for (unsigned k = 0; k < 4; ++k)
+                            Serial.printf(" [read=%lu left=%08lx]", (unsigned long)r[2 + 2 * k], (unsigned long)r[3 + 2 * k]);
+                        Serial.printf(" level=%lu fdebug=%08lx\n", (unsigned long)r[10], (unsigned long)r[11]);
+                    }
+                    Serial.printf("TABLETEST d_y=%04lx d_x=%04lx d_isr=%04lx\n", (unsigned long)ide_table::readD(pio_y),
+                                  (unsigned long)ide_table::readD(pio_x), (unsigned long)ide_table::readD(pio_isr));
+                    uint32_t r1 = ide_table::selfTest(0xA55A), r2 = ide_table::selfTest(0x3CC3);
+                    Serial.printf("TABLETEST released=%d a55a -> seen %04lx oe %04lx; 3cc3 -> seen %04lx oe %04lx\n",
+                                  int(ide_table::selfTestReleased()),
+                                  (unsigned long)(r1 & 0xFFFF), (unsigned long)(r1 >> 16), (unsigned long)(r2 & 0xFFFF),
+                                  (unsigned long)(r2 >> 16));
+                }
+                break;
             case 'U': startLoopback(); break;  // the link's loopback test
             case 'V': setAbsent(!g_absent.load(), ""); break;  // the drive gone from the bus, or back
             case 'H':  // seek timing off or on, until a restart (to benchmark)

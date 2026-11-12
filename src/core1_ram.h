@@ -23,9 +23,13 @@
 // functions sit where they did before the CD-ROM joined the build. Where core
 // 1's code sits moves its timings (CLAUDE.md, Core split).
 #define CORE1_RAM_CD __attribute__((section(".after_data.core1_cd")))
+// The register table's core 1 code (docs/register-table.md): in RAM after the
+// CD-ROM's, for the same reason: the other bus programs' code stays put.
+#define CORE1_RAM_TABLE __attribute__((section(".after_data.core1_table")))
 #else
 #define CORE1_RAM
 #define CORE1_RAM_CD
+#define CORE1_RAM_TABLE
 #endif
 
 // A flag shared between the cores, for core 1 to read or set per access.

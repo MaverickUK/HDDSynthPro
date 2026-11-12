@@ -141,6 +141,10 @@ void end() {
 
 bool running() { return s_started.load(std::memory_order_acquire); }
 
+const uint32_t* ring() { return s_ring; }
+uint32_t ringWords() { return RING_WORDS; }
+unsigned ringChannel() { return s_dma; }
+
 #ifdef HDDPRO_OBS_REGS  // bench: what the host latched, as it leaves the ring
 static void obsShow(Print& out, uint32_t word) {
     static unsigned regs = 0, data = 0;

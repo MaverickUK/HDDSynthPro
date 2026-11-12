@@ -983,6 +983,45 @@ TEST(test_write_multiple_sectors_interrupt_each) {
     CHECK(sameAsDisk(got, 2003, 1));
 }
 
+// The register table's write channel (docs/register-table.md): a DMA channel
+// writes each block where dataOutRemaining() says, in one go or in parts, and
+// consumeDataOut() catches the device up. The disk must end up as it does
+// when the words come one at a time through write(Data).
+TEST(test_data_out_by_block_stores_what_word_writes_store) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<8> disk(base);
+    VirtualHost h{d, &disk};
+    std::vector<uint16_t> words = pattern(3, 13);
+    h.setLba(3000, 3);
+    d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
+    for (int s = 0; s < 3; ++s) {
+        // write-behind: wait until the device wants the next block
+        for (int n = 0; n < 4 && !(h.altStatus() & ST_DRQ); ++n) h.pump();
+        uint16_t* dest = nullptr;
+        uint16_t left = 0;
+        CHECK(d.dataOutRemaining(dest, left));
+        CHECK_EQ(left, 256);
+        // in two parts, as a channel cut short and restarted would
+        for (int i = 0; i < 100; ++i) dest[i] = words[size_t(s) * 256 + size_t(i)];
+        d.consumeDataOut(100);
+        CHECK(h.altStatus() & ST_DRQ);  // not whole yet
+        CHECK(d.dataOutRemaining(dest, left));
+        CHECK_EQ(left, 156);
+        for (int i = 0; i < 156; ++i) dest[i] = words[size_t(s) * 256 + 100 + size_t(i)];
+        d.consumeDataOut(156);
+        CHECK(!d.dataOutRemaining(dest, left));  // whole: BSY, or the next block's wait
+        h.pump();
+    }
+    for (int n = 0; n < 4; ++n) h.pump();
+    CHECK_EQ(h.altStatus(), ST_DRDY | ST_DSC);
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(3000, 3, got));
+    CHECK(got == words);
+    CHECK(h.readSectors(3003, 1, got));
+    CHECK(sameAsDisk(got, 3003, 1));
+}
+
 TEST(test_write_behind_overlaps_the_store) {
     // The host sends sector 2 into the other buffer while sector 1 is stored.
     Device d(INFO);
@@ -1915,6 +1954,7 @@ void runAtaDeviceTests() {
     RUN(test_read_and_write_through_an_image);
     RUN(test_write_one_sector);
     RUN(test_write_multiple_sectors_interrupt_each);
+    RUN(test_data_out_by_block_stores_what_word_writes_store);
     RUN(test_write_behind_overlaps_the_store);
     RUN(test_write_behind_store_failure);
     RUN(test_write_behind_through_the_virtual_host);

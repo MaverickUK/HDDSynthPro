@@ -42,10 +42,15 @@ public top:
 
 ; ---- C: a Command write -------------------------------------------------------
 ;
-; Pushes a word as a Command write starts, for a DMA chain that writes the
-; busy Status entry into R1 and R2, so the host's Status read 400 ns later
-; shows BSY whatever core 1 is doing. Y = 23 (DA2-0 = 7, CS0# low, CS1# high).
+; As a Command write starts: INTRQ low (side-set; this state machine owns the
+; pin, and core 1 raises it with forced SET instructions), and a word for the
+; DMA that writes the busy Status into R1 and R2. The Innostor bridge writes a
+; command and then waits for INTRQ, without polling Status: INTRQ still high
+; from the block before (core 1 clearing it once it had taken the command) sent
+; it straight to the old block's data (12 Nov 2026). Y = 23 (DA2-0 = 7, CS0#
+; low, CS1# high).
 .program ide_table_command
+.side_set 1 opt                     ; INTRQ: low as a Command write starts, as a real drive drops it
 public top:
 .wrap_target
     wait 1 gpio 27                  ; DIOW# high
@@ -54,5 +59,6 @@ public top:
     out null, 16
     out x, 5                        ; DA2-0, CS0#, CS1#
     jmp x!=y top                    ; not the Command register
-    push noblock                    ; for the busy write's DMA chain
+    mov isr, ~null          side 0  ; INTRQ low; the busy Status entry (FFh, every line): DMA puts it
+    push noblock                    ; straight into R1's Status entry, then R2's Alternate Status
 .wrap

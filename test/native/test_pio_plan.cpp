@@ -52,6 +52,16 @@ TEST(test_plan_every_plan_fits) {
             for (bool isa : {false, true}) CHECK(fits(pio_plan::choose(sdio, dma, isa), sdio));
 }
 
+TEST(test_plan_table_takes_the_diagnostics_room) {
+    for (bool sdio : {false, true}) {
+        Plan p = pio_plan::choose(sdio, false, false, true);
+        CHECK(p.table_write && p.bus_observer);
+        CHECK(!p.iordy_timer && !p.ide_dma);
+        CHECK(p.iocs16 == !sdio && p.bus_timing == !sdio);
+        CHECK(fits(p, sdio));
+    }
+}
+
 TEST(test_plan_fit_check_catches_overflow) {
     Plan all;
     all.ide_dma = all.iocs16 = all.iordy_timer = all.bus_observer = all.bus_timing = true;
@@ -67,5 +77,6 @@ void runPioPlanTests() {
     RUN(test_plan_sdio_isa_keeps_iocs16_and_the_timer);
     RUN(test_plan_sdio_pio_keeps_the_diagnostics);
     RUN(test_plan_every_plan_fits);
+    RUN(test_plan_table_takes_the_diagnostics_room);
     RUN(test_plan_fit_check_catches_overflow);
 }

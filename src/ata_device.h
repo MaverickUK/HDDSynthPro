@@ -184,6 +184,20 @@ public:
     }
     void consumeDataWords(uint16_t n);
 
+    // The data-out side of the same, for the register table's write channel
+    // (docs/register-table.md): while the host is to send a block, where its
+    // words go and how many are still to come; a DMA channel writes them there
+    // and then consumeDataOut(n) catches the device up, finishing the block
+    // when it's whole. Data register writes through write() do the same a word
+    // at a time.
+    __attribute__((always_inline)) bool dataOutRemaining(uint16_t*& dest, uint16_t& left) {
+        if (absent_selected_ || !receiving_ || !(status_ & ST_DRQ)) return false;
+        dest = &sectors_[recv_buf_][received_];
+        left = uint16_t(SECTOR_WORDS - received_);
+        return true;
+    }
+    void consumeDataOut(uint16_t n);
+
     // Host writes a register (only the low byte matters except for DATA).
     void write(Reg reg, uint16_t value);
 

@@ -17,7 +17,7 @@ import dataclasses
 import pytest
 
 from hddproto.ide_host_model import FAST_PIO_MODES, PIO_MODES, Access, Core1, Mode0, run_host
-from hddproto.pio_sim import CYCLE_PS, PioBlock, PioSim
+from hddproto.pio_sim import CYCLE_PS, DmaToTx, PioBlock, PioSim
 
 pytestmark = pytest.mark.sim
 
@@ -26,6 +26,7 @@ DATA_ADDRESS = 16                  # DA2-0 = 0, CS0# low, CS1# high: D's Y
 CLAIMS = {"R0": 4, "R1": 5, "R2": 3}  # DA2, CS0#, CS1#, as ide_table.cpp loads ISR
 DRIVE = 0xFFFF0000
 BUSY = DRIVE | 0x80                # the busy Status entry
+SPARE = 0xDEAD                     # the word the stream adds after each block
 ALL_MODES = {**PIO_MODES, **FAST_PIO_MODES}
 NO_WAIT = {m: dataclasses.replace(t, waits_for_iordy=False) for m, t in PIO_MODES.items()}
 # A PIIX in compatible timing (docs/no-iordy.md): chip select and strobe
@@ -47,35 +48,31 @@ def programs(assemble):
 
 class Table:
     """The four state machines, configured as ide_table.cpp configures them,
-    with the register image loaded and the DMA channels modelled."""
+    with the register image loaded and the DMA channels modelled: the stream
+    of the block (and a spare word) into D's 8-deep TX FIFO, and on its
+    completion the busy write into R1's Status and R2's Alternate Status."""
 
     def __init__(self, programs, registers=REGISTERS, block_words: list[int] | None = None,
                  dma_latency: int = 4):
         reg_program, data_program = programs
-        bypass = 0  # every pin through the synchroniser: a strobe and its address arrive together (no t1: the PIIX)
+        bypass = 1 << DIOR_BIT  # DIOR# skips the synchroniser in block 0 (ide_table.cpp); the address doesn't
         self.r = {}
         for name, claim in CLAIMS.items():
             sm = PioSim(reg_program, out_base=0, out_count=16, bypass_mask=bypass)
             sm.isr = claim
             self.r[name] = sm
         self.d = PioSim(data_program, out_base=0, out_count=16, sideset_base=IORDY_BIT,
-                        fifo_depth=4, tx_depth=4, bypass_mask=bypass)
+                        fifo_depth=4, tx_depth=8, bypass_mask=bypass)
         self.d.y = DATA_ADDRESS
         self.load(registers)
-        # R2's addresses that aren't the drive's: never driven
+        # Empty entries: the data register (D's), and R2's addresses that aren't the drive's
+        self.r["R0"].rxf[0] = 0
         self.r["R2"].rxf[0] = self.r["R2"].rxf[1] = 0
         self.block = PioBlock(self.r["R0"], self.r["R1"], self.r["R2"], self.d)
         self.block.on_cycle = self.dma
         self.latency = dma_latency
         self.words = list(block_words or [])
-        self.data_next = 1                # the next word for R0's entry 0
-        self.ctrl = [0] * len(self.words) + [0] * 4
-        if self.words:
-            self.ctrl[len(self.words) - 1] = BUSY
-            self.r["R0"].rxf[0] = DRIVE | self.words[0]
-            self.d.tx_fifo = self.ctrl[:4]
-        self.ctrl_next = 4
-        self._feed_wait = None            # cycles left before the next data/control pair lands
+        self.stream = DmaToTx(self.d, self.words + [SPARE], latency=dma_latency) if self.words else None
         self._busy_wait = None
         self.busy_written_at = None
 
@@ -87,29 +84,22 @@ class Table:
             sm, i = entry[key]
             self.r[sm].rxf[i] = DRIVE | value
 
+    def host_done(self) -> bool:
+        """What core 1 checks: the stream done and only the spare word left."""
+        return self.stream is not None and not self.stream.busy and len(self.d.tx_fifo) <= 1
+
     def dma(self, block):
-        # The data pair: D's pull made room in its TX FIFO; a word for R0's
-        # entry 0, then the next control word, `latency` cycles each.
-        if self._feed_wait is None and len(self.d.tx_fifo) < 4 and self.ctrl_next < len(self.ctrl):
-            self._feed_wait = self.latency
-        if self._feed_wait is not None:
-            self._feed_wait -= 1
-            if self._feed_wait == self.latency // 2 and self.data_next < len(self.words):
-                self.r["R0"].rxf[0] = DRIVE | self.words[self.data_next]
-                self.data_next += 1
-            if self._feed_wait <= 0:
-                self.d.tx_fifo.append(self.ctrl[self.ctrl_next])
-                self.ctrl_next += 1
-                self._feed_wait = None
-        # The busy pair: D pushed the busy Status entry.
-        if self._busy_wait is None and self.d.rx_fifo:
-            self._busy_wait = self.latency
+        if self.stream is None:
+            return
+        was_busy = self.stream.busy
+        self.stream(block)
+        if was_busy and not self.stream.busy:  # the stream's completion chains to the busy write
+            self._busy_wait = 2 * self.latency
         if self._busy_wait is not None:
             self._busy_wait -= 1
             if self._busy_wait <= 0:
-                word = self.d.rx_fifo.pop(0)
-                self.r["R1"].rxf[3] = word
-                self.r["R2"].rxf[2] = word
+                self.r["R1"].rxf[3] = BUSY
+                self.r["R2"].rxf[2] = BUSY
                 self._busy_wait = None
                 self.busy_written_at = block.cycle
 
@@ -199,16 +189,18 @@ def test_a_data_block_reads_right_then_status_shows_busy(programs, timing):
     assert [r.read_value & 0xFF for r in run.results[256:]] == [0x80, 0x80]
 
 
-def test_busy_is_written_well_inside_the_hosts_400_ns(programs):
+def test_core1_sees_the_block_done_only_after_the_last_word(programs):
     words = sector(5)
     table = Table(programs, block_words=words)
-    reads = [Access(False, "CMD", 0, hold_cs=True) for _ in range(255)] + [Access(False, "CMD", 0)]
+    reads = [Access(False, "CMD", 0, hold_cs=True) for _ in range(255)]
     run = run_host(table.block, idle_core1(), reads, timing=ALL_MODES[4])
     assert not run.errors
-    last_rise_cycle = run.results[-1].rise_ns * 1000 / CYCLE_PS
-    assert table.busy_written_at is not None
-    assert (table.busy_written_at * CYCLE_PS / 1000) - run.results[-1].fall_ns < 400
-    assert table.busy_written_at < last_rise_cycle + 400_000 / CYCLE_PS
+    assert not table.host_done()  # one word still to read
+    table2 = Table(programs, block_words=words)
+    run = run_host(table2.block, idle_core1(), reads + [Access(False, "CMD", 0)], timing=ALL_MODES[4])
+    assert not run.errors and table2.host_done()
+    assert table2.busy_written_at is not None
+    assert table2.busy_written_at * CYCLE_PS / 1000 < run.results[-1].rise_ns + 400
 
 
 # ---- The write side: block 1 (src/ide_table_write.pio) ----------------------------
@@ -316,3 +308,16 @@ def test_reads_never_reach_the_write_side(programs, write_programs):
     run = run_host(table.block, idle_core1(), register_reads(), timing=ALL_MODES[0], observers=(writes.block,))
     assert not run.errors
     assert writes.ring == [] and writes.buffer == [] and writes.busy_written_at is None
+
+
+@pytest.mark.parametrize("mode", ALL_MODES)
+def test_data_reads_never_hold_iordy(programs, mode):
+    # The Innostor bridge's IORDY takes about a microsecond to rise once released:
+    # a data read that found it low took 1.3 us, and the bridge gave up on sectors.
+    words = sector(11)
+    table = Table(programs, block_words=words)
+    reads = [Access(False, "CMD", 0, hold_cs=True) for _ in range(255)] + [Access(False, "CMD", 0)]
+    run = run_host(table.block, idle_core1(), reads, timing=ALL_MODES[mode])
+    assert not run.errors
+    assert [r.read_value for r in run.results] == words
+    assert not any(r.iordy_low_at_tA for r in run.results)

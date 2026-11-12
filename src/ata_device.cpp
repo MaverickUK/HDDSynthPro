@@ -470,6 +470,14 @@ CORE1_RAM void Device::finishDataOut() {
     settleWrite();
 }
 
+// Only the register table's loop calls it (docs/register-table.md): in its
+// section, so the hard disk's core 1 code stays where it is measured.
+CORE1_RAM_TABLE void Device::consumeDataOut(uint16_t n) {
+    if (!receiving_ || absent_selected_) return;
+    received_ = uint16_t(received_ + n > SECTOR_WORDS ? SECTOR_WORDS : received_ + n);
+    if (received_ >= SECTOR_WORDS) finishDataOut();
+}
+
 CORE1_RAM void Device::releaseDataOut() {
     if (!out_hold_) return;
     out_hold_ = false;
