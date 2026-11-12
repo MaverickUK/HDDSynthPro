@@ -204,6 +204,22 @@ Run on the Mac (restarted first) with the PCB, `pcb_drive`, console `P t` and th
 
 **To pick it up (on any host):** flash `pcb_drive` from this commit; console `T` (the test disk) and `P t` (the table), both until a power cycle (the board loses them when the host it's powered from restarts: on 13 Nov a Mac restart put it back on `ICL386MB.IMG`, and macOS mounted it and wrote to it before it was unmounted); `HDDSYNTH.INI` has `mode = auto` (PIO 3; `P 0`, `E mode = pio2`, `P t` for PIO 2). Replug the bridge after every flash or restart. Then one raw read and console `R`. `host/bench/catch_write_fail.py` (bench, macOS paths; `PORT` and the device are at its top) runs slice-4-like writes and sends `R` and `s` at the first `DONE ... 30 80`; it writes LBAs 100000-100287 and leaves them changed, so restart the drive (or write the generated sectors back) before slices 3-4.
 
+## After the rig session: a review at the desk (no hardware)
+
+Read from the note above and the code at d4b9088, on the Windows PC, with no board or adapter. Nothing here is measured.
+
+**The JMicron fault and its fix.** The two-read `sample` was the cause, and it predates 03bdd00: that commit's late-address rework neither caused nor cured slice 4's failure. The one-read fix is sound, and the address in the entry's bits 8-15 costs nothing (a register never drives DD8-15). 03bdd00's theory for the bridge in PIO 3 (the address settling after the strobe) is not its fault: the read side now follows the bus and PIO 3 still fails.
+
+**Three doubts about the PIO 3 evidence:**
+
+1. **"The bridge never read the block" isn't shown yet.** The write log's DRQ flag is the device's own state, which clears only once core 1 sees D's FIFO down to the spare word (`dataInDone`). A block the drive counts one word short looks the same in that log as one never touched. Console `R` already prints what tells them apart: `TABLETEST blocks=... [... fetched= end_level= ... why=3]`, written by `stopDataIn` at each stop. While the stream is still running, `fetched - end_level` is the number of words D gave the host: 0 (and `fetched=8 end_level=8`) is a block never read; 255 or so is a block read but miscounted. The note quotes neither.
+2. **`intrq_rises=1` says nothing in table mode.** `s` prints `ide_bus::intrqRises()`, which counts in `ide_bus`'s `setIntrq`; the table raises INTRQ through `ide_table::setIntrq` (forced SETs on C), which counts nothing. So the idea that the bridge waits for an INTRQ that never comes has no evidence for or against it.
+3. **An abandoned block leaves its words in D's FIFO.** `stopDataIn` aborts the stream, but only `startDataIn` (`dReset`) empties the FIFO, and that comes after the fetch. A host that reads data between a Command write and the next block's DRQ gets up to 8 words of the block before, then the last of them repeated. That is 8 words of the previous sector, not the whole of it, so it doesn't explain what the Mac saw; but a bridge that reads early should get junk, not old data that looks right.
+
+**What would explain a whole previous sector.** The drive can only have given sector N whole between N's DRQ and the next Command write. If the block records show it did (`fetched - end_level` near 256, `why=3`), the bridge reads the data, the drive's count is short, and the fault is ours: look at the block's first and last reads in `OBSSNAP`. If they show 0, the data the host got for the next command came from the bridge itself, and the question is what the bridge was waiting for: INTRQ (count it), or a Status value (the snapshot's `a=17`/`a=0e` reads).
+
+**Changes to make for the next rig session** (next commit): empty D's FIFO when a block is abandoned; count the table's INTRQ rises and show them in `s`; print the words the host took in each block record.
+
 ## Open
 
 - **The Innostor bridge in PIO 3:** *13 Nov, on the rig*: it never reads a READ's block, and each read returns the previous command's sector. Cause not known; next steps there. `mode = pio2` works (slices 3 and 4), at no cost through USB.
