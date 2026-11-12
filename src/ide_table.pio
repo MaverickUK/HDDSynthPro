@@ -3,9 +3,10 @@
 ; for core 1. Block 0, which owns DD0-15 and IORDY.
 ;
 ; Pin mapping (ide_table.cpp; bit numbers as in bus_sample.h):
-;   IN_BASE  = GPIO4 (DD0): one 32-bit pin read is a full access sample
+;   IN_BASE  = GPIO20 (DA0), IN_COUNT 5: a pin read is the address alone,
+;              DA0-2, CS0#, CS1# (bits 0-4), the higher bits read as 0
 ;   OUT_BASE = GPIO4, 16 pins: DD0-15
-;   wait gpio 26 = DIOR#
+;   JMP_PIN  = wait gpio 26 = DIOR#
 ;
 ; ---- R0-R2: the registers ------------------------------------------------------
 ;
@@ -22,32 +23,45 @@
 ; all, not even the output latch, which D may be writing for the same read.
 ;
 ; ISR holds the state machine's claim, loaded once by the C side: DA2, CS0#
-; and CS1# as the sample has them (R0 4, R1 5, R2 3). Nothing else uses ISR.
+; and CS1# (R0 4, R1 5, R2 3). Nothing else uses ISR.
 ;
-; About 12 cycles (60 ns at 200 MHz) from DIOR# falling, through the input
-; synchroniser, to DD driven; ide_table_data holds IORDY meanwhile for hosts
-; that wait, and hosts that don't have strobes of 165 ns or more.
+; The answer is ready before the strobe: the state machine whose address is
+; on the bus spins with its entry in OSR, re-reading the entry and the address
+; every 4 cycles, and drives DD within about 35 ns of DIOR# falling. The
+; register table first answered from the strobe, about 90 ns on (12 Nov
+; 2026). DIOR# skips the input synchroniser and the address doesn't, so after
+; the strobe the address is checked once more, as of 2 cycles after it, no
+; earlier than D's look at it. A host that changes the address with
+; the strobe gets the new register: the Innostor bridge moves from Status to
+; Data with DA2 changing as DIOR# falls, and R1, checking first, answered LBA
+; Mid over D's first data word (12 Nov 2026); the PIIX in compatible timing
+; does it too. Driven about 50 ns after the strobe at most once spinning,
+; about 100 ns after a change of address; ide_table_data holds IORDY
+; meanwhile for hosts that wait.
 .pio_version 1
 .program ide_table_reg
 .fifo txget
-public rise:
-.wrap_target
-    wait 1 gpio 26                  ; DIOR# high: between reads
-    wait 0 gpio 26                  ; DIOR# falls: a read
-    nop                     [1]     ; DIOR# skips the synchroniser, the address doesn't:
-    mov osr, pins                   ; two cycles for it to catch up (the PIIX changes it with the strobe)
-    out null, 18                    ; DD0-15, DA0-1
-    out x, 3                        ; DA2, CS0#, CS1#
+public sample:
+    mov osr, pins                   ; the address
+    out null, 2                     ; DA0-1
+    mov x, osr                      ; DA2, CS0#, CS1#
     mov y, isr                      ; my claim
-    jmp x!=y rise                   ; another state machine's, or nobody's
-    mov osr, pins                   ; again (the address holds through the strobe)
-    out null, 16
-    out y, 2                        ; DA1-0: which entry
-    mov osr, rxfifo[y]              ; its value and drive mask
+    jmp x!=y sample                 ; another state machine's, or nobody's
+    mov y, pins                     ; the address: DA1-0 pick the entry
+    mov osr, rxfifo[y]
     mov x, osr
-    jmp !x rise                     ; an empty entry: not the drive's, or D's (the data register)
+    jmp !x sample                   ; an empty entry: not the drive's, or D's (the data register)
+.wrap_target                        ; after a read: spinning again, if the address hasn't moved
+spin:
+    mov osr, rxfifo[y]              ; the entry as it is now
+    mov x, pins
+    jmp x!=y sample                 ; the address moved on
+    jmp pin spin                    ; until DIOR# falls; it skips the synchroniser, the address doesn't:
+    nop                     [1]
+    mov x, pins                     ; the address as of 2 cycles after the strobe, no earlier than D's look
+    jmp x!=y sample                 ; changed with the strobe: not this entry (D's, if the data register)
     out pins, 16                    ; onto DD0-15 (still inputs)
-    out pindirs, 16                 ; drive them, or not
+    out pindirs, 16                 ; drive them
     wait 1 gpio 26                  ; hold the value until DIOR# rises
     mov pindirs, null               ; release DD0-15
 .wrap
@@ -71,16 +85,19 @@ public rise:
 ; word, never pulled: the FIFO holding just that is how core 1 knows the host
 ; has read the whole block. The channel's completion starts the busy write.
 ;
-; Y holds the data register's address bits (DA2-0 = 0, CS0# low, CS1# high:
-; 16), set by the C side.
+; IN_BASE and IN_COUNT as R0-R2's: a pin read is the address. Y holds the
+; data register's (DA2-0 = 0, CS0# low, CS1# high: 16), set by the C side.
 .program ide_table_data
 .side_set 1 opt pindirs
+regs:                               ; a register: IORDY low until R0-R2 have answered, even
+    nop                     side 1 [7]  ; one whose address changed with the strobe
+    nop                            [7]  ; (about 25 ns after the strobe, inside tA's 35)
+    wait 1 gpio 26          side 0  ; release IORDY; DIOR# rises; on into top
 public top:
 .wrap_target
-    wait 0 gpio 26                  ; DIOR# falls (unsynchronised): a read
-    mov osr, pins                   ; its address (synchronised: as of two cycles before)
-    out null, 16                    ; DD0-15
-    out x, 5                        ; DA2-0, CS0#, CS1#
+    wait 0 gpio 26          [2]     ; DIOR# falls (unsynchronised): a read
+    mov x, pins                     ; its address, as of 2 cycles after the strobe (the synchroniser's
+                                    ; 2 cycles): settled for a host that changes it with the strobe
     jmp x!=y regs                   ; not the data register: R0-R2's
     pull noblock                    ; the next word (outside a block: X, junk, as a real
                                     ; drive gives; a blocking pull held IORDY for good)
@@ -89,8 +106,3 @@ public top:
     wait 1 gpio 26                  ; hold the word until DIOR# rises; IORDY untouched
     mov pindirs, null               ; release DD0-15
 .wrap
-regs:                               ; a register: IORDY low until R0-R2 have answered
-    nop                     side 1 [7]  ; (about 25 ns after the strobe, inside tA's 35)
-    nop                            [5]
-    wait 1 gpio 26          side 0  ; release IORDY; DIOR# rises
-    jmp top

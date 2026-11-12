@@ -297,7 +297,13 @@ static volatile uint32_t g_c1_iser[2], g_c1_primask;  // core 1's interrupt set-
 #endif
 static uint32_t g_bench_pio, g_bench_ram, g_bench_sio, g_bench_nop;  // cycles per 1000, measured in setup1
 static volatile uint32_t g_bench_var;
-static uint32_t g_bench_pio_ram, g_bench_nop_ram;  // the same loops, from core 1's RAM code
+static uint32_t g_bench_pio_ram, g_bench_nop_ram;
+
+#ifdef HDDPRO_OBS_REGS
+namespace bus_observer { extern volatile bool g_obs_rearm; }
+#endif
+volatile uint32_t g_wlog_pos[64];
+volatile uint32_t g_wlog[64]; volatile uint32_t g_wlog_n;  // bench: the table's last writes  // the same loops, from core 1's RAM code
 CORE1_RAM __attribute__((noinline)) static void benchFromRam() {
     uint32_t t = m33_hw->dwt_cyccnt;
     for (int i = 0; i < 1000; ++i) __asm volatile("nop");
@@ -827,7 +833,7 @@ CORE1_FOR(hdcd::Device, CORE1_RAM_CD)
 // once the block is done. The hard disk only. Never returns.
 template <class Dev>
 __attribute__((always_inline)) static inline ide_table::Image tableImage(Dev& dev) {
-    constexpr uint32_t DRIVE = 0xFFFF0000;
+    constexpr uint32_t DRIVE = 0xFFFF0000;  // BISECT: the fix is 0x00FF0000, DD0-7 (ide_table.cpp)
     ide_table::Image m;
     m.error = DRIVE | dev.peek(ata::Reg::ErrorFeatures);
     m.sector_count = DRIVE | dev.peek(ata::Reg::SectorCount);
@@ -877,6 +883,8 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         // queueCommand makes the device busy too, so C1 is armed again.
         uint32_t sample;
         while (ide_table::popWrite(sample)) {
+            g_wlog_pos[g_wlog_n & 63] = ide_table::observerRingIndex();
+            g_wlog[g_wlog_n & 63] = sample | (dev.status() & ata::ST_DRQ ? 0x80000000u : 0) | (dev.commandQueued() ? 0x40000000u : 0); g_wlog_n = g_wlog_n + 1;
             bus::Block block = bus::block(sample);
             ata::Reg reg = ata::regFor(block == bus::Block::Command, block == bus::Block::Control, bus::address(sample));
             if (reg == ata::Reg::Data || reg == ata::Reg::None) continue;  // WD has the data words
@@ -2519,6 +2527,83 @@ static void runShortTest() {
     for (;;) tight_loop_contents();
 }
 
+// Bench (12 Nov 2026, the Innostor bridge): core 0 logs every edge of the bus's
+// control lines for 2 ms from the end of the next read command's Command write
+// (20h, C4h, C8h), into `ev` (cycles in bits 0-24; the lines in 25-31).
+static void edgeLog(uint32_t* ev, uint32_t cap) {
+    static constexpr unsigned LINES[8] = {cfg::PIN_INTRQ,  cfg::PIN_DIOR_N,  cfg::PIN_DIOW_N,  cfg::PIN_IORDY,
+                                          cfg::PIN_CS0_N,  cfg::PIN_DA0,     cfg::PIN_DA0 + 1, cfg::PIN_DA0 + 2};
+    uint32_t mask = 0;
+    for (unsigned l : LINES) mask |= 1u << l;
+    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 0's cycle counter
+    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
+    const uint32_t cmd = (7u << cfg::PIN_DA0) | (1u << cfg::PIN_CS1_N);  // DA 7, CS0# low, CS1# high
+    const uint32_t amask = (7u << cfg::PIN_DA0) | (1u << cfg::PIN_CS0_N) | (1u << cfg::PIN_CS1_N);
+    Serial.printf("# waiting for a read command\n");
+    Serial.flush();
+    uint32_t start = time_us_32();
+    uint8_t command = 0;
+    for (;;) {
+        if (time_us_32() - start > 20000000) { Serial.printf("# none\n"); return; }
+        uint32_t g = sio_hw->gpio_in;
+        if ((g & (1u << cfg::PIN_DIOW_N)) || (g & amask) != cmd) continue;
+        uint32_t last = g;
+        while (!((g = sio_hw->gpio_in) & (1u << cfg::PIN_DIOW_N))) last = g;
+        command = uint8_t(last >> cfg::PIN_DD0);
+        if (command == 0x20 || command == 0xC4 || command == 0xC8) break;
+    }
+    auto pack = [&](uint32_t c, uint32_t g) {
+        uint32_t v = c & 0xFFFFFF;
+        for (unsigned k = 0; k < 8; ++k) v |= ((g >> LINES[k]) & 1) << (24 + k);
+        return v;
+    };
+    // The last 16 edges kept in a ring until the address leaves Status (DA 7),
+    // then everything from there: the change from Status to Data.
+    uint32_t n = 0, last = sio_hw->gpio_in & mask, t0 = m33_hw->dwt_cyccnt;
+    const uint32_t da_mask = 7u << cfg::PIN_DA0;
+    uint32_t ring = 0;
+    ev[ring++ % 16] = pack(0, last);
+    for (uint32_t spin = 0;; ++spin) {
+#if FIRMWARE_SLICE != 0
+        if (spin % 256 == 255) serveFetches();  // the read's sector, or it never comes
+#endif
+        uint32_t g = sio_hw->gpio_in & mask;
+        if (g != last) ev[ring++ % 16] = pack(m33_hw->dwt_cyccnt - t0, g), last = g;
+        if ((g & da_mask) != da_mask || m33_hw->dwt_cyccnt - t0 > 200000000u) break;  // or 1 s
+    }
+    {
+        uint32_t keep = ring < 16 ? ring : 16, tmp[16];
+        for (uint32_t k = 0; k < keep; ++k) tmp[k] = ev[(ring - keep + k) % 16];
+        for (uint32_t k = 0; k < keep; ++k) ev[k] = tmp[k];
+        n = keep;
+    }
+    uint32_t t1 = m33_hw->dwt_cyccnt;
+    // Data register strobes left out (they'd fill the buffer in two sectors), counted instead
+    const uint32_t data_addr = 0, data_mask = da_mask | (1u << cfg::PIN_CS0_N);
+    uint32_t data_reads = 0;
+    bool was_low = false;
+    for (uint32_t spin = 0; m33_hw->dwt_cyccnt - t1 < 2000000u && n < cap; ++spin) {  // 10 ms at 200 MHz
+#if FIRMWARE_SLICE != 0
+        if (spin % 256 == 255) serveFetches();
+#endif
+        uint32_t g = sio_hw->gpio_in & mask;
+        if ((g & data_mask) == data_addr) {
+            bool low = !(g & (1u << cfg::PIN_DIOR_N));
+            if (low && !was_low) ++data_reads;
+            was_low = low;
+            g |= 1u << cfg::PIN_DIOR_N;
+        }
+        if (g != last) ev[n++] = pack(m33_hw->dwt_cyccnt - t0, g), last = g;
+    }
+    Serial.printf("# data reads %lu\n", (unsigned long)data_reads);
+    Serial.printf("EDGES n=%lu command=%02x (ns intrq dior diow iordy cs0 da0 da1 da2)\n", (unsigned long)n, command);
+    for (uint32_t i = 0; i < n; ++i) {
+        Serial.printf("E %lu", (unsigned long)((ev[i] & 0xFFFFFF) * 5));
+        for (unsigned k = 0; k < 8; ++k) Serial.printf(" %d", int((ev[i] >> (24 + k)) & 1));
+        Serial.printf("\n");
+    }
+}
+
 static void handleConsole() {
     while (Serial.available()) {
         int c = Serial.read();
@@ -2624,6 +2709,11 @@ static void handleConsole() {
                 Serial.printf("WINDOW %s\n", on ? "on" : "off");
                 break;
             }
+            case 'G': {  // bench: edges from the next read command (edgeLog)
+                static uint32_t ev[2048];
+                edgeLog(ev, 2048);
+                break;
+            }
 #endif
 #if FIRMWARE_SLICE != 0
             case 'r':
@@ -2637,13 +2727,31 @@ static void handleConsole() {
                 ide_bus::resetEarlyProfile();
                 ide_bus::resetLaneStats();
                 break;
+            case 'G': {  // bench: edges from the next read command, into the table's capture buffer
+                const uint32_t* cap_pins; const uint16_t* cap_d; ide_table::capture(cap_pins, cap_d);
+                edgeLog(const_cast<uint32_t*>(cap_pins), 1024);
+                break;
+            }
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 'P': bus_letter_next = true; break;  // a bus program until a power cycle
             case 'Z':  // bench: the register table's timeline from the next Command write
+#ifdef HDDPRO_OBS_REGS
+                { bus_observer::g_obs_rearm = true; Serial.printf("# obs rearmed\n"); }
+#else
                 if (ide_table::running()) ide_table::armCommandCapture(), Serial.printf("# armed\n");
+#endif
                 break;
             case 'R':  // bench: the register table's records (no tests)
                 if (ide_table::running()) {
+                    {
+                        uint32_t n = g_wlog_n, from = n > 64 ? n - 64 : 0;
+                        Serial.printf("WLOG n=%lu (reg data drq queued)\n", (unsigned long)n);
+                        for (uint32_t i = from; i < n; ++i) {
+                            uint32_t s = g_wlog[i & 63];
+                            bus::Block b = bus::block(s);
+                            Serial.printf("W @%u %d %04x %d%d\n", unsigned(g_wlog_pos[i & 63] % bus_observer::ringSize()), int(ata::regFor(b == bus::Block::Command, b == bus::Block::Control, bus::address(s))), unsigned(bus::data(s)), int(s >> 31), int((s >> 30) & 1));
+                        }
+                    }
                     {
                         const uint32_t* pins;
                         const uint16_t* d;

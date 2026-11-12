@@ -146,25 +146,28 @@ uint32_t ringWords() { return RING_WORDS; }
 unsigned ringChannel() { return s_dma; }
 
 #ifdef HDDPRO_OBS_REGS  // bench: what the host latched, as it leaves the ring
-static void obsShow(Print& out, uint32_t word) {
+volatile bool g_obs_rearm = false;
+static void obsShow(Print& out, uint32_t word, uint32_t at) {
     static unsigned regs = 0, data = 0;
+    if (g_obs_rearm) g_obs_rearm = false, regs = 0, data = 0;
     static uint16_t line[8];
     if (((word >> 16) & 0x1F) != 0x10) {
-        if (regs < 120) {
+        if (regs < 600) {
             ++regs;
-            out.printf("OBSREG da=%u value=%04x after_data=%u\n", unsigned((word >> 16) & 7), unsigned(word & 0xFFFF), data);
+            out.printf("OBSREG @%u blk=%02x value=%04x strobe_ns=%u after_data=%u\n", unsigned(at), unsigned((word >> 16) & 0x1F), unsigned(word & 0xFFFF), sector_check::strobeNs(word), data);
         }
         return;
     }
-    if (data >= 2600) return;
+    if (data >= 1300) return;
     line[data % 8] = uint16_t(word);
     if (++data % 8 == 0)
+        if (data == 8) out.printf("OBSDATA starts @%u\n", unsigned((at + RING_WORDS - 7) % RING_WORDS));
         out.printf("OBSDATA %3u %04x %04x %04x %04x %04x %04x %04x %04x\n", data - 8, line[0], line[1], line[2],
                    line[3], line[4], line[5], line[6], line[7]);
 }
-#define OBS_SHOW(w) obsShow(out, (w))
+#define OBS_SHOW(w, at) obsShow(out, (w), (at))
 #else
-#define OBS_SHOW(w) ((void)0)
+#define OBS_SHOW(w, at) ((void)0)
 #endif
 
 void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
@@ -199,15 +202,15 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
                 s_checker->alignAt();
                 break;
             }
-            OBS_SHOW(s_ring[s_read]);
+            OBS_SHOW(s_ring[s_read], s_read);
             s_read = (s_read + 1) % RING_WORDS;
             ++s_dropped;
         }
         if (!s_checker->aligned() && !endsData(s_ring[s_read])) break;
         if (s_read == written) break;
         uint32_t word = s_ring[s_read];
+        OBS_SHOW(word, s_read);
         s_read = (s_read + 1) % RING_WORDS;
-        OBS_SHOW(word);
         if (!s_checker->observe(word, check)) continue;
         const sector_check::Mismatch& m = s_checker->mismatch();
         if (m.lba == sector_check::IDENTIFY_LBA) {

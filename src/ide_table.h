@@ -34,6 +34,7 @@ bool popWrite(uint32_t& sample);
 // bus_observer's ring, in order: its absolute position now, and whether a
 // Status read (which acknowledges the interrupt) came at or after `since`.
 uint32_t observerPosition();
+uint32_t observerRingIndex();  // bench
 bool statusReadSince(uint32_t since);
 
 // C's busy write: armed for the next Command write. Core 1 re-arms it once

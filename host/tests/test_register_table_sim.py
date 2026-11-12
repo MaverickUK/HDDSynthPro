@@ -22,10 +22,11 @@ from hddproto.pio_sim import CYCLE_PS, DmaToTx, PioBlock, PioSim
 pytestmark = pytest.mark.sim
 
 DIOR_BIT, IORDY_BIT = 22, 24
+ADDRESS_BIT, ADDRESS_PINS = 16, 5    # IN_BASE (DA0) and IN_COUNT, for R0-R2 and D
 DATA_ADDRESS = 16                  # DA2-0 = 0, CS0# low, CS1# high: D's Y
 CLAIMS = {"R0": 4, "R1": 5, "R2": 3}  # DA2, CS0#, CS1#, as ide_table.cpp loads ISR
-DRIVE = 0xFFFF0000
-BUSY = DRIVE | 0x80                # the busy Status entry
+DRIVE = 0x00FF0000                 # DD0-7 only, as a drive answers its 8-bit registers
+BUSY = DRIVE | 0xD0                # the busy Status entry: BSY, DRDY, DSC
 SPARE = 0xDEAD                     # the word the stream adds after each block
 ALL_MODES = {**PIO_MODES, **FAST_PIO_MODES}
 NO_WAIT = {m: dataclasses.replace(t, waits_for_iordy=False) for m, t in PIO_MODES.items()}
@@ -34,6 +35,10 @@ NO_WAIT = {m: dataclasses.replace(t, waits_for_iordy=False) for m, t in PIO_MODE
 PIIX = dataclasses.replace(Mode0(), t1=0, t2=175, t0=600, waits_for_iordy=False)
 # The Innostor USB bridge before it sets a mode (docs/register-table.md).
 INNOSTOR = dataclasses.replace(Mode0(), t1=170, t2=600, t0=1000, waits_for_iordy=False)
+# The Innostor once it has set PIO mode 4: its first Status read after a
+# Command write is a 75 ns strobe at the same address, not waiting for IORDY
+# (12 Nov 2026, the observer's strobe lengths).
+INNOSTOR_MODE4 = dataclasses.replace(ALL_MODES[4], t2=75, waits_for_iordy=False)
 
 REGISTERS = {  # (block, DA): value
     ("CMD", 1): 0x01, ("CMD", 2): 0x01, ("CMD", 3): 0x01, ("CMD", 4): 0x00,
@@ -58,12 +63,14 @@ class Table:
         bypass = 1 << DIOR_BIT  # DIOR# skips the synchroniser in block 0 (ide_table.cpp); the address doesn't
         self.r = {}
         for name, claim in CLAIMS.items():
-            sm = PioSim(reg_program, out_base=0, out_count=16, bypass_mask=bypass)
+            sm = PioSim(reg_program, out_base=0, out_count=16, bypass_mask=bypass, jmp_pin=DIOR_BIT,
+                        in_base=ADDRESS_BIT, in_count=ADDRESS_PINS)
             sm.isr = claim
             self.r[name] = sm
         self.d = PioSim(data_program, out_base=0, out_count=16, sideset_base=IORDY_BIT,
-                        fifo_depth=4, tx_depth=8, bypass_mask=bypass)
+                        fifo_depth=4, tx_depth=8, bypass_mask=bypass, in_base=ADDRESS_BIT, in_count=ADDRESS_PINS)
         self.d.y = DATA_ADDRESS
+        self.d.pc = data_program.wrap_target  # `top`, as ide_table.cpp starts it
         self.load(registers)
         # Empty entries: the data register (D's), and R2's addresses that aren't the drive's
         self.r["R0"].rxf[0] = 0
@@ -160,7 +167,7 @@ def test_a_changed_register_is_read_fresh_at_the_next_strobe(programs):
 
     def change_after_first(block):
         original(block)
-        if not changed["done"] and table.d.pc == 0 and block.cycle > 60:
+        if not changed["done"] and table.d.pc == table.d.program.wrap_target and block.cycle > 60:
             table.r["R1"].rxf[3] = DRIVE | 0x58
             changed["done"] = True
 
@@ -186,7 +193,7 @@ def test_a_data_block_reads_right_then_status_shows_busy(programs, timing):
     got = [r.read_value for r in run.results[:256]]
     bad = [i for i, (g, w) in enumerate(zip(got, words)) if g != w]
     assert not bad, f"{len(bad)} words wrong, first at {bad[0]}: {got[bad[0]]} want {words[bad[0]]:04x}"
-    assert [r.read_value & 0xFF for r in run.results[256:]] == [0x80, 0x80]
+    assert [r.read_value & 0xFF for r in run.results[256:]] == [0xD0, 0xD0]
 
 
 def test_core1_sees_the_block_done_only_after_the_last_word(programs):
@@ -283,7 +290,7 @@ def test_a_data_block_written_lands_in_the_buffer_then_status_shows_busy(program
     run = run_host(table.block, idle_core1(), accesses, timing=ALL_MODES[mode], observers=(writes.block,))
     assert not run.errors
     assert writes.buffer == data
-    assert run.results[-1].read_value & 0xFF == 0x80
+    assert run.results[-1].read_value & 0xFF == 0xD0
 
 
 @pytest.mark.parametrize("timing", [NO_WAIT[0], PIIX, ALL_MODES[3], ALL_MODES[4]],
@@ -299,7 +306,7 @@ def test_status_shows_busy_400_ns_after_a_command_write(programs, write_programs
     busy_ns = writes.busy_written_at * CYCLE_PS / 1000
     assert busy_ns - command.rise_ns < 400, f"busy {busy_ns - command.rise_ns:.0f} ns after the write"
     if status.fall_ns - command.rise_ns >= 400:  # as ATA lets the host read it
-        assert status.read_value & 0xFF == 0x80 and alt.read_value & 0xFF == 0x80
+        assert status.read_value & 0xFF == 0xD0 and alt.read_value & 0xFF == 0xD0
 
 
 def test_reads_never_reach_the_write_side(programs, write_programs):
@@ -321,3 +328,70 @@ def test_data_reads_never_hold_iordy(programs, mode):
     assert not run.errors
     assert [r.read_value for r in run.results] == words
     assert not any(r.iordy_low_at_tA for r in run.results)
+
+
+@pytest.mark.parametrize("timing", [INNOSTOR_MODE4, dataclasses.replace(ALL_MODES[3], waits_for_iordy=False)],
+                         ids=["innostor-mode4", "mode3-no-wait"])
+def test_a_status_read_straight_after_the_command_write_sees_busy(programs, write_programs, timing):
+    # The answer must be on DD before a short strobe ends: answered from the
+    # strobe (about 90 ns), the bridge read the undriven bus, 7Fh, as ready
+    # and took a block that wasn't there yet.
+    table = Table(programs)
+    writes = Writes(write_programs, table)
+    accesses = [Access(True, "CMD", 7, 0x20, hold_cs=True)] + [Access(False, "CMD", 7, hold_cs=True)] * 3
+    accesses += [Access(False, "CMD", 7)]
+    run = run_host(table.block, idle_core1(), accesses, timing=timing, observers=(writes.block,))
+    assert not run.errors
+    values = [r.read_value for r in run.results[1:]]
+    assert all(v is not None for v in values), f"undriven: {values}"
+    assert [v & 0xFF for v in values] == [0xD0] * 4, [hex(v) for v in values]
+
+
+@pytest.mark.parametrize("timing", [INNOSTOR_MODE4, dataclasses.replace(ALL_MODES[3], waits_for_iordy=False)],
+                         ids=["innostor-mode4", "mode3-no-wait"])
+def test_back_to_back_polls_with_short_strobes_read_every_change(programs, timing):
+    # Status polls at one address, the value changing between them: each poll
+    # sees the value as it was a few cycles before its strobe, never older.
+    # The first follows a new address by only t1 (25-30 ns): from an address
+    # change the answer takes about 95 ns, so only a host that waits for IORDY
+    # (as every mode 3 and 4 host must) reads that one right.
+    table = Table(programs)
+    reads = [Access(False, "CMD", 7, hold_cs=True)] * 6 + [Access(False, "CMD", 7)]
+    seen = []
+    original = table.block.on_cycle
+
+    def change(block):
+        original(block)
+        # a new value every 100 cycles (500 ns), as core 1 publishes
+        table.r["R1"].rxf[3] = DRIVE | (0x50 + (block.cycle // 100) % 8)
+        seen.append((block.cycle, table.r["R1"].rxf[3] & 0xFF))
+
+    table.block.on_cycle = change
+    run = run_host(table.block, idle_core1(), reads, timing=timing)
+    assert not run.errors
+    for r in run.results[1:]:
+        assert r.read_value is not None, f"undriven at {r.fall_ns} ns"
+        fall = int(r.fall_ns * 1000 / CYCLE_PS)
+        # the value at some cycle from 8 before the strobe to the strobe's end
+        window = {v for c, v in seen if fall - 8 <= c <= fall + int(timing.t2 * 1000 / CYCLE_PS)}
+        assert r.read_value & 0xFF in window, (r.fall_ns, hex(r.read_value), window)
+
+
+@pytest.mark.parametrize("timing", [dataclasses.replace(PIO_MODES[2], t1=0), dataclasses.replace(PIO_MODES[2], t1=5),
+                                    dataclasses.replace(PIO_MODES[0], t1=0), PIIX],
+                         ids=["pio2-t1=0", "pio2-t1=5", "pio0-t1=0", "piix"])
+def test_the_first_data_read_after_status_polls_with_no_address_setup(programs, timing):
+    # The Innostor bridge goes from its Status polls to the data with the
+    # address changing as DIOR# falls (DA2 last): R1 answered LBA Mid (01Bh)
+    # over D's first word (12 Nov 2026), and D, looking too early, could take
+    # the read for a register and leave the word for the next read.
+    words = sector(13)
+    registers = {**REGISTERS, ("CMD", 4): 0x1B, ("CMD", 7): 0x58}
+    table = Table(programs, registers=registers, block_words=words)
+    accesses = [Access(False, "CMD", 7, hold_cs=True)] * 3
+    accesses += [Access(False, "CMD", 0, hold_cs=True)] * 7 + [Access(False, "CMD", 0)]
+    run = run_host(table.block, idle_core1(), accesses, timing=timing)
+    assert not run.errors
+    assert [r.read_value & 0xFF for r in run.results[:3]] == [0x58] * 3
+    assert [r.read_value for r in run.results[3:]] == words[:8], [hex(v) if v is not None else None for v in
+                                                                   (r.read_value for r in run.results[3:])]

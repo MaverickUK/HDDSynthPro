@@ -93,6 +93,10 @@ class PioSim:
     out_count: int = 32
     sideset_base: int = 0
     jmp_pin: int = 0
+    # IN_BASE (relative to the pins the harness passes, as `in_base` bits up)
+    # and IN_COUNT (RP2350: pins above it read as 0 by IN, MOV and relative WAIT)
+    in_base: int = 0
+    in_count: int = 32
     fifo_depth: int = 8          # 8 = RX (or TX) joined; the slice 1 program uses 4 each way
     tx_depth: int = 4
     bypass_mask: int = 0         # pins that skip the input synchroniser
@@ -127,6 +131,10 @@ class PioSim:
     def _advance(self):
         p = self.program
         self.pc = p.wrap_target if self.pc == p.wrap else self.pc + 1
+
+    def _in_pins(self, pins: int) -> int:
+        value = (pins >> self.in_base) & MASK32
+        return value & ((1 << self.in_count) - 1) if self.in_count < 32 else value
 
     def _set_bits(self, current: int, base: int, count: int, value: int) -> int:
         mask = ((1 << count) - 1) << base
@@ -206,8 +214,8 @@ class PioSim:
             polarity, source, index = (instr >> 7) & 1, (instr >> 5) & 3, instr & 0x1F
             if source == 0:      # absolute GPIO
                 bit = index - GPIO_OFFSET
-            elif source == 1:    # relative to IN_BASE (bit 0)
-                bit = index
+            elif source == 1:    # relative to IN_BASE
+                bit = self.in_base + index
             elif source == 3:    # relative to JMP_PIN (PIO v1)
                 bit = self.jmp_pin + index
             else:                # IRQ flag: WAIT 1 clears it as it proceeds
@@ -227,7 +235,7 @@ class PioSim:
 
         if opcode == 0b010:  # IN, shifting right: new bits enter at the top
             src, count = (instr >> 5) & 7, (instr & 0x1F) or 32
-            value = {0: pins, 1: self.x, 2: self.y, 3: 0, 6: self.isr, 7: self.osr}.get(src)
+            value = {0: self._in_pins(pins), 1: self.x, 2: self.y, 3: 0, 6: self.isr, 7: self.osr}.get(src)
             if value is None:
                 raise NotImplementedError(f"in source {src}")
             value &= (1 << count) - 1
@@ -272,7 +280,7 @@ class PioSim:
                     raise NotImplementedError("mov from STATUS without status_rx_below")
                 value = MASK32 if len(self.rx_fifo) < self.status_rx_below else 0
             else:
-                value = {0: pins, 1: self.x, 2: self.y, 3: 0, 6: self.isr, 7: self.osr}.get(src)
+                value = {0: self._in_pins(pins), 1: self.x, 2: self.y, 3: 0, 6: self.isr, 7: self.osr}.get(src)
             if value is None:
                 raise NotImplementedError(f"mov source {src}")
             if op == 1:

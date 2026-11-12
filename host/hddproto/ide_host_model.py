@@ -296,8 +296,14 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
                     diow = 1
                     host_dd_until = t + T["t4"]
                 else:
-                    cur.read_value = (sim.pin_out & DD_MASK) if dev_drive == DD_MASK else (
-                        kept_dd if dd_keeper else None)
+                    if dev_drive == DD_MASK:
+                        cur.read_value = sim.pin_out & DD_MASK
+                    elif not (a.block == "CMD" and a.addr == 0) and dev_drive & 0xFF == 0xFF:
+                        # an 8-bit register: DD0-7 driven, as a drive answers;
+                        # the lines it leaves read as the host's pull-ups
+                        cur.read_value = (sim.pin_out & dev_drive & DD_MASK) | (DD_MASK & ~dev_drive)
+                    else:
+                        cur.read_value = kept_dd if dd_keeper else None
                     if drive_since is not None:
                         cur.data_setup_ns = (t - drive_since) / 1000
                     dior = 1
