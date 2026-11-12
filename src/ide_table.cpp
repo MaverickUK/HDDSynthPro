@@ -24,12 +24,11 @@ constexpr unsigned COMMAND_ADDRESS = 23;  // DA 7, CS0# low
 constexpr unsigned ADDRESS_PINS = 5;      // block 0's reads: DA0-2, CS0#, CS1#
 // R0-R2's claims: DA2, CS0#, CS1#, as the program's `out x, 3` reads them.
 constexpr unsigned CLAIM_R0 = 4, CLAIM_R1 = 5, CLAIM_R2 = 3;
-// BISECT (12 Nov 2026): all 16 lines, as this morning. The fix drives DD0-7 only (0x00FF0000):
-// the registers are 8 bits, and a drive leaves DD8-15 to the host's pulls. Not the slice 4 cause.
-constexpr uint32_t DRIVE = 0xFFFF0000;
-// BISECT step 2: 80h, as this morning. The fix is D0h (BSY, DRDY, DSC: what a drive shows while
-// busy; the Innostor bridge took a bare 80h as no wait needed).
-constexpr uint32_t BUSY = DRIVE | 0x80;
+// DD0-7 only: the registers are 8 bits, and a drive leaves DD8-15 to the host's pulls.
+constexpr uint32_t DRIVE = 0x00FF0000;
+// BSY, DRDY, DSC: what a drive shows while busy (the Innostor bridge took a bare 80h as no
+// wait needed, 12 Nov 2026).
+constexpr uint32_t BUSY = DRIVE | 0xD0;
 constexpr uint32_t DRIVEN_PINS = (0xFFFFu << cfg::PIN_DD0) | (1u << cfg::PIN_IORDY);
 constexpr uint32_t PULL_NOBLOCK = 0x8080;  // pio_encode_pull(false, false), for core 1
 constexpr uint32_t SET_PINS_0 = 0xe000, SET_PINS_1 = 0xe001;        // pio_encode_set(pio_pins, v)
@@ -43,6 +42,7 @@ PIO s_wpio = nullptr;     // block 1: the write side
 uint s_w, s_wd, s_c;
 bool s_running = false;
 uint32_t s_d_start = 0;  // `jmp` to D's start, for dReset
+uint32_t s_d_midread = 0;  // and to where it waits out a read already under way
 uint32_t s_reg_start = 0;  // `jmp` to R0-R2's start (sample), for restart
 
 // DMA channels (the design note's table)
@@ -127,8 +127,9 @@ void begin() {
     pio_sm_set_pins_with_mask(s_pio, s_d, 0, 1u << cfg::PIN_IORDY);  // IORDY's value 0: an output pulls it low
     pio_sm_set_pindirs_with_mask(s_pio, s_d, 0, DRIVEN_PINS);       // everything released
     // DIOR# skips the input synchroniser, so D pulls IORDY low inside tA (35 ns)
-    // and R0-R2 drive DD within about 35 ns; everything else goes through it, and
-    // R0-R2 check the address again two cycles after the strobe (ide_table.pio).
+    // and R0-R2 drive DD within about 30 ns; everything else goes through it, and
+    // R0-R2 and D first look at the address as of two cycles after the strobe,
+    // then follow it while DIOR# is low (ide_table.pio).
     s_pio->input_sync_bypass &= ~(0xFFFFFFFFu >> (32 - (cfg::BUS_LAST_PIN + 1)));
     s_pio->input_sync_bypass |= 1u << (cfg::PIN_DIOR_N - pio_get_gpio_base(s_pio));
 
@@ -158,6 +159,7 @@ void begin() {
         pio_sm_config c = ide_table_data_program_get_default_config(data_offset);
         sm_config_set_in_pins(&c, cfg::PIN_DA0);  // as R0-R2: the address
         sm_config_set_in_pin_count(&c, ADDRESS_PINS);
+        sm_config_set_jmp_pin(&c, cfg::PIN_DIOR_N);  // `jmp pin`: DIOR# has risen
         sm_config_set_out_pins(&c, cfg::PIN_DD0, 16);
         sm_config_set_sideset_pins(&c, cfg::PIN_IORDY);
         sm_config_set_out_shift(&c, true, false, 32);  // `out pins, 16` takes the low half
@@ -165,6 +167,7 @@ void begin() {
         pio_sm_init(s_pio, s_d, data_offset + ide_table_data_offset_top, &c);
         pio_sm_exec(s_pio, s_d, pio_encode_set(pio_y, DATA_ADDRESS));
         s_d_start = pio_encode_jmp(data_offset + ide_table_data_offset_top);
+        s_d_midread = pio_encode_jmp(data_offset + ide_table_data_offset_isreg);
     }
 
     // ---- Block 1: W, WD and C (ide_table_write.pio); bus_observer joins them ----
@@ -231,9 +234,7 @@ void begin() {
     oneShot(s_ka, DMA_SIZE_32, false, DREQ_FORCE, s_kb, &s_pio->rxf_putget[s_r1][3], &s_busy);
     oneShot(s_kb, DMA_SIZE_32, false, DREQ_FORCE, s_kb, &s_pio->rxf_putget[s_r2][2], &s_busy);
     // C1: C's word at a Command write.
-    oneShot(s_c1, DMA_SIZE_32, false, pio_get_dreq(s_wpio, s_c, false), s_kb, &s_pio->rxf_putget[s_r1][3],
-            &s_wpio->rxf[s_c]);  // BISECT step 2: C's word (FFFFFFFFh) straight into Status, as this
-                                 // morning. The fix: into s_dummy, chaining Ka, which writes BUSY.
+    oneShot(s_c1, DMA_SIZE_32, false, pio_get_dreq(s_wpio, s_c, false), s_ka, &s_dummy, &s_wpio->rxf[s_c]);
     {  // WD: a block's words into the sector buffer, then the busy writes
         dma_channel_config c = dma_channel_get_default_config(s_wdma);
         channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
@@ -304,7 +305,11 @@ __attribute__((always_inline)) inline void dReset() {
     // and no more. 12 Nov 2026.)
     for (unsigned n = 0; n < 8 && ((s_pio->flevel >> (s_d * 8)) & 0xF); ++n) s_pio->sm[s_d].instr = PULL_NOBLOCK;
     hw_set_bits(&s_pio->ctrl, 1u << (PIO_CTRL_SM_RESTART_LSB + s_d));
-    s_pio->sm[s_d].instr = s_d_start;  // jmp to its start
+    // To its start; or, with a read under way (the host polling Status for the
+    // DRQ this block brings), to where it waits that read out. From its start it
+    // took the read as new and pulled IORDY low a second time, mid-strobe, and
+    // the Innostor bridge's IORDY takes a microsecond to rise again.
+    s_pio->sm[s_d].instr = (sio_hw->gpio_in & (1u << cfg::PIN_DIOR_N)) ? s_d_start : s_d_midread;
     hw_set_bits(&s_pio->ctrl, 1u << s_d);
 }
 
@@ -459,6 +464,10 @@ CORE1_RAM_TABLE void stopDataIn() {
 
 CORE1_RAM_TABLE void startDataOut(uint16_t* dest, uint16_t count) {
     if (dmaBusy(s_wdma)) dmaAbort(s_wdma);
+    // Words WD took outside a block (a block cut short by a reset, with the host
+    // still writing) would come first in this one: empty its FIFO. The host
+    // can't have written any of this block yet: it hasn't seen DRQ.
+    while ((s_wpio->flevel >> (s_wd * 8 + 4)) & 0xF) (void)s_wpio->rxf[s_wd];
     dma_hw->ch[s_wdma].write_addr = uint32_t(uintptr_t(dest));
     dma_hw->ch[s_wdma].al1_transfer_count_trig = count;  // and go
     s_out_active = true;

@@ -833,7 +833,7 @@ CORE1_FOR(hdcd::Device, CORE1_RAM_CD)
 // once the block is done. The hard disk only. Never returns.
 template <class Dev>
 __attribute__((always_inline)) static inline ide_table::Image tableImage(Dev& dev) {
-    constexpr uint32_t DRIVE = 0xFFFF0000;  // BISECT: the fix is 0x00FF0000, DD0-7 (ide_table.cpp)
+    constexpr uint32_t DRIVE = 0x00FF0000;  // DD0-7, as ide_table.cpp's
     ide_table::Image m;
     m.error = DRIVE | dev.peek(ata::Reg::ErrorFeatures);
     m.sector_count = DRIVE | dev.peek(ata::Reg::SectorCount);

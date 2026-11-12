@@ -26,18 +26,28 @@
 ; and CS1# (R0 4, R1 5, R2 3). Nothing else uses ISR.
 ;
 ; The answer is ready before the strobe: the state machine whose address is
-; on the bus spins with its entry in OSR, re-reading the entry and the address
-; every 4 cycles, and drives DD within about 35 ns of DIOR# falling. The
-; register table first answered from the strobe, about 90 ns on (12 Nov
-; 2026). DIOR# skips the input synchroniser and the address doesn't, so after
-; the strobe the address is checked once more, as of 2 cycles after it, no
-; earlier than D's look at it. A host that changes the address with
-; the strobe gets the new register: the Innostor bridge moves from Status to
-; Data with DA2 changing as DIOR# falls, and R1, checking first, answered LBA
-; Mid over D's first data word (12 Nov 2026); the PIIX in compatible timing
-; does it too. Driven about 50 ns after the strobe at most once spinning,
-; about 100 ns after a change of address; ide_table_data holds IORDY
-; meanwhile for hosts that wait.
+; on the bus spins, watching the address and DIOR#, and drives DD within about
+; 30 ns of DIOR# falling. The register table first answered from the strobe,
+; about 90 ns on (12 Nov 2026).
+;
+; While DIOR# is low the outputs follow the bus, as a drive's do (its register
+; outputs are gates on the address and DIOR#, not something decided at the
+; strobe): each pass of `hold`, 6 cycles, re-reads the entry and puts it on DD,
+; and lets go as soon as the address is no longer this entry's. So:
+;   - a host whose address settles after its strobe gets the register the
+;     address ends on. The Innostor bridge goes from Status to Data with the
+;     address changing as DIOR# falls, and the PIIX in compatible timing does
+;     the same; decided once, 2 cycles after the strobe, a read whose address
+;     settled 10 ns later was answered as Status, or by nobody, and the data
+;     block ran one word late from there (simulated, 12 Nov 2026);
+;   - a host that holds one long strobe sees Status change under it.
+; DIOR# skips the input synchroniser and the address doesn't, so the address
+; is first looked at as of 2 cycles after the strobe, never before D's look: if
+; D takes the read for the data register, no register is driven over it. DD's
+; output latch may be written (`out pins`) for a read that turns out to be
+; D's: D writes it later (cycle 6 after the strobe against 5 at most here).
+; Released up to 35 ns after DIOR# rises (a pass of `hold` and an instruction;
+; t6z allows 30), typically 15-20.
 .pio_version 1
 .program ide_table_reg
 .fifo txget
@@ -51,19 +61,20 @@ public sample:
     mov osr, rxfifo[y]
     mov x, osr
     jmp !x sample                   ; an empty entry: not the drive's, or D's (the data register)
-.wrap_target                        ; after a read: spinning again, if the address hasn't moved
-spin:
-    mov osr, rxfifo[y]              ; the entry as it is now
+release:                            ; (also passed on the way in from `sample`, where it changes
+    mov pindirs, null               ; nothing: no read of this entry is under way) release DD0-15
+spin:                               ; my address is on the bus: until DIOR# falls, or it moves on
     mov x, pins
-    jmp x!=y sample                 ; the address moved on
-    jmp pin spin                    ; until DIOR# falls; it skips the synchroniser, the address doesn't:
-    nop                     [1]
-    mov x, pins                     ; the address as of 2 cycles after the strobe, no earlier than D's look
-    jmp x!=y sample                 ; changed with the strobe: not this entry (D's, if the data register)
-    out pins, 16                    ; onto DD0-15 (still inputs)
-    out pindirs, 16                 ; drive them
-    wait 1 gpio 26                  ; hold the value until DIOR# rises
-    mov pindirs, null               ; release DD0-15
+    jmp x!=y sample
+    jmp pin spin
+.wrap_target
+hold:                               ; DIOR# low: follow the entry and the address
+    mov osr, rxfifo[y]              ; the entry as it is now
+    out pins, 16                    ; onto DD's output latch
+    mov x, pins                     ; the address: first as of 2 cycles after the strobe
+    jmp x!=y release                ; not this entry's (any more): let go
+    out pindirs, 16                 ; drive DD
+    jmp pin release                 ; DIOR# has risen
 .wrap
 
 ; ---- D: IORDY, and the data register ------------------------------------------
@@ -87,22 +98,34 @@ spin:
 ;
 ; IN_BASE and IN_COUNT as R0-R2's: a pin read is the address. Y holds the
 ; data register's (DA2-0 = 0, CS0# low, CS1# high: 16), set by the C side.
+; JMP_PIN is DIOR#.
+;
+; A read that starts as a register's can become the data register's while
+; DIOR# is still low (the address settling after the strobe, see R0-R2): `again`
+; looks at the address every 8 cycles, first with IORDY still low, and answers
+; with the next word when it is the data register's; IORDY is released once the
+; word has been on DD for 25 ns. It notices DIOR# rising up to 45 ns late,
+; inside every mode's recovery time but PIO 4's (25 ns).
 .program ide_table_data
 .side_set 1 opt pindirs
-regs:                               ; a register: IORDY low until R0-R2 have answered, even
-    nop                     side 1 [7]  ; one whose address changed with the strobe
-    nop                            [7]  ; (about 25 ns after the strobe, inside tA's 35)
-    wait 1 gpio 26          side 0  ; release IORDY; DIOR# rises; on into top
-public top:
+regs:                               ; a register: IORDY low until R0-R2 have answered
+    nop                     side 1 [7]  ; (from about 25 ns after the strobe, inside tA's 35,
+again:                              ; for 80 ns)
+    mov x, pins                    [5]
+    jmp x!=y isreg                  ; still a register's; else the data register after all:
 .wrap_target
-    wait 0 gpio 26          [2]     ; DIOR# falls (unsynchronised): a read
-    mov x, pins                     ; its address, as of 2 cycles after the strobe (the synchroniser's
-                                    ; 2 cycles): settled for a host that changes it with the strobe
-    jmp x!=y regs                   ; not the data register: R0-R2's
     pull noblock                    ; the next word (outside a block: X, junk, as a real
                                     ; drive gives; a blocking pull held IORDY for good)
     out pins, 16
-    mov pindirs, ~null              ; drive DD0-15, about 35 ns after DIOR# fell
-    wait 1 gpio 26                  ; hold the word until DIOR# rises; IORDY untouched
+    mov pindirs, ~null             [3]  ; drive DD0-15, about 35 ns after DIOR# fell
+    wait 1 gpio 26          side 0  ; hold the word until DIOR# rises (IORDY released, if it was low)
     mov pindirs, null               ; release DD0-15
+public top:
+    wait 0 gpio 26          [2]     ; DIOR# falls (unsynchronised): a read
+    mov x, pins                     ; its address, as of 2 cycles after the strobe (the synchroniser's
+                                    ; 2 cycles)
+    jmp x!=y regs                   ; not the data register (yet)
 .wrap
+public isreg:                       ; (core 1 restarts D here when a read is under way)
+    jmp pin top             side 0  ; IORDY released; DIOR# has risen: the next read
+    jmp again                       ; still low: the address may yet become the data register's

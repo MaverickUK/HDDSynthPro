@@ -35,6 +35,12 @@ class Mode0:
     # may strobe again this soon after the last one rose. 0: the host waits
     # t9 + t1 as before any access.
     t2i: float = 0
+    # A host that keeps its address between accesses (hold_cs) and is late
+    # changing it: from one held address to the next, CS and DA change this
+    # long AFTER the strobe falls, instead of t1 before it (the Innostor bridge
+    # changes them with the strobe; cable skew and slow edges make that
+    # "after"). From an idle bus the address has t1 as usual.
+    address_lag: float = 0
 
 
 @dataclass(frozen=True)
@@ -197,6 +203,8 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
     rx_words = 0
 
     # Host state
+    late_address = late_at = None
+    prev_address = (1, 1, 0)
     i = 0
     state = "gap"
     t_next = int(start_ns * 1000)
@@ -244,6 +252,8 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             iordy_low_since = None
 
         # ---- host state machine ----
+        if late_at is not None and t >= late_at:
+            (cs0, cs1, da), late_at, late_address = late_address, None, None
         if state == "gap" and t >= t_next:
             if i >= len(accesses):
                 if end_ps is None:
@@ -251,12 +261,15 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             else:
                 a = accesses[i]
                 cur = Result(a)
-                if a.block == "CMD":
-                    cs0, cs1 = 0, 1
+                prev_address = (cs0, cs1, da)
+                new_cs = (0, 1) if a.block == "CMD" else (1, 0)
+                if T["address_lag"] and prev_address[:2] != (1, 1) and (*new_cs, a.addr) != prev_address:
+                    late_address, late_at = (*new_cs, a.addr), None  # applied after the strobe falls
+                    state, t_next = "setup", t
                 else:
-                    cs0, cs1 = 1, 0
-                da = a.addr
-                state, t_next = "setup", t + T["t1"]
+                    cs0, cs1 = new_cs
+                    da = a.addr
+                    state, t_next = "setup", t + T["t1"]
         elif state == "setup" and t >= t_next:
             a = cur.access
             if a.write:
@@ -265,6 +278,9 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             else:
                 dior = 0
             cur.fall_ns = t / 1000
+            if T["address_lag"] and late_address is not None:
+                late_at = t + T["address_lag"]
+                cs0, cs1, da = prev_address  # the old address until then
             cur.iordy_low_lead_ns = (t - iordy_low_since) / 1000 if iordy_low_since is not None else None
             fall = t
             tA_checked = False
