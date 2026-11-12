@@ -303,7 +303,7 @@ static uint32_t g_bench_pio_ram, g_bench_nop_ram;
 namespace bus_observer { extern volatile bool g_obs_rearm; }
 #endif
 volatile uint32_t g_wlog_pos[64];
-volatile uint32_t g_wlog[64]; volatile uint32_t g_wlog_n;  // bench: the table's last writes  // the same loops, from core 1's RAM code
+volatile uint32_t g_wlog[64]; volatile uint32_t g_wlog_n; volatile uint32_t g_wlog_stop; uint32_t g_obs_snap[160]; uint32_t g_obs_snap_end; volatile uint32_t g_obs_snapped; uint32_t g_cmd_snap_pos;  // bench: the table's last writes  // the same loops, from core 1's RAM code
 CORE1_RAM __attribute__((noinline)) static void benchFromRam() {
     uint32_t t = m33_hw->dwt_cyccnt;
     for (int i = 0; i < 1000; ++i) __asm volatile("nop");
@@ -883,12 +883,18 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         // queueCommand makes the device busy too, so C1 is armed again.
         uint32_t sample;
         while (ide_table::popWrite(sample)) {
-            g_wlog_pos[g_wlog_n & 63] = ide_table::observerRingIndex();
-            g_wlog[g_wlog_n & 63] = sample | (dev.status() & ata::ST_DRQ ? 0x80000000u : 0) | (dev.commandQueued() ? 0x40000000u : 0); g_wlog_n = g_wlog_n + 1;
             bus::Block block = bus::block(sample);
             ata::Reg reg = ata::regFor(block == bus::Block::Command, block == bus::Block::Control, bus::address(sample));
+            if (g_wlog_stop == 0 || g_wlog_stop > 1) {  // bench: freeze 16 writes after an SRST mid-block
+                if (g_wlog_stop > 1) g_wlog_stop = g_wlog_stop - 1;
+                if (g_wlog_stop == 2 && !g_obs_snapped) { ide_table::snapObserver(g_obs_snap, 160, g_obs_snap_end); g_obs_snapped = 1; }
+                g_wlog_pos[g_wlog_n & 63] = ide_table::observerRingIndex() | (ide_table::dataOutActive() ? 0x80000000u : 0u);
+                g_wlog[g_wlog_n & 63] = sample | (dev.status() & ata::ST_DRQ ? 0x80000000u : 0) | (dev.commandQueued() ? 0x40000000u : 0); g_wlog_n = g_wlog_n + 1;
+                if (g_wlog_stop == 0 && reg == ata::Reg::AltStatusDevCtrl && (bus::data(sample) & ata::DC_SRST) && dev.status() & ata::ST_DRQ) g_wlog_stop = 17;
+            }
             if (reg == ata::Reg::Data || reg == ata::Reg::None) continue;  // WD has the data words
             if (reg == ata::Reg::StatusCommand) {
+                g_cmd_snap_pos = ide_table::observerRingIndex() | 0x80000000u;  // bench: snapshot the reads after it
                 dev.queueCommand(uint8_t(bus::data(sample)));
                 ide_table::armCommandBusy();
                 if (g_table_intrq > 0) g_table_intrq = int8_t(g_table_intrq & ~1);  // C lowered INTRQ
@@ -896,6 +902,15 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
                 dev.write(reg, bus::data(sample));
             }
             dirty = true;
+        }
+        if (g_cmd_snap_pos && !g_wlog_stop) {  // bench: 150 reads after the last Command write
+            uint32_t now = ide_table::observerRingIndex(), from = g_cmd_snap_pos & 0x7FFFFFFF;
+            uint32_t ring = 1u << 12;  // bus_observer::ringSize() (RING_WORDS)
+            if ((now - from + ring) % ring >= 150) {
+                ide_table::snapObserver(g_obs_snap, 160, g_obs_snap_end);
+                g_obs_snapped = 1;
+                g_cmd_snap_pos = 0;
+            }
         }
         if (ide_table::statusReadSince(irq_raised_at) && dev.intrq()) {
             dev.consumeRead(ata::Reg::StatusCommand);  // acknowledges the interrupt raised at irq_raised_at
@@ -2745,11 +2760,19 @@ static void handleConsole() {
                 if (ide_table::running()) {
                     {
                         uint32_t n = g_wlog_n, from = n > 64 ? n - 64 : 0;
-                        Serial.printf("WLOG n=%lu (reg data drq queued)\n", (unsigned long)n);
+                        Serial.printf("WLOG n=%lu stop=%lu (reg data drq queued)\n", (unsigned long)n, (unsigned long)g_wlog_stop);
                         for (uint32_t i = from; i < n; ++i) {
                             uint32_t s = g_wlog[i & 63];
                             bus::Block b = bus::block(s);
-                            Serial.printf("W @%u %d %04x %d%d\n", unsigned(g_wlog_pos[i & 63] % bus_observer::ringSize()), int(ata::regFor(b == bus::Block::Command, b == bus::Block::Control, bus::address(s))), unsigned(bus::data(s)), int(s >> 31), int((s >> 30) & 1));
+                            Serial.printf("W out=%u @%u raw=%08lx %d %04x %d%d\n", unsigned(g_wlog_pos[i & 63] >> 31), unsigned(g_wlog_pos[i & 63] & 0x7FFFFFFF), (unsigned long)s, int(ata::regFor(b == bus::Block::Command, b == bus::Block::Control, bus::address(s))), unsigned(bus::data(s)), int(s >> 31), int((s >> 30) & 1));
+                        }
+                    }
+                    if (g_obs_snapped) {
+                        Serial.printf("OBSSNAP end=%lu (address dd)\n", (unsigned long)g_obs_snap_end);
+                        for (unsigned i = 0; i < 160; ++i) {
+                            Serial.printf("O @%lu a=%02lx dd=%04lx\n", (unsigned long)((g_obs_snap_end + bus_observer::ringSize() * 4 - 160 + i) % bus_observer::ringSize()),
+                                          (unsigned long)((g_obs_snap[i] >> 16) & 0xFF), (unsigned long)(g_obs_snap[i] & 0xFFFF));
+                            if (i % 32 == 0) delay(5);
                         }
                     }
                     {

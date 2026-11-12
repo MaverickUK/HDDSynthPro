@@ -41,6 +41,11 @@ class Mode0:
     # changes them with the strobe; cable skew and slow edges make that
     # "after"). From an idle bus the address has t1 as usual.
     address_lag: float = 0
+    # DA2 settles this long after DA0-1 and CS (from an access's start, so
+    # inside t1 if shorter): going from the data register (0) to Status (7)
+    # the address passes through LBA Low's (3). Bus skew; the JMicron adapter
+    # after its PIO writes (13 Nov 2026: Status read as LBA Low).
+    da2_skew: float = 0
 
 
 @dataclass(frozen=True)
@@ -204,6 +209,7 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
 
     # Host state
     late_address = late_at = None
+    skew_at = skew_da = None
     prev_address = (1, 1, 0)
     i = 0
     state = "gap"
@@ -252,6 +258,8 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
             iordy_low_since = None
 
         # ---- host state machine ----
+        if skew_at is not None and t >= skew_at:
+            da, skew_at, skew_da = skew_da, None, None
         if late_at is not None and t >= late_at:
             (cs0, cs1, da), late_at, late_address = late_address, None, None
         if state == "gap" and t >= t_next:
@@ -268,7 +276,11 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
                     state, t_next = "setup", t
                 else:
                     cs0, cs1 = new_cs
-                    da = a.addr
+                    if T["da2_skew"] and (da ^ a.addr) & 4:
+                        skew_at, skew_da = t + T["da2_skew"], a.addr
+                        da = (a.addr & 3) | (da & 4)
+                    else:
+                        da = a.addr
                     state, t_next = "setup", t + T["t1"]
         elif state == "setup" and t >= t_next:
             a = cur.access

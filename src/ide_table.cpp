@@ -22,8 +22,11 @@ namespace {
 constexpr unsigned DATA_ADDRESS = 16;     // DA 0, CS0# low, CS1# high
 constexpr unsigned COMMAND_ADDRESS = 23;  // DA 7, CS0# low
 constexpr unsigned ADDRESS_PINS = 5;      // block 0's reads: DA0-2, CS0#, CS1#
-// R0-R2's claims: DA2, CS0#, CS1#, as the program's `out x, 3` reads them.
-constexpr unsigned CLAIM_R0 = 4, CLAIM_R1 = 5, CLAIM_R2 = 3;
+// Each entry carries the address it answers in bits 8-15, as a pin read gives
+// it (DA0-2, CS0#, CS1#): ide_table.pio's R0-R2 answer only that address.
+constexpr uint32_t at(unsigned address) { return address << 8; }
+constexpr unsigned ERROR_ADDRESS = 17, SECTOR_COUNT_ADDRESS = 18, LBA_LOW_ADDRESS = 19, LBA_MID_ADDRESS = 20,
+                   LBA_HIGH_ADDRESS = 21, DEVICE_ADDRESS = 22, ALT_STATUS_ADDRESS = 14;  // DA 6, CS1# low
 // DD0-7 only: the registers are 8 bits, and a drive leaves DD8-15 to the host's pulls.
 constexpr uint32_t DRIVE = 0x00FF0000;
 // BSY, DRDY, DSC: what a drive shows while busy (the Innostor bridge took a bare 80h as no
@@ -53,7 +56,7 @@ uint s_wdma;              // WD's words into the sector buffer
 uint s_wring;             // W's samples into the ring
 
 // The busy word, for Ka and Kb; a dummy for C1's word.
-uint32_t s_busy = BUSY;
+uint32_t s_busy_status = BUSY | at(COMMAND_ADDRESS), s_busy_alt = BUSY | at(ALT_STATUS_ADDRESS);  // Ka's and Kb's words
 uint32_t s_dummy = 0;
 
 // W's ring: 256 samples, aligned for the channel's address wrap.
@@ -133,7 +136,6 @@ void begin() {
     s_pio->input_sync_bypass &= ~(0xFFFFFFFFu >> (32 - (cfg::BUS_LAST_PIN + 1)));
     s_pio->input_sync_bypass |= 1u << (cfg::PIN_DIOR_N - pio_get_gpio_base(s_pio));
 
-    const uint claims[3] = {CLAIM_R0, CLAIM_R1, CLAIM_R2};
     const uint regs[3] = {s_r0, s_r1, s_r2};
     for (unsigned k = 0; k < 3; ++k) {
         pio_sm_config c = ide_table_reg_program_get_default_config(reg_offset);  // .fifo txget
@@ -144,8 +146,6 @@ void begin() {
         sm_config_set_out_shift(&c, true, false, 32);
         pio_sm_init(s_pio, regs[k], reg_offset + ide_table_reg_offset_sample, &c);
         s_reg_start = pio_encode_jmp(reg_offset + ide_table_reg_offset_sample);
-        pio_sm_exec(s_pio, regs[k], pio_encode_set(pio_x, claims[k]));  // its claim, in ISR
-        pio_sm_exec(s_pio, regs[k], pio_encode_mov(pio_isr, pio_x));
     }
     // The register image before anything reads it: nothing driven, BSY. After
     // pio_sm_init, which turns the FIFO into registers: written before, the
@@ -153,8 +153,8 @@ void begin() {
     // read over D (12 Nov 2026).
     for (uint sm : {s_r0, s_r1, s_r2})
         for (unsigned i = 0; i < 4; ++i) s_pio->rxf_putget[sm][i] = 0;
-    s_pio->rxf_putget[s_r1][3] = BUSY;
-    s_pio->rxf_putget[s_r2][2] = BUSY;
+    s_pio->rxf_putget[s_r1][3] = s_busy_status;
+    s_pio->rxf_putget[s_r2][2] = s_busy_alt;
     {
         pio_sm_config c = ide_table_data_program_get_default_config(data_offset);
         sm_config_set_in_pins(&c, cfg::PIN_DA0);  // as R0-R2: the address
@@ -231,8 +231,8 @@ void begin() {
         dma_channel_configure(s_stream, &c, &s_pio->txf[s_d], nullptr, 0, false);
     }
     // The busy writes: Ka into R1's Status entry, Kb into R2's Alternate Status.
-    oneShot(s_ka, DMA_SIZE_32, false, DREQ_FORCE, s_kb, &s_pio->rxf_putget[s_r1][3], &s_busy);
-    oneShot(s_kb, DMA_SIZE_32, false, DREQ_FORCE, s_kb, &s_pio->rxf_putget[s_r2][2], &s_busy);
+    oneShot(s_ka, DMA_SIZE_32, false, DREQ_FORCE, s_kb, &s_pio->rxf_putget[s_r1][3], &s_busy_status);
+    oneShot(s_kb, DMA_SIZE_32, false, DREQ_FORCE, s_kb, &s_pio->rxf_putget[s_r2][2], &s_busy_alt);
     // C1: C's word at a Command write.
     oneShot(s_c1, DMA_SIZE_32, false, pio_get_dreq(s_wpio, s_c, false), s_ka, &s_dummy, &s_wpio->rxf[s_c]);
     {  // WD: a block's words into the sector buffer, then the busy writes
@@ -324,20 +324,20 @@ __attribute__((always_inline)) inline bool busyOwed() {
 
 CORE1_RAM_TABLE void publish(const Image& image) {
     PIO pio = s_pio;
-    pio->rxf_putget[s_r0][1] = image.error;
-    pio->rxf_putget[s_r0][2] = image.sector_count;
-    pio->rxf_putget[s_r0][3] = image.lba_low;
-    pio->rxf_putget[s_r1][0] = image.lba_mid;
-    pio->rxf_putget[s_r1][1] = image.lba_high;
-    pio->rxf_putget[s_r1][2] = image.device;
+    pio->rxf_putget[s_r0][1] = image.error | at(ERROR_ADDRESS);
+    pio->rxf_putget[s_r0][2] = image.sector_count | at(SECTOR_COUNT_ADDRESS);
+    pio->rxf_putget[s_r0][3] = image.lba_low | at(LBA_LOW_ADDRESS);
+    pio->rxf_putget[s_r1][0] = image.lba_mid | at(LBA_MID_ADDRESS);
+    pio->rxf_putget[s_r1][1] = image.lba_high | at(LBA_HIGH_ADDRESS);
+    pio->rxf_putget[s_r1][2] = image.device | at(DEVICE_ADDRESS);
     // Status last, and checked again after: a busy write that lands between the
     // check and the write would otherwise be overwritten.
     uint32_t status = busyOwed() ? BUSY : image.status;
-    pio->rxf_putget[s_r1][3] = status;
-    pio->rxf_putget[s_r2][2] = status;
+    pio->rxf_putget[s_r1][3] = status | at(COMMAND_ADDRESS);
+    pio->rxf_putget[s_r2][2] = status | at(ALT_STATUS_ADDRESS);
     if (status != BUSY && busyOwed()) {
-        pio->rxf_putget[s_r1][3] = BUSY;
-        pio->rxf_putget[s_r2][2] = BUSY;
+        pio->rxf_putget[s_r1][3] = s_busy_status;
+        pio->rxf_putget[s_r2][2] = s_busy_alt;
     }
 }
 
@@ -355,6 +355,10 @@ uint32_t s_obs_count = 0;
 
 CORE1_RAM_TABLE uint32_t observerRingIndex() {  // bench
     return s_obs_ring ? (dma_hw->ch[s_obs_dma].write_addr - uint32_t(uintptr_t(s_obs_ring))) / 4 : 0;
+}
+CORE1_RAM_TABLE void snapObserver(uint32_t* out, unsigned n, uint32_t& end) {  // bench: the n samples before now
+    end = observerRingIndex();
+    for (unsigned i = 0; i < n; ++i) out[i] = s_obs_ring ? s_obs_ring[(end + s_obs_words - n + i) % s_obs_words] : 0;
 }
 CORE1_RAM_TABLE uint32_t observerPosition() {
     if (!s_obs_ring) return 0;
@@ -672,8 +676,8 @@ uint32_t flushTest() {
 uint32_t busyTest(uint32_t wait_cycles) {
     s_bench_hold = true;
     busy_wait_us(50);
-    s_pio->rxf_putget[s_r1][3] = DRIVE | 0x50;
-    s_pio->rxf_putget[s_r2][2] = DRIVE | 0x50;
+    s_pio->rxf_putget[s_r1][3] = DRIVE | 0x50 | at(COMMAND_ADDRESS);
+    s_pio->rxf_putget[s_r2][2] = DRIVE | 0x50 | at(ALT_STATUS_ADDRESS);
     if (!dmaBusy(s_c1)) armCommandBusy();
     auto status = [&]() {
         for (unsigned pin = cfg::PIN_DA0; pin < cfg::PIN_DA0 + 3; ++pin) gpio_set_inover(pin, GPIO_OVERRIDE_HIGH);

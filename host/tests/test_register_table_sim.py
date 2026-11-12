@@ -24,8 +24,15 @@ pytestmark = pytest.mark.sim
 DIOR_BIT, IORDY_BIT = 22, 24
 ADDRESS_BIT, ADDRESS_PINS = 16, 5    # IN_BASE (DA0) and IN_COUNT, for R0-R2 and D
 DATA_ADDRESS = 16                  # DA2-0 = 0, CS0# low, CS1# high: D's Y
-CLAIMS = {"R0": 4, "R1": 5, "R2": 3}  # DA2, CS0#, CS1#, as ide_table.cpp loads ISR
 DRIVE = 0x00FF0000                 # DD0-7 only, as a drive answers its 8-bit registers
+
+
+def at(block: str, addr: int) -> int:
+    """An entry's address (bits 8-15), as a pin read gives it: DA0-2, CS0#, CS1#."""
+    return ((16 if block == "CMD" else 8) + addr) << 8
+
+
+STATUS_AT, ALT_AT = at("CMD", 7), at("CTL", 6)
 BUSY = DRIVE | 0xD0                # the busy Status entry: BSY, DRDY, DSC
 SPARE = 0xDEAD                     # the word the stream adds after each block
 ALL_MODES = {**PIO_MODES, **FAST_PIO_MODES}
@@ -62,11 +69,9 @@ class Table:
         reg_program, data_program = programs
         bypass = 1 << DIOR_BIT  # DIOR# skips the synchroniser in block 0 (ide_table.cpp); the address doesn't
         self.r = {}
-        for name, claim in CLAIMS.items():
-            sm = PioSim(reg_program, out_base=0, out_count=16, bypass_mask=bypass, jmp_pin=DIOR_BIT,
-                        in_base=ADDRESS_BIT, in_count=ADDRESS_PINS)
-            sm.isr = claim
-            self.r[name] = sm
+        for name in ("R0", "R1", "R2"):
+            self.r[name] = PioSim(reg_program, out_base=0, out_count=16, bypass_mask=bypass, jmp_pin=DIOR_BIT,
+                                  in_base=ADDRESS_BIT, in_count=ADDRESS_PINS)
         self.d = PioSim(data_program, out_base=0, out_count=16, sideset_base=IORDY_BIT,
                         fifo_depth=4, tx_depth=8, bypass_mask=bypass, jmp_pin=DIOR_BIT, in_base=ADDRESS_BIT,
                         in_count=ADDRESS_PINS)
@@ -90,7 +95,7 @@ class Table:
                  ("CMD", 7): ("R1", 3), ("CTL", 6): ("R2", 2), ("CTL", 7): ("R2", 3)}
         for key, value in registers.items():
             sm, i = entry[key]
-            self.r[sm].rxf[i] = DRIVE | value
+            self.r[sm].rxf[i] = DRIVE | value | at(*key)
 
     def host_done(self) -> bool:
         """What core 1 checks: the stream done and only the spare word left."""
@@ -106,8 +111,8 @@ class Table:
         if self._busy_wait is not None:
             self._busy_wait -= 1
             if self._busy_wait <= 0:
-                self.r["R1"].rxf[3] = BUSY
-                self.r["R2"].rxf[2] = BUSY
+                self.r["R1"].rxf[3] = BUSY | STATUS_AT
+                self.r["R2"].rxf[2] = BUSY | ALT_AT
                 self._busy_wait = None
                 self.busy_written_at = block.cycle
 
@@ -171,7 +176,7 @@ def test_a_changed_register_is_read_fresh_at_the_next_strobe(programs):
     def change_after_first(block):
         original(block)
         if not changed["done"] and table.d.pc == table.d.program.offsets["top"] and block.cycle > 60:
-            table.r["R1"].rxf[3] = DRIVE | 0x58
+            table.r["R1"].rxf[3] = DRIVE | 0x58 | STATUS_AT
             changed["done"] = True
 
     table.block.on_cycle = change_after_first
@@ -261,8 +266,8 @@ class Writes:
         if self._busy_wait is not None:
             self._busy_wait -= 1
             if self._busy_wait <= 0:
-                self.table.r["R1"].rxf[3] = BUSY
-                self.table.r["R2"].rxf[2] = BUSY
+                self.table.r["R1"].rxf[3] = BUSY | STATUS_AT
+                self.table.r["R2"].rxf[2] = BUSY | ALT_AT
                 self._busy_wait = None
                 self.busy_written_at = block.cycle
 
@@ -366,7 +371,7 @@ def test_back_to_back_polls_with_short_strobes_read_every_change(programs, timin
     def change(block):
         original(block)
         # a new value every 100 cycles (500 ns), as core 1 publishes
-        table.r["R1"].rxf[3] = DRIVE | (0x50 + (block.cycle // 100) % 8)
+        table.r["R1"].rxf[3] = DRIVE | (0x50 + (block.cycle // 100) % 8) | STATUS_AT
         seen.append((block.cycle, table.r["R1"].rxf[3] & 0xFF))
 
     table.block.on_cycle = change
@@ -463,9 +468,34 @@ def test_status_changes_under_a_long_strobe(programs):
     def ready_mid_strobe(block):
         original(block)
         if block.cycle == 300:  # 1.5 us in: mid-strobe
-            table.r["R1"].rxf[3] = DRIVE | 0x58
+            table.r["R1"].rxf[3] = DRIVE | 0x58 | STATUS_AT
 
     table.block.on_cycle = ready_mid_strobe
     run = run_host(table.block, idle_core1(), [Access(False, "CMD", 7)], timing=timing, timeout_ns=4000)
     assert not run.errors
     assert run.results[0].read_value & 0xFF == 0x58
+
+
+# ---- DA2 settling late: a register's entry over another's (13 Nov 2026) -------------
+
+
+@pytest.mark.parametrize("mode, skew", [(m, s) for m in (0, 2, 3, 4) for s in (0, 5, 10, 20, 25)] + [(0, 40), (0, 60)])
+def test_status_after_data_writes_with_da2_settling_late(programs, mode, skew):
+    # The JMicron adapter, after a sector's data writes, read Status as LBA Low
+    # (D0h, F2h: the write's LBA Low) and reset the drive: going from the data
+    # register (0) to Status (7) the address passes through LBA Low's (3) if
+    # DA2 is last to settle, and R0, driving LBA Low for it, was still on DD
+    # (the latch and output enables are shared) when the host sampled.
+    # Skews inside t1 (the address valid before the strobe). Settling well after
+    # it (60 ns in modes 2-3, 30 ns into the strobe) can still read undriven: the
+    # R that let go clears DD's output enables after the right one drove them.
+    timing = dataclasses.replace(ALL_MODES[mode], da2_skew=skew)
+    registers = {**REGISTERS, ("CMD", 3): 0xF2, ("CMD", 7): 0x58, ("CTL", 6): 0x58}
+    table = Table(programs, registers=registers)
+    accesses = [Access(True, "CMD", 0, data=0x1234 + n, hold_cs=True) for n in range(4)]
+    accesses += [Access(False, "CMD", 7, hold_cs=True), Access(False, "CTL", 6, hold_cs=True)]
+    accesses += [Access(True, "CMD", 0, data=0x2222, hold_cs=True), Access(False, "CMD", 7)]
+    run = run_host(table.block, idle_core1(), accesses, timing=timing)
+    assert not run.errors
+    reads = [r.read_value for r in run.results if not r.access.write]
+    assert [v & 0xFF if v is not None else None for v in reads] == [0x58] * 3, [hex(v) if v is not None else v for v in reads]

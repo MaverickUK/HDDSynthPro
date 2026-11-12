@@ -21,7 +21,8 @@ void attachObserver();
 // ---- Core 1 ------------------------------------------------------------------
 
 // The register image: what each read address answers, as R0-R2's entries
-// hold it (bits 0-15 the value, 16-31 which DD lines to drive).
+// hold it (bits 0-7 the value, 16-31 which DD lines to drive); publish adds
+// each entry's address (bits 8-15).
 struct Image {
     uint32_t error = 0, sector_count = 0, lba_low = 0, lba_mid = 0, lba_high = 0, device = 0, status = 0;
 };
@@ -35,6 +36,7 @@ bool popWrite(uint32_t& sample);
 // Status read (which acknowledges the interrupt) came at or after `since`.
 uint32_t observerPosition();
 uint32_t observerRingIndex();  // bench
+void snapObserver(uint32_t* out, unsigned n, uint32_t& end);  // bench
 bool statusReadSince(uint32_t since);
 
 // C's busy write: armed for the next Command write. Core 1 re-arms it once

@@ -17,13 +17,15 @@
 ;       2 Sector Count, 3 LBA Low
 ;   R1  CS0#, DA2 = 1: 0 LBA Mid, 1 LBA High, 2 Device, 3 Status
 ;   R2  CS1#, DA2 = 1: 0-1 not the drive's, 2 Alternate Status, 3 Drive Address
-; Each entry is the word ide_bus's core 1 answers with: bits 0-15 the value
-; for DD0-15, bits 16-31 which of them to drive (all). An empty entry (0) is an
-; address that isn't this state machine's to answer: it doesn't touch DD at
-; all, not even the output latch, which D may be writing for the same read.
-;
-; ISR holds the state machine's claim, loaded once by the C side: DA2, CS0#
-; and CS1# (R0 4, R1 5, R2 3). Nothing else uses ISR.
+; Each entry: bits 0-7 the value for DD0-7, bits 8-15 the address it answers
+; (as a pin read gives it: DA0-2, CS0#, CS1#), bits 16-31 which of DD0-15 to
+; drive (DD0-7). An empty entry (0) answers no address: it doesn't touch DD
+; at all, not even the output latch, which D may be writing for the same read.
+; One pin read both picks the entry (DA0-1) and must equal its address: with
+; the address read twice, once for a claim (DA2, CS0#, CS1#) and once for the
+; entry, the JMicron adapter's step from the data register (0) to Status (7)
+; through LBA Low's address (3, DA2 last) let R0 take Status and answer it
+; with LBA Low, over R1, and the adapter reset the drive (13 Nov 2026).
 ;
 ; The answer is ready before the strobe: the state machine whose address is
 ; on the bus spins, watching the address and DIOR#, and drives DD within about
@@ -52,15 +54,11 @@
 .program ide_table_reg
 .fifo txget
 public sample:
-    mov osr, pins                   ; the address
-    out null, 2                     ; DA0-1
-    mov x, osr                      ; DA2, CS0#, CS1#
-    mov y, isr                      ; my claim
-    jmp x!=y sample                 ; another state machine's, or nobody's
-    mov y, pins                     ; the address: DA1-0 pick the entry
-    mov osr, rxfifo[y]
-    mov x, osr
-    jmp !x sample                   ; an empty entry: not the drive's, or D's (the data register)
+    mov y, pins                     ; the address (one read: it picks the entry and is checked
+    mov osr, rxfifo[y]              ; against the entry's own, so a moving address can't pair
+    out null, 8                     ; one address's claim with another's entry, 13 Nov 2026)
+    out x, 8                        ; the address this entry answers (bits 8-15; 0: none)
+    jmp x!=y sample                 ; another state machine's, D's, or nobody's
 release:                            ; (also passed on the way in from `sample`, where it changes
     mov pindirs, null               ; nothing: no read of this entry is under way) release DD0-15
 spin:                               ; my address is on the bus: until DIOR# falls, or it moves on
@@ -70,10 +68,10 @@ spin:                               ; my address is on the bus: until DIOR# fall
 .wrap_target
 hold:                               ; DIOR# low: follow the entry and the address
     mov osr, rxfifo[y]              ; the entry as it is now
-    out pins, 16                    ; onto DD's output latch
+    out pins, 16                    ; onto DD's output latch (DD8-15's bits, the address, undriven)
     mov x, pins                     ; the address: first as of 2 cycles after the strobe
     jmp x!=y release                ; not this entry's (any more): let go
-    out pindirs, 16                 ; drive DD
+    out pindirs, 16                 ; drive DD (DD0-7)
     jmp pin release                 ; DIOR# has risen
 .wrap
 
