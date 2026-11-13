@@ -1,6 +1,6 @@
 # The register table: every read answered without core 1
 
-**Status (14 Nov 2026, morning): on the rig. The Innostor bridge passes slices 3 and 4 in PIO 3 since R0-R2 keep their answer on DD's output latch before the strobe (*14 Nov, morning*); offered PIO 2 it passed before. The JMicron adapter passes slices 3 and 4 on it too, and reads 1.69 MB/s and writes 1.77, the fastest PIO through it yet. Branch `register-table`, console `P t`; slices 1-2 need console `V` to work in this mode (*Open*). The bench hooks (console `Q`, `R`, `Z`, `G`, the write log and observer snapshots, extra `s` fields, `HDDPRO_FETCH_DELAY_US`) come out before it merges.**
+**Status (14 Nov 2026, morning): on the rig. The Innostor bridge passes slices 3 and 4 in PIO 3 since R0-R2 keep their answer on DD's output latch before the strobe (*14 Nov, morning*); offered PIO 2 it passed before. The JMicron adapter passes slices 3 and 4 on it too, and reads 1.69 MB/s and writes 1.77, the fastest PIO through it yet. Branch `register-table`, console `P t`; slices 1-2 need console `V` to work in this mode (*Open*). The bench hooks are out (14 Nov): `s` keeps `table_in`, `table_out` and `intrq_rises`.**
 
 ## Why
 
@@ -258,12 +258,12 @@ On the Mac with the bridge at PIO 3 (`mode = auto`), `T`, `P t`, firmware 43d70e
 
 **Bench:** `Q` hung core 0 (`busyTest`'s wait used core 0's cycle counter, which only `G` turned on): fixed. Careful with slice 3 after hand-written tests: it checks the whole disk, so writes to the test disk (LBA 100000 on) must be put back first (`gen_disk.sectors`), or restart with `T` twice.
 
+**The bench hooks out (14 Nov):** the write log, event log and observer snapshots, console `Q`, `R`, `Z` and `G` (and core 0's edge log), the test functions in `ide_table.cpp`, `HDDPRO_OBS_REGS`, `HDDPRO_FETCH_DELAY_US` and `host/bench/`; the strobe observer back to `main`'s layout (6-bit passes, 5-bit sequence). The core 1 layout is unchanged (the table's code sits after `.data`). On the JMicron: slices 3 and 4 pass, reads 1.69 MB/s, writes 1.78, 80.1 IOPS, as with the hooks in. RAM 96.5% (95.5% on `main`).
+
 ## Open
 
 - **The Innostor bridge in PIO 3:** passes slices 3 and 4 since R drives from its latch (*14 Nov, morning*). The JMicron adapter passes on it too.
 - **Slice 4 through the JMicron adapter:** fixed (*13 Nov, on the rig*: R0 answered Status with LBA Low).
 - **Interrupt acknowledgement:** a Status read now acknowledges an interrupt only if the host saw the device not busy (`statusReadSince`): a read whose strobe began before the raise and ended after it lands after the raise in the ring. Right in principle; slice 4's failure was something else (*13 Nov, on the rig*).
 - **Console `V` (rig re-detection):** in table mode the drive stops answering, but the JMicron adapter doesn't reset, so slices 1-2 time out.
-- **Bench tools in the tree, to come out before merging:** `host/bench/`, the write log's SRST trigger and the observer snapshots after it and after each Command write (`g_wlog_stop`, `g_obs_snap`, `g_cmd_snap_pos`, `snapObserver`), console `G` (core 0 logs the control lines' edges from the next read command, `edgeLog`; in the listen build too), the write log printed by `R` (`WLOG`), `Z` re-arming the observer's register print, and that print's limits and ring positions (`HDDPRO_OBS_REGS`, bus_observer.cpp). The register print's `OBSDATA` numbering is wrong after a re-arm.
 - **Console `E`/`C` in table mode:** "the card's PIO block couldn't be borrowed" (the write side holds the diagnostics' block). `P 0`, `E`, `P t` meanwhile.
-- **The core 1 layout** was recorded on 14 Nov with the bench hooks in: record it again once they come out (and benchmark).

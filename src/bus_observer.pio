@@ -33,8 +33,8 @@ done:
 ; (15 ns at 200 MHz), so a read the host cut short shows apart from one it
 ; waited for. Each word:
 ;   bits 20-0   the sample, as above
-;   bits 30-21  the passes, counting down from 1023 (wrapping every 1024: 15.4 us)
-;   bit 31      the sequence number's low bit (gaps show modulo 2)
+;   bits 26-21  the passes, counting down from 63 (wrapping every 64: 960 ns)
+;   bits 31-27  the sequence number, counting down (gaps still show, modulo 32)
 ; Two instructions more than bus_observer (src/pio_plan.h).
 
 .program bus_observer_strobe
@@ -48,8 +48,8 @@ sample:
     jmp x-- sample          ; one pass more (x never reaches 0 in a read)
 done:
     in osr, 21              ; DD0-15, DA2-0, CS0#, CS1#
-    in x, 10                ; the passes (10 bits, 15 us, 13 Nov 2026: the Innostor's long Status strobes)
-    in y, 1                 ; the sequence number's low bit on top
+    in x, 6                 ; the passes
+    in y, 5                 ; the sequence number on top
     push noblock            ; DMA keeps the FIFO empty
     jmp y-- top
 .wrap

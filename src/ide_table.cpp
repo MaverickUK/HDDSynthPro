@@ -75,14 +75,6 @@ uint32_t s_obs_read = 0;
 bool s_c1_armed = false;
 bool s_in_active = false, s_out_active = false;
 volatile uint32_t s_blocks_in = 0, s_blocks_out = 0;
-// Bench: the first blocks: at the start, D's FIFO level after the wait; at
-// the stop, words fetched and the FIFO level.
-const uint16_t* s_in_words = nullptr;
-volatile uint32_t s_rec[16][5];
-volatile uint32_t s_rec_n = 0;
-volatile bool s_seen_on = false;
-volatile bool s_cap_arm = false;
-volatile bool s_cap_cmd = false;
 
 uint claimDma() { return uint(dma_claim_unused_channel(true)); }
 
@@ -353,13 +345,6 @@ CORE1_RAM_TABLE bool popWrite(uint32_t& sample) {
 // a position is absolute (it doesn't wrap as the ring's index does).
 uint32_t s_obs_count = 0;
 
-CORE1_RAM_TABLE uint32_t observerRingIndex() {  // bench
-    return s_obs_ring ? (dma_hw->ch[s_obs_dma].write_addr - uint32_t(uintptr_t(s_obs_ring))) / 4 : 0;
-}
-CORE1_RAM_TABLE void snapObserver(uint32_t* out, unsigned n, uint32_t& end) {  // bench: the n samples before now
-    end = observerRingIndex();
-    for (unsigned i = 0; i < n; ++i) out[i] = s_obs_ring ? s_obs_ring[(end + s_obs_words - n + i) % s_obs_words] : 0;
-}
 CORE1_RAM_TABLE uint32_t observerPosition() {
     if (!s_obs_ring) return 0;
     uint32_t written = (dma_hw->ch[s_obs_dma].write_addr - uint32_t(uintptr_t(s_obs_ring))) / 4;
@@ -386,7 +371,6 @@ CORE1_RAM_TABLE bool statusReadSince(uint32_t since) {
     return seen;
 }
 
-volatile uint32_t s_cmds_taken = 0, s_cmds_c1_fired = 0;
 // Console V: the drive off the bus, as if unplugged. R0-R2 and D stopped and
 // DD, IORDY and INTRQ released; restart() brings them back at their starts.
 CORE1_RAM_TABLE void stop() {
@@ -407,8 +391,6 @@ CORE1_RAM_TABLE void restart() {
 }
 
 CORE1_RAM_TABLE void armCommandBusy() {
-    s_cmds_taken = s_cmds_taken + 1;
-    if (s_c1_armed && !dmaBusy(s_c1)) s_cmds_c1_fired = s_cmds_c1_fired + 1;  // bench: C's busy fired for it
     dmaRetrigger(s_c1);  // waits for C's next word
     s_c1_armed = true;
 }
@@ -424,8 +406,6 @@ CORE1_RAM_TABLE void setIntrq(bool asserted, bool driven) {
     s_wpio->sm[s_c].instr = driven ? SET_PINDIRS_1 : SET_PINDIRS_0;
 }
 
-CORE1_RAM_TABLE bool commandBusyPending() { return s_c1_armed && !dmaBusy(s_c1); }
-
 CORE1_RAM_TABLE void startDataIn(const uint16_t* words, uint16_t count) {
     if (dmaBusy(s_stream)) dmaAbort(s_stream);  // only if running: an idle channel aborted lost its pacing
     dReset();
@@ -437,13 +417,6 @@ CORE1_RAM_TABLE void startDataIn(const uint16_t* words, uint16_t count) {
     for (uint32_t spins = 0; ((s_pio->flevel >> (s_d * 8)) & 0xF) < want && spins < 2000; ++spins) {
     }
     s_in_active = true;
-    s_in_words = words;
-    // (bench: set s_cap_arm here to capture a block's timeline)
-    {
-        uint32_t i = s_rec_n % 16;
-        s_rec[i][0] = (s_pio->flevel >> (s_d * 8)) & 0xF;
-        s_rec[i][3] = words[0] | uint32_t(count) << 16;
-    }
 }
 
 CORE1_RAM_TABLE bool dataInActive() { return s_in_active; }
@@ -454,16 +427,7 @@ CORE1_RAM_TABLE bool dataInDone() {
     return s_in_active && !dmaBusy(s_stream) && ((s_pio->flevel >> (s_d * 8)) & 0xF) <= 1;
 }
 
-uint8_t s_stop_why = 0;
-CORE1_RAM_TABLE void stopWhy(uint8_t why) { s_stop_why = why; }
 CORE1_RAM_TABLE void stopDataIn() {
-    if (s_in_active) {
-        uint32_t i = s_rec_n % 16;
-        s_rec[i][4] = s_stop_why;
-        s_rec[i][1] = (dma_hw->ch[s_stream].read_addr - uint32_t(uintptr_t(s_in_words))) / 2;
-        s_rec[i][2] = (s_pio->flevel >> (s_d * 8)) & 0xF;
-        s_rec_n = s_rec_n + 1;
-    }
     if (s_in_active && !dmaBusy(s_stream)) s_blocks_in = s_blocks_in + 1;
     // A block cut short (a new command, SRST, a reset) leaves words behind: the
     // stream's, and up to 8 in D's FIFO, which a host reading data before the
@@ -498,254 +462,5 @@ CORE1_RAM_TABLE void stopDataOut() {
 
 CORE1_RAM_TABLE uint32_t blocksIn() { return s_blocks_in; }
 CORE1_RAM_TABLE uint32_t blocksOut() { return s_blocks_out; }
-// Bench: can D drive DD? Stops it, gives it a word, runs its own drive
-// instructions, reads the lines back, releases them and starts it again.
-bool s_selftest_released = false;
-bool selfTestReleased() { return s_selftest_released; }
-// Bench: one of D's registers (Y, X or ISR), put on DD and read back.
-uint32_t readD(int reg_) {
-    enum pio_src_dest reg = pio_src_dest(reg_);
-    hw_clear_bits(&s_pio->ctrl, 1u << s_d);
-    pio_sm_exec(s_pio, s_d, pio_encode_mov(pio_osr, reg));
-    pio_sm_exec(s_pio, s_d, pio_encode_out(pio_pins, 16));
-    pio_sm_exec(s_pio, s_d, pio_encode_mov_not(pio_osr, pio_null));
-    pio_sm_exec(s_pio, s_d, pio_encode_out(pio_pindirs, 16));
-    busy_wait_us(2);
-    uint32_t seen = (sio_hw->gpio_in >> cfg::PIN_DD0) & 0xFFFF;
-    pio_sm_exec(s_pio, s_d, pio_encode_mov(pio_osr, pio_null));
-    pio_sm_exec(s_pio, s_d, pio_encode_out(pio_pindirs, 16));
-    s_pio->sm[s_d].instr = s_d_start;
-    hw_set_bits(&s_pio->ctrl, 1u << s_d);
-    return seen;
-}
-uint32_t selfTest(uint16_t word) {
-    hw_clear_bits(&s_pio->ctrl, 1u << s_d);
-    s_pio->txf[s_d] = word;
-    pio_sm_exec(s_pio, s_d, pio_encode_pull(false, false));
-    pio_sm_exec(s_pio, s_d, pio_encode_out(pio_pins, 16));
-    pio_sm_exec(s_pio, s_d, pio_encode_mov_not(pio_osr, pio_null));  // `out pindirs, 16` of ones, in
-    pio_sm_exec(s_pio, s_d, pio_encode_out(pio_pindirs, 16));         // place of `mov pindirs, ~null`
-    busy_wait_us(2);
-    uint32_t seen = (sio_hw->gpio_in >> cfg::PIN_DD0) & 0xFFFF;
-    uint32_t dirs = s_pio->dbg_padoe;
-    pio_sm_exec(s_pio, s_d, pio_encode_mov(pio_pindirs, pio_null));
-    busy_wait_us(1);
-    s_selftest_released = ((s_pio->dbg_padoe >> cfg::PIN_DD0) & 0xFFFF) == 0;
-    hw_xor_bits(&s_pio->sm[s_d].shiftctrl, PIO_SM0_SHIFTCTRL_FJOIN_TX_BITS);
-    hw_xor_bits(&s_pio->sm[s_d].shiftctrl, PIO_SM0_SHIFTCTRL_FJOIN_TX_BITS);
-    s_pio->sm[s_d].instr = s_d_start;
-    hw_set_bits(&s_pio->ctrl, 1u << s_d);
-    return seen | ((dirs >> cfg::PIN_DD0) & 0xFFFF) << 16;
-}
-
-// Bench: start a block from a known buffer, D stopped so nothing drains its
-// FIFO, and follow the stream: words fetched (read address), count left, busy.
-uint32_t s_trace[12];
-uint32_t* streamTest() {
-    static uint16_t words[256];
-    for (unsigned i = 0; i < 256; ++i) words[i] = uint16_t(0x1000 + i);
-    hw_set_bits(&s_pio->fdebug, 0xFFFFFFFFu);
-    hw_clear_bits(&s_pio->ctrl, 1u << s_d);
-    dmaAbort(s_stream);
-    dReset();
-    hw_clear_bits(&s_pio->ctrl, 1u << s_d);
-    dma_hw->ch[s_stream].read_addr = uint32_t(uintptr_t(words));
-    s_trace[0] = dma_hw->ch[s_stream].ctrl_trig;
-    s_trace[1] = dma_hw->ch[s_stream].transfer_count;
-    dma_hw->ch[s_stream].al1_transfer_count_trig = 257;
-    for (unsigned k = 0; k < 4; ++k) {
-        busy_wait_us(k ? 10 : 0);
-        s_trace[2 + 2 * k] = (dma_hw->ch[s_stream].read_addr - uint32_t(uintptr_t(words))) / 2;
-        s_trace[3 + 2 * k] = dma_hw->ch[s_stream].transfer_count | (dmaBusy(s_stream) ? 0x80000000u : 0);
-    }
-    s_trace[10] = (s_pio->flevel >> (s_d * 8)) & 0xF;
-    s_trace[11] = s_pio->fdebug;
-    dmaAbort(s_stream);
-    dReset();
-    return s_trace;
-}
-
-void blockRecords(uint32_t out[81]) {  // the last 16, oldest first
-    out[0] = s_rec_n;
-    uint32_t n = s_rec_n < 16 ? s_rec_n : 16, first = s_rec_n - n;
-    for (unsigned k = 0; k < n; ++k)
-        for (unsigned j = 0; j < 5; ++j) out[1 + k * 5 + j] = s_rec[(first + k) % 16][j];
-}
-
-// Bench: a data read as the programs see it, made with input overrides (no host
-// needed): the address of the data register and DIOR# low, then high, for four
-// words of a known block. Returns what DD showed during each read (low half)
-// and whether it was released after (bit 16), per word.
-uint32_t s_fake[40];
-bool s_fake_cpu = false, s_fake_zero = false;
-volatile bool s_bench_hold = false;
-// Bench: core 1's view of the first sector block (count 256 after four IDENTIFY), each pass
-volatile uint32_t s_seen[64][3];
-volatile uint32_t s_seen_n = 0;
-void armCommandCapture() { s_cap_cmd = true; }
-
-// Bench: a timeline of the first sector block, sampled by core 1 once it has
-// published the block: the pins (DD, DA, CS, DIOR#...) and D's PC and FIFO level.
-constexpr unsigned CAP = 1024;
-uint32_t s_cap_pins[CAP];
-uint16_t s_cap_d[CAP];
-volatile uint32_t s_cap_n = 0;
-volatile bool s_cap_done = false;
-CORE1_RAM_TABLE void notePass(uint32_t extra) {
-    // Armed from the console (Z): wait here for the next Command write's busy DMA
-    // to fire (C1 done), then capture at once.
-    if (s_cap_cmd) {
-        while (s_c1_armed && dmaBusy(s_c1)) {
-            if (!s_cap_cmd) return;
-        }
-        s_cap_cmd = false;
-        s_cap_arm = true;
-        s_cap_done = false;
-    }
-    if (s_cap_arm && !s_cap_done) {
-        s_cap_done = true;
-        for (unsigned i = 0; i < CAP; ++i) {
-            uint32_t start = m33_hw->dwt_cyccnt;
-            s_cap_pins[i] = sio_hw->gpio_in;
-            s_cap_d[i] = uint16_t(s_pio->sm[s_d].addr | ((s_pio->flevel >> (s_d * 8)) & 0xF) << 8);
-            while (m33_hw->dwt_cyccnt - start < 20) {
-            }
-        }
-        s_cap_n = CAP;
-        s_cap_arm = false;
-    }
-    if (!s_in_active || !s_seen_on || s_seen_n >= 64) return;
-    s_seen[s_seen_n][0] = m33_hw->dwt_cyccnt;
-    s_seen[s_seen_n][1] = dma_hw->ch[s_stream].transfer_count | (dmaBusy(s_stream) ? 0x80000000u : 0);
-    s_seen[s_seen_n][2] = ((s_pio->flevel >> (s_d * 8)) & 0xF) | extra << 8;
-    s_seen_n = s_seen_n + 1;
-}
-const volatile uint32_t (*seenLog(uint32_t& n))[3] { n = s_seen_n; return s_seen; }
-uint32_t capture(const uint32_t*& pins, const uint16_t*& d) { pins = s_cap_pins; d = s_cap_d; return s_cap_n; }
-CORE1_RAM_TABLE bool benchHold() { return s_bench_hold; }
-void fakeZero(bool on) { s_fake_zero = on; }
-void fakeCpu(bool on) { s_fake_cpu = on; }
-uint32_t s_fake_left = 0;
-uint32_t s_fake_cycles = 200;
-void fakeCycles(uint32_t c) { s_fake_cycles = c; }
-uint32_t s_fake_padout = 0, s_fake_funcsel = 0, s_fake_pio = 0;
-uint32_t fakeInfo(unsigned i) { return i == 0 ? s_fake_padout : i == 1 ? s_fake_funcsel : i == 2 ? s_fake_pio : s_fake_left; }
-uint32_t* fakeReads() {
-    static uint16_t words[256];
-    for (unsigned i = 0; i < 256; ++i) words[i] = uint16_t(0xB000 + i);
-    for (unsigned pin = cfg::PIN_DA0; pin < cfg::PIN_DA0 + 3; ++pin) gpio_set_inover(pin, GPIO_OVERRIDE_LOW);
-    gpio_set_inover(cfg::PIN_CS0_N, GPIO_OVERRIDE_LOW);
-    gpio_set_inover(cfg::PIN_CS1_N, GPIO_OVERRIDE_HIGH);
-    gpio_set_inover(cfg::PIN_DIOR_N, GPIO_OVERRIDE_HIGH);
-    gpio_set_inover(cfg::PIN_DIOW_N, GPIO_OVERRIDE_HIGH);
-    s_bench_hold = true;  // core 1's loop leaves the blocks alone meanwhile
-    busy_wait_us(50);
-    if (s_fake_zero) s_pio->rxf_putget[s_r0][0] = 0;
-    if (s_fake_cpu) {  // no DMA: the CPU puts four words in D's FIFO
-        dmaAbort(s_stream);
-        dReset();
-        for (unsigned k = 0; k < 4; ++k) s_pio->txf[s_d] = 0xC000u + k;
-    } else {
-        startDataIn(words, 256);
-    }
-    for (unsigned k = 0; k < 40; ++k) {
-        gpio_set_inover(cfg::PIN_DIOR_N, GPIO_OVERRIDE_LOW);
-        busy_wait_at_least_cycles(s_fake_cycles);
-        uint32_t seen = (sio_hw->gpio_in >> cfg::PIN_DD0) & 0xFFFF;
-        uint32_t oe = (s_pio->dbg_padoe >> cfg::PIN_DD0) & 0xFFFF;
-        if (k == 0) {
-            s_fake_padout = (s_pio->dbg_padout >> cfg::PIN_DD0) & 0xFFFF;
-            s_fake_funcsel = (io_bank0_hw->io[cfg::PIN_DD0].ctrl & IO_BANK0_GPIO0_CTRL_FUNCSEL_BITS);
-            s_fake_pio = PIO_NUM(s_pio);
-        }
-        gpio_set_inover(cfg::PIN_DIOR_N, GPIO_OVERRIDE_HIGH);
-        busy_wait_at_least_cycles(s_fake_cycles);
-        uint32_t released = ((s_pio->dbg_padoe >> cfg::PIN_DD0) & 0xFFFF) == 0;
-        s_fake[k] = seen | released << 16 | (oe == 0xFFFF ? 1u : 0u) << 17;
-    }
-    s_fake_left = dma_hw->ch[s_stream].transfer_count | (dmaBusy(s_stream) ? 0x80000000u : 0);
-    if (!s_fake_cpu) stopDataIn();
-    s_bench_hold = false;
-    for (unsigned pin = cfg::PIN_DA0; pin <= cfg::PIN_DIOW_N; ++pin) gpio_set_inover(pin, GPIO_OVERRIDE_NORMAL);
-    return s_fake;
-}
-
-// Bench: four words into D's FIFO, then its reset: the level before and after.
-uint32_t flushTest() {
-    hw_clear_bits(&s_pio->ctrl, 1u << s_d);
-    for (unsigned k = 0; k < 4; ++k) s_pio->txf[s_d] = k;
-    uint32_t before = (s_pio->flevel >> (s_d * 8)) & 0xF;
-    dReset();
-    uint32_t after = (s_pio->flevel >> (s_d * 8)) & 0xF;
-    return before | after << 8;
-}
-
-// Bench: the Command busy path. Core 1 held; Status shows 0x50; C's word is
-// pushed by hand (as a Command write would); Status is read (input overrides)
-// after `wait_cycles`. Returns the value read, before (low byte) and after.
-uint32_t busyTest(uint32_t wait_cycles) {
-    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // this core's cycle counter (core 0's is off otherwise)
-    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
-    s_bench_hold = true;
-    busy_wait_us(50);
-    s_pio->rxf_putget[s_r1][3] = DRIVE | 0x50 | at(COMMAND_ADDRESS);
-    s_pio->rxf_putget[s_r2][2] = DRIVE | 0x50 | at(ALT_STATUS_ADDRESS);
-    if (!dmaBusy(s_c1)) armCommandBusy();
-    auto status = [&]() {
-        for (unsigned pin = cfg::PIN_DA0; pin < cfg::PIN_DA0 + 3; ++pin) gpio_set_inover(pin, GPIO_OVERRIDE_HIGH);
-        gpio_set_inover(cfg::PIN_CS0_N, GPIO_OVERRIDE_LOW);
-        gpio_set_inover(cfg::PIN_CS1_N, GPIO_OVERRIDE_HIGH);
-        gpio_set_inover(cfg::PIN_DIOR_N, GPIO_OVERRIDE_LOW);
-        busy_wait_us(1);
-        uint32_t v = (sio_hw->gpio_in >> cfg::PIN_DD0) & 0xFF;
-        gpio_set_inover(cfg::PIN_DIOR_N, GPIO_OVERRIDE_HIGH);
-        busy_wait_us(1);
-        return v;
-    };
-    uint32_t before = status();
-    s_wpio->sm[s_c].instr = pio_encode_push(false, false);  // C's word, as at a Command write
-    uint32_t t0 = m33_hw->dwt_cyccnt;
-    while (m33_hw->dwt_cyccnt - t0 < wait_cycles) {
-    }
-    uint32_t after = status();
-    for (unsigned pin = cfg::PIN_DA0; pin <= cfg::PIN_DIOW_N; ++pin) gpio_set_inover(pin, GPIO_OVERRIDE_NORMAL);
-    uint32_t fired = !dmaBusy(s_c1);
-    armCommandBusy();
-    s_bench_hold = false;
-    return before | after << 8 | fired << 16;
-}
-
-// Bench: how long the Command busy path takes, C's push to the busy word in
-// R1's Status entry (core 0 polling the entry; about 2 cycles a poll). Core 1 held.
-uint32_t busyLatency() {
-    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // this core's cycle counter (core 0's is off otherwise)
-    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
-    s_bench_hold = true;
-    busy_wait_us(50);
-    s_pio->rxf_putget[s_r1][3] = DRIVE | 0x50 | at(COMMAND_ADDRESS);
-    s_pio->rxf_putget[s_r2][2] = DRIVE | 0x50 | at(ALT_STATUS_ADDRESS);
-    if (!dmaBusy(s_c1)) armCommandBusy();
-    volatile uint32_t* entry = &s_pio->rxf_putget[s_r1][3];
-    uint32_t t0 = m33_hw->dwt_cyccnt;
-    s_wpio->sm[s_c].instr = pio_encode_push(false, false);  // C's word, as at a Command write
-    uint32_t cycles = 0;
-    while (*entry != s_busy_status) {
-        cycles = m33_hw->dwt_cyccnt - t0;
-        if (cycles > 100000) break;
-    }
-    cycles = m33_hw->dwt_cyccnt - t0;
-    armCommandBusy();
-    s_bench_hold = false;
-    return cycles;
-}
-
-void debug(uint32_t out[6]) {
-    out[0] = s_pio->sm[s_d].addr;                                  // D's program counter
-    out[1] = (s_pio->flevel >> (s_d * 8)) & 0xF;                  // its TX level
-    out[2] = s_cmds_taken | s_cmds_c1_fired << 16;                 // bench: commands taken, and C1 fired for
-    out[3] = dma_hw->ch[s_c1].ctrl_trig | (s_c1_armed ? 1u << 31 : 0) | ((s_wpio->flevel >> (s_c * 8 + 4)) & 0xF) << 27;  // C1 (busy bit 26), armed, C's RX level
-    out[4] = PIO_NUM(s_pio) | PIO_NUM(s_wpio) << 4;                // bench: the two blocks
-    out[5] = s_pio->rxf_putget[s_r0][0];  // must stay 0: the data register is D's
-}
 
 }  // namespace ide_table

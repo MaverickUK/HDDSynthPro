@@ -297,13 +297,7 @@ static volatile uint32_t g_c1_iser[2], g_c1_primask;  // core 1's interrupt set-
 #endif
 static uint32_t g_bench_pio, g_bench_ram, g_bench_sio, g_bench_nop;  // cycles per 1000, measured in setup1
 static volatile uint32_t g_bench_var;
-static uint32_t g_bench_pio_ram, g_bench_nop_ram;
-
-#ifdef HDDPRO_OBS_REGS
-namespace bus_observer { extern volatile bool g_obs_rearm; }
-#endif
-volatile uint32_t g_wlog_pos[64];
-volatile uint32_t g_wlog[64]; volatile uint32_t g_wlog_n; volatile uint32_t g_wlog_stop; uint32_t g_obs_snap[160]; uint32_t g_obs_snap_end; volatile uint32_t g_obs_snapped; uint32_t g_cmd_snap_pos;  // bench: the table's last writes  // the same loops, from core 1's RAM code
+static uint32_t g_bench_pio_ram, g_bench_nop_ram;  // the same loops, from core 1's RAM code
 CORE1_RAM __attribute__((noinline)) static void benchFromRam() {
     uint32_t t = m33_hw->dwt_cyccnt;
     for (int i = 0; i < 1000; ++i) __asm volatile("nop");
@@ -854,14 +848,6 @@ __attribute__((always_inline)) static inline ide_table::Image tableImage(Dev& de
 // ready at once, the interrupt went off and on again within one pass, and
 // INTRQ was never raised again (the JMicron adapter then waited for good).
 static int8_t g_table_intrq = -1;
-// bench: core 1's events against the observer's ring position (console R, `EV1`):
-// 1 Command taken, 2 INTRQ set (bits 28-29: asserted, driven), 3 interrupt
-// acknowledged, 4 fetch result taken, 5 data-in block started.
-volatile uint32_t g_elog[64]; volatile uint32_t g_elog_n;
-__attribute__((always_inline)) static inline void elog(uint32_t kind, uint32_t bits = 0) {
-    g_elog[g_elog_n & 63] = ide_table::observerRingIndex() | bits << 28 | kind << 24;
-    g_elog_n = g_elog_n + 1;
-}
 
 template <class Dev>
 __attribute__((always_inline)) static inline void tableIntrq(Dev& dev) {
@@ -869,7 +855,6 @@ __attribute__((always_inline)) static inline void tableIntrq(Dev& dev) {
     int8_t now = int8_t((dev.intrq() ? 1 : 0) | (dev.intrqDriven() ? 2 : 0));
     if (now == shown) return;
     shown = now;
-    elog(2, uint32_t(now & 3));
     ide_table::setIntrq(now & 1, now & 2);
 }
 
@@ -894,17 +879,8 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         while (ide_table::popWrite(sample)) {
             bus::Block block = bus::block(sample);
             ata::Reg reg = ata::regFor(block == bus::Block::Command, block == bus::Block::Control, bus::address(sample));
-            if (g_wlog_stop == 0 || g_wlog_stop > 1) {  // bench: freeze 16 writes after an SRST mid-block
-                if (g_wlog_stop > 1) g_wlog_stop = g_wlog_stop - 1;
-                if (g_wlog_stop == 2 && !g_obs_snapped) { ide_table::snapObserver(g_obs_snap, 160, g_obs_snap_end); g_obs_snapped = 1; }
-                g_wlog_pos[g_wlog_n & 63] = ide_table::observerRingIndex() | (ide_table::dataOutActive() ? 0x80000000u : 0u);
-                g_wlog[g_wlog_n & 63] = sample | (dev.status() & ata::ST_DRQ ? 0x80000000u : 0) | (dev.commandQueued() ? 0x40000000u : 0); g_wlog_n = g_wlog_n + 1;
-                if (g_wlog_stop == 0 && reg == ata::Reg::AltStatusDevCtrl && (bus::data(sample) & ata::DC_SRST) && dev.status() & ata::ST_DRQ) g_wlog_stop = 17;
-            }
             if (reg == ata::Reg::Data || reg == ata::Reg::None) continue;  // WD has the data words
             if (reg == ata::Reg::StatusCommand) {
-                g_cmd_snap_pos = ide_table::observerRingIndex() | 0x80000000u;  // bench: snapshot the reads after it
-                elog(1, bus::data(sample) & 0xF);
                 dev.queueCommand(uint8_t(bus::data(sample)));
                 ide_table::armCommandBusy();
                 if (g_table_intrq > 0) g_table_intrq = int8_t(g_table_intrq & ~1);  // C lowered INTRQ
@@ -913,22 +889,12 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             }
             dirty = true;
         }
-        if (g_cmd_snap_pos && !g_wlog_stop) {  // bench: the reads around the last Command write
-            uint32_t now = ide_table::observerRingIndex(), from = g_cmd_snap_pos & 0x7FFFFFFF;
-            uint32_t ring = 1u << 12;  // bus_observer::ringSize() (RING_WORDS)
-            if ((now - from + ring) % ring >= 60) {  // 160 reads: about 100 before the Command, 60 after
-                ide_table::snapObserver(g_obs_snap, 160, g_obs_snap_end);
-                g_obs_snapped = 1;
-                g_cmd_snap_pos = 0;
-            }
-        }
         if (ide_table::statusReadSince(irq_raised_at) && dev.intrq()) {
             dev.consumeRead(ata::Reg::StatusCommand);  // acknowledges the interrupt raised at irq_raised_at
-            elog(3);
             dirty = true;
         }
         if (dev.commandQueued()) {
-            if (ide_table::dataInActive()) ide_table::stopWhy(3), ide_table::stopDataIn();  // a new command abandons a block
+            if (ide_table::dataInActive()) ide_table::stopDataIn();  // a new command abandons a block
             if (ide_table::dataOutActive()) ide_table::stopDataOut();
             runCommandEarly(dev);  // its CMD line, and it runs
             dirty = true;
@@ -939,7 +905,6 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         FetchResult result;
         if (g_mailbox.takeResult(result)) {
             dev.fetchDone(result.id, result.ok);
-            elog(4);
             dirty = true;
         }
         busyTimers(dev);
@@ -963,7 +928,6 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         bool low = !bus::high(pins, cfg::PIN_RESET_N);
         if (low != reset_low) {
             reset_low = low;
-            ide_table::stopWhy(4);
             ide_table::stopDataIn();
             ide_table::stopDataOut();
             dev.hardReset(low);
@@ -972,12 +936,6 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             dirty = true;
         }
 
-        if (ide_table::benchHold()) continue;  // bench: console Q is driving the blocks
-        {
-            const uint16_t* n_;
-            uint16_t l_;
-            ide_table::notePass(dev.dataInRemaining(n_, l_) ? 1u : 0u);
-        }
         // Data blocks, after everything that can start one (a command, a fetch, a
         // timer) and before publishing: the host must not see DRQ before its block
         // is on its way (0.32.3-dev: a sector's first five reads came before it).
@@ -987,19 +945,16 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         uint16_t left;
         if (ide_table::dataInActive()) {
             if (ide_table::dataInDone()) {
-                ide_table::stopWhy(1);
                 ide_table::stopDataIn();
                 if (dev.dataInRemaining(next, left)) dev.consumeDataWords(left);
                 dirty = true;
             } else if (!dev.dataInRemaining(next, left)) {  // the device dropped it (SRST, a reset)
-                ide_table::stopWhy(2);
                 ide_table::stopDataIn();
                 dirty = true;
             }
         }
         if (!ide_table::dataInActive() && dev.dataInRemaining(next, left)) {
             ide_table::startDataIn(next, left);  // before the host can see DRQ
-            elog(5);
             dirty = true;
         }
 
@@ -2093,9 +2048,6 @@ static void serveFetches() {
                 postHeadTarget(fetch.command_lba, fetch.command_sectors,
                                fetch.store ? activity_link::Op::Write : activity_link::Op::Read, r.seek_start_us);
         }
-#ifdef HDDPRO_FETCH_DELAY_US  // bench: every result held at least this long, as a real drive's access time
-        if (ready < now + HDDPRO_FETCH_DELAY_US) ready = now + HDDPRO_FETCH_DELAY_US;
-#endif
         g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok}, ready};
         ++g_held_count;
         releaseHeld();
@@ -2402,13 +2354,8 @@ static void printStats() {
     Serial.printf(" c1_bench_ram_per1000=nop:%lu,pio:%lu", (unsigned long)g_bench_nop_ram, (unsigned long)g_bench_pio_ram);
     s_passes_then = passes, s_ms_then = ms;
     Serial.printf(" bus=%s iordy_stall_released=%lu", ide_table::running() ? "table" : ide_bus::busName(), (unsigned long)ide_bus::iordyStallReleases());
-    if (ide_table::running()) {
-        uint32_t d[6];
-        ide_table::debug(d);
-        Serial.printf(" table_in=%lu table_out=%lu table_dpc=%lu table_dtx=%lu table_left=%lu table_ctrl=%08lx table_dinstr=%04lx table_r0e0=%08lx",
-                      (unsigned long)ide_table::blocksIn(), (unsigned long)ide_table::blocksOut(), (unsigned long)d[0],
-                      (unsigned long)d[1], (unsigned long)d[2], (unsigned long)d[3], (unsigned long)d[4], (unsigned long)d[5]);
-    }
+    if (ide_table::running())
+        Serial.printf(" table_in=%lu table_out=%lu", (unsigned long)ide_table::blocksIn(), (unsigned long)ide_table::blocksOut());
     Serial.printf(" autobus=%s autobus_why=%s autobus_sectors=%lu autobus_long=%lu",
                   g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early", auto_bus::whyName(g_auto_bus.why()),
                   (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads());
@@ -2555,82 +2502,6 @@ static void runShortTest() {
     for (;;) tight_loop_contents();
 }
 
-// Bench (12 Nov 2026, the Innostor bridge): core 0 logs every edge of the bus's
-// control lines for 2 ms from the end of the next read command's Command write
-// (20h, C4h, C8h), into `ev` (cycles in bits 0-24; the lines in 25-31).
-static void edgeLog(uint32_t* ev, uint32_t cap) {
-    static constexpr unsigned LINES[8] = {cfg::PIN_INTRQ,  cfg::PIN_DIOR_N,  cfg::PIN_DIOW_N,  cfg::PIN_IORDY,
-                                          cfg::PIN_CS0_N,  cfg::PIN_DA0,     cfg::PIN_DA0 + 1, cfg::PIN_DA0 + 2};
-    uint32_t mask = 0;
-    for (unsigned l : LINES) mask |= 1u << l;
-    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 0's cycle counter
-    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
-    const uint32_t cmd = (7u << cfg::PIN_DA0) | (1u << cfg::PIN_CS1_N);  // DA 7, CS0# low, CS1# high
-    const uint32_t amask = (7u << cfg::PIN_DA0) | (1u << cfg::PIN_CS0_N) | (1u << cfg::PIN_CS1_N);
-    Serial.printf("# waiting for a read command\n");
-    Serial.flush();
-    uint32_t start = time_us_32();
-    uint8_t command = 0;
-    for (;;) {
-        if (time_us_32() - start > 20000000) { Serial.printf("# none\n"); return; }
-        uint32_t g = sio_hw->gpio_in;
-        if ((g & (1u << cfg::PIN_DIOW_N)) || (g & amask) != cmd) continue;
-        uint32_t last = g;
-        while (!((g = sio_hw->gpio_in) & (1u << cfg::PIN_DIOW_N))) last = g;
-        command = uint8_t(last >> cfg::PIN_DD0);
-        if (command == 0x20 || command == 0xC4 || command == 0xC8) break;
-    }
-    auto pack = [&](uint32_t c, uint32_t g) {
-        uint32_t v = c & 0xFFFFFF;
-        for (unsigned k = 0; k < 8; ++k) v |= ((g >> LINES[k]) & 1) << (24 + k);
-        return v;
-    };
-    // The last 16 edges kept in a ring until the address leaves Status (DA 7),
-    // then everything from there: the change from Status to Data.
-    uint32_t n = 0, last = sio_hw->gpio_in & mask, t0 = m33_hw->dwt_cyccnt;
-    const uint32_t da_mask = 7u << cfg::PIN_DA0;
-    uint32_t ring = 0;
-    ev[ring++ % 16] = pack(0, last);
-    for (uint32_t spin = 0;; ++spin) {
-#if FIRMWARE_SLICE != 0
-        if (spin % 256 == 255) serveFetches();  // the read's sector, or it never comes
-#endif
-        uint32_t g = sio_hw->gpio_in & mask;
-        if (g != last) ev[ring++ % 16] = pack(m33_hw->dwt_cyccnt - t0, g), last = g;
-        if ((g & da_mask) != da_mask || m33_hw->dwt_cyccnt - t0 > 200000000u) break;  // or 1 s
-    }
-    {
-        uint32_t keep = ring < 16 ? ring : 16, tmp[16];
-        for (uint32_t k = 0; k < keep; ++k) tmp[k] = ev[(ring - keep + k) % 16];
-        for (uint32_t k = 0; k < keep; ++k) ev[k] = tmp[k];
-        n = keep;
-    }
-    uint32_t t1 = m33_hw->dwt_cyccnt;
-    // Data register strobes left out (they'd fill the buffer in two sectors), counted instead
-    const uint32_t data_addr = 0, data_mask = da_mask | (1u << cfg::PIN_CS0_N);
-    uint32_t data_reads = 0;
-    bool was_low = false;
-    for (uint32_t spin = 0; m33_hw->dwt_cyccnt - t1 < 2000000u && n < cap; ++spin) {  // 10 ms at 200 MHz
-#if FIRMWARE_SLICE != 0
-        if (spin % 256 == 255) serveFetches();
-#endif
-        uint32_t g = sio_hw->gpio_in & mask;
-        if ((g & data_mask) == data_addr) {
-            bool low = !(g & (1u << cfg::PIN_DIOR_N));
-            if (low && !was_low) ++data_reads;
-            was_low = low;
-            g |= 1u << cfg::PIN_DIOR_N;
-        }
-        if (g != last) ev[n++] = pack(m33_hw->dwt_cyccnt - t0, g), last = g;
-    }
-    Serial.printf("# data reads %lu\n", (unsigned long)data_reads);
-    Serial.printf("EDGES n=%lu command=%02x (ns intrq dior diow iordy cs0 da0 da1 da2)\n", (unsigned long)n, command);
-    for (uint32_t i = 0; i < n; ++i) {
-        Serial.printf("E %lu", (unsigned long)((ev[i] & 0xFFFFFF) * 5));
-        for (unsigned k = 0; k < 8; ++k) Serial.printf(" %d", int((ev[i] >> (24 + k)) & 1));
-        Serial.printf("\n");
-    }
-}
 
 static void handleConsole() {
     while (Serial.available()) {
@@ -2737,11 +2608,6 @@ static void handleConsole() {
                 Serial.printf("WINDOW %s\n", on ? "on" : "off");
                 break;
             }
-            case 'G': {  // bench: edges from the next read command (edgeLog)
-                static uint32_t ev[2048];
-                edgeLog(ev, 2048);
-                break;
-            }
 #endif
 #if FIRMWARE_SLICE != 0
             case 'r':
@@ -2755,144 +2621,8 @@ static void handleConsole() {
                 ide_bus::resetEarlyProfile();
                 ide_bus::resetLaneStats();
                 break;
-            case 'G': {  // bench: edges from the next read command, into the table's capture buffer
-                const uint32_t* cap_pins; const uint16_t* cap_d; ide_table::capture(cap_pins, cap_d);
-                edgeLog(const_cast<uint32_t*>(cap_pins), 1024);
-                break;
-            }
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 'P': bus_letter_next = true; break;  // a bus program until a power cycle
-            case 'Z':  // bench: the register table's timeline from the next Command write
-#ifdef HDDPRO_OBS_REGS
-                { bus_observer::g_obs_rearm = true; Serial.printf("# obs rearmed\n"); }
-#else
-                if (ide_table::running()) ide_table::armCommandCapture(), Serial.printf("# armed\n");
-#endif
-                break;
-            case 'R':  // bench: the register table's records (no tests)
-                if (ide_table::running()) {
-                    {
-                        uint32_t n = g_wlog_n, from = n > 64 ? n - 64 : 0;
-                        Serial.printf("WLOG n=%lu stop=%lu (reg data drq queued)\n", (unsigned long)n, (unsigned long)g_wlog_stop);
-                        for (uint32_t i = from; i < n; ++i) {
-                            uint32_t s = g_wlog[i & 63];
-                            bus::Block b = bus::block(s);
-                            Serial.printf("W out=%u @%u raw=%08lx %d %04x %d%d\n", unsigned(g_wlog_pos[i & 63] >> 31), unsigned(g_wlog_pos[i & 63] & 0x7FFFFFFF), (unsigned long)s, int(ata::regFor(b == bus::Block::Command, b == bus::Block::Control, bus::address(s))), unsigned(bus::data(s)), int(s >> 31), int((s >> 30) & 1));
-                        }
-                    }
-                    {
-                        uint32_t n = g_elog_n, from = n > 64 ? n - 64 : 0;
-                        Serial.printf("ELOG n=%lu (1 cmd, 2 intrq a+2d, 3 ack, 4 fetched, 5 block)\n", (unsigned long)n);
-                        for (uint32_t i = from; i < n; ++i)
-                            Serial.printf("EV1 @%lu k=%lu v=%lu\n", (unsigned long)((g_elog[i & 63] & 0xFFFFFF) % bus_observer::ringSize()),
-                                          (unsigned long)((g_elog[i & 63] >> 24) & 0xF), (unsigned long)(g_elog[i & 63] >> 28));
-                    }
-                    if (g_obs_snapped) {
-                        Serial.printf("OBSSNAP end=%lu (address dd)\n", (unsigned long)g_obs_snap_end);
-                        for (unsigned i = 0; i < 160; ++i) {
-                            Serial.printf("O @%lu a=%02lx dd=%04lx raw=%08lx\n", (unsigned long)((g_obs_snap_end + bus_observer::ringSize() * 4 - 160 + i) % bus_observer::ringSize()),
-                                          (unsigned long)((g_obs_snap[i] >> 16) & 0xFF), (unsigned long)(g_obs_snap[i] & 0xFFFF), (unsigned long)g_obs_snap[i]);
-                            if (i % 32 == 0) delay(5);
-                        }
-                    }
-                    {
-                        const uint32_t* pins;
-                        const uint16_t* d;
-                        uint32_t n = ide_table::capture(pins, d);
-                        Serial.printf("TABLECAP n=%lu (100 ns steps; dior cs0 cs1 da dd | d_pc d_lvl)\n", (unsigned long)n);
-                        uint64_t last = ~0ull;
-                        for (uint32_t i = 0; i < n; ++i) {
-                            uint32_t p = pins[i];
-                            uint32_t key = ((p >> 4) & 0xFFFFFF) | ((p >> cfg::PIN_INTRQ) & 1) << 24;  // DD, DA, CS, DIOR#, DIOW#, INTRQ
-                            uint64_t v = uint64_t(key) << 12 | d[i];
-                            if (v == last) continue;
-                            last = v;
-                            Serial.printf("CAP %4lu intrq=%lu dior=%lu diow=%lu cs0=%lu cs1=%lu da=%lu dd=%04lx | pc=%2u lvl=%u\n", (unsigned long)i,
-                                          (unsigned long)((p >> cfg::PIN_INTRQ) & 1),
-                                          (unsigned long)((p >> cfg::PIN_DIOR_N) & 1), (unsigned long)((p >> cfg::PIN_DIOW_N) & 1),
-                                          (unsigned long)((p >> cfg::PIN_CS0_N) & 1),
-                                          (unsigned long)((p >> cfg::PIN_CS1_N) & 1), (unsigned long)((p >> cfg::PIN_DA0) & 7),
-                                          (unsigned long)((p >> cfg::PIN_DD0) & 0xFFFF), unsigned(d[i] & 0x1F), unsigned(d[i] >> 8));
-                            if (i % 64 == 0) delay(5);
-                        }
-                    }
-                    {
-                        uint32_t b[81];
-                        ide_table::blockRecords(b);
-                        Serial.printf("TABLETEST blocks=%lu", (unsigned long)b[0]);
-                        for (unsigned i = 0; i < b[0] && i < 16; ++i)
-                            Serial.printf(" [start_level=%lu fetched=%lu end_level=%lu taken=%ld first=%04lx count=%lu why=%lu]",
-                                          (unsigned long)b[1 + i * 5], (unsigned long)b[2 + i * 5], (unsigned long)b[3 + i * 5],
-                                          long(b[2 + i * 5]) - long(b[3 + i * 5]),  // words D gave the host
-                                          (unsigned long)(b[4 + i * 5] & 0xFFFF), (unsigned long)(b[4 + i * 5] >> 16),
-                                          (unsigned long)b[5 + i * 5]);
-                        Serial.printf("\n");
-                    }
-                }
-                break;
-            case 'Q':  // bench: the register table's D drives a word
-                if (ide_table::running()) {
-                    static const uint32_t waits[] = {0, 20, 100, 400};
-                    for (uint32_t w : waits) {
-                        uint32_t r = ide_table::busyTest(w);
-                        Serial.printf("TABLETEST busy after %lu cycles: status %02lx -> %02lx (C1 fired=%lu)\n", (unsigned long)w,
-                                      (unsigned long)(r & 0xFF), (unsigned long)((r >> 8) & 0xFF), (unsigned long)(r >> 16));
-                    }
-                    for (int k = 0; k < 5; ++k)
-                        Serial.printf("TABLETEST busy latency %lu cycles\n", (unsigned long)ide_table::busyLatency());
-                    {
-                        uint32_t f = ide_table::flushTest();
-                        Serial.printf("TABLETEST flush: level %lu -> %lu\n", (unsigned long)(f & 0xFF), (unsigned long)(f >> 8));
-                    }
-                    {
-                        ide_table::fakeCycles(200);
-                        const uint32_t* f = ide_table::fakeReads();
-                        Serial.printf("TABLETEST fake data reads at 200 cycles (want b000 ... b027):");
-                        for (unsigned k = 0; k < 40; ++k)
-                            Serial.printf(" %04lx%s%s", (unsigned long)(f[k] & 0xFFFF), (f[k] >> 17) & 1 ? "" : "(not driven)",
-                                          (f[k] >> 16) & 1 ? "" : "(held after)");
-                        Serial.printf(" padout=%04lx funcsel=%lu pio=%lu stream_left=%08lx\n", (unsigned long)ide_table::fakeInfo(0),
-                                      (unsigned long)ide_table::fakeInfo(1), (unsigned long)ide_table::fakeInfo(2),
-                                      (unsigned long)ide_table::fakeInfo(3));
-                    }
-                    {
-                        ide_table::fakeCycles(40);
-                        const uint32_t* f = ide_table::fakeReads();
-                        Serial.printf("TABLETEST fake data reads at 40 cycles (want b000 ... b027):");
-                        for (unsigned k = 0; k < 40; ++k)
-                            Serial.printf(" %04lx%s%s", (unsigned long)(f[k] & 0xFFFF), (f[k] >> 17) & 1 ? "" : "(not driven)",
-                                          (f[k] >> 16) & 1 ? "" : "(held after)");
-                        Serial.printf(" padout=%04lx funcsel=%lu pio=%lu stream_left=%08lx\n", (unsigned long)ide_table::fakeInfo(0),
-                                      (unsigned long)ide_table::fakeInfo(1), (unsigned long)ide_table::fakeInfo(2),
-                                      (unsigned long)ide_table::fakeInfo(3));
-                    }
-                    {
-                        ide_table::fakeCycles(16);
-                        const uint32_t* f = ide_table::fakeReads();
-                        Serial.printf("TABLETEST fake data reads at 16 cycles (want b000 ... b027):");
-                        for (unsigned k = 0; k < 40; ++k)
-                            Serial.printf(" %04lx%s%s", (unsigned long)(f[k] & 0xFFFF), (f[k] >> 17) & 1 ? "" : "(not driven)",
-                                          (f[k] >> 16) & 1 ? "" : "(held after)");
-                        Serial.printf(" padout=%04lx funcsel=%lu pio=%lu stream_left=%08lx\n", (unsigned long)ide_table::fakeInfo(0),
-                                      (unsigned long)ide_table::fakeInfo(1), (unsigned long)ide_table::fakeInfo(2),
-                                      (unsigned long)ide_table::fakeInfo(3));
-                    }
-                    {
-                        const uint32_t* r = ide_table::streamTest();
-                        Serial.printf("TABLETEST stream: ctrl=%08lx count0=%lu", (unsigned long)r[0], (unsigned long)r[1]);
-                        for (unsigned k = 0; k < 4; ++k)
-                            Serial.printf(" [read=%lu left=%08lx]", (unsigned long)r[2 + 2 * k], (unsigned long)r[3 + 2 * k]);
-                        Serial.printf(" level=%lu fdebug=%08lx\n", (unsigned long)r[10], (unsigned long)r[11]);
-                    }
-                    Serial.printf("TABLETEST d_y=%04lx d_x=%04lx d_isr=%04lx\n", (unsigned long)ide_table::readD(pio_y),
-                                  (unsigned long)ide_table::readD(pio_x), (unsigned long)ide_table::readD(pio_isr));
-                    uint32_t r1 = ide_table::selfTest(0xA55A), r2 = ide_table::selfTest(0x3CC3);
-                    Serial.printf("TABLETEST released=%d a55a -> seen %04lx oe %04lx; 3cc3 -> seen %04lx oe %04lx\n",
-                                  int(ide_table::selfTestReleased()),
-                                  (unsigned long)(r1 & 0xFFFF), (unsigned long)(r1 >> 16), (unsigned long)(r2 & 0xFFFF),
-                                  (unsigned long)(r2 >> 16));
-                }
-                break;
             case 'U': startLoopback(); break;  // the link's loopback test
             case 'V': setAbsent(!g_absent.load(), ""); break;  // the drive gone from the bus, or back
             case 'H':  // seek timing off or on, until a restart (to benchmark)

@@ -30,17 +30,17 @@ namespace sector_check {
 // One observer word: bits 0-20 as in the pin sample (DD0-15, DA2-0, CS0#,
 // CS1#), bits 21-31 a sequence number that counts down by one per read.
 // With HDDPRO_OBSERVER_STROBE (bus_observer_strobe, a bench diagnostic), bits
-// 21-30 are how long DIOR# was low, in the observer's 15 ns passes counting
-// down from 1023, and bit 31 the sequence number's low bit.
+// 21-26 are how long DIOR# was low, in the observer's 15 ns passes counting
+// down from 63, and bits 27-31 the sequence number.
 constexpr unsigned SAMPLE_BITS = 21;
 constexpr uint32_t SAMPLE_MASK = (1u << SAMPLE_BITS) - 1;
 #if HDDPRO_OBSERVER_STROBE
 constexpr bool HAS_STROBE = true;
 constexpr unsigned STROBE_SHIFT = 21;
-constexpr uint32_t STROBE_MASK = 0x3FFu;
+constexpr uint32_t STROBE_MASK = 0x3Fu;
 constexpr unsigned STROBE_PASS_NS = 15;  // 3 cycles at 200 MHz
-constexpr unsigned SEQ_SHIFT = 31;
-constexpr uint32_t SEQ_MASK = 0x1u;
+constexpr unsigned SEQ_SHIFT = 27;
+constexpr uint32_t SEQ_MASK = 0x1Fu;
 #else
 constexpr bool HAS_STROBE = false;
 constexpr unsigned SEQ_SHIFT = 21;
@@ -48,7 +48,7 @@ constexpr uint32_t SEQ_MASK = 0x7FFu;
 #endif
 
 // How long DIOR# was low for an observer word, in ns (HAS_STROBE), from the
-// observer's passes: exact to a pass, and wrapping every 1024 passes (15.4 us).
+// observer's passes: exact to a pass, and wrapping every 64 passes (960 ns).
 inline unsigned strobeNs(uint32_t word) {
 #if HDDPRO_OBSERVER_STROBE
     unsigned passes = (STROBE_MASK - ((word >> STROBE_SHIFT) & STROBE_MASK)) & STROBE_MASK;
