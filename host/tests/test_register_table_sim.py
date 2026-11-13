@@ -501,15 +501,21 @@ def test_status_after_data_writes_with_da2_settling_late(programs, mode, skew):
     assert [v & 0xFF if v is not None else None for v in reads] == [0x58] * 3, [hex(v) if v is not None else v for v in reads]
 
 
-@pytest.mark.parametrize("mode", [0, 2, 3, 4])
-def test_iordy_falls_within_20_ns_of_a_register_read(programs, mode):
-    # D watches the address before the strobe, so a register read gets IORDY low
-    # about 10-20 ns after DIOR# falls: deciding after the strobe (30-35 ns) was
-    # too late for the Innostor bridge in PIO 3, whose 75 ns Status reads after
-    # a Command then sometimes latched DD before R1 drove it (13 Nov 2026).
+@pytest.mark.parametrize("host", ["innostor_mode4", 0, 2, 3])  # (PIO 4: its 25 ns recovery is shorter than R's release, up to 35)
+def test_status_after_a_command_is_on_dd_within_30_ns_of_its_strobe(programs, host):
+    # R0-R2 keep their entry on DD's output latch while they wait for the strobe,
+    # so a read of a register whose address was already on the bus is driven
+    # 5-30 ns after DIOR# falls. Decided after the strobe (30-40 ns) was too late
+    # for the Innostor bridge in PIO 3: it reads Status 75 ns long and ignores
+    # IORDY after a Command, and its first poll, with DD still floating from the
+    # command byte, sometimes read BSY clear and went for the data before DRQ
+    # (13-14 Nov 2026).
+    timing = INNOSTOR_MODE4 if host == "innostor_mode4" else ALL_MODES[host]
     table = Table(programs)
-    run = run_host(table.block, idle_core1(), register_reads(), timing=ALL_MODES[mode])
+    accesses = [Access(True, "CMD", 7, data=0x20, hold_cs=True)] + [Access(False, "CMD", 7, hold_cs=True)] * 12
+    run = run_host(table.block, idle_core1(), accesses, timing=timing)
     assert not run.errors
-    check_registers(run)
-    leads = [r.iordy_low_lead_ns for r in run.results]
-    assert all(lead is not None and lead >= -20 for lead in leads), leads
+    reads = run.results[1:]
+    assert all(r.read_value is not None and r.read_value & 0xFF == 0x50 for r in reads)
+    late = [r.rise_ns - r.fall_ns - r.data_setup_ns for r in reads]
+    assert max(late) <= 30, late

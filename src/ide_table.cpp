@@ -684,6 +684,8 @@ uint32_t flushTest() {
 // pushed by hand (as a Command write would); Status is read (input overrides)
 // after `wait_cycles`. Returns the value read, before (low byte) and after.
 uint32_t busyTest(uint32_t wait_cycles) {
+    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // this core's cycle counter (core 0's is off otherwise)
+    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
     s_bench_hold = true;
     busy_wait_us(50);
     s_pio->rxf_putget[s_r1][3] = DRIVE | 0x50 | at(COMMAND_ADDRESS);
@@ -711,6 +713,30 @@ uint32_t busyTest(uint32_t wait_cycles) {
     armCommandBusy();
     s_bench_hold = false;
     return before | after << 8 | fired << 16;
+}
+
+// Bench: how long the Command busy path takes, C's push to the busy word in
+// R1's Status entry (core 0 polling the entry; about 2 cycles a poll). Core 1 held.
+uint32_t busyLatency() {
+    m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // this core's cycle counter (core 0's is off otherwise)
+    m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
+    s_bench_hold = true;
+    busy_wait_us(50);
+    s_pio->rxf_putget[s_r1][3] = DRIVE | 0x50 | at(COMMAND_ADDRESS);
+    s_pio->rxf_putget[s_r2][2] = DRIVE | 0x50 | at(ALT_STATUS_ADDRESS);
+    if (!dmaBusy(s_c1)) armCommandBusy();
+    volatile uint32_t* entry = &s_pio->rxf_putget[s_r1][3];
+    uint32_t t0 = m33_hw->dwt_cyccnt;
+    s_wpio->sm[s_c].instr = pio_encode_push(false, false);  // C's word, as at a Command write
+    uint32_t cycles = 0;
+    while (*entry != s_busy_status) {
+        cycles = m33_hw->dwt_cyccnt - t0;
+        if (cycles > 100000) break;
+    }
+    cycles = m33_hw->dwt_cyccnt - t0;
+    armCommandBusy();
+    s_bench_hold = false;
+    return cycles;
 }
 
 void debug(uint32_t out[6]) {

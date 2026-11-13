@@ -2838,6 +2838,8 @@ static void handleConsole() {
                         Serial.printf("TABLETEST busy after %lu cycles: status %02lx -> %02lx (C1 fired=%lu)\n", (unsigned long)w,
                                       (unsigned long)(r & 0xFF), (unsigned long)((r >> 8) & 0xFF), (unsigned long)(r >> 16));
                     }
+                    for (int k = 0; k < 5; ++k)
+                        Serial.printf("TABLETEST busy latency %lu cycles\n", (unsigned long)ide_table::busyLatency());
                     {
                         uint32_t f = ide_table::flushTest();
                         Serial.printf("TABLETEST flush: level %lu -> %lu\n", (unsigned long)(f & 0xFF), (unsigned long)(f >> 8));

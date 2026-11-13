@@ -1,4 +1,4 @@
-block 20000110-2000311c (12300 bytes)
+block 20000110-2000313c (12332 bytes)
 20000110    28 ata::regFor(bool, bool, unsigned int)
 2000012c    56 ata::Device::selectUnit(unsigned char)
 20000164    44 ata::Device::deviceWritten()
@@ -66,14 +66,14 @@ block 20000110-2000311c (12300 bytes)
 200028c4     8 pinsAsSample()
 200028cc    64 benchFromRam()
 2000290c    96 record(TraceEvent const&)
-2000296c    36 record(TraceKind, unsigned long)
-20002990     6 recordBus(unsigned long)
-20002996    94 recordDone(ata::Device&)
-200029f4    40 recordCommandStart(unsigned long, ata::CommandInfo const&)
-20002a1c   112 busyTimers(ata::Device&)
-20002a8c   140 runCommandEarly(ata::Device&)
-20002b18    72 serviceDma(ata::Device&)
-20002b60    38 earlyIdle(ata::Device&)
-20002b86   110 postFetch(ata::Device&, unsigned long&) [clone .constprop.0]
-20002bf4  1068 runDrive(ata::Device&) [clone .constprop.0]
-20003020   252 loop1
+2000296c    40 recordCommandStart(unsigned long, ata::CommandInfo const&)
+20002994    92 recordDone(ata::Device&)
+200029f0    36 record(TraceKind, unsigned long)
+20002a14     6 recordBus(unsigned long)
+20002a1a   138 runCommandEarly(ata::Device&)
+20002aa4   112 busyTimers(ata::Device&)
+20002b14    72 serviceDma(ata::Device&)
+20002b5c    38 earlyIdle(ata::Device&)
+20002b82   110 postFetch(ata::Device&, unsigned long&) [clone .constprop.0]
+20002bf0  1068 runDrive(ata::Device&) [clone .constprop.0]
+2000301c   288 loop1

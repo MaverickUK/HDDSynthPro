@@ -235,9 +235,9 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
 
     while True:
         dev_drive = sim.pindirs & DD_MASK
-        if dev_drive == DD_MASK and drive_since is None:
+        if dev_drive & 0xFF == 0xFF and drive_since is None:  # DD0-7 at least (a register's)
             drive_since = t
-        elif dev_drive != DD_MASK:
+        elif dev_drive & 0xFF != 0xFF:
             drive_since = None
         iordy_low = device_iordy_low()
         if iordy_low and (sim.pin_out >> B_IORDY) & 1:

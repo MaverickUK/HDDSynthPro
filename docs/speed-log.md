@@ -139,6 +139,10 @@ The data lane (`early_answers = off`): 0.31.0 reads 1.53, 80.0 IOPS, writes 1.68
 
 What it showed: the combined device costs the hard disk alone a fifth of its PIO write speed, so the hard disk gets a loop of its own; and with identical code, where it sits in RAM was worth 2.5% of reads (`CHANGELOG.md`, dev.2 and dev.5). Writes are still 2% short of 0.31.0, from outside core 1's per-access code. With a CD-ROM as device 1, the disk in MDMA 2: 8.63 MB/s reads, 1,066 random, 12.94 writes; the test disc read at 3.37 MB/s (device 1) and 3.19 (device 0).
 
+## The register table (branch `register-table`, 14 Nov 2026)
+
+`pcb_drive`, console `P t`, the test disk, the JMicron adapter in PIO 3 (`-m speed`): sequential reads 1.69 MB/s (10.92 ms a command, 213 µs a sector), random 4 KB 80.0 IOPS, writes 1.77 MB/s. Against the data lane's 1.53, 80.0 and 1.68 (above), and early answers' 1.20 and 1.11: the fastest PIO yet through this adapter. No read is held for long enough for the IORDY timer, which the table's block leaves out (`worst read 0`). Layout recorded after this run.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

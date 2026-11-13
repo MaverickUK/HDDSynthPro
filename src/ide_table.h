@@ -85,6 +85,7 @@ const volatile uint32_t (*seenLog(uint32_t& n))[3];
 uint32_t capture(const uint32_t*& pins, const uint16_t*& d);
 void fakeCycles(uint32_t c);
 uint32_t busyTest(uint32_t wait_cycles);  // bench  // bench: cycles low and high per faked read  // bench: core 1 leaves the blocks alone
+uint32_t busyLatency();  // bench: cycles from C's push to the busy Status entry
 uint32_t flushTest();  // bench: DD0's padout, its funcsel, the PIO number  // bench: D's Y, X or ISR (pio_src_dest), on DD  // bench: `mov pindirs, null` released them after  // bench: D drives `word`; the lines seen, and (top half) their output enables
 
 }  // namespace ide_table
