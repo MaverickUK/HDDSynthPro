@@ -94,7 +94,8 @@ void forEachLine(const char* text, size_t len, Fn fn) {
         const char* nl = static_cast<const char*>(std::memchr(p, '\n', size_t(end - p)));
         const char* line_end = nl ? nl : end;
         Span whole{p, line_end};
-        if (!whole.empty() && whole.end[-1] == '\r') --whole.end;
+        // CRLF, and any extra CRs (a file ending in a bare CR, finished by setKey, had CR CR LF)
+        while (!whole.empty() && whole.end[-1] == '\r') --whole.end;
         fn(number++, split(whole));
         p = nl ? nl + 1 : end;
     }
@@ -170,6 +171,7 @@ void defaults(Config& out) {
     out.isa = DEFAULT_ISA;
     out.early_answers = DEFAULT_EARLY_ANSWERS;
     out.iordy = DEFAULT_IORDY;
+    out.register_table = DEFAULT_REGISTER_TABLE;
     out.geometry = Geometry{};
     out.seek_timing = seek_timing::Setting{};
     out.warning_count = 0;
@@ -190,6 +192,7 @@ const Switch SWITCHES[] = {
     {"isa", &Config::isa},
     {"early_answers", &Config::early_answers},
     {"iordy", &Config::iordy},
+    {"register_table", &Config::register_table},
 };
 constexpr size_t SWITCH_COUNT = sizeof SWITCHES / sizeof SWITCHES[0];
 
@@ -387,8 +390,10 @@ size_t setKey(const char* text, size_t len, const char* key, const char* value, 
                           int(text + len - target_value_end), target_value_end);
     } else {
         bool ends_with_newline = len == 0 || text[len - 1] == '\n';
-        n = std::snprintf(out, size, "%.*s%s%s = %s%s", int(len), text, ends_with_newline ? "" : nl, key,
-                          value, nl);
+        // A last line ending in a bare CR gets only its LF (CR CR LF left its
+        // value with a CR on the end, 14 Nov 2026)
+        const char* finish = ends_with_newline ? "" : text[len - 1] == '\r' ? "\n" : nl;
+        n = std::snprintf(out, size, "%.*s%s%s = %s%s", int(len), text, finish, key, value, nl);
     }
     return (n > 0 && size_t(n) < size) ? size_t(n) : 0;
 }
@@ -486,6 +491,12 @@ const char* defaultFile() {
            "# off for a controller that checks IORDY before it starts each access (an\r\n"
            "# Amiga 1200's): the drive never touches IORDY. Use with early_answers = on.\r\n"
            "iordy = on\r\n"
+           "\r\n"
+           "# Experimental: every read answered at once by the drive's own hardware,\r\n"
+           "# with no wait for its processor (fastest through USB adapters, and in\r\n"
+           "# time for controllers that never wait). The hard disk only, without DMA;\r\n"
+           "# isa = on overrides it. Not yet tried on retro PCs.\r\n"
+           "register_table = off\r\n"
            "\r\n"
            "# The CHS geometry the drive reports, which a BIOS's auto-detect picks up:\r\n"
            "# auto (the one the image's partition table was made with, else 16 heads\r\n"

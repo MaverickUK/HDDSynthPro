@@ -16,6 +16,7 @@
 //   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
+//   register_table = off   # on: every read answered by the PIO from a table core 1 keeps (docs/register-table.md)
 //   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
 //   cdrom = HDDSYNTH.ISO   # the CD-ROM drive's disc (device0 or device1 = cdrom): an ISO or a CUE
 //                          # sheet; none: the test disc
@@ -105,6 +106,13 @@ constexpr bool DEFAULT_EARLY_ANSWERS = true;
 // held from the chip select deadlocks (an Amiga 1200's Gayle, 2026-10-31);
 // with early_answers the value is ready by the strobe anyway.
 constexpr bool DEFAULT_IORDY = true;
+// `register_table = on`: ide_table, which answers every read from values core
+// 1 keeps in the PIO's registers, within about 30 ns of the strobe, so no read
+// waits for core 1 (docs/register-table.md). The hard disk in PIO only: with a
+// CD-ROM the drive runs ide_bus, and no DMA is offered; `isa = on` overrides
+// it (the program the ICL 386 was proven on). Off by default until it has run
+// on retro PCs.
+constexpr bool DEFAULT_REGISTER_TABLE = false;
 
 struct Config {
     // `device0 = NAME`: device 0's disk image. Its old name, `image`, still
@@ -123,6 +131,7 @@ struct Config {
     bool isa = DEFAULT_ISA;
     bool early_answers = DEFAULT_EARLY_ANSWERS;
     bool iordy = DEFAULT_IORDY;
+    bool register_table = DEFAULT_REGISTER_TABLE;
     // `geometry = C/H/S`: the default geometry IDENTIFY reports, for an image
     // from an old drive whose partition table and boot code use its own (a
     // BIOS's auto-detect then picks it up); 0 cylinders: auto (16 x 63).

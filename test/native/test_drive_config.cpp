@@ -283,6 +283,28 @@ TEST(test_config_isa) {
     CHECK(!parsed("iordy = off\n").iordy);
     CHECK(drive_config::isKey("iordy"));
     CHECK(parsed(drive_config::defaultFile()).iordy);
+    // register_table = on: the register table (docs/register-table.md); off by default
+    CHECK(!parsed("").register_table);
+    CHECK(parsed("register_table = on\n").register_table);
+    CHECK(!parsed(drive_config::defaultFile()).register_table);
+    CHECK(drive_config::isKey("register_table"));
+    CHECK(parsed(drive_config::defaultFile()).warning_count == 0);
+    {  // a last line ending in a bare CR: setKey finishes it with LF only, and the value has no CR
+        const char in[] = "isa = off\r\ncdrom = DOOM_SE.ISO\r";
+        char out[drive_config::MAX_FILE];
+        size_t n = drive_config::setKey(in, sizeof in - 1, "register_table", "on", out, sizeof out);
+        CHECK(n > 0);
+        CHECK(std::string(out, n) == "isa = off\r\ncdrom = DOOM_SE.ISO\r\nregister_table = on\r\n");
+        Config c = parsed(std::string(out, n).c_str());
+        CHECK(c.warning_count == 0);
+        CHECK(std::strcmp(c.cdrom, "DOOM_SE.ISO") == 0);
+        CHECK(c.register_table);
+        // and a file already holding CR CR LF reads as it was meant
+        Config d = parsed("cdrom = DOOM_SE.ISO\r\r\nisa = on\r\r\n");
+        CHECK(d.warning_count == 0);
+        CHECK(std::strcmp(d.cdrom, "DOOM_SE.ISO") == 0);
+        CHECK(d.isa);
+    }
     // geometry = C/H/S for an old drive's image; auto by default
     CHECK_EQ(parsed("").geometry.cylinders, uint16_t(0));
     Config g = parsed("geometry = 756/13/51\n");

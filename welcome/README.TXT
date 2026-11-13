@@ -73,6 +73,11 @@ Plain text, one setting per line as key = value. # starts a comment.
                          from the Pentium on), but not for ISA cards.
   iordy = on             off for a controller that checks IORDY before
                          each access (an Amiga 1200), with early_answers.
+  register_table = off   Experimental. on: every read answered at once by
+                         the drive's own hardware, with no wait for its
+                         processor: the fastest through USB adapters. The
+                         hard disk only, without DMA; isa = on overrides
+                         it. Not yet tried on retro PCs.
   geometry = auto        The cylinders/heads/sectors the BIOS sees: auto
                          (from the image's partition table), or e.g.
                          756/13/51 to match an old BIOS's setting.
@@ -89,6 +94,7 @@ WHICH SETTINGS FOR YOUR COMPUTER
   ... faster, if the controller waits        early_answers = off
       for the drive (never with ISA cards)
   A USB-IDE adapter that can do DMA          dma = on (or mode = mdma2)
+  A USB-IDE adapter without DMA              register_table = on
   The CD-ROM through a USB-IDE adapter       mode = mdma2 (it asks for DMA)
   Amiga 1200 (not working yet)               iordy = off
 

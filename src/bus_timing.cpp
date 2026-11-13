@@ -11,6 +11,7 @@ namespace bus_timing {
 
 static PIO s_pio;
 static uint s_sm;
+static uint s_offset;
 static bool s_running = false;
 
 static uint32_t s_count = 0;
@@ -25,7 +26,7 @@ static uint32_t cyclesToNs(uint32_t cycles) {
 }
 
 bool begin() {
-    uint offset;
+    uint& offset = s_offset;
     s_running = pio_claim_free_sm_and_add_program_for_gpio_range(
         &bus_timing_program, &s_pio, &s_sm, &offset, cfg::PIN_DD0, cfg::PIN_RESET_N - cfg::PIN_DD0 + 1, true);
     if (!s_running) return false;
@@ -40,6 +41,14 @@ bool begin() {
 }
 
 bool running() { return s_running; }
+
+void end() {
+    if (!s_running) return;
+    s_running = false;  // poll() stops first (core 0, as the caller)
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    pio_remove_program(s_pio, &bus_timing_program, s_offset);
+    pio_sm_unclaim(s_pio, s_sm);
+}
 
 // A bounded batch: a host that probes an absent drive (the USB adapter, about
 // one read a microsecond during a re-detection) fills the FIFO faster than

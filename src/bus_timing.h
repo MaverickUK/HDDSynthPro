@@ -11,6 +11,8 @@ namespace bus_timing {
 // multiword DMA offered, ide_dma fills the third block).
 bool begin();
 bool running();
+// Stops it and frees its room (core 0; the PCB's card borrowing its block). begin() starts it again; the counts are kept.
+void end();
 
 // Collects the reports so far. Call often from core 0.
 void poll();

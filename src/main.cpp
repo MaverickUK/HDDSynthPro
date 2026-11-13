@@ -162,7 +162,7 @@ static FetchMailbox g_mailbox;
 static SharedFlag g_trace_bus{false};  // console `t`
 static SharedFlag g_fast_lane{true};   // console `F` (debug)
 static SharedFlag g_early{false};       // HDDSYNTH.INI early_answers: ide_bus_early (ide_bus::begin)
-static SharedFlag g_table{false};       // console `P t`: the register table (ide_table, docs/register-table.md)
+static SharedFlag g_table{false};       // HDDSYNTH.INI register_table, or console `P t`: ide_table (docs/register-table.md)
 static SharedFlag g_isa{false};         // HDDSYNTH.INI isa: iordy_watchdog and IOCS16# (ide_bus::begin)
 static SharedFlag g_no_lane{false};     // a CD-ROM: ide_bus, never the data lane (ide_bus::begin)
 static SharedFlag g_iordy{true};        // HDDSYNTH.INI iordy: off leaves IORDY alone (ide_bus::begin)
@@ -330,12 +330,27 @@ static void startDiagnostics() {
 static bool lendDiagnostics() {
     for (uint32_t start = millis(); !g_pio_planned.load(std::memory_order_acquire);)
         if (millis() - start > 2000) return false;
+    if (g_pio_plan.table_write) {
+        // The register table's write side shares the diagnostics' block with
+        // bus_observer and can't stop; the card's block went to IOCS16# and the
+        // read timing probe instead (pio_plan::choose), so those lend it.
+        iocs16::end();
+        bus_timing::end();
+        return true;
+    }
     if (!g_pio_plan.iordy_timer || !g_pio_plan.bus_observer) return false;  // they don't have a block of their own
     iordy_timer::end();
     bus_observer::end();
     return true;
 }
-static void reclaimDiagnostics() { startDiagnostics(); }
+static void reclaimDiagnostics() {
+    if (g_pio_plan.table_write) {
+        if (g_pio_plan.iocs16) iocs16::begin();
+        if (g_pio_plan.bus_timing) bus_timing::begin();
+        return;
+    }
+    startDiagnostics();
+}
 
 void setup1() {
     m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 1's own cycle counter, for g_c1_gap
@@ -1339,11 +1354,14 @@ static void chooseDisk() {
     // isa = on keeps its own program (no early answers, iordy_watchdog.pio):
     // the one the ICL 386 was proven on
     g_early.store(g_config.early_answers && !g_config.isa);
-    switch (busRequested()) {  // console `P`
-        case 'e': g_isa.store(false); g_early.store(true); break;
+    // register_table = on: the table in place of early answers or the data
+    // lane; isa = on keeps its own program
+    g_table.store(g_config.register_table && !g_config.isa);
+    switch (busRequested()) {  // console `P`, over the settings
+        case 'e': g_isa.store(false); g_early.store(true); g_table.store(false); break;
         case 't': g_isa.store(false); g_early.store(false); g_table.store(true); break;
-        case 'l': g_isa.store(false); g_early.store(false); break;
-        case 'i': g_isa.store(true); g_early.store(false); break;
+        case 'l': g_isa.store(false); g_early.store(false); g_table.store(false); break;
+        case 'i': g_isa.store(true); g_early.store(false); g_table.store(false); break;
         default: break;
     }
     g_iordy.store(g_config.iordy);
@@ -1511,7 +1529,7 @@ static void editConfig(const char* line) {
     }
     size_t n = drive_config::setKey(text, len, key, value, edited, sizeof edited);
     if (n == 0) {
-        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy, geometry), "
+        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy, register_table, geometry), "
                       "or the file would be too long\n", key);
         return;
     }
@@ -1561,11 +1579,21 @@ static void printConfig() {
     } else if (g_device1_note[0]) {
         Serial.printf("CONFIG device1 not used: %s\n", g_device1_note);
     }
-    Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s early_answers=%s iordy=%s\n",
+    Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s early_answers=%s iordy=%s register_table=%s\n",
                   g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
                   drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa),
-                  drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy));
+                  drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy),
+                  drive_config::onOff(g_config.register_table));
+    if (g_config.register_table && !g_table.load()) {
+        const char* why = busRequested() ? "the console's bus program (P) is used instead"
+                          : (g_device0_cdrom || g_device1_cdrom) ? "a CD-ROM is configured, so ide_bus runs"
+                          : g_config.isa ? "isa = on keeps its own program"
+                                         : "not started";
+        Serial.printf("CONFIG register_table not used: %s\n", why);
+    }
+    if (g_table.load() && g_config.dma && g_dmarq_wired.load())
+        Serial.printf("CONFIG register table: no DMA offered (dma = on is for the other bus programs, so far)\n");
     if (g_pio_planned.load(std::memory_order_acquire)) {
         const pio_plan::Plan& p = g_pio_plan;
         const bool diag = !sd_card::keptDiagnosticsBlock();  // a disc put in later may have taken their block

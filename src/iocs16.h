@@ -12,5 +12,10 @@ namespace iocs16 {
 // Starts the program. Call after ide_bus and the diagnostics have their PIO
 // blocks, and instead of ide_dma::begin().
 void begin();
+bool running();
+// Stops it and frees its PIO block's room (the PCB's card borrowing the block
+// for a console card operation with the register table, main.cpp). begin()
+// starts it again.
+void end();
 
 }  // namespace iocs16
