@@ -387,6 +387,14 @@ CORE1_RAM_TABLE void restart() {
         s_pio->sm[sm].instr = s_reg_start;
     }
     dReset();  // D at its start, its FIFO empty (and enabled)
+    // The writes the host made meanwhile (an adapter probing for a drive) are
+    // dropped, as ide_bus clears its FIFOs: replayed, they ran old commands.
+    s_wring_read = (dma_hw->ch[s_wring].write_addr - uint32_t(uintptr_t(s_wring_buf))) / 4;
+    while ((s_wpio->flevel >> (s_wd * 8 + 4)) & 0xF) (void)s_wpio->rxf[s_wd];
+    while ((s_wpio->flevel >> (s_c * 8 + 4)) & 0xF) (void)s_wpio->rxf[s_c];
+    // C's busy write fired for a dropped command: armed again, or Status would
+    // stay BSY for a command nobody will take (busyOwed).
+    if (!dmaBusy(s_c1)) armCommandBusy();
     hw_set_bits(&s_pio->ctrl, mask);
 }
 

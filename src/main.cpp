@@ -922,6 +922,7 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             iordy_timer::requestReset();
             g_command_active.store(false);
             reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
+            if (reset_low) dev.hardReset(true);  // back in the middle of a reset (as runDriveT)
             dirty = true;
         }
         uint32_t pins = pinsAsSample();
