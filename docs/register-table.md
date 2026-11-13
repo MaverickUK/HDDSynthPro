@@ -258,7 +258,7 @@ On the Mac with the bridge at PIO 3 (`mode = auto`), `T`, `P t`, firmware 43d70e
 
 **Bench:** `Q` hung core 0 (`busyTest`'s wait used core 0's cycle counter, which only `G` turned on): fixed. Careful with slice 3 after hand-written tests: it checks the whole disk, so writes to the test disk (LBA 100000 on) must be put back first (`gen_disk.sectors`), or restart with `T` twice.
 
-**The bench hooks out (14 Nov):** the write log, event log and observer snapshots, console `Q`, `R`, `Z` and `G` (and core 0's edge log), the test functions in `ide_table.cpp`, `HDDPRO_OBS_REGS`, `HDDPRO_FETCH_DELAY_US` and `host/bench/`; the strobe observer back to `main`'s layout (6-bit passes, 5-bit sequence). The core 1 layout is unchanged (the table's code sits after `.data`). On the JMicron: slices 3 and 4 pass, reads 1.69 MB/s, writes 1.78, 80.1 IOPS, as with the hooks in. RAM 96.5% (95.5% on `main`).
+**The bench hooks out (14 Nov):** the write log, event log and observer snapshots, console `Q`, `R`, `Z` and `G` (and core 0's edge log), the test functions in `ide_table.cpp`, `HDDPRO_OBS_REGS`, `HDDPRO_FETCH_DELAY_US` and `host/bench/`; the strobe observer back to `main`'s layout (6-bit passes, 5-bit sequence). The core 1 layout is unchanged (the table's code sits after `.data`). On the JMicron: slices 3 and 4 pass, reads 1.69 MB/s, writes 1.78, 80.1 IOPS, as with the hooks in. RAM 96.5% (95.5% on `main`). Then the Innostor bridge, PIO 3: slices 3 and 4 pass (1,000 cycles at 2.45 MB/s); `-m speed` reads 2.40 MB/s, 519 IOPS, writes 2.65 (it sends one-sector commands only; `test_speed` no longer divides by zero on that).
 
 ## Open
 

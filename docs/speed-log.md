@@ -141,7 +141,9 @@ What it showed: the combined device costs the hard disk alone a fifth of its PIO
 
 ## The register table (branch `register-table`, 14 Nov 2026)
 
-`pcb_drive`, console `P t`, the test disk, the JMicron adapter in PIO 3 (`-m speed`): sequential reads 1.69 MB/s (10.92 ms a command, 213 µs a sector), random 4 KB 80.0 IOPS, writes 1.77 MB/s. Against the data lane's 1.53, 80.0 and 1.68 (above), and early answers' 1.20 and 1.11: the fastest PIO yet through this adapter. No read is held for long enough for the IORDY timer, which the table's block leaves out (`worst read 0`). Layout recorded after this run.
+`pcb_drive`, console `P t`, the test disk, the JMicron adapter in PIO 3 (`-m speed`): sequential reads 1.69 MB/s (10.92 ms a command, 213 µs a sector), random 4 KB 80.0 IOPS, writes 1.77 MB/s. Against the data lane's 1.53, 80.0 and 1.68 (above), and early answers' 1.20 and 1.11: the fastest PIO yet through this adapter. No read is held for long enough for the IORDY timer, which the table's block leaves out (`worst read 0`). Layout recorded after this run. With the bench hooks out (`621f649`): 1.69, 80.1 and 1.78, the same.
+
+The Innostor bridge (`1F75:0611`, USB 3), PIO 3, the same build: sequential reads 2.40 MB/s, random 4 KB 519 IOPS, writes 2.65 MB/s. It sends every transfer as one-sector commands (60,063 READ SECTORS of 1 for the sequential read, 0.19 ms each in the drive) and doesn't wait 10 ms after each one as the JMicron does, so random reads are six times faster. `-m speed` reports no fit for it (`read command n/a`): one size can't be split into a fixed and a per-sector part.
 
 ## Ceilings on this adapter
 

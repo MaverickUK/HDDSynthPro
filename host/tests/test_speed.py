@@ -107,9 +107,14 @@ def test_speed(raw_disk, drive, run_dir):
             lba = rng.randrange(0, sectors - count)
             pread(fd, count * SECTOR, lba * SECTOR)
     points = [(c.count, c.duration_us / 1000) for c in commands_since(drive, mark, READS)]
-    fixed, per_sector = fit(points)
-    lines.append(f"read command      {fixed:6.2f} ms fixed + {per_sector * 1000:.0f} us per sector "
-                 f"(the bus and fetches: {SECTOR / per_sector / 1000:.2f} MB/s)")
+    if len({count for count, _ in points}) > 1:
+        fixed, per_sector = fit(points)
+        lines.append(f"read command      {fixed:6.2f} ms fixed + {per_sector * 1000:.0f} us per sector "
+                     f"(the bus and fetches: {SECTOR / per_sector / 1000:.2f} MB/s)")
+    else:  # the Innostor bridge sends every read as one-sector commands: nothing to fit
+        sizes = sorted({count for count, _ in points})
+        mean = sum(ms for _, ms in points) / len(points) if points else 0.0
+        lines.append(f"read command      n/a (every read as {sizes or 'no'}-sector commands, {mean:.3f} ms each)")
 
     # Sequential writes: on the generated disk (its RAM overlay) or the scratch
     # image HDDBENCH.IMG, never on HDDSYNTH.IMG
