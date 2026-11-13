@@ -854,6 +854,14 @@ __attribute__((always_inline)) static inline ide_table::Image tableImage(Dev& de
 // ready at once, the interrupt went off and on again within one pass, and
 // INTRQ was never raised again (the JMicron adapter then waited for good).
 static int8_t g_table_intrq = -1;
+// bench: core 1's events against the observer's ring position (console R, `EV1`):
+// 1 Command taken, 2 INTRQ set (bits 28-29: asserted, driven), 3 interrupt
+// acknowledged, 4 fetch result taken, 5 data-in block started.
+volatile uint32_t g_elog[64]; volatile uint32_t g_elog_n;
+__attribute__((always_inline)) static inline void elog(uint32_t kind, uint32_t bits = 0) {
+    g_elog[g_elog_n & 63] = ide_table::observerRingIndex() | bits << 28 | kind << 24;
+    g_elog_n = g_elog_n + 1;
+}
 
 template <class Dev>
 __attribute__((always_inline)) static inline void tableIntrq(Dev& dev) {
@@ -861,6 +869,7 @@ __attribute__((always_inline)) static inline void tableIntrq(Dev& dev) {
     int8_t now = int8_t((dev.intrq() ? 1 : 0) | (dev.intrqDriven() ? 2 : 0));
     if (now == shown) return;
     shown = now;
+    elog(2, uint32_t(now & 3));
     ide_table::setIntrq(now & 1, now & 2);
 }
 
@@ -895,6 +904,7 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             if (reg == ata::Reg::Data || reg == ata::Reg::None) continue;  // WD has the data words
             if (reg == ata::Reg::StatusCommand) {
                 g_cmd_snap_pos = ide_table::observerRingIndex() | 0x80000000u;  // bench: snapshot the reads after it
+                elog(1, bus::data(sample) & 0xF);
                 dev.queueCommand(uint8_t(bus::data(sample)));
                 ide_table::armCommandBusy();
                 if (g_table_intrq > 0) g_table_intrq = int8_t(g_table_intrq & ~1);  // C lowered INTRQ
@@ -903,10 +913,10 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             }
             dirty = true;
         }
-        if (g_cmd_snap_pos && !g_wlog_stop) {  // bench: 150 reads after the last Command write
+        if (g_cmd_snap_pos && !g_wlog_stop) {  // bench: the reads around the last Command write
             uint32_t now = ide_table::observerRingIndex(), from = g_cmd_snap_pos & 0x7FFFFFFF;
             uint32_t ring = 1u << 12;  // bus_observer::ringSize() (RING_WORDS)
-            if ((now - from + ring) % ring >= 150) {
+            if ((now - from + ring) % ring >= 60) {  // 160 reads: about 100 before the Command, 60 after
                 ide_table::snapObserver(g_obs_snap, 160, g_obs_snap_end);
                 g_obs_snapped = 1;
                 g_cmd_snap_pos = 0;
@@ -914,6 +924,7 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         }
         if (ide_table::statusReadSince(irq_raised_at) && dev.intrq()) {
             dev.consumeRead(ata::Reg::StatusCommand);  // acknowledges the interrupt raised at irq_raised_at
+            elog(3);
             dirty = true;
         }
         if (dev.commandQueued()) {
@@ -928,6 +939,7 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         FetchResult result;
         if (g_mailbox.takeResult(result)) {
             dev.fetchDone(result.id, result.ok);
+            elog(4);
             dirty = true;
         }
         busyTimers(dev);
@@ -987,6 +999,7 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         }
         if (!ide_table::dataInActive() && dev.dataInRemaining(next, left)) {
             ide_table::startDataIn(next, left);  // before the host can see DRQ
+            elog(5);
             dirty = true;
         }
 
@@ -2767,11 +2780,18 @@ static void handleConsole() {
                             Serial.printf("W out=%u @%u raw=%08lx %d %04x %d%d\n", unsigned(g_wlog_pos[i & 63] >> 31), unsigned(g_wlog_pos[i & 63] & 0x7FFFFFFF), (unsigned long)s, int(ata::regFor(b == bus::Block::Command, b == bus::Block::Control, bus::address(s))), unsigned(bus::data(s)), int(s >> 31), int((s >> 30) & 1));
                         }
                     }
+                    {
+                        uint32_t n = g_elog_n, from = n > 64 ? n - 64 : 0;
+                        Serial.printf("ELOG n=%lu (1 cmd, 2 intrq a+2d, 3 ack, 4 fetched, 5 block)\n", (unsigned long)n);
+                        for (uint32_t i = from; i < n; ++i)
+                            Serial.printf("EV1 @%lu k=%lu v=%lu\n", (unsigned long)((g_elog[i & 63] & 0xFFFFFF) % bus_observer::ringSize()),
+                                          (unsigned long)((g_elog[i & 63] >> 24) & 0xF), (unsigned long)(g_elog[i & 63] >> 28));
+                    }
                     if (g_obs_snapped) {
                         Serial.printf("OBSSNAP end=%lu (address dd)\n", (unsigned long)g_obs_snap_end);
                         for (unsigned i = 0; i < 160; ++i) {
-                            Serial.printf("O @%lu a=%02lx dd=%04lx\n", (unsigned long)((g_obs_snap_end + bus_observer::ringSize() * 4 - 160 + i) % bus_observer::ringSize()),
-                                          (unsigned long)((g_obs_snap[i] >> 16) & 0xFF), (unsigned long)(g_obs_snap[i] & 0xFFFF));
+                            Serial.printf("O @%lu a=%02lx dd=%04lx raw=%08lx\n", (unsigned long)((g_obs_snap_end + bus_observer::ringSize() * 4 - 160 + i) % bus_observer::ringSize()),
+                                          (unsigned long)((g_obs_snap[i] >> 16) & 0xFF), (unsigned long)(g_obs_snap[i] & 0xFFFF), (unsigned long)g_obs_snap[i]);
                             if (i % 32 == 0) delay(5);
                         }
                     }

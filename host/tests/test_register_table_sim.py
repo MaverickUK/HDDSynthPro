@@ -499,3 +499,17 @@ def test_status_after_data_writes_with_da2_settling_late(programs, mode, skew):
     assert not run.errors
     reads = [r.read_value for r in run.results if not r.access.write]
     assert [v & 0xFF if v is not None else None for v in reads] == [0x58] * 3, [hex(v) if v is not None else v for v in reads]
+
+
+@pytest.mark.parametrize("mode", [0, 2, 3, 4])
+def test_iordy_falls_within_20_ns_of_a_register_read(programs, mode):
+    # D watches the address before the strobe, so a register read gets IORDY low
+    # about 10-20 ns after DIOR# falls: deciding after the strobe (30-35 ns) was
+    # too late for the Innostor bridge in PIO 3, whose 75 ns Status reads after
+    # a Command then sometimes latched DD before R1 drove it (13 Nov 2026).
+    table = Table(programs)
+    run = run_host(table.block, idle_core1(), register_reads(), timing=ALL_MODES[mode])
+    assert not run.errors
+    check_registers(run)
+    leads = [r.iordy_low_lead_ns for r in run.results]
+    assert all(lead is not None and lead >= -20 for lead in leads), leads

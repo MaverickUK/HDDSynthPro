@@ -225,6 +225,25 @@ Read from the note above and the code at d4b9088, on the Windows PC, with no boa
 
 **To run on the Mac** (as *To pick it up* above: `T`, `P t`, `mode = auto`, the bridge replugged): `s` for `intrq_rises` before; three raw reads of different LBAs; `R` and `s`. Wanted: what each read returned; `taken=` and `why=` for each block; `intrq_rises` against the number of reads; and the `OBSSNAP` after the last Command write.
 
+## 13 Nov 2026, late: the review's run, and why PIO 3 reads go early
+
+On the Mac with the bridge at PIO 3 (`mode = auto`), `T`, `P t`, firmware 43d70ee plus bench logging: core 1's events against the observer's ring position (`elog`, printed by `R` as `EV1 @pos k=`: 1 Command taken, 2 INTRQ set, 3 interrupt acknowledged, 4 fetch result, 5 block started), the snapshot moved to 100 reads before the Command and 60 after, and the strobe build (`PLATFORMIO_BUILD_FLAGS=-DHDDPRO_OBSERVER_STROBE=1`) with its pass count widened to 10 bits (15.4 us; the sequence number down to 1 bit, bench only). The bridge re-detected the drive by itself after each flash, with no replug.
+
+**The review's three doubts, answered:**
+1. **The bridge doesn't read the block:** a failing read's record is `fetched=8 end_level=8 taken=0 why=3` (11 of 16 records after detection were like it); good ones `taken=256 why=1`.
+2. **INTRQ:** counted now (`intrq_rises` 118 to 123 over three reads). The event log shows INTRQ low (driven) from the Command to the block, and raised with the block (`k=5` then `k=2 v=3`): the bridge isn't going on INTRQ.
+3. **With D's FIFO emptied** (43d70ee), a failing read now returns junk (`1048576`/`1048592` in the LBA field: X repeated), no longer the previous sector: those sectors came from the drive's leftover FIFO words and stream.
+
+**What a failing read looks like** (LBA 13041; reads, then strobe lengths):
+- Status polls before the Command: 50h, **1,605 ns** each (D's IORDY, then the bridge's slow rise);
+- the Command (`EV1 k=1`), then **one** Status read, D0h on the cable, **75 ns**;
+- then the data register at once: the first read 1,755 ns (D took it for a register's, the address moving with the strobe), the rest 105 ns, all junk; the fetch arrives about 300 reads later.
+
+**A good read** (LBA 13000): after the Command, Status D0h read again and again, every one **75 ns**, about 100 times and more, until DRQ. So the bridge does wait for BSY, and reads Status with 75 ns strobes that don't wait for IORDY (before the Command it waits). The observer saw D0h in the failing case too: the bridge latched something else. **Theory:** its strobe is 75 ns and it samples IORDY early; D pulled IORDY low 30-35 ns after DIOR# fell (it waited 2 cycles for the address synchroniser), at tA's limit, so the bridge sometimes misses it and latches DD near when R1 starts driving (25-45 ns): a stale bus, BSY clear, and it goes for the data. A CF card holds that read 2.2 us (12 Nov): it pulls IORDY in time.
+
+**Tried, not yet seen to work:** D watches the address while DIOR# is high (`top`: a register's address goes to `regwatch`, which pulls IORDY low the instruction after DIOR# falls, about 10-20 ns); a data read looks at the address again after the strobe, so a host moving the address with the strobe still gets a register's IORDY. 31 of 32 instructions. `test_iordy_falls_within_20_ns_of_a_register_read` (modes 0-4) fails on the old D and passes on the new; 522 simulator tests pass. **On the rig, unknown:** the upload failed part-way (picotool, after 12 s) and the board left USB altogether (no serial port, no bootloader drive) while still serving the bridge, so which firmware ran isn't known; it read 20 of 30 sectors wrong (about 1 in 4 before). Morning: replug the board's USB, check `h`/`R` (`ELOG` present, the new D: `R`'s `EV1`), set `T` and `P t` again if it restarted, and repeat 30 reads at PIO 3 (`host/bench/snap_one.py LBA out.log` reads one sector and saves `R`; `host/bench/show_snap.py out.log` lists the reads with strobe lengths and the events). If it's worse, the new D is wrong on hardware: compare the first Status read's strobe after a Command (it should now be about 1.6 us, as before a Command).
+
+
 ## Open
 
 - **The Innostor bridge in PIO 3:** *13 Nov, on the rig*: it never reads a READ's block, and each read returns the previous command's sector. Cause not known; next steps there. `mode = pio2` works (slices 3 and 4), at no cost through USB.
