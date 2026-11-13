@@ -187,6 +187,19 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
         s_read = (s_read + 1) % RING_WORDS;
         if (!s_checker->observe(word, check)) continue;
         const sector_check::Mismatch& m = s_checker->mismatch();
+        // Only with room in USB serial: core 0 must never block on a print (a
+        // flood of them, with the register table, stalled its fetches, 14 Nov
+        // 2026). The ones left out are counted on the next line printed.
+        static uint32_t s_unprinted = 0;
+        if (out.availableForWrite() < 200) {
+            ++s_unprinted;
+            continue;
+        }
+        if (s_unprinted) {
+            out.printf("BUSERR %lu unprinted=%lu (no room in USB serial)\n", (unsigned long)time_us_32(),
+                       (unsigned long)s_unprinted);
+            s_unprinted = 0;
+        }
         if (m.lba == sector_check::IDENTIFY_LBA) {
             out.printf("BUSERR %lu IDENTIFY word=%u seen=%04x want=%04x bad_words=%u bits_lost=%u bits_gained=%u\n",
                        (unsigned long)time_us_32(), unsigned(m.first_word), unsigned(m.seen), unsigned(m.want),

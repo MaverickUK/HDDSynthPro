@@ -207,8 +207,11 @@ def test_soak(raw_disk_rw, drive, run_dir):
         log.flush()
 
     note(f"soak for {minutes:g} min, seed {seed} (rerun with HDDPRO_SEED={seed})")
-    want = "full" if FULL_CHECKS else "spot"
-    if f"bus_checks={want}" not in drive.command("s", "STATS").split():
+    stats_now = drive.command("s", "STATS").split()
+    # The register table never waits for core 0, so full checks can't keep up
+    # with it (the ring overruns): spot checks, and the soak's own read-backs.
+    want = "full" if FULL_CHECKS and "bus=table" not in stats_now else "spot"
+    if f"bus_checks={want}" not in stats_now:
         assert drive.command("O", "OBSERVER").endswith(want), "console O didn't switch the observer"
     note(f"bus observer: {want} checks")
     drive.send("r")  # read timings and bus counters from here

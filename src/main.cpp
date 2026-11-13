@@ -2670,6 +2670,11 @@ static void handleConsole() {
                 break;
             }
             case 'O': {  // the bus observer's full checks on or off (spot checks)
+                if (ide_table::running()) {  // the table never waits for core 0: its ring would overrun
+                    bus_observer::setFull(false);
+                    Serial.printf("OBSERVER spot (full checks need a bus program that waits for core 0)\n");
+                    break;
+                }
                 bool full = !bus_observer::full();
                 bus_observer::setFull(full);
                 Serial.printf("OBSERVER %s\n", full ? "full" : "spot");
