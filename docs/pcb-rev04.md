@@ -130,7 +130,7 @@ What the retro PCs taught that firmware covers: IORDY on ISA cards that assert c
 
 ## Bring-up: tests owed
 
-- [ ] **The ICL 386 with the strobe-aware IORDY watchdog** (branch `watchdog-strobes`, 0.32.1-dev.6; CHANGELOG). Rev 0.3 can't run it: the 386's ISA card needs IOCS16#, which rev 0.4 wires. With `isa = on` and `ICL386MB.IMG`: MS-DOS boots and runs as on 0.32.0 (no freeze from the card's aliased chip selects, which the watchdog is for), and `s` shows `iordy_early` low. Then merge `watchdog-strobes` to `main`. Why: [atapi.md](atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
+- [ ] **The ICL 386 with the strobe-aware IORDY watchdog** (branch `iordy-watchdog-strobes`, 0.32.3-dev.2: 0.32.1-dev.6's watchdog on today's `main`; CHANGELOG). Rev 0.3 can't run it: the 386's ISA card needs IOCS16#, which rev 0.4 wires. With `isa = on` and `ICL386MB.IMG`: MS-DOS boots and runs as on 0.32.0 (no freeze from the card's aliased chip selects, which the watchdog is for), and `s` shows `iordy_early` low. Then merge `iordy-watchdog-strobes` to `main` (the old `watchdog-strobes` can't be merged: 0.32.1 already took its commits and undid the watchdog). Why: [atapi.md](atapi.md#a-wrong-data-word-on-the-evesham-doom-quits-10-nov-2026-0320).
 
 ## Firmware for rev 0.3 itself
 

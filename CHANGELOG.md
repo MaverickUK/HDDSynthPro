@@ -4,6 +4,11 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.32.3-dev.2] - 2026-11-14 (branch `iordy-watchdog-strobes`)
+
+### Fixed
+- **The IORDY watchdog (`isa = on`) starts its count over at every strobe**: 0.32.1-dev.6's watchdog, back from branch `watchdog-strobes` onto today's `main`. That branch can't be merged: its commits are already in `main`'s history, and 0.32.1 (`2c3fae1`) put the old watchdog back, so a merge brings nothing. This branch reverses that part of 0.32.1 (`iordy_watchdog.pio`, its set-up in `ide_bus.cpp`, and `test_iordy_watchdog_sim.py`). What it fixes and how it was tested: dev.6's entry below. Owed before merging: the ICL 386 (`isa = on`, IOCS16#) boots and runs as on 0.32.0 ([docs/pcb-rev04.md](docs/pcb-rev04.md#bring-up-tests-owed)).
+
 ## [0.32.3-dev.1] - 2026-11-11 (on `main`)
 
 ### Added

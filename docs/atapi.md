@@ -96,7 +96,7 @@ So something released IORDY mid-read before core 1's answer, without driving DD:
 
 **The fix (0.32.1-dev.5):** a CD-ROM keeps `ide_bus` through `ide_bus::begin`'s new `lane` argument and leaves `isa` as `HDDSYNTH.INI` sets it, so the watchdog (and IOCS16#) runs only with `isa = on`.
 
-**Still open:** the watchdog has the same weakness wherever it runs. An ISA host fast enough to put data reads back to back with IORDY high only briefly between them would hit it too. The ICL 386 (PIO 0, slow) hasn't. A sturdier watchdog would start its count again at every strobe (DIOR# or DIOW# low), not only when it sees IORDY high. That's written (0.32.1-dev.6, on branch `watchdog-strobes`, left out of v0.32.1): it passes in simulation, but waits for the ICL 386 (PCB rev 0.4, which wires IOCS16#).
+**Still open:** the watchdog has the same weakness wherever it runs. An ISA host fast enough to put data reads back to back with IORDY high only briefly between them would hit it too. The ICL 386 (PIO 0, slow) hasn't. A sturdier watchdog would start its count again at every strobe (DIOR# or DIOW# low), not only when it sees IORDY high. That's written (0.32.1-dev.6, left out of v0.32.1; since 14 Nov on branch `iordy-watchdog-strobes`, 0.32.3-dev.2): it passes in simulation, but waits for the ICL 386 (PCB rev 0.4, which wires IOCS16#).
 
 **On the bench:** `-m cdsoak` reads the test disc in Doom's pattern for an hour with every sector checked. But through the rig's adapter the CD's data goes by multiword DMA, not `ide_bus`'s PIO data path, so it soaks the CD-ROM's commands and the card, not this fault. A host that reads a CD-ROM by PIO is what reproduces it.
 
