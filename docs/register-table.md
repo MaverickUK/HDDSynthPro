@@ -1,6 +1,6 @@
 # The register table: every read answered without core 1
 
-**Status (14 Nov 2026): on the rig, an hour's soak clean on each adapter (Innostor and JMicron). The Innostor bridge passes slices 3 and 4 in PIO 3 since R0-R2 keep their answer on DD's output latch before the strobe (*14 Nov, morning*); offered PIO 2 it passed before. The JMicron adapter passes slices 3 and 4 on it too, and reads 1.69 MB/s and writes 1.77, the fastest PIO through it yet. Branch `register-table`, console `P t` or `register_table = on` in `HDDSYNTH.INI`; slices 1-2 need console `V` to work in this mode (*Open*). The bench hooks are out (14 Nov): `s` keeps `table_in`, `table_out` and `intrq_rises`.**
+**Status (14 Nov 2026; firmware 0.33.0-dev.1): on the rig, an hour's soak clean on each adapter (Innostor and JMicron). The Innostor bridge passes slices 3 and 4 in PIO 3 since R0-R2 keep their answer on DD's output latch before the strobe (*14 Nov, morning*); offered PIO 2 it passed before. The JMicron adapter passes slices 3 and 4 on it too, and reads 1.69 MB/s and writes 1.77, the fastest PIO through it yet. Branch `register-table`, console `P t` or `register_table = on` in `HDDSYNTH.INI`; slices 1-2 need console `V` to work in this mode (*Open*). The bench hooks are out (14 Nov): `s` keeps `table_in`, `table_out` and `intrq_rises`.**
 
 ## Why
 
@@ -116,9 +116,9 @@ With `bus_observer`'s, nine. F1, F2, K1 and K2 run one transfer per trigger, rel
 
 | Block | Table mode |
 |---|---|
-| 0 | `ide_table_reg` (15) on R0-R2, `ide_table_data` (14): 29 of 32, 4 state machines |
-| 1 | W (4), WD (8), C (7) and `bus_observer` (8): 27 of 32 |
-| 2 | as now: SDIO on the PCB; `iocs16` and `bus_timing`, or `ide_dma`, on the BB48 |
+| 0 | `ide_table_reg` (15) on R0-R2, `ide_table_data` (14): 29 of 32, 4 state machines. **As built (0.33.0-dev.1):** 17 and 14, 31 of 32 |
+| 1 | W (4), WD (8), C (7) and `bus_observer` (8): 27 of 32. **As built:** 4, 8 and 8 (`TABLE_WRITE_SLOTS`) and `bus_observer`: 28 |
+| 2 | as now: SDIO on the PCB; `iocs16` and `bus_timing`, or `ide_dma`, on the BB48. **As built:** on the PCB, with the card on SDIO, IOCS16# and the read timing probe are off (`pio_plan.h`); with the test disk (`T`, no card started) they run there, and the console's card operations (`S`, `E`, `C`) borrow the block |
 
 DMA channels: D's feed, WD's, the two busy writes (command, block end), W's ring and the observer's: six.
 
@@ -271,6 +271,13 @@ On the Mac with the bridge at PIO 3 (`mode = auto`), `T`, `P t`, firmware 43d70e
 **And on the JMicron (14 Nov, PIO 3, the same setup):** 60 minutes, 53,292 reads and 28,979 writes, 4.0 GB, no mismatches; 137,776 commands; 4,825,625 sectors checked on the cable, none bad, no gaps (ring max 2,369 of 4,096). Console `V` now re-detects the drive on it in table mode (the read held about 62 s, the adapter's RESET#, IDENTIFY, reads right); slices 1-2 by `V` are still to run: after each re-detection the rig's `sudo chown` of the raw disk needs a password, so they need someone at the keyboard (or a sudoers rule for that one command).
 
 ## Open
+
+**Before merging into `main`** (14 Nov 2026):
+1. Slices 1-2 by `V` through the JMicron in table mode (`V` re-detects there; `rig.sh` stopped at `sudo chown`'s password, so run it by hand first).
+2. The Evesham with `register_table = on`: boot, `DOSBENCH.IMG`, and Doom from the CD-ROM as device 1 (which runs `ide_bus`, so with a CD-ROM configured the table doesn't run; try the disk alone too).
+3. `-m speed` on the merged build, then record the core 1 layout and note it in `docs/speed-log.md`; release with 0.32.3-dev.1's `AUTOBUS` as 0.33.0.
+
+**After:** the Pentium 200 (its PIIX ignores IORDY in compatible timing, the host the table was designed for), the ICL 386 (`isa = on` overrides the table today; IOCS16# would need its own room on the PCB with SDIO), the Amiga 1200, and DMA beside the table.
 
 - **The Innostor bridge in PIO 3:** passes slices 3 and 4 since R drives from its latch (*14 Nov, morning*). The JMicron adapter passes on it too.
 - **Slice 4 through the JMicron adapter:** fixed (*13 Nov, on the rig*: R0 answered Status with LBA Low).

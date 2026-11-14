@@ -10,6 +10,7 @@
 | **The data lane** (`ide_bus_data` + `ide_data_in`) | `early_answers = off` | reads **2.18 MB/s**, writes **1.98** | hosts that wait for IORDY on every read: the Evesham, the USB adapter |
 | `ide_bus` with `iordy_watchdog` | `isa = on` | (the 386: 1.51 reads, 0.72 writes) | the ICL 386, where it was proven first |
 | `ide_bus_noiordy` | `iordy = off` | | the Amiga 1200, in progress |
+| The register table (`ide_table_reg` + `ide_table_data`; branch `register-table`) | `register_table = on` | not yet run there (the JMicron adapter: reads 1.69 MB/s, writes 1.78, against the lane's 1.53 and 1.68) | both USB adapters, including the Innostor, which ignores IORDY; hard disk only, PIO only. A candidate for `auto` once it has run on retro PCs ([register-table.md](register-table.md)) |
 
 The program is chosen once, when core 1 starts (`ide_bus::begin`), from `HDDSYNTH.INI` or console `P`, which restarts the board. A CD-ROM always runs `ide_bus` (since 0.30.0-dev.10; not early answers, which answered it too slowly, nor the lane, written for the hard disk's 256-word blocks), so `auto` would choose for the hard disk alone.
 

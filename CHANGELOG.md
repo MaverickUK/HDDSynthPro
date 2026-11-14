@@ -4,6 +4,31 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0-dev.1] - 2026-11-14 (branch `register-table`)
+
+### Added
+- **The register table, a fifth bus program** (experimental; [docs/register-table.md](docs/register-table.md)). The PIO answers every register read itself, within about 30 ns of the strobe, from values core 1 keeps ready in its FIFO storage (`.fifo txget`). So no read waits for core 1, whether or not the host waits for IORDY. Choose it with `register_table = on` in `HDDSYNTH.INI` or console `P t`. It serves the hard disk in PIO only: no DMA is offered with it, a CD-ROM runs `ide_bus`, and `isa = on` or a console `P` overrides it.
+  - Block 0 holds `ide_table_reg` (17 instructions) on R0-R2, which drive DD, and `ide_table_data` (14) on D, which holds IORDY briefly on register reads and paces data reads.
+  - Block 1 holds the write side, `ide_table_write`, `ide_table_data_out` and `ide_table_command` (20), beside `bus_observer`. `iordy_timer` and `iordy_check` are off in this mode, since IORDY is never held long. On the PCB with the card on SDIO, IOCS16# and the read timing probe are off too (`pio_plan`); with the test disk (`T`) they run in the card's block, and the console's card operations (`S`, `E`, `C`) borrow it.
+  - DMA channels feed data words and write BSY into the Status entries after a Command write or a block's end, so BSY shows in time without core 1.
+  - Core 1's table code is `CORE1_RAM_TABLE`, placed after the CD-ROM's, so the other bus programs' code stays where it was.
+  - Console `V` works in table mode: writes the host makes while the drive is off the bus are dropped on its return.
+  - `s` adds `table_in` and `table_out` (data blocks), and `intrq_rises` counts the table's interrupts.
+- **The Innostor USB-IDE bridge** (`1F75:0611`) works: it polls Status 75 ns after a Command without waiting for IORDY, which no earlier bus program could answer. R0-R2 now keep their answer on DD's output latch before the strobe, and each pin read both picks the entry and checks the address (an address passing through LBA Low's on the way to Status had made R0 answer Status with LBA Low).
+- `pio_sim` learns `.fifo txget`, `mov osr, rxfifo[]` and state machines sharing pins; `test_register_table_sim.py` holds the programs to PIO modes 0-3 and the PIIX's timings. `test_pio_plan.cpp`, `test_drive_config.cpp` and `test_ata_device.cpp` cover the new plan, setting and device hooks.
+
+### Fixed
+- Console `E` turned a last line ending in a bare CR into CR CR LF and spoiled the setting on it; the parser and `setKey` handle it now.
+- `BUSERR` lines print only when USB serial has room.
+
+### Tested
+- **The JMicron adapter, PIO 3, the test disk:** slices 3 and 4; `-m speed` reads 1.69 MB/s and writes 1.78, the fastest PIO through it yet (the data lane: 1.53 and 1.68); an hour's soak, 4.0 GB, no mismatch; `V` re-detects the drive.
+- **The Innostor bridge, PIO 3:** slices 3 and 4; `-m speed` 2.40 MB/s reads, 519 random IOPS, 2.65 writes (it sends one-sector commands); an hour's soak, 6.2 GB in 12.1 million commands, no mismatch. It never re-detects after a failed read, so slices 1-2 can't run through it.
+- Core 1's layout recorded for both drive builds.
+
+### Not yet tested
+- Slices 1-2 by `V` through the JMicron in table mode, and any retro PC (the Evesham first, then the Pentium 200, whose PIIX doesn't wait for IORDY).
+
 ## [0.32.3-dev.1] - 2026-11-11 (on `main`)
 
 ### Added

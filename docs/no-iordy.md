@@ -1,6 +1,6 @@
 # Hosts that don't wait for IORDY: a design
 
-**Status: early answers (`early_answers`, 0.23.x on branch `no-iordy`) get a Pentium 200's PIIX through its BIOS and boot Windows 95 with its 32-bit disk driver off. That driver's compatible-timing reads still go wrong; the table design below is not built.** Build it if a retro PC shows `iordy_ignored` above 0 ([retro-test.md](retro-test.md)). It's the firmware half of [pcb-bom.md](pcb-bom.md)'s "register reads answered from a table" (section 4, and open question 3).
+**Status: early answers (`early_answers`, 0.23.x on branch `no-iordy`) get a Pentium 200's PIIX through its BIOS and boot Windows 95 with its 32-bit disk driver off. That driver's compatible-timing reads still go wrong. The table design below is built, revised, as the register table (branch `register-table`, 0.33.0-dev.1, 12-14 Nov 2026): [register-table.md](register-table.md) is the current design and its results; this page keeps the problem and the first design.** Build it if a retro PC shows `iordy_ignored` above 0 ([retro-test.md](retro-test.md)). It's the firmware half of [pcb-bom.md](pcb-bom.md)'s "register reads answered from a table" (section 4, and open question 3).
 
 ## The problem
 
