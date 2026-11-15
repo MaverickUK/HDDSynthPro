@@ -4,6 +4,13 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-15
+
+The register table, an experimental fifth bus program (`register_table = on`, off by default; [docs/register-table.md](docs/register-table.md)), and the `AUTOBUS` advice (0.32.3-dev.1); release notes in [docs/release-notes/v0.33.0.md](docs/release-notes/v0.33.0.md). With the table off, the other bus programs run as in 0.32.2 (`-m speed` against 0.32.3-dev.1, 15 Nov).
+
+- **On the Evesham** (`pcb_drive`, PIO 3, the card on SDIO): `DOSBENCH.IMG` passes at 4.12 MB/s reads and 3.63 writes on the table (the data lane: 4.24 and 2.03); Doom from the CD-ROM beside it.
+- **On the USB adapters:** slices 3-4 and an hour's soak on the JMicron and the Innostor. Slices 1-2 by `V` weren't run: on the Mac they fail with any bus program (the 0.33.0-dev.1 entry); owed from the Windows rig.
+
 ## [0.33.0-dev.1] - 2026-11-14 (branch `register-table`)
 
 ### Added
