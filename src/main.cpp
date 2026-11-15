@@ -842,7 +842,7 @@ CORE1_FOR(hdcd::Device, CORE1_RAM_CD)
 // once the block is done. The hard disk only. Never returns.
 template <class Dev>
 __attribute__((always_inline)) static inline ide_table::Image tableImage(Dev& dev) {
-    constexpr uint32_t DRIVE = 0x00FF0000;  // DD0-7, as ide_table.cpp's
+    constexpr uint32_t DRIVE = ide_table::DRIVE;
     ide_table::Image m;
     m.error = DRIVE | dev.peek(ata::Reg::ErrorFeatures);
     m.sector_count = DRIVE | dev.peek(ata::Reg::SectorCount);
@@ -1993,6 +1993,7 @@ static uint32_t g_identify_check_until_ms = 30000;
 static uint32_t g_release_ms = 0;
 static uint64_t g_no_cs_at_release = 0;
 static bool g_no_cs_reported = false;
+static uint32_t g_no_cs_seen_ms = 0;  // when the first was seen (| 1), until its line is printed
 
 // The last few commands, for the NOIORDY line: which one an unwaited read
 // fell in or followed (iordy_timer reports those separately).
@@ -2012,6 +2013,7 @@ static void noteActivity(const TraceEvent& e) {
         g_release_ms = millis();
         g_no_cs_at_release = bus_observer::dmaWords();
         g_no_cs_reported = false;
+        g_no_cs_seen_ms = 0;
         if (g_auto_bus_started) g_auto_bus.reset(autoBusCounters(), millis());
     }
     uint8_t command = uint8_t(e.extra);
@@ -2138,6 +2140,20 @@ static bool printLine(const char* line, size_t n) {
     return true;
 }
 
+// The same for a formatted line: false, and nothing printed, if there's no
+// room for it now. For lines core 0 prints unasked: Serial.printf waits up to
+// a second for a host that has the port open and isn't reading, and fetches
+// wait with it.
+__attribute__((format(printf, 1, 2))) static bool printfLine(const char* format, ...) {
+    char line[200];
+    va_list args;
+    va_start(args, format);
+    int n = vsnprintf(line, sizeof line, format, args);
+    va_end(args);
+    if (n <= 0) return true;
+    return printLine(line, size_t(n) < sizeof line ? size_t(n) : sizeof line - 1);
+}
+
 #if FIRMWARE_SLICE != 0
 // A CARD line when the card the image is on is pulled out, comes back, or a
 // different card (or the image changed) comes back, which isn't served; and
@@ -2205,13 +2221,22 @@ static void printAutoBus() {
         g_auto_bus.reset(autoBusCounters(), now);
         g_auto_bus_started = true;
     }
-    if (now - last_ms < 100) return;
-    last_ms = now;
-    if (!g_auto_bus.update(autoBusCounters(), now)) return;
-    Serial.printf("AUTOBUS %s (%s) %lu ms after reset: %lu sectors, %lu long reads waited; running %s\n",
-                  g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early",
-                  auto_bus::whyName(g_auto_bus.why()), (unsigned long)g_auto_bus.sinceResetMs(now),
-                  (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads(), (ide_table::running() ? "table" : ide_bus::busName()));
+    static bool unprinted = false;  // a change whose line is waiting for room in USB serial
+    static uint32_t changed_ms = 0;
+    if (now - last_ms >= 100) {
+        last_ms = now;
+        if (g_auto_bus.update(autoBusCounters(), now)) {
+            unprinted = true;
+            changed_ms = now;
+        }
+    }
+    if (!unprinted) return;
+    if (printfLine("AUTOBUS %s (%s) %lu ms after reset: %lu sectors, %lu long reads waited; running %s\n",
+                   g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early",
+                   auto_bus::whyName(g_auto_bus.why()), (unsigned long)g_auto_bus.sinceResetMs(changed_ms),
+                   (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads(),
+                   (ide_table::running() ? "table" : ide_bus::busName())))
+        unprinted = false;
 }
 
 // A NOCS line the first time after each RESET# release (or boot) that the host
@@ -2220,9 +2245,10 @@ static void printAutoBus() {
 static void printNoChipSelect() {
     if (g_no_cs_reported || g_mdma_mode.load(std::memory_order_relaxed) != NO_DMA) return;
     if (bus_observer::dmaWords() == g_no_cs_at_release) return;
-    g_no_cs_reported = true;
-    Serial.printf("NOCS %lu ms after RESET# release: DIOR# with no chip select (an ISA card?)\n",
-                  (unsigned long)(millis() - g_release_ms));
+    if (!g_no_cs_seen_ms) g_no_cs_seen_ms = millis() | 1;  // the line may wait for room in USB serial
+    if (printfLine("NOCS %lu ms after RESET# release: DIOR# with no chip select (an ISA card?)\n",
+                   (unsigned long)(g_no_cs_seen_ms - g_release_ms)))
+        g_no_cs_reported = true;
 }
 
 // A NOIORDY line when the host ends reads without waiting for IORDY, at most
@@ -2879,7 +2905,7 @@ void loop() {
 
     uint32_t drops = g_dropped.load(std::memory_order_relaxed);
     if (drops != g_reported_drops) {
-        Serial.printf("DROP %lu\n", (unsigned long)(drops - g_reported_drops));
-        g_reported_drops = drops;
+        // Drops come when serial can't keep up: the line waits for room (and counts on).
+        if (printfLine("DROP %lu\n", (unsigned long)(drops - g_reported_drops))) g_reported_drops = drops;
     }
 }

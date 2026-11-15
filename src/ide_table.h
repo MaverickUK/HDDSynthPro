@@ -23,6 +23,9 @@ void attachObserver();
 // The register image: what each read address answers, as R0-R2's entries
 // hold it (bits 0-7 the value, 16-31 which DD lines to drive); publish adds
 // each entry's address (bits 8-15).
+// An entry's bits 16-31, which DD lines to drive: DD0-7 only. The registers are
+// 8 bits, and a drive leaves DD8-15 to the host's pulls.
+constexpr uint32_t DRIVE = 0x00FF0000;
 struct Image {
     uint32_t error = 0, sector_count = 0, lba_low = 0, lba_mid = 0, lba_high = 0, device = 0, status = 0;
 };

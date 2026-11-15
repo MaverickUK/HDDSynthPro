@@ -4,6 +4,20 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0-dev.2] - 2026-11-15 (branch `review-fixes`, from `register-table`)
+
+From a review of the code at the desk; nothing here has run on hardware.
+
+### Fixed
+- **`DROP`, `AUTOBUS` and `NOCS` lines print only when USB serial has room** (`printfLine`), as trace lines do. `Serial.printf` waits up to a second for a host that has the port open and isn't reading, and core 0 serves no fetch meanwhile; `DROP` came exactly when serial was behind. A line that can't be printed waits (`DROP` goes on counting; `NOCS` and `AUTOBUS` keep the time they were noticed).
+
+### Changed
+- **The register table's write ring holds 1,024 samples** (was 256, one data-out block's worth; 3 KB more RAM). Only the ring's write address is known, so a ring lapped while core 1 was away read as no writes at all, or replayed old ones. Not seen; a lap now needs core 1 away for about a millisecond of writes.
+- `ide_table::DRIVE` (which DD lines a register drives) is defined once, in `ide_table.h`.
+
+### Not yet tested
+- On hardware: the register table's speed and slices 3-4 with the larger ring.
+
 ## [0.33.0-dev.1] - 2026-11-14 (branch `register-table`)
 
 ### Added

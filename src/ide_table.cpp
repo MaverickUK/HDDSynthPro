@@ -27,8 +27,6 @@ constexpr unsigned ADDRESS_PINS = 5;      // block 0's reads: DA0-2, CS0#, CS1#
 constexpr uint32_t at(unsigned address) { return address << 8; }
 constexpr unsigned ERROR_ADDRESS = 17, SECTOR_COUNT_ADDRESS = 18, LBA_LOW_ADDRESS = 19, LBA_MID_ADDRESS = 20,
                    LBA_HIGH_ADDRESS = 21, DEVICE_ADDRESS = 22, ALT_STATUS_ADDRESS = 14;  // DA 6, CS1# low
-// DD0-7 only: the registers are 8 bits, and a drive leaves DD8-15 to the host's pulls.
-constexpr uint32_t DRIVE = 0x00FF0000;
 // BSY, DRDY, DSC: what a drive shows while busy (the Innostor bridge took a bare 80h as no
 // wait needed, 12 Nov 2026).
 constexpr uint32_t BUSY = DRIVE | 0xD0;
@@ -59,8 +57,11 @@ uint s_wring;             // W's samples into the ring
 uint32_t s_busy_status = BUSY | at(COMMAND_ADDRESS), s_busy_alt = BUSY | at(ALT_STATUS_ADDRESS);  // Ka's and Kb's words
 uint32_t s_dummy = 0;
 
-// W's ring: 256 samples, aligned for the channel's address wrap.
-constexpr unsigned WRING_BITS = 10;  // bytes, as a power of two
+// W's ring: 1,024 samples, aligned for the channel's address wrap. Nothing can
+// tell a ring that was lapped (only its write address is known), so it holds
+// four data-out blocks' writes: core 1 would have to be away for a millisecond.
+// With 256, one block's worth, a whole lap read as no writes at all.
+constexpr unsigned WRING_BITS = 12;  // bytes, as a power of two
 constexpr uint32_t WRING_WORDS = (1u << WRING_BITS) / 4;
 alignas(1u << WRING_BITS) uint32_t s_wring_buf[WRING_WORDS];
 uint32_t s_wring_read = 0;
