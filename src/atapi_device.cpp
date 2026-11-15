@@ -38,7 +38,7 @@ CORE1_RAM_CD void Device::resetToSignature(uint8_t device) {
     reading_ = false;
     ahead_ok_ = ahead_failed_ = false;
     fetch_pending_ = false;  // a fetch still on core 0 becomes stale
-    if (++fetch_id_ == 0) ++fetch_id_;
+    ++fetch_id_;
 }
 
 CORE1_RAM_CD void Device::consumeRead(Reg reg) {
@@ -141,7 +141,7 @@ CORE1_RAM_CD void Device::hardReset(bool asserted) {
         reading_ = false;
         ahead_ok_ = ahead_failed_ = false;
         fetch_pending_ = false;
-        if (++fetch_id_ == 0) ++fetch_id_;
+        ++fetch_id_;
     } else if (in_reset_) {
         in_reset_ = false;
         resetToSignature();
