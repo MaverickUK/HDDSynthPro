@@ -145,6 +145,20 @@ What it showed: the combined device costs the hard disk alone a fifth of its PIO
 
 The Innostor bridge (`1F75:0611`, USB 3), PIO 3, the same build: sequential reads 2.40 MB/s, random 4 KB 519 IOPS, writes 2.65 MB/s. It sends every transfer as one-sector commands (60,063 READ SECTORS of 1 for the sequential read, 0.19 ms each in the drive) and doesn't wait 10 ms after each one as the JMicron does, so random reads are six times faster. `-m speed` reports no fit for it (`read command n/a`): one size can't be split into a fixed and a per-sector part.
 
+## The register table against `main` (15 Nov 2026)
+
+On the PCB through the JMicron adapter **on the Mac**, PIO 3, the test disk, `-m speed`, console `P` for each bus program; `main` (0.32.3-dev.1) and the branch (0.33.0-dev.1) flashed in turn on the same setup. The Windows figures above aren't comparable: the data lane read 1.53 there and about 1.2 here, on either firmware.
+
+| Bus program | Firmware | Seq read | Per sector | Random 4 KB | Seq write | Worst read |
+|---|---|---|---|---|---|---|
+| Early answers | 0.32.3-dev.1 | 1.17 MB/s | 348 µs | 74.4 | 1.11 MB/s | |
+| Early answers | 0.33.0-dev.1 | 1.17 | 349 | 74.4 | 1.11 | 2,080 ns |
+| Data lane | 0.32.3-dev.1 | 1.24, 1.20 | 326, 341 | 78.4, 78.7 | 1.64, 1.64 | 1,350 ns |
+| Data lane | 0.33.0-dev.1 | 1.21 | 338 | 78.7 | 1.65 | 1,360 ns |
+| Register table | 0.33.0-dev.1 | 1.69 | 211 | 80.1 | 1.78 | 0 (not measured) |
+
+No slowdown: early answers agree to the digit, and the data lane's single runs vary by about 3%. The core 1 layout as recorded on the branch (`check_core1_layout.py pcb_drive`: 78 functions, none moved).
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

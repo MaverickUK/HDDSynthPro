@@ -26,8 +26,12 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 - **The Innostor bridge, PIO 3:** slices 3 and 4; `-m speed` 2.40 MB/s reads, 519 random IOPS, 2.65 writes (it sends one-sector commands); an hour's soak, 6.2 GB in 12.1 million commands, no mismatch. It never re-detects after a failed read, so slices 1-2 can't run through it.
 - Core 1's layout recorded for both drive builds.
 
-### Not yet tested
-- Slices 1-2 by `V` through the JMicron in table mode, and any retro PC (the Evesham first, then the Pentium 200, whose PIIX doesn't wait for IORDY).
+- **The Evesham (Athlon XP, PIO 3), the PCB, `register_table = on` (15 Nov):** boots MS-DOS from `ICL386MB.IMG` and runs clean; `DOSBENCH.IMG` passes at 4.12 MB/s reads, 0.76 ms random, **3.63 MB/s writes** (the data lane: 4.24 and 2.03), 81,904 sectors checked, none bad, and a short soak. Doom from the CD-ROM as device 1 beside it (which runs `ide_bus`) ran clean. No `BUSERR`, `STUCK` or card event in any pass.
+- **No slowdown of the other bus programs** (15 Nov, Mac, JMicron, PIO 3, the test disk, against `main`'s 0.32.3-dev.1 on the same setup): early answers 1.17 MB/s reads, 74.4 IOPS, 1.11 writes on both; the data lane 1.21 / 78.7 / 1.65 against 1.20-1.24 / 78.4-78.7 / 1.64 (runs vary by about 3%); the table 1.69 / 80.1 / 1.78, as on 14 Nov.
+
+### Not run
+- **Slices 1-2 by `V` on the Mac**, with any bus program: the adapter resets the drive about 62 s after `V` (`ide_bus` the same, 15 Nov), and macOS resets the adapter after 30 s; sometimes its storage driver doesn't come back ("failed to re-instantiate") and the disk goes until a replug. Each re-detection that reached the drive was answered right, the table's as `ide_bus`'s. They need the Windows rig.
+- The Pentium 200, whose PIIX doesn't wait for IORDY, the ICL 386 and the Amiga.
 
 ## [0.32.3-dev.1] - 2026-11-11 (on `main`)
 
