@@ -1486,6 +1486,23 @@ TEST(test_read_verify) {
     CHECK_EQ(d.error(), ER_IDNF);
 }
 
+// A CHS address the geometry doesn't hold (sector 0): IDNF, and the CMD line's
+// LBA is 0, not whatever the stack held (READ VERIFY and SEEK left it unset).
+TEST(test_a_chs_address_out_of_range_traces_lba_0) {
+    Device d(INFO);
+    for (uint8_t cmd : {uint8_t(CMD_READ_VERIFY), uint8_t(CMD_SEEK)}) {
+        d.write(Reg::Device, 0xA0);  // CHS, head 0
+        d.write(Reg::SectorCount, 1);
+        d.write(Reg::LbaLow, 0);  // sector 0: there is none
+        d.write(Reg::LbaMid, 3);
+        d.write(Reg::LbaHigh, 0);
+        d.write(Reg::StatusCommand, cmd);
+        CHECK(d.peek(Reg::AltStatusDevCtrl) & ST_ERR);
+        CHECK_EQ(d.error(), ER_IDNF);
+        CHECK_EQ(d.lastCommand().lba, 0u);
+    }
+}
+
 TEST(test_seek_and_recalibrate) {
     Device d(INFO);
     VirtualHost h{d};
@@ -1975,6 +1992,7 @@ void runAtaDeviceTests() {
     RUN(test_set_geometry_is_the_power_on_one);
     RUN(test_initialize_device_parameters_rejects_zero_sectors);
     RUN(test_read_verify);
+    RUN(test_a_chs_address_out_of_range_traces_lba_0);
     RUN(test_seek_and_recalibrate);
     RUN(test_power_commands);
     RUN(test_queued_command);
