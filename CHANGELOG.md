@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0-dev.5] - 2026-11-15 (branch `review-fixes`)
+
+Not run on hardware. No change in behaviour is meant.
+
+### Changed
+- **The console and the lines core 0 prints moved out of `main.cpp`** (2,885 lines, now 2,236) into `console.cpp` (723): the console's commands, `s`'s stats, `p`, the solder-bridge test, and the `CARD`, `AUTOBUS`, `NOCS`, `NOIORDY`, `SLOWREAD` and access-log lines. `main_state.h` declares what the two share; `main.cpp` still defines it, and keeps both cores' loops, the disk choice and core 0's services. Core 1's hard disk layout is unchanged (`check_core1_layout.py`), and `check_core1_ram.py` passes.
+
+### Not yet tested
+- On hardware: the console (`h`, `s`, `p`, `S`, `E`, `P`, `T`, `V`) and a slice, to confirm nothing moved by more than its file.
+
 ## [0.33.0-dev.4] - 2026-11-15 (branch `review-fixes`)
 
 Not run on hardware. (0.33.0-dev.3, the ATA device's two fixes, was reverted to come last on the branch as dev.6: it moves core 1's code and needs a benchmark.)
