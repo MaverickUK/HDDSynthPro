@@ -145,6 +145,8 @@ Each slice ends in a passing automated test before the next starts.
 
 ## Later layers
 
+Speed on the hardware as built: [performance.md](performance.md).
+
 1. Faster register path (status from PIO without IORDY; DMA-fed sector data). Built as the register table (branch `register-table`, 0.33.0-dev.1, [register-table.md](register-table.md)): through both USB adapters, not yet on retro PCs.
 2. READ/WRITE MULTIPLE.
 3. PIO modes 1–4.
