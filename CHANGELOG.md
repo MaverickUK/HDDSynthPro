@@ -4,6 +4,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0-dev.6] - 2026-11-15 (branch `review-fixes`)
+
+Not run on hardware. **It moves core 1's hard disk code** (`ata_device.cpp` grew by a few instructions), so `check_core1_layout.py` fails until reads are benchmarked on the rig and the layout recorded: it is the branch's last commit, to drop if that isn't worth it yet. (First made as dev.3, then reverted to come last.)
+
+### Fixed
+- READ VERIFY and SEEK with a CHS address the geometry doesn't hold passed an unset LBA on to the `CMD` line (the command itself failed with IDNF, as it should). It is 0 now, as READ and WRITE SECTORS give.
+- A reset could leave the fetch id at 0, which means "no fetch" (`resetToSignature`, `hardReset`, and the CD-ROM's two): after 4 billion fetches and resets, so never seen. They skip 0 now, as every other increment does.
+
 ## [0.33.0-dev.5] - 2026-11-15 (branch `review-fixes`)
 
 Not run on hardware. No change in behaviour is meant.

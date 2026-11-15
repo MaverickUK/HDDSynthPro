@@ -71,7 +71,7 @@ CORE1_RAM void Device::resetToSignature() {
     out_hold_ = false;
     flushing_ = false;
     fetch_pending_ = false;
-    ++fetch_id_;
+    if (++fetch_id_ == 0) ++fetch_id_;  // never 0: pendingFetchId() uses it for "none"
 }
 
 CORE1_RAM void Device::consumeRead(Reg reg) {
@@ -173,7 +173,7 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         out_hold_ = false;
         flushing_ = false;
         fetch_pending_ = false;
-        ++fetch_id_;
+        if (++fetch_id_ == 0) ++fetch_id_;
         // A hardware reset (not a soft one) restores both units' power-on
         // CHS translation and write cache setting.
         for (unsigned n = 0; n < (has_device1_ ? 2u : 1u); ++n) {
@@ -348,12 +348,12 @@ CORE1_RAM bool Device::checkRange(uint32_t count, uint32_t& lba) {
 CORE1_RAM void Device::readVerify() {
     // Like READ SECTORS, but the data stays on the drive. Generated data
     // can't fail to read, so a range check is the whole job.
-    uint32_t lba;
+    uint32_t lba = 0;  // decodeAddress leaves it alone for a CHS address out of range
     if (checkRange(sector_count_ ? sector_count_ : 256, lba)) completeNoData();
 }
 
 CORE1_RAM void Device::seek() {
-    uint32_t lba;
+    uint32_t lba = 0;
     if (checkRange(1, lba)) completeNoData();
 }
 
