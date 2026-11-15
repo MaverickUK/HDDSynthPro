@@ -50,6 +50,11 @@ Geometry geometryFromPartitions(const uint8_t sector0[512], uint32_t total_secto
 // there is (ide_dma.pio meets modes 0-2: host/tests/test_dma_sim.py).
 constexpr uint8_t NO_DMA = 0xFF;
 constexpr uint8_t MAX_MDMA_MODE = 2;
+// READ/WRITE MULTIPLE: the most sectors per DRQ block (IDENTIFY word 47). The
+// device holds two buffers of this many sectors, so it is RAM: 8 costs 7 KB
+// over single sectors; 16, what most BIOSes ask for when offered, 15 KB
+// (docs/performance.md).
+constexpr uint8_t MAX_MULTIPLE = 8;
 
 // The fastest PIO mode the drive can offer: the bus program meets modes 0-3's
 // timings, with IORDY holding the host while core 1 answers
@@ -81,6 +86,9 @@ void setMdmaModeSelected(uint16_t words[256], uint8_t mode);
 // Sets the "write cache enabled" bit (word 85 bit 5) after SET FEATURES 02h
 // or 82h, and fixes up the checksum, as setCurrentGeometry does.
 void setWriteCacheEnabled(uint16_t words[256], bool on);
+// READ/WRITE MULTIPLE's block, as SET MULTIPLE MODE left it (word 59): sectors
+// per DRQ block, or 0 while multiple mode is off.
+void setMultipleSectors(uint16_t words[256], uint8_t sectors);
 
 // ATA strings are space-padded and stored two characters per word with the
 // first character in the high byte. Writes `len_words` words.

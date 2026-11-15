@@ -29,9 +29,79 @@ struct VirtualHost {
         Fetch f;
         if (dev.dataOutHeld()) dev.releaseDataOut();  // core 1's timer
         if (source && dev.pendingFetch(f)) {
-            bool ok = f.store ? source->write(f.lba, f.buffer) : f.flush ? true : source->read(f.lba, f.buffer);
-            dev.fetchDone(f.id, ok && (!f.flush || source->flush()));
+            bool ok = true;
+            uint8_t failed = 0;
+            if (f.store || !f.flush) {  // a block's sectors, stopping at the first that fails
+                fetched.push_back(f.sectors);
+                for (uint8_t i = 0; ok && i < f.sectors; ++i) {
+                    uint16_t* words = f.buffer + size_t(i) * 256;
+                    ok = f.store ? source->write(f.lba + i, words) : source->read(f.lba + i, words);
+                    if (!ok) failed = i;
+                }
+            }
+            dev.fetchDone(f.id, ok && (!f.flush || source->flush()), failed);
         }
+    }
+    std::vector<int> fetched = {};  // the sectors of each fetch pump() served
+
+    // SET MULTIPLE MODE; true if the device took it.
+    bool setMultiple(uint8_t sectors) {
+        dev.write(Reg::SectorCount, sectors);
+        dev.write(Reg::StatusCommand, CMD_SET_MULTIPLE_MODE);
+        return !(status() & ST_ERR);
+    }
+
+    // READ MULTIPLE the polled way: DRQ blocks of `block` sectors, the last
+    // perhaps shorter, each with its interrupt. `blocks` gets how many words
+    // each DRQ gave. False on an error or a missing data phase.
+    bool readMultiple(uint32_t lba, uint8_t count, int block, std::vector<uint16_t>& out,
+                      std::vector<int>* blocks = nullptr) {
+        setLba(lba, count);
+        dev.write(Reg::StatusCommand, CMD_READ_MULTIPLE);
+        out.clear();
+        int left = count ? count : 256;
+        while (left > 0) {
+            if (!waitNotBusy()) return false;
+            if (!dev.intrq()) return false;  // an interrupt for every block
+            uint8_t st = status();
+            if ((st & ST_ERR) || !(st & ST_DRQ)) return false;
+            int n = left < block ? left : block;
+            int words = 0;
+            for (; words < n * 256 && (altStatus() & ST_DRQ); ++words) out.push_back(dev.read(Reg::Data));
+            if (blocks) blocks->push_back(words);
+            if (words != n * 256) return false;
+            left -= n;
+        }
+        if (!waitNotBusy()) return false;
+        return !(altStatus() & (ST_ERR | ST_DRQ));
+    }
+
+    // WRITE MULTIPLE the polled way; `words` holds 256 per sector.
+    bool writeMultiple(uint32_t lba, uint8_t count, int block, const std::vector<uint16_t>& words,
+                       int* interrupts = nullptr) {
+        setLba(lba, count);
+        dev.write(Reg::StatusCommand, CMD_WRITE_MULTIPLE);
+        int left = count ? count : 256;
+        size_t at = 0;
+        bool first = true;
+        while (left > 0) {
+            if (!waitNotBusy()) return false;
+            if (interrupts && dev.intrq()) ++*interrupts;
+            if (first && dev.intrq()) return false;  // none before the first block
+            first = false;
+            uint8_t st = status();
+            if ((st & ST_ERR) || !(st & ST_DRQ)) return false;
+            int n = left < block ? left : block;
+            for (int i = 0; i < n * 256; ++i) {
+                if (!(altStatus() & ST_DRQ)) return false;  // DRQ holds for the whole block
+                dev.write(Reg::Data, words[at++]);
+            }
+            left -= n;
+        }
+        if (!waitNotBusy()) return false;
+        if (interrupts && dev.intrq()) ++*interrupts;
+        uint8_t st = status();
+        return !(st & (ST_ERR | ST_DRQ));
     }
 
     uint8_t status() { return uint8_t(dev.read(Reg::StatusCommand)); }
@@ -1626,10 +1696,217 @@ TEST(test_reset_cancels_waking) {
     CHECK(!d.intrq());
 }
 
-TEST(test_set_multiple_mode_aborts) {
+// ---- READ MULTIPLE, WRITE MULTIPLE, SET MULTIPLE MODE --------------------------
+
+TEST(test_set_multiple_mode) {
     Device d(INFO);
-    CHECK(command(d, CMD_SET_MULTIPLE_MODE, 0, 16) & ST_ERR);
+    VirtualHost h{d};
+    uint16_t id[256];
+    CHECK(h.identify(id));
+    CHECK_EQ(id[47], 0x8000 | MAX_MULTIPLE);  // the largest block
+    CHECK_EQ(id[59], 0);                      // off at power-on
+    // Over the largest, or not a power of two: aborted, the setting unchanged.
+    CHECK(command(d, CMD_SET_MULTIPLE_MODE, 0, uint8_t(MAX_MULTIPLE * 2)) & ST_ERR);
     CHECK_EQ(d.error(), ER_ABRT);
+    CHECK(command(d, CMD_SET_MULTIPLE_MODE, 0, 3) & ST_ERR);
+    CHECK(h.identify(id));
+    CHECK_EQ(id[59], 0);
+    // Taken: IDENTIFY word 59 says so, and the command ends with an interrupt.
+    CHECK_EQ(command(d, CMD_SET_MULTIPLE_MODE, 0, 4), ST_DRDY | ST_DSC);
+    CHECK(d.intrq());
+    CHECK_EQ(d.lastCommand().count, 4);  // in the trace: what the host asked for
+    CHECK(h.identify(id));
+    CHECK_EQ(id[59], 0x0104);
+    // A soft reset keeps it; RESET# turns it off, as at power-on.
+    h.softReset();
+    CHECK(h.identify(id));
+    CHECK_EQ(id[59], 0x0104);
+    d.hardReset(true);
+    d.hardReset(false);
+    CHECK(h.identify(id));
+    CHECK_EQ(id[59], 0);
+    // 0 turns it off.
+    CHECK(h.setMultiple(MAX_MULTIPLE));
+    CHECK(h.setMultiple(0));
+    CHECK(h.identify(id));
+    CHECK_EQ(id[59], 0);
+}
+
+TEST(test_read_and_write_multiple_need_the_mode_set) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    for (uint8_t cmd : {uint8_t(CMD_READ_MULTIPLE), uint8_t(CMD_WRITE_MULTIPLE)}) {
+        h.setLba(100, 4);
+        d.write(Reg::StatusCommand, cmd);
+        CHECK(h.altStatus() & ST_ERR);
+        CHECK(!(h.altStatus() & ST_DRQ));
+        CHECK_EQ(d.error(), ER_ABRT);
+        CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+    }
+    Fetch f;
+    CHECK(!d.pendingFetch(f));
+}
+
+TEST(test_read_multiple) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    CHECK(h.setMultiple(4));
+    std::vector<uint16_t> got;
+    std::vector<int> blocks;
+    CHECK(h.readMultiple(500, 10, 4, got, &blocks));  // 4, 4 and a short block of 2
+    CHECK(sameAsDisk(got, 500, 10));
+    CHECK_EQ(blocks.size(), 3u);
+    CHECK_EQ(blocks[0], 4 * 256);
+    CHECK_EQ(blocks[2], 2 * 256);
+    // Core 0 was asked for the same three blocks, not ten sectors.
+    CHECK_EQ(h.fetched.size(), 3u);
+    CHECK_EQ(h.fetched[0], 4);
+    CHECK_EQ(h.fetched[2], 2);
+    CHECK(!d.intrq());  // none after the last block of a PIO read
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+    CHECK_EQ(d.lastCommand().count, 10);
+
+    // A count that isn't the block's multiple, a whole 256, and the largest block.
+    CHECK(h.readMultiple(7, 1, 4, got));
+    CHECK(sameAsDisk(got, 7, 1));
+    CHECK(h.readMultiple(1000, 0, 4, got));
+    CHECK(sameAsDisk(got, 1000, 256));
+    CHECK(h.setMultiple(MAX_MULTIPLE));
+    CHECK(h.readMultiple(131072 - 20, 20, MAX_MULTIPLE, got));  // up to the disk's last sector
+    CHECK(sameAsDisk(got, 131072 - 20, 20));
+    // Past the end: refused before anything is fetched.
+    h.setLba(131072 - 4, 8);
+    d.write(Reg::StatusCommand, CMD_READ_MULTIPLE);
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK_EQ(d.error(), ER_IDNF);
+}
+
+TEST(test_read_multiple_without_read_ahead) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    d.setReadAhead(false);
+    CHECK(h.setMultiple(4));
+    std::vector<uint16_t> got;
+    CHECK(h.readMultiple(300, 9, 4, got));
+    CHECK(sameAsDisk(got, 300, 9));
+}
+
+TEST(test_read_sectors_keeps_single_sector_blocks_in_multiple_mode) {
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    CHECK(h.setMultiple(MAX_MULTIPLE));
+    std::vector<uint16_t> got;
+    CHECK(h.readSectors(40, 5, got));  // one DRQ per sector, as ever
+    CHECK(sameAsDisk(got, 40, 5));
+    for (int n : h.fetched) CHECK_EQ(n, 1);
+    // And READ MULTIPLE after it uses blocks again.
+    h.fetched.clear();
+    CHECK(h.readMultiple(40, 16, MAX_MULTIPLE, got));
+    CHECK(sameAsDisk(got, 40, 16));
+    CHECK_EQ(h.fetched.size(), 2u);
+}
+
+TEST(test_read_multiple_fetch_failure) {
+    Device d(INFO);
+    FailingDisk disk(506);
+    VirtualHost h{d, &disk};
+    CHECK(h.setMultiple(4));
+    std::vector<uint16_t> got;
+    CHECK(!h.readMultiple(500, 12, 4, got));
+    CHECK_EQ(got.size(), 4u * 256u);  // the first block arrived; none of the second
+    CHECK(sameAsDisk(got, 500, 4));
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK(!(h.altStatus() & ST_DRQ));
+    CHECK_EQ(d.error(), ER_UNC);
+    CHECK_EQ(d.read(Reg::LbaLow), 506 & 0xFF);  // the sector that failed, not its block's first
+    CHECK_EQ(d.read(Reg::LbaMid), 506 >> 8);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+    // The drive goes on: the next command works.
+    CHECK(h.readMultiple(100, 4, 4, got));
+    CHECK(sameAsDisk(got, 100, 4));
+}
+
+TEST(test_write_multiple) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<32> disk(base);
+    VirtualHost h{d, &disk};
+    CHECK(h.setMultiple(4));
+    std::vector<uint16_t> data = pattern(10, 77);
+    int interrupts = 0;
+    CHECK(h.writeMultiple(2000, 10, 4, data, &interrupts));  // 4, 4 and a short block of 2
+    CHECK_EQ(interrupts, 3);  // for the second and third blocks, and at the end
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+    // Stored block by block, and it reads back, by either command.
+    CHECK_EQ(h.fetched.size(), 3u);
+    CHECK_EQ(h.fetched[0], 4);
+    CHECK_EQ(h.fetched[2], 2);
+    std::vector<uint16_t> got;
+    CHECK(h.readMultiple(2000, 10, 4, got));
+    CHECK(got == data);
+    CHECK(h.readSectors(2000, 10, got));
+    CHECK(got == data);
+    // WRITE SECTORS still takes a sector per DRQ in multiple mode.
+    std::vector<uint16_t> more = pattern(3, 78);
+    h.fetched.clear();
+    CHECK(h.writeSectors(2100, 3, more));
+    for (int n : h.fetched) CHECK_EQ(n, 1);
+    CHECK(h.readSectors(2100, 3, got));
+    CHECK(got == more);
+}
+
+TEST(test_write_multiple_without_write_behind) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<32> disk(base);
+    VirtualHost h{d, &disk};
+    d.setWriteBehind(false);
+    CHECK(h.setMultiple(MAX_MULTIPLE));
+    std::vector<uint16_t> data = pattern(20, 79);
+    CHECK(h.writeMultiple(3000, 20, MAX_MULTIPLE, data));
+    std::vector<uint16_t> got;
+    CHECK(h.readMultiple(3000, 20, MAX_MULTIPLE, got));
+    CHECK(got == data);
+}
+
+TEST(test_write_multiple_store_failure) {
+    Device d(INFO);
+    GeneratedDisk base;
+    static RamOverlayDisk<2> disk(base);  // room for two sectors: the block's third fails
+    VirtualHost h{d, &disk};
+    CHECK(h.setMultiple(4));
+    std::vector<uint16_t> data = pattern(4, 80);
+    CHECK(!h.writeMultiple(4000, 4, 4, data));
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK_EQ(d.error(), ER_ABRT);
+    CHECK_EQ(d.read(Reg::LbaLow), 4002 & 0xFF);  // the sector that couldn't be stored
+    CHECK_EQ(d.read(Reg::LbaMid), 4002 >> 8);
+    CHECK_EQ(d.commandsCompleted(), d.commandsStarted());
+}
+
+TEST(test_multiple_mode_is_per_device) {
+    const IdentifyInfo second{"HDDSYNTH PRO D1", "HSP-000001-D1", "0.2.0", 65536};
+    Device d(INFO, &second);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    h.select(0);
+    CHECK(h.setMultiple(4));
+    h.select(1);
+    uint16_t id[256];
+    CHECK(h.identify(id));
+    CHECK_EQ(id[59], 0);  // device 1 wasn't asked
+    h.setLba(10, 4);
+    d.write(Reg::Device, 0xF0);  // LBA, device 1
+    d.write(Reg::StatusCommand, CMD_READ_MULTIPLE);
+    CHECK(h.altStatus() & ST_ERR);
+    CHECK_EQ(d.error(), ER_ABRT);
+    h.select(0);
+    CHECK(h.identify(id));
+    CHECK_EQ(id[59], 0x0104);
 }
 
 TEST(test_housekeeping_commands_complete_for_the_trace) {
@@ -1702,8 +1979,10 @@ TEST(test_virtual_host_bridge_setup) {
     d.write(Reg::Device, 0xA0 | (id[3] - 1));
     CHECK_EQ(command(d, CMD_INITIALIZE_DEVICE_PARAMETERS, 0, uint8_t(id[6])) & ST_ERR, 0);
 
-    // Multiple mode only if IDENTIFY word 47 offers it (it doesn't).
-    CHECK_EQ(id[47] & 0xFF, 0);
+    // Multiple mode as IDENTIFY word 47 offers it.
+    CHECK_EQ(id[47] & 0xFF, MAX_MULTIPLE);
+    CHECK_EQ(command(d, CMD_SET_MULTIPLE_MODE, 0, uint8_t(id[47] & 0xFF)) & ST_ERR, 0);
+    h.status();
 
     std::vector<uint16_t> got;
     CHECK(h.readSectors(0, 8, got));
@@ -1998,7 +2277,16 @@ void runAtaDeviceTests() {
     RUN(test_queued_command);
     RUN(test_queued_command_rules);
     RUN(test_reset_cancels_waking);
-    RUN(test_set_multiple_mode_aborts);
+    RUN(test_set_multiple_mode);
+    RUN(test_read_and_write_multiple_need_the_mode_set);
+    RUN(test_read_multiple);
+    RUN(test_read_multiple_without_read_ahead);
+    RUN(test_read_sectors_keeps_single_sector_blocks_in_multiple_mode);
+    RUN(test_read_multiple_fetch_failure);
+    RUN(test_write_multiple);
+    RUN(test_write_multiple_without_write_behind);
+    RUN(test_write_multiple_store_failure);
+    RUN(test_multiple_mode_is_per_device);
     RUN(test_housekeeping_commands_complete_for_the_trace);
     RUN(test_flush_cache_flushes_the_storage);
     RUN(test_flush_cache_through_the_virtual_host);

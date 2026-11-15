@@ -675,7 +675,7 @@ __attribute__((always_inline)) static inline bool serveLaneT(Dev& dev, bool rese
             continue;
         }
         FetchResult result;
-        if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);  // the read-ahead is in
+        if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok, result.failed);  // the read-ahead is in
     }
     // The block is done (and no next one yet): straight back to the bus, where
     // the host's status read comes next; the pass's bookkeeping can wait (it
@@ -749,7 +749,7 @@ __attribute__((always_inline)) static inline bool serveDataInT(Dev& dev, bool re
                 continue;
             }
             FetchResult result;
-            if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);  // the read-ahead is in
+            if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok, result.failed);  // the read-ahead is in
         }
         if (reset_changed) break;
         uint32_t sample = pio_sm_get(s_pio, s_sm);
@@ -822,7 +822,7 @@ __attribute__((always_inline)) static inline bool serveDataInEarlyT(Dev& dev, bo
                     to_post = false;
                 } else {
                     FetchResult result;
-                    if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok);  // the read-ahead is in
+                    if (mailbox.takeResult(result)) dev.fetchDone(result.id, result.ok, result.failed);  // the read-ahead is in
                 }
                 continue;
             }
@@ -923,7 +923,7 @@ __attribute__((always_inline)) static inline void serveBusEarlyT(Dev& dev, bool 
         site(SITE_FETCH_DONE);
         FetchResult result;
         if (mailbox.takeResult(result)) {
-            dev.fetchDone(result.id, result.ok);
+            dev.fetchDone(result.id, result.ok, result.failed);
             updateIntrq(dev);
             const uint16_t* next;
             uint16_t left;

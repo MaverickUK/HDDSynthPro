@@ -1,6 +1,6 @@
 # Performance roadmap: faster reads and writes on rev 0.3
 
-**Status (15 Nov 2026): a plan, from a review at the desk. Items 1 and 2 are started on branch `performance`; nothing here is measured yet.** Measurements go in [speed-log.md](speed-log.md) as they are made.
+**Status (15 Nov 2026): a plan, from a review at the desk. On branch `performance`: item 1 is written and host-tested (0.33.0-dev.9), item 2 is a test plan needing no code; nothing here is measured yet.** Measurements go in [speed-log.md](speed-log.md) as they are made.
 
 Rev 0.4 doesn't make the bus faster: it adds the PSRAM, which makes large caches possible. Everything below except the large form of items 4 and 5 can be done and measured on rev 0.3.
 
@@ -18,7 +18,7 @@ PIO on a real PC runs at well under half of what its mode allows, and the card i
 
 ## The items, biggest expected gain first
 
-### 1. READ MULTIPLE, WRITE MULTIPLE and SET MULTIPLE MODE (started)
+### 1. READ MULTIPLE, WRITE MULTIPLE and SET MULTIPLE MODE (written in 0.33.0-dev.9; not on hardware)
 
 **Why.** The drive refuses SET MULTIPLE MODE (C6h), so a DOS or Windows 9x host takes an interrupt, a Status read and a wait for DRQ for every sector. With multiple mode the host does that once per block of sectors. Not for the USB adapters: both ignore multiple mode.
 
@@ -34,6 +34,8 @@ PIO on a real PC runs at well under half of what its mode allows, and the card i
 **How to prove it.** Native tests for the device. On the Evesham: `DOSBENCH.IMG` before and after, on the data lane and on early answers; the BIOS's "block mode" setting on; `CMD c6` in the trace with the count it asked for, then `c4`/`c5`. Slices 3-4 and a soak through the adapter show nothing else changed (it never sends them).
 
 **Risk.** It changes the device core 1 runs, the most-soaked code in the tree, and moves core 1's layout: benchmark and record it.
+
+**As built (0.33.0-dev.9).** `MAX_MULTIPLE` is 8 (identify.h): 8.8 KB more RAM, 96.9% used. Going to 16 needs 16 KB more, and the bus observer's `EXPECT_SLOTS` (16: a block with the host and one read ahead) doubled with it. Core 0 still makes one card call per sector inside the block (item 4 makes it one per block). In table mode a block of 8 is 2,048 data writes against the write ring's 1,024 samples, drained as it fills.
 
 ### 2. Multiword DMA on a real PC (started: a test plan, no code)
 

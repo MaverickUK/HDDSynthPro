@@ -81,7 +81,9 @@ constexpr uint8_t CMD_READ_VERIFY_NO_RETRY = 0x41;
 constexpr uint8_t CMD_SEEK = 0x70;  // 70h-7Fh: obsolete, all alike
 constexpr uint8_t CMD_EXECUTE_DEVICE_DIAGNOSTIC = 0x90;
 constexpr uint8_t CMD_INITIALIZE_DEVICE_PARAMETERS = 0x91;
-constexpr uint8_t CMD_SET_MULTIPLE_MODE = 0xC6;  // aborted: no READ/WRITE MULTIPLE
+constexpr uint8_t CMD_READ_MULTIPLE = 0xC4;   // DRQ blocks of the sectors SET MULTIPLE MODE set
+constexpr uint8_t CMD_WRITE_MULTIPLE = 0xC5;
+constexpr uint8_t CMD_SET_MULTIPLE_MODE = 0xC6;  // a power of two up to MAX_MULTIPLE; 0 turns it off
 constexpr uint8_t CMD_READ_DMA = 0xC8;              // when IDENTIFY offers multiword DMA
 constexpr uint8_t CMD_READ_DMA_NO_RETRY = 0xC9;     // obsolete alias
 constexpr uint8_t CMD_WRITE_DMA = 0xCA;
@@ -115,6 +117,9 @@ constexpr uint8_t POWER_STANDBY = 0x00;
 constexpr uint8_t POWER_ACTIVE_OR_IDLE = 0xFF;
 
 constexpr uint16_t SECTOR_WORDS = 256;
+// A DRQ block: one sector, or with READ/WRITE MULTIPLE up to MAX_MULTIPLE
+// (identify.h) of them. The device's two buffers each hold one block.
+constexpr uint16_t BLOCK_WORDS = MAX_MULTIPLE * SECTOR_WORDS;
 
 // A sector the device needs core 0 to move: fetched into `buffer` for a read,
 // or stored from it for a write (`store`). `id` changes with every request,
@@ -123,13 +128,14 @@ constexpr uint16_t SECTOR_WORDS = 256;
 struct Fetch {
     uint32_t id;
     uint32_t lba;
-    uint16_t* buffer;  // SECTOR_WORDS words, in bus order (low byte first on disk)
+    uint16_t* buffer;  // `sectors` * SECTOR_WORDS words, in bus order (low byte first on disk)
     bool store;        // true: write `buffer` to `lba`; false: fill it from `lba`
     bool flush;        // true: then make everything stored so far permanent. Alone: FLUSH
                        // CACHE; with store: a write with the write cache off
     uint16_t command_sectors;  // the command's sector count and first sector, for core 0's
     uint32_t command_lba;      // seek timing and the activity link (seek_timing.h)
     uint8_t unit;              // 0: device 0's disk, 1: device 1's
+    uint8_t sectors = 1;       // how many, from `lba` on (READ/WRITE MULTIPLE: a block's)
 };
 
 // A DMA burst for core 1 to run (READ DMA or WRITE DMA): the rest of a
@@ -193,7 +199,7 @@ public:
     __attribute__((always_inline)) bool dataOutRemaining(uint16_t*& dest, uint16_t& left) {
         if (absent_selected_ || !receiving_ || !(status_ & ST_DRQ)) return false;
         dest = &sectors_[recv_buf_][received_];
-        left = uint16_t(SECTOR_WORDS - received_);
+        left = uint16_t(recv_words_ - received_);
         return true;
     }
     void consumeDataOut(uint16_t n);
@@ -250,7 +256,9 @@ public:
     uint32_t pendingFetchId() const { return fetch_pending_ ? fetch_id_ : 0; }
 
     // Core 0 finished fetch `id`: the sector was moved (ok), or it failed.
-    void fetchDone(uint32_t id, bool ok);
+    // `failed`: with !ok, which of the fetch's sectors failed (0 = its first),
+    // for the address the host is told.
+    void fetchDone(uint32_t id, bool ok, uint8_t failed = 0);
 
     // ---- DMA (READ DMA, WRITE DMA) --------------------------------------------
 
@@ -301,6 +309,7 @@ private:
         uint16_t identify[256];
         bool standby = false;  // after STANDBY; any media access wakes it
         bool write_cache = true;
+        uint8_t multiple = 0;  // SET MULTIPLE MODE's sectors per block; 0: off
         uint8_t status = 0;    // while not selected
         uint8_t error = 0;
         bool irq = false;
@@ -313,8 +322,9 @@ private:
     void resetToSignature();  // registers and status as after a reset
     void abandonCommand() { commands_completed_ = commands_started_; }  // a command cut short ends
     void startCommand(uint8_t command);
-    void startRead();
-    void startWrite();
+    void startRead(uint8_t block = 1);   // `block`: sectors per DRQ block
+    void startWrite(uint8_t block = 1);
+    void setMultipleMode();
     void readVerify();
     void seek();
     void setFeatures();
@@ -345,7 +355,7 @@ private:
     // Two sector buffers: while the host reads one, core 0 fills the other
     // with the next sector of the read (read-ahead); while the host writes
     // one, core 0 stores the other (write-behind).
-    uint16_t sectors_[2][SECTOR_WORDS];
+    uint16_t sectors_[2][BLOCK_WORDS];  // two blocks: one with the host, one with core 0
 
     // Task file
     uint8_t features_ = 0;
@@ -365,7 +375,13 @@ private:
 
     // Data-out transfer (host to device), into sectors_[recv_buf_]
     bool receiving_ = false;
-    uint16_t received_ = 0;  // words of the current sector so far
+    uint16_t received_ = 0;  // words of the current block so far
+    uint16_t recv_words_ = SECTOR_WORDS;  // the current block's length
+    uint8_t recv_count_ = 1;              // and its sectors
+    uint8_t block_ = 1;         // the command's sectors per DRQ block (1, or READ/WRITE MULTIPLE's)
+    uint8_t fetch_count_ = 1;   // the sectors of the fetch out, or last out
+    uint8_t fetch_failed_ = 0;  // which of them failed, if it did
+    uint8_t filled_count_ = 1;  // the sectors of the received block waiting for its store
     uint8_t recv_buf_ = 0;
 
     // Multi-sector read in progress

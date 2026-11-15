@@ -249,7 +249,8 @@ TEST(test_identify_fields) {
     CHECK(w[49] & (1u << 9));    // LBA
     CHECK(w[49] & (1u << 11));   // IORDY
     CHECK(!(w[49] & (1u << 8)));  // no DMA
-    CHECK_EQ(w[47] & 0xFF, 0);   // no READ/WRITE MULTIPLE
+    CHECK_EQ(w[47], 0x8000 | MAX_MULTIPLE);  // READ/WRITE MULTIPLE: the largest block
+    CHECK_EQ(w[59], 0);          // multiple mode off until SET MULTIPLE MODE
     CHECK_EQ(w[63], 0);          // no multiword DMA
     CHECK_EQ(w[64], 0);          // no PIO 3/4
     CHECK_EQ(w[51], 0x0000);     // PIO mode 0 (IdentifyInfo's default)...

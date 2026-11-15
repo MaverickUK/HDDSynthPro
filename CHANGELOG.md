@@ -4,6 +4,27 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0-dev.9] - 2026-11-15 (branch `performance`, from `review-fixes`)
+
+Host-tested only: not run on hardware, and core 1's hard disk code moved (`check_core1_layout.py` fails until reads are benchmarked on the rig and the layout recorded).
+
+### Added
+- **READ MULTIPLE, WRITE MULTIPLE and SET MULTIPLE MODE** (C4h, C5h, C6h; [docs/performance.md](docs/performance.md), item 1). A DOS or Windows 9x host that sets multiple mode takes one interrupt and one Status read per block of sectors instead of per sector.
+  - IDENTIFY word 47 offers blocks of up to 8 sectors (`MAX_MULTIPLE`, identify.h); word 59 shows the setting. SET MULTIPLE MODE takes a power of two up to that, or 0 to turn it off; anything else is aborted. Per device; off after power-on and RESET#, kept over a soft reset. READ and WRITE MULTIPLE are aborted while it is off.
+  - The device's two sector buffers became two block buffers (8 sectors each: 8.8 KB more RAM, 96.9% used on `pcb_drive`), used as before: one with the host, one with core 0, so read-ahead fetches the next block while the host reads this one and write-behind stores one while the host sends the next.
+  - A `Fetch` carries a sector count and core 0 moves the block in one request; a `FetchResult` says which sector failed, so the task file gives that sector's address (the block that holds it isn't transferred).
+  - READ and WRITE SECTORS and the DMA commands still move one sector per block.
+- `WRITE_MULTIPLE` in the trace's command names.
+
+### Changed
+- `docs/performance.md`: the performance roadmap for rev 0.3 (READ/WRITE MULTIPLE, DMA on a retro PC, the card at 50 MHz, runs of sectors to the card, a read cache, PIO writes), linked from CLAUDE.md's *Next* and the plan.
+
+### Tested
+- Native tests: SET MULTIPLE MODE's values and resets, both commands refused while it's off, blocks of 4 and 8 with a short last block and a count of 256, read-ahead and write-behind off, a failed read and a failed store mid-block (the right address, nothing of the block transferred), single-sector commands unchanged in multiple mode, the setting per device. 6,393 checks.
+
+### Not yet tested
+- Any hardware. On the Evesham: `DOSBENCH.IMG` before and after on the data lane and on early answers, with the BIOS's block mode on (`CMD c6` with the count it asks, then `c4`/`c5` in the trace). Through the adapters (which never send these): slices 3-4 and `-m speed`, then record the layout. In table mode a WRITE MULTIPLE block is 2,048 data writes against a write ring of 1,024 samples, drained as it fills, as a sector's 256 were against a ring of 256.
+
 ## [0.33.0-dev.8] - 2026-11-15 (branch `review-fixes`)
 
 Not run on hardware. No change in behaviour is meant.

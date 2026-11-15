@@ -78,8 +78,8 @@ CORE1_RAM_CD bool Device::pendingFetch(ata::Fetch& fetch) {
     return hd_.pendingFetch(fetch) || (cd_on_ && cd_.pendingFetch(fetch));
 }
 
-CORE1_RAM_CD void Device::fetchDone(uint32_t id, bool ok) {
-    if (hd_on_) hd_.fetchDone(id, ok);  // each takes only its own id: the CD-ROM's as device 1 have the top bit set
+CORE1_RAM_CD void Device::fetchDone(uint32_t id, bool ok, uint8_t failed) {
+    if (hd_on_) hd_.fetchDone(id, ok, failed);  // each takes only its own id: the CD-ROM's as device 1 have the top bit set
     if (cd_on_) cd_.fetchDone(id, ok);
 }
 

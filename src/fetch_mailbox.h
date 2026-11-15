@@ -16,6 +16,7 @@
 struct FetchResult {
     uint32_t id;
     bool ok;
+    uint8_t failed = 0;  // with !ok: which of the fetch's sectors failed (0 = its first)
 };
 
 class FetchMailbox {

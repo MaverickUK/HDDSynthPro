@@ -51,6 +51,7 @@ const char* commandName(uint8_t command) {
         case 0x91: return "INIT_PARAMS";
         case 0xC6: return "SET_MULTIPLE";
         case 0xC4: return "READ_MULTIPLE";
+        case 0xC5: return "WRITE_MULTIPLE";
         case 0xC8: return "READ_DMA";
         case 0xC9: return "READ_DMA_NR";
         case 0xCA: return "WRITE_DMA";

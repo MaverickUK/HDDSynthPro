@@ -141,7 +141,7 @@ public:
         uint32_t id = hd_.pendingFetchId();
         return id || !cd_on_ ? id : cd_.pendingFetchId();
     }
-    void fetchDone(uint32_t id, bool ok);
+    void fetchDone(uint32_t id, bool ok, uint8_t failed = 0);
 
     // ---- DMA -------------------------------------------------------------------
 

@@ -740,7 +740,7 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
             case 2: {  // a fetch result, which may complete a DRQ block
                 FetchResult result;
                 if (g_mailbox.takeResult(result)) {
-                    dev.fetchDone(result.id, result.ok);
+                    dev.fetchDone(result.id, result.ok, result.failed);
                     ide_bus::syncDataLane(dev);  // a sector's block onto the lane, then INTRQ
                 }
                 break;
@@ -886,7 +886,7 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         postFetch(dev, posted_fetch);
         FetchResult result;
         if (g_mailbox.takeResult(result)) {
-            dev.fetchDone(result.id, result.ok);
+            dev.fetchDone(result.id, result.ok, result.failed);
             dirty = true;
         }
         busyTimers(dev);
@@ -1151,22 +1151,32 @@ static void serveFetches() {
     while (g_held_count < HELD_MAX && g_mailbox.takeRequest(fetch)) {
         uint64_t now = time_us_64();  // the command's time starts before the card's
         BlockSource* disk = fetch.unit ? g_device1_disk : g_disk;  // device 1's, or device 0's
-        bool ok = !disk ? false
-                  : fetch.store ? disk->write(fetch.lba, fetch.buffer)
-                  : fetch.flush ? true  // FLUSH CACHE: nothing to move
-                                : disk->read(fetch.lba, fetch.buffer);
-        if (ok && fetch.flush) ok = disk->flush();
-        if (ok && !fetch.store && !fetch.flush) bus_observer::expect(fetch.lba, fetch.buffer);  // before core 1 can send it
-        if (ok && !fetch.flush) ++g_sectors_served;  // auto_bus: past detection?
+        // A fetch moves `sectors` of them (one, or READ/WRITE MULTIPLE's block),
+        // stopping at the first that fails. FLUSH CACHE alone moves nothing.
+        const bool moves = fetch.store || !fetch.flush;
+        bool ok = disk != nullptr;
+        uint8_t failed = 0;
         uint64_t ready = now;
-        if (fetch.store || !fetch.flush) {  // a sector read or written
-            seek_timing::Release r = g_seek.onSector(now, fetch.command_lba, fetch.lba);
+        for (uint8_t i = 0; ok && moves && i < fetch.sectors; ++i) {
+            const uint32_t lba = fetch.lba + i;
+            uint16_t* words = fetch.buffer + size_t(i) * ata::SECTOR_WORDS;
+            ok = fetch.store ? disk->write(lba, words) : disk->read(lba, words);
+            if (!ok) {
+                failed = i;
+                break;
+            }
+            if (!fetch.store) bus_observer::expect(lba, words);  // before core 1 can send it
+            ++g_sectors_served;  // auto_bus: past detection?
+            // Seek timing sees each sector, as it did one fetch at a time: the
+            // block is ready when its last sector would be.
+            seek_timing::Release r = g_seek.onSector(now, fetch.command_lba, lba);
             ready = r.ready_us;
             if (r.first)
                 postHeadTarget(fetch.command_lba, fetch.command_sectors,
                                fetch.store ? activity_link::Op::Write : activity_link::Op::Read, r.seek_start_us);
         }
-        g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok}, ready};
+        if (ok && fetch.flush) ok = disk->flush();
+        g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok, failed}, ready};
         ++g_held_count;
         releaseHeld();
         g_last_fetch.count++;

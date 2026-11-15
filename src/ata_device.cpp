@@ -117,7 +117,7 @@ CORE1_RAM void Device::write(Reg reg, uint16_t value) {
         case Reg::Data:
             if (!receiving_ || absent_selected_) break;  // no data-out phase: ignored
             sectors_[recv_buf_][received_++] = value;
-            if (received_ >= SECTOR_WORDS) finishDataOut();
+            if (received_ >= recv_words_) finishDataOut();
             break;
         case Reg::ErrorFeatures: features_ = v; break;
         case Reg::SectorCount: sector_count_ = v; break;
@@ -182,6 +182,8 @@ CORE1_RAM void Device::hardReset(bool asserted) {
             setCurrentGeometry(unit.identify, unit.geometry);
             unit.write_cache = true;
             setWriteCacheEnabled(unit.identify, true);
+            unit.multiple = 0;  // multiple mode off, as at power-on
+            setMultipleSectors(unit.identify, 0);
             unit.standby = false;
         }
     } else if (in_reset_) {
@@ -259,6 +261,21 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
             u().standby = false;
             startWrite();
             break;
+        case CMD_READ_MULTIPLE:
+        case CMD_WRITE_MULTIPLE:
+            if (!u().multiple) {
+                fail(ER_ABRT);  // SET MULTIPLE MODE first
+                break;
+            }
+            u().standby = false;
+            if (command == CMD_READ_MULTIPLE)
+                startRead(u().multiple);
+            else
+                startWrite(u().multiple);
+            break;
+        case CMD_SET_MULTIPLE_MODE:
+            setMultipleMode();
+            break;
         case CMD_READ_VERIFY:
         case CMD_READ_VERIFY_NO_RETRY:
             u().standby = false;
@@ -313,7 +330,7 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
                 u().standby = false;
                 seek();
             } else {
-                fail(ER_ABRT);  // includes SET MULTIPLE MODE: not advertised
+                fail(ER_ABRT);
             }
             break;
     }
@@ -389,6 +406,20 @@ CORE1_RAM void Device::setFeatures() {
     fail(ER_ABRT);
 }
 
+// SET MULTIPLE MODE: Sector Count is the sectors per DRQ block for READ and
+// WRITE MULTIPLE: a power of two up to MAX_MULTIPLE, or 0 to turn them off.
+CORE1_RAM void Device::setMultipleMode() {
+    uint8_t n = sector_count_;
+    last_.count = n;  // for the trace: what the host asked for
+    if (n > MAX_MULTIPLE || (n & (n - 1)) != 0) {
+        fail(ER_ABRT);  // the setting stays as it was
+        return;
+    }
+    u().multiple = n;
+    setMultipleSectors(u().identify, n);
+    completeNoData();
+}
+
 CORE1_RAM void Device::initializeDeviceParameters() {
     // Sector Count = sectors per track, Device bits 3-0 = heads - 1.
     uint16_t spt = sector_count_;
@@ -429,10 +460,11 @@ CORE1_RAM bool Device::decodeAddress(uint32_t& lba) const {
     return true;
 }
 
-CORE1_RAM void Device::startRead() {
+CORE1_RAM void Device::startRead(uint8_t block) {
     uint32_t count = sector_count_ ? sector_count_ : 256;
     uint32_t lba = 0;
     if (!checkRange(count, lba)) return;
+    block_ = block;
     reading_ = true;
     read_lba_ = lba;
     read_left_ = count;
@@ -440,10 +472,11 @@ CORE1_RAM void Device::startRead() {
     requestFetch();
 }
 
-CORE1_RAM void Device::startWrite() {
+CORE1_RAM void Device::startWrite(uint8_t block) {
     uint32_t count = sector_count_ ? sector_count_ : 256;
     uint32_t lba = 0;
     if (!checkRange(count, lba)) return;
+    block_ = block;
     writing_ = true;
     write_lba_ = lba;
     write_left_ = count;
@@ -458,14 +491,17 @@ CORE1_RAM void Device::startWrite() {
 CORE1_RAM void Device::startDataOut() {
     receiving_ = true;
     received_ = 0;
+    recv_count_ = uint8_t(recv_left_ < block_ ? recv_left_ : block_);  // the last block may be short
+    recv_words_ = uint16_t(recv_count_ * SECTOR_WORDS);
     status_ = ST_DRDY | ST_DSC | ST_DRQ;
 }
 
 CORE1_RAM void Device::finishDataOut() {
     receiving_ = false;
-    --recv_left_;
+    recv_left_ -= recv_count_;
     filled_ = true;
     filled_buf_ = recv_buf_;
+    filled_count_ = recv_count_;
     if (recv_left_ > 0 && !dma_) out_hold_ = true;  // PIO: BSY before the next block is wanted
     settleWrite();
 }
@@ -474,8 +510,8 @@ CORE1_RAM void Device::finishDataOut() {
 // section, so the hard disk's core 1 code stays where it is measured.
 CORE1_RAM_TABLE void Device::consumeDataOut(uint16_t n) {
     if (!receiving_ || absent_selected_) return;
-    received_ = uint16_t(received_ + n > SECTOR_WORDS ? SECTOR_WORDS : received_ + n);
-    if (received_ >= SECTOR_WORDS) finishDataOut();
+    received_ = uint16_t(received_ + n > recv_words_ ? recv_words_ : received_ + n);
+    if (received_ >= recv_words_) finishDataOut();
 }
 
 CORE1_RAM void Device::releaseDataOut() {
@@ -502,6 +538,7 @@ CORE1_RAM void Device::settleWrite() {
         filled_ = false;
         fetch_buf_ = filled_buf_;
         fetch_lba_ = write_lba_;
+        fetch_count_ = filled_count_;
         fetch_pending_ = true;
         if (++fetch_id_ == 0) ++fetch_id_;
     }
@@ -526,6 +563,8 @@ CORE1_RAM void Device::requestFetch(bool busy) {
     fetch_pending_ = true;
     if (++fetch_id_ == 0) ++fetch_id_;  // never 0: pendingFetchId() uses it for "none"
     fetch_lba_ = writing_ ? write_lba_ : read_lba_;
+    // A read's next block (the last may be short); FLUSH CACHE moves nothing.
+    fetch_count_ = !reading_ ? 1 : uint8_t(read_left_ < block_ ? read_left_ : block_);
     // A read fills the buffer the host isn't reading; a write stores the one
     // it was written into.
     fetch_buf_ = writing_ ? 0 : (data_ == sectors_[0] ? 1 : 0);
@@ -537,25 +576,28 @@ CORE1_RAM void Device::readAhead() {
 
 CORE1_RAM void Device::deliverSector(bool ok) {
     if (!ok) {
-        setTaskFileLba(fetch_lba_);
+        // The whole block fails, none of it transferred: the address is the
+        // sector that couldn't be read.
+        setTaskFileLba(fetch_lba_ + fetch_failed_);
         reading_ = false;
         fail(ER_UNC);
         return;
     }
-    startDataIn(sectors_[fetch_buf_], SECTOR_WORDS);
+    startDataIn(sectors_[fetch_buf_], uint16_t(fetch_count_ * SECTOR_WORDS));
     readAhead();
 }
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
     fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_, flushing_ || (writing_ && !u().write_cache),
-                  last_.count, last_.lba, unit_};
+                  last_.count, last_.lba, unit_, fetch_count_};
     return true;
 }
 
-CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
+CORE1_RAM void Device::fetchDone(uint32_t id, bool ok, uint8_t failed) {
     if (!fetch_pending_ || id != fetch_id_) return;  // stale: a reset came first
     fetch_pending_ = false;
+    fetch_failed_ = ok ? 0 : failed;
     if (flushing_) {
         flushing_ = false;
         if (ok)
@@ -566,17 +608,17 @@ CORE1_RAM void Device::fetchDone(uint32_t id, bool ok) {
     }
     if (writing_) {
         if (ok) {
-            ++write_lba_;
-            --write_left_;
+            write_lba_ += fetch_count_;
+            write_left_ -= fetch_count_;
         } else {
             store_failed_ = true;
-            store_failed_lba_ = write_lba_;
+            store_failed_lba_ = write_lba_ + fetch_failed_;
         }
         settleWrite();
         return;
     }
-    ++read_lba_;
-    --read_left_;
+    read_lba_ += fetch_count_;
+    read_left_ -= fetch_count_;
     if (data_) {  // a read-ahead, done while the host reads the previous sector
         ahead_ok_ = ok;
         ahead_failed_ = !ok;
@@ -657,7 +699,7 @@ CORE1_RAM bool Device::dmaBurstReady(DmaBurst& burst) {
     if (reading_ && data_ && (status_ & ST_DRQ)) {
         burst = DmaBurst{data_ + data_index_, nullptr, uint16_t(data_count_ - data_index_)};
     } else if (writing_ && receiving_) {
-        burst = DmaBurst{nullptr, sectors_[recv_buf_] + received_, uint16_t(SECTOR_WORDS - received_)};
+        burst = DmaBurst{nullptr, sectors_[recv_buf_] + received_, uint16_t(recv_words_ - received_)};
     } else {
         return false;  // BSY: a fetch, a store or a full buffer first
     }
@@ -672,7 +714,7 @@ CORE1_RAM void Device::dmaBurstDone() {
         data_index_ = data_count_;
         finishDataIn();  // the next sector at once if read-ahead has it, else BSY
     } else if (receiving_) {
-        received_ = SECTOR_WORDS;
+        received_ = recv_words_;
         finishDataOut();  // its store, and the next buffer
     }
 }
