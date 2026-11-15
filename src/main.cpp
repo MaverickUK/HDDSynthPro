@@ -26,6 +26,7 @@
 #include "core1_ram.h"
 #include "drive_device.h"
 #include "short_test.h"
+#include "stack_watch.h"
 #include "spsc_ring.h"
 #include "trace_format.h"
 #include "version.h"
@@ -113,6 +114,7 @@ std::atomic<uint32_t> g_window{0};
 std::atomic<uint32_t> g_skipped{0};  // accesses outside the window
 
 void setup1() {
+    stack_watch::paint(1);
     listen::begin();
     busSwitchesOn();
 }
@@ -337,6 +339,7 @@ static void reclaimDiagnostics() {
 }
 
 void setup1() {
+    stack_watch::paint(1);  // core 1's stack, for `s`
     m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 1's own cycle counter, for g_c1_gap
     m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
     g_bus_only_cycles = cfg::EARLY_BUS_ONLY_US * (clock_get_hz(clk_sys) / 1000000);
@@ -2120,6 +2123,7 @@ static void peripheralClockFromSystem() {
 }
 
 void setup() {
+    stack_watch::paint(0);  // core 0's stack, for `s`
     peripheralClockFromSystem();  // before SPI and the UART work out their dividers
     Serial.begin(115200);
     // The PCB's card detect, readable for `p` (not used yet): an input with no

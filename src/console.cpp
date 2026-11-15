@@ -16,6 +16,7 @@
 #include "core1_ram.h"
 #include "drive_device.h"
 #include "short_test.h"
+#include "stack_watch.h"
 #include "spsc_ring.h"
 #include "trace_format.h"
 #include "version.h"
@@ -303,6 +304,9 @@ static void printStats() {
     Serial.printf("STATS events=%lu dropped=%lu stalls=%lu ring=%u",
                   (unsigned long)g_events.load(), (unsigned long)g_dropped.load(),
                   (unsigned long)g_stalls.load(), (unsigned)g_trace.size());
+    // The most each core's stack has held, of 4,096 bytes (core 1: 2,048 as the SDK set it up).
+    Serial.printf(" stack0_max=%lu stack1_max=%lu", (unsigned long)stack_watch::used(0),
+                  (unsigned long)stack_watch::used(1));
 #if FIRMWARE_SLICE == 0
     Serial.printf(" window=%lu skipped=%lu", (unsigned long)g_window.load(), (unsigned long)g_skipped.load());
 #endif

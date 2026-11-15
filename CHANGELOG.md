@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0-dev.7] - 2026-11-15 (branch `review-fixes`)
+
+Not run on hardware.
+
+### Added
+- **`s` shows how deep each core's stack has gone:** `stack0_max` and `stack1_max`, in bytes (`stack_watch.*`). Each core paints the 4 KB region its stack sits in at start-up, and `s` finds the lowest word since overwritten. Core 1's stack is 2,048 bytes as the SDK starts it, with the SDK's unused 2 KB array below it in the same region: over 2,048 is past what was set aside, 4,096 for either core means it left its region. Nothing measured this before. Core 1's layout is unchanged against dev.6's.
+
+### Not yet tested
+- On hardware: the two figures after a soak, on each bus program and with a CD-ROM.
+
 ## [0.33.0-dev.6] - 2026-11-15 (branch `review-fixes`)
 
 Not run on hardware. **It moves core 1's hard disk code** (`ata_device.cpp` grew by a few instructions), so `check_core1_layout.py` fails until reads are benchmarked on the rig and the layout recorded: it is the branch's last commit, to drop if that isn't worth it yet. (First made as dev.3, then reverted to come last.)
