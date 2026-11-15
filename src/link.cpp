@@ -1,6 +1,6 @@
 // Core 0: the activity classifier, the activity link to an HDD Synth (UART0),
 // seek timing's model and the link's loopback test (console `U`). Moved out
-// of main.cpp (0.33.0-dev.8); main_state.h declares what the files share.
+// of main.cpp (0.33.1-dev.7); main_state.h declares what the files share.
 // Nothing here runs on core 1.
 #include <Arduino.h>
 

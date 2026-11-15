@@ -4,7 +4,9 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
-## [0.33.0-dev.9] - 2026-11-15 (branch `performance`, from `review-fixes`)
+## [0.33.1-dev.8] - 2026-11-15 (branch `performance`, from `review-fixes`)
+
+(0.33.0 was released from `main` while this branch was open and is merged in here: what the branch first called 0.33.0-dev.2 to dev.9 are 0.33.1-dev.1 to dev.8.)
 
 Host-tested only: not run on hardware, and core 1's hard disk code moved (`check_core1_layout.py` fails until reads are benchmarked on the rig and the layout recorded).
 
@@ -25,35 +27,35 @@ Host-tested only: not run on hardware, and core 1's hard disk code moved (`check
 ### Not yet tested
 - Any hardware. On the Evesham: `DOSBENCH.IMG` before and after on the data lane and on early answers, with the BIOS's block mode on (`CMD c6` with the count it asks, then `c4`/`c5` in the trace). Through the adapters (which never send these): slices 3-4 and `-m speed`, then record the layout. In table mode a WRITE MULTIPLE block is 2,048 data writes against a write ring of 1,024 samples, drained as it fills, as a sector's 256 were against a ring of 256.
 
-## [0.33.0-dev.8] - 2026-11-15 (branch `review-fixes`)
+## [0.33.1-dev.7] - 2026-11-15 (branch `review-fixes`)
 
 Not run on hardware. No change in behaviour is meant.
 
 ### Changed
-- **`main.cpp` is 1,340 lines** (2,885 before dev.5): two more parts of core 0's code moved out. `disks.cpp` (646) holds which disks are served: the choice at boot, the CD-ROM's disc changed by console `M`, and the settings (`E`, `S`). `link.cpp` (370) holds the activity classifier, the activity link, seek timing's model and the loopback test. `main.cpp` keeps both cores' loops, the fetch service, console `V`'s absence and `loop()`; `main_state.h` declares what the four files share, with `driveIdentity()` and `device1Identity()` in it. No global's start-up value depends on another file's. Core 1's hard disk layout is unchanged against dev.6's, and its code is all in RAM.
+- **`main.cpp` is 1,340 lines** (2,885 before dev.4): two more parts of core 0's code moved out. `disks.cpp` (646) holds which disks are served: the choice at boot, the CD-ROM's disc changed by console `M`, and the settings (`E`, `S`). `link.cpp` (370) holds the activity classifier, the activity link, seek timing's model and the loopback test. `main.cpp` keeps both cores' loops, the fetch service, console `V`'s absence and `loop()`; `main_state.h` declares what the four files share, with `driveIdentity()` and `device1Identity()` in it. No global's start-up value depends on another file's. Core 1's hard disk layout is unchanged against dev.5's, and its code is all in RAM.
 
 ### Not yet tested
 - On hardware: a boot from each kind of disk (an image, a folder, a CD-ROM with an ISO and a BIN/CUE, no card), console `M`, `E`, `S`, `U`, and a slice.
 
-## [0.33.0-dev.7] - 2026-11-15 (branch `review-fixes`)
+## [0.33.1-dev.6] - 2026-11-15 (branch `review-fixes`)
 
 Not run on hardware.
 
 ### Added
-- **`s` shows how deep each core's stack has gone:** `stack0_max` and `stack1_max`, in bytes (`stack_watch.*`). Each core paints the 4 KB region its stack sits in at start-up, and `s` finds the lowest word since overwritten. Core 1's stack is 2,048 bytes as the SDK starts it, with the SDK's unused 2 KB array below it in the same region: over 2,048 is past what was set aside, 4,096 for either core means it left its region. Nothing measured this before. Core 1's layout is unchanged against dev.6's.
+- **`s` shows how deep each core's stack has gone:** `stack0_max` and `stack1_max`, in bytes (`stack_watch.*`). Each core paints the 4 KB region its stack sits in at start-up, and `s` finds the lowest word since overwritten. Core 1's stack is 2,048 bytes as the SDK starts it, with the SDK's unused 2 KB array below it in the same region: over 2,048 is past what was set aside, 4,096 for either core means it left its region. Nothing measured this before. Core 1's layout is unchanged against dev.5's.
 
 ### Not yet tested
 - On hardware: the two figures after a soak, on each bus program and with a CD-ROM.
 
-## [0.33.0-dev.6] - 2026-11-15 (branch `review-fixes`)
+## [0.33.1-dev.5] - 2026-11-15 (branch `review-fixes`)
 
-Not run on hardware. **It moves core 1's hard disk code** (`ata_device.cpp` grew by a few instructions), so `check_core1_layout.py` fails until reads are benchmarked on the rig and the layout recorded: it is the branch's last commit, to drop if that isn't worth it yet. (First made as dev.3, then reverted to come last.)
+Not run on hardware. **It moves core 1's hard disk code** (`ata_device.cpp` grew by a few instructions), so `check_core1_layout.py` fails until reads are benchmarked on the rig and the layout recorded: it is the branch's last commit, to drop if that isn't worth it yet. (First made as dev.2, then reverted to come last.)
 
 ### Fixed
 - READ VERIFY and SEEK with a CHS address the geometry doesn't hold passed an unset LBA on to the `CMD` line (the command itself failed with IDNF, as it should). It is 0 now, as READ and WRITE SECTORS give.
 - A reset could leave the fetch id at 0, which means "no fetch" (`resetToSignature`, `hardReset`, and the CD-ROM's two): after 4 billion fetches and resets, so never seen. They skip 0 now, as every other increment does.
 
-## [0.33.0-dev.5] - 2026-11-15 (branch `review-fixes`)
+## [0.33.1-dev.4] - 2026-11-15 (branch `review-fixes`)
 
 Not run on hardware. No change in behaviour is meant.
 
@@ -63,9 +65,9 @@ Not run on hardware. No change in behaviour is meant.
 ### Not yet tested
 - On hardware: the console (`h`, `s`, `p`, `S`, `E`, `P`, `T`, `V`) and a slice, to confirm nothing moved by more than its file.
 
-## [0.33.0-dev.4] - 2026-11-15 (branch `review-fixes`)
+## [0.33.1-dev.3] - 2026-11-15 (branch `review-fixes`)
 
-Not run on hardware. (0.33.0-dev.3, the ATA device's two fixes, was reverted to come last on the branch as dev.6: it moves core 1's code and needs a benchmark.)
+Not run on hardware. (0.33.1-dev.2, the ATA device's two fixes, was reverted to come last on the branch as dev.5: it moves core 1's code and needs a benchmark.)
 
 ### Changed
 - **Core 0's one-off jobs share two 4 KB buffers** (`scratch.h`): `HDDSYNTH.INI` at boot, console `E`'s file and edited copy, a cue sheet, and the zeros `I`/`K` write. Each had its own for good, 17.5 KB in all; RAM use falls from 97.1% to 95.2% (9.7 KB). Core 1's layout is unchanged.
@@ -73,7 +75,7 @@ Not run on hardware. (0.33.0-dev.3, the ATA device's two fixes, was reverted to 
 ### Not yet tested
 - On hardware: boot with an `HDDSYNTH.INI` and a BIN/CUE disc, console `E`, `M` with a cue sheet, and `K` (a new scratch image).
 
-## [0.33.0-dev.2] - 2026-11-15 (branch `review-fixes`, from `register-table`)
+## [0.33.1-dev.1] - 2026-11-15 (branch `review-fixes`)
 
 From a review of the code at the desk; nothing here has run on hardware.
 
@@ -86,6 +88,12 @@ From a review of the code at the desk; nothing here has run on hardware.
 
 ### Not yet tested
 - On hardware: the register table's speed and slices 3-4 with the larger ring.
+## [0.33.0] - 2026-11-15
+
+The register table, an experimental fifth bus program (`register_table = on`, off by default; [docs/register-table.md](docs/register-table.md)), and the `AUTOBUS` advice (0.32.3-dev.1); release notes in [docs/release-notes/v0.33.0.md](docs/release-notes/v0.33.0.md). With the table off, the other bus programs run as in 0.32.2 (`-m speed` against 0.32.3-dev.1, 15 Nov).
+
+- **On the Evesham** (`pcb_drive`, PIO 3, the card on SDIO): `DOSBENCH.IMG` passes at 4.12 MB/s reads and 3.63 writes on the table (the data lane: 4.24 and 2.03); Doom from the CD-ROM beside it.
+- **On the USB adapters:** slices 3-4 and an hour's soak on the JMicron and the Innostor. Slices 1-2 by `V` weren't run: on the Mac they fail with any bus program (the 0.33.0-dev.1 entry); owed from the Windows rig.
 
 ## [0.33.0-dev.1] - 2026-11-14 (branch `register-table`)
 
@@ -109,8 +117,12 @@ From a review of the code at the desk; nothing here has run on hardware.
 - **The Innostor bridge, PIO 3:** slices 3 and 4; `-m speed` 2.40 MB/s reads, 519 random IOPS, 2.65 writes (it sends one-sector commands); an hour's soak, 6.2 GB in 12.1 million commands, no mismatch. It never re-detects after a failed read, so slices 1-2 can't run through it.
 - Core 1's layout recorded for both drive builds.
 
-### Not yet tested
-- Slices 1-2 by `V` through the JMicron in table mode, and any retro PC (the Evesham first, then the Pentium 200, whose PIIX doesn't wait for IORDY).
+- **The Evesham (Athlon XP, PIO 3), the PCB, `register_table = on` (15 Nov):** boots MS-DOS from `ICL386MB.IMG` and runs clean; `DOSBENCH.IMG` passes at 4.12 MB/s reads, 0.76 ms random, **3.63 MB/s writes** (the data lane: 4.24 and 2.03), 81,904 sectors checked, none bad, and a short soak. Doom from the CD-ROM as device 1 beside it (which runs `ide_bus`) ran clean. No `BUSERR`, `STUCK` or card event in any pass.
+- **No slowdown of the other bus programs** (15 Nov, Mac, JMicron, PIO 3, the test disk, against `main`'s 0.32.3-dev.1 on the same setup): early answers 1.17 MB/s reads, 74.4 IOPS, 1.11 writes on both; the data lane 1.21 / 78.7 / 1.65 against 1.20-1.24 / 78.4-78.7 / 1.64 (runs vary by about 3%); the table 1.69 / 80.1 / 1.78, as on 14 Nov.
+
+### Not run
+- **Slices 1-2 by `V` on the Mac**, with any bus program: the adapter resets the drive about 62 s after `V` (`ide_bus` the same, 15 Nov), and macOS resets the adapter after 30 s; sometimes its storage driver doesn't come back ("failed to re-instantiate") and the disk goes until a replug. Each re-detection that reached the drive was answered right, the table's as `ide_bus`'s. They need the Windows rig.
+- The Pentium 200, whose PIIX doesn't wait for IORDY, the ICL 386 and the Amiga.
 
 ## [0.32.3-dev.1] - 2026-11-11 (on `main`)
 

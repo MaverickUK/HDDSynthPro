@@ -1,7 +1,7 @@
 // Core 0: which disks the drive serves. The choice at boot (HDDSYNTH.INI, the
 // card's images, a folder, a CD-ROM's disc, the welcome and test disks), the
 // CD-ROM's disc changed at run time (console `M`), and the settings: console
-// `E` and `S`. Moved out of main.cpp (0.33.0-dev.8); main_state.h declares
+// `E` and `S`. Moved out of main.cpp (0.33.1-dev.7); main_state.h declares
 // what the files share. Nothing here runs on core 1.
 #include <Arduino.h>
 

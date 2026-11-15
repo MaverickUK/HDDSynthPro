@@ -270,12 +270,19 @@ On the Mac with the bridge at PIO 3 (`mode = auto`), `T`, `P t`, firmware 43d70e
 
 **And on the JMicron (14 Nov, PIO 3, the same setup):** 60 minutes, 53,292 reads and 28,979 writes, 4.0 GB, no mismatches; 137,776 commands; 4,825,625 sectors checked on the cable, none bad, no gaps (ring max 2,369 of 4,096). Console `V` now re-detects the drive on it in table mode (the read held about 62 s, the adapter's RESET#, IDENTIFY, reads right); slices 1-2 by `V` are still to run: after each re-detection the rig's `sudo chown` of the raw disk needs a password, so they need someone at the keyboard (or a sudoers rule for that one command).
 
+**The Evesham (15 Nov, PCB, `pcb_drive` 0.33.0-dev.1, PIO 3 set by the BIOS):** the first retro PC on the table. Logs `host/runs/retro-20261115-*-evesham-table-*`.
+- `register_table = on`, `device1 = none`, `ICL386MB.IMG`: MS-DOS boots and runs (1,451 reads, 9 writes, 784 sectors checked on the cable, none bad).
+- `DOSBENCH.IMG`: PASS, sequential read 4.12 MB/s, random 0.76 ms, **sequential write 3.63 MB/s**, 16,384 + 65,520 sectors checked, no BIOS errors or retries; then a short soak (11,280 commands, none failed). The data lane on the same PC: 4.24 and 2.03, so writes are 79% faster and reads the same (the card holds them back).
+- Doom from `DOOM_SE.ISO` as device 1 with `register_table = on` (`ide_bus` runs, as a CD-ROM is configured): clean, 2,897 READ(10), `iordy_ignored=0`.
+- No `BUSERR`, `STUCK` or card event in any pass. The only errors were the BIOS's ATAPI probes (DEVICE RESET, IDENTIFY PACKET), aborted as a hard disk must.
+
+**Slices 1-2 by `V` don't run on the Mac (15 Nov), with any bus program.** The JMicron resets the drive about 62 s after `V` (`ide_bus`: 62.05 s, the table 61.7-62.0 s), but macOS resets the adapter after 30 s, and sometimes its storage driver then gives up ("failed to re-instantiate") and the disk is gone until a replug; after a re-detection it can also come back with no name, so `find_disk` needs `HDDPRO_DISK`. Every re-detection that reached the drive was answered right. They need the Windows rig.
+
+**Speed against `main` (15 Nov, Mac, JMicron, PIO 3, the test disk):** no slowdown in the other bus programs; figures in `docs/speed-log.md`.
+
 ## Open
 
-**Before merging into `main`** (14 Nov 2026):
-1. Slices 1-2 by `V` through the JMicron in table mode (`V` re-detects there; `rig.sh` stopped at `sudo chown`'s password, so run it by hand first).
-2. The Evesham with `register_table = on`: boot, `DOSBENCH.IMG`, and Doom from the CD-ROM as device 1 (which runs `ide_bus`, so with a CD-ROM configured the table doesn't run; try the disk alone too).
-3. `-m speed` on the merged build, then record the core 1 layout and note it in `docs/speed-log.md`; release with 0.32.3-dev.1's `AUTOBUS` as 0.33.0.
+**Merged into `main` for 0.33.0 (15 Nov 2026).** Still owed: slices 1-2 by `V` from the Windows rig.
 
 **After:** the Pentium 200 (its PIIX ignores IORDY in compatible timing, the host the table was designed for), the ICL 386 (`isa = on` overrides the table today; IOCS16# would need its own room on the PCB with SDIO), the Amiga 1200, and DMA beside the table.
 

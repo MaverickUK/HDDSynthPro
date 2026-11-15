@@ -1,6 +1,6 @@
 // Core 0's console and the lines it prints unasked: the stats, the event lines
 // (CARD, AUTOBUS, NOCS, NOIORDY, SLOWREAD), the solder-bridge test and the
-// console's commands. Moved out of main.cpp (0.33.0-dev.5), which keeps the
+// console's commands. Moved out of main.cpp (0.33.1-dev.4), which keeps the
 // state they share (main_state.h), core 1's loops and core 0's loop().
 // Nothing here runs on core 1.
 #include <Arduino.h>
