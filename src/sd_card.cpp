@@ -8,6 +8,7 @@
 #include "config.h"
 #include "drive_config.h"
 #include "image_parts.h"
+#include "scratch.h"
 #if HDDPRO_PCB
 #include "sdio_card.h"
 #endif
@@ -784,11 +785,12 @@ bool createImage(const char* name, uint32_t sectors, Print& out) {
     // One contiguous run of clusters, then zeros: a blank disk, which is
     // what a host expects before it partitions it.
     bool ok = file.preAllocate(bytes);
-    static uint8_t zeros[4096];
+    char* const zeros = scratch::a;
+    memset(zeros, 0, scratch::SIZE);
     uint64_t written = 0;
     while (ok && written < bytes) {
-        ok = file.write(zeros, sizeof zeros) == sizeof zeros;
-        written += sizeof zeros;
+        ok = file.write(zeros, scratch::SIZE) == scratch::SIZE;
+        written += scratch::SIZE;
         if ((written & ((8u << 20) - 1)) == 0) out.printf("# %lu MB\n", (unsigned long)(written >> 20));
     }
     ok = ok && file.sync();

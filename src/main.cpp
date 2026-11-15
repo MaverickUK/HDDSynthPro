@@ -67,6 +67,7 @@
 #include <hardware/structs/m33.h>
 #include "iordy_timer.h"
 #include "sd_card.h"
+#include "scratch.h"
 #include "welcome_disk.h"
 #include "welcome_text.h"
 #endif
@@ -1152,10 +1153,11 @@ static BlockSource* openCdDisc(const char* name, const char*& why, uint8_t unit)
         if (!iso.sectors()) why = "empty";
         return iso.sectors() ? &iso : nullptr;
     }
-    static char text[cue_sheet::MAX_TEXT];
+    static_assert(cue_sheet::MAX_TEXT <= scratch::SIZE);
+    char* const text = scratch::b;  // only until this returns: the sheet's fields are copied out
     size_t len = 0;
     bool truncated = false;
-    if (!sd_card::readFileStart(name, text, sizeof text, len, truncated, why, Serial)) return nullptr;
+    if (!sd_card::readFileStart(name, text, cue_sheet::MAX_TEXT, len, truncated, why, Serial)) return nullptr;
     if (truncated)  // a long sheet: up to its last whole line
         while (len && text[len - 1] != '\n') --len;
     cue_sheet::Sheet parsed;
@@ -1316,10 +1318,11 @@ static void chooseDevice1() {
 static void chooseDisk() {
     uint32_t start = millis();
     drive_config::defaults(g_config);
-    static char text[drive_config::MAX_FILE];
+    static_assert(drive_config::MAX_FILE <= scratch::SIZE);
+    char* const text = scratch::a;  // only for the parse: g_config holds copies
     size_t len = 0;
     bool truncated = false;
-    if (sd_card::readConfig(text, sizeof text, len, truncated, Serial)) {
+    if (sd_card::readConfig(text, drive_config::MAX_FILE, len, truncated, Serial)) {
         drive_config::parse(text, len, g_config);
         g_config_state = truncated ? "truncated" : "present";
     }
@@ -1511,10 +1514,11 @@ static void editConfig(const char* line) {
         Serial.println("# E: nothing changed; type key = value, e.g. device0 = GAMES.IMG");
         return;
     }
-    static char text[drive_config::MAX_FILE], edited[drive_config::MAX_FILE];
+    char* const text = scratch::a;
+    char* const edited = scratch::b;
     size_t len = 0;
     bool truncated = false;
-    if (!sd_card::readConfig(text, sizeof text, len, truncated, Serial)) {
+    if (!sd_card::readConfig(text, drive_config::MAX_FILE, len, truncated, Serial)) {
         if (!sd_card::mounted()) return;  // no card: readConfig said so
         if (sd_card::configExists()) {  // there, but unreadable: never overwrite it with the defaults
             Serial.printf("# E: can't read %s; nothing changed\n", drive_config::FILE_NAME);
@@ -1527,7 +1531,7 @@ static void editConfig(const char* line) {
                       unsigned(drive_config::MAX_FILE));
         return;
     }
-    size_t n = drive_config::setKey(text, len, key, value, edited, sizeof edited);
+    size_t n = drive_config::setKey(text, len, key, value, edited, drive_config::MAX_FILE);
     if (n == 0) {
         Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy, register_table, geometry), "
                       "or the file would be too long\n", key);

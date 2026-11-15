@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0-dev.4] - 2026-11-15 (branch `review-fixes`)
+
+Not run on hardware. (0.33.0-dev.3, the ATA device's two fixes, was reverted to come last on the branch as dev.6: it moves core 1's code and needs a benchmark.)
+
+### Changed
+- **Core 0's one-off jobs share two 4 KB buffers** (`scratch.h`): `HDDSYNTH.INI` at boot, console `E`'s file and edited copy, a cue sheet, and the zeros `I`/`K` write. Each had its own for good, 17.5 KB in all; RAM use falls from 97.1% to 95.2% (9.7 KB). Core 1's layout is unchanged.
+
+### Not yet tested
+- On hardware: boot with an `HDDSYNTH.INI` and a BIN/CUE disc, console `E`, `M` with a cue sheet, and `K` (a new scratch image).
+
 ## [0.33.0-dev.2] - 2026-11-15 (branch `review-fixes`, from `register-table`)
 
 From a review of the code at the desk; nothing here has run on hardware.
