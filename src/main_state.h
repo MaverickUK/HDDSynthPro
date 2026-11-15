@@ -67,6 +67,73 @@ extern std::atomic<uint8_t> g_mdma_mode;  // set by core 1 at start-up (setup1)
 extern pio_plan::Plan g_pio_plan;
 extern std::atomic<bool> g_pio_planned;  // start-up only
 
+// What core 0 chooses at boot and core 1 waits for (g_disk_chosen, last): the
+// disks' sizes and geometries, the modes offered, the bus program's switches.
+extern std::atomic<uint32_t> g_disk_sectors;
+extern std::atomic<bool> g_disk_chosen;  // set after g_disk_sectors: a CD-ROM with no disc has 0
+extern std::atomic<uint32_t> g_geometry;          // cylinders << 16 | heads << 8 | sectors, or 0 for auto
+extern std::atomic<uint32_t> g_device1_sectors;   // 0: no device 1
+extern std::atomic<uint32_t> g_device1_geometry;
+extern bool g_geometry_trimmed;       // the cylinders were cut to fit the disk (CONFIG says so)
+extern const char* g_geometry_from;   // "set", "partition table" or "auto", for CONFIG
+extern std::atomic<uint8_t> g_pio_mode;
+extern std::atomic<uint8_t> g_mode_asked;  // HDDSYNTH.INI's mode, for core 1
+extern SharedFlag g_dmarq_wired;           // found by core 1 at start-up
+extern SharedFlag g_dma_auto;              // HDDSYNTH.INI dma: auto may offer DMA
+extern SharedFlag g_early;    // HDDSYNTH.INI early_answers
+extern SharedFlag g_table;    // HDDSYNTH.INI register_table, or console `P t`
+extern SharedFlag g_isa;      // HDDSYNTH.INI isa
+extern SharedFlag g_no_lane;  // a CD-ROM: ide_bus, never the data lane
+extern SharedFlag g_iordy;    // HDDSYNTH.INI iordy
+// A CD-ROM drive as device 0 or 1: plain bools, set before g_disk_chosen and read after it.
+extern bool g_device0_cdrom;
+extern bool g_device1_cdrom;
+// Console `M`'s handshake with core 1 (main.cpp)
+extern std::atomic<uint32_t> g_disc_seq;
+extern std::atomic<uint32_t> g_disc_sectors;
+extern std::atomic<uint32_t> g_disc_done;
+
+// What IDENTIFY says: the device's, and the bus observer's to check it by.
+__attribute__((always_inline)) static inline IdentifyInfo driveIdentity() {
+    uint32_t g = g_geometry.load(std::memory_order_relaxed);
+    return IdentifyInfo{g_device0_cdrom ? "HDDSYNTH PRO CD-ROM" : "HDDSYNTH PROTO", "HSP-000001", FIRMWARE_VERSION,
+                        g_disk_sectors.load(std::memory_order_acquire),
+                        g_pio_mode.load(std::memory_order_relaxed),
+                        g_mdma_mode.load(std::memory_order_relaxed),
+                        Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}};
+}
+
+// Device 1's identity: its own model, serial and size, device 0's modes.
+__attribute__((always_inline)) static inline IdentifyInfo device1Identity() {
+    uint32_t g = g_device1_geometry.load(std::memory_order_relaxed);
+    const bool cdrom = g_device1_cdrom;
+    return IdentifyInfo{cdrom ? "HDDSYNTH PRO CD-ROM" : "HDDSYNTH PRO D1", cdrom ? "HSP-000001-CD" : "HSP-000001-D1",
+                        FIRMWARE_VERSION,
+                        g_device1_sectors.load(std::memory_order_relaxed),
+                        g_pio_mode.load(std::memory_order_relaxed),
+                        g_mdma_mode.load(std::memory_order_relaxed),
+                        Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}};
+}
+
+// disks.cpp
+extern bool g_test_disk;    // the generated disk: the bus observer can check its data
+void chooseDisk();          // at boot, before core 1 is told (g_disk_chosen)
+void serviceDiscChange();   // each pass of loop()
+
+// link.cpp
+extern bool g_busy;  // the activity light's state (main.cpp's updateLed); the link sends it
+extern uint32_t g_activity_checked_us;
+extern bool g_activity_unprinted;
+extern activity_link::Op g_link_op;  // the last media command's
+void beginLink();
+void beginSeekTiming();
+void serviceLink();
+void serviceLinkRx();
+void serviceLoopback();
+void printSeekConfig();  // console `S`'s seek timing lines
+const SeekModel* seekModel(uint32_t now_ms);
+void postHeadTarget(uint32_t lba, uint32_t sectors, activity_link::Op op, uint64_t at_us);
+
 // Console `J`, `T` and `P`: what to serve, and the bus program, after the
 // restart they trigger; in watchdog scratch registers 0 and 1, which a restart
 // keeps and a power cycle clears.
@@ -85,8 +152,6 @@ extern const char* g_disk_name;
 extern uint32_t g_disk_ms;  // how long choosing the disk took at boot (console `s`)
 extern BlockSource* g_device1_disk;
 extern const char* g_device1_kind;  // "none", "image" or "folder"
-extern bool g_device0_cdrom;
-extern bool g_device1_cdrom;
 void editConfig(const char* line);       // console `E`
 void printConfig();                      // console `S`
 void startDiscChange(const char* name);  // console `M`

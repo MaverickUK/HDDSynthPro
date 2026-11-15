@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.0-dev.8] - 2026-11-15 (branch `review-fixes`)
+
+Not run on hardware. No change in behaviour is meant.
+
+### Changed
+- **`main.cpp` is 1,340 lines** (2,885 before dev.5): two more parts of core 0's code moved out. `disks.cpp` (646) holds which disks are served: the choice at boot, the CD-ROM's disc changed by console `M`, and the settings (`E`, `S`). `link.cpp` (370) holds the activity classifier, the activity link, seek timing's model and the loopback test. `main.cpp` keeps both cores' loops, the fetch service, console `V`'s absence and `loop()`; `main_state.h` declares what the four files share, with `driveIdentity()` and `device1Identity()` in it. No global's start-up value depends on another file's. Core 1's hard disk layout is unchanged against dev.6's, and its code is all in RAM.
+
+### Not yet tested
+- On hardware: a boot from each kind of disk (an image, a folder, a CD-ROM with an ISO and a BIN/CUE, no card), console `M`, `E`, `S`, `U`, and a slice.
+
 ## [0.33.0-dev.7] - 2026-11-15 (branch `review-fixes`)
 
 Not run on hardware.
