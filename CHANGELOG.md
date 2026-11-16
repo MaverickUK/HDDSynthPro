@@ -13,6 +13,7 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ### Tested (16 Nov, the PCB, the JMicron on the Mac, PIO 3, the test disk; `docs/speed-log.md`)
 - `-m speed`: the data lane 1.21-1.25 MB/s reads (324-337 µs a sector), 1.63 writes; early answers 1.16 / 74.1 / 1.11; the table 1.69 / 80.1 / 1.78: all as dev.9. Slices 3-4 on early answers.
+- **An hour's soak** on early answers with full bus checks: 60.2 minutes, 29,947 reads and 16,263 writes (2.24 GB), no mismatches; 77,317 commands; 3,832,511 sectors checked on the cable, none bad, no gaps, none dropped; Status at most 2,210 ns; no `BUSERR`, `STUCK` or card event.
 - The same build without the safeguard's flash code (only flash moved; both RAM blocks and `.bss` unchanged): the data lane 335-346 µs a sector, inside the lane's usual spread (0.33.0: 326-341), against 355-361 for the flash-only changes before core 0's code moved to RAM. Core 0's main loop is still in flash, so a few µs may still depend on it.
 
 ### Found
