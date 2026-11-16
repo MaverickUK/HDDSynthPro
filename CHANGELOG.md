@@ -12,7 +12,10 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (16 Nov, the PCB, the JMicron on the Mac, PIO 3, the test disk; `docs/speed-log.md`)
 - `-m speed`, twice each: early answers writes 1.11 MB/s (dev.8 1.01, 0.33.0 1.11), reads 1.16-1.17; the data lane writes 1.63-1.64 (dev.8 1.55, 0.33.0 1.64-1.65), reads 1.23-1.25; the table 1.69 / 80.1 / 1.79, unchanged.
 - Slices 3-4 on early answers and the table (dev.8 passed them on all three bus programs, 15 Nov). Core 1's layout recorded.
-- READ/WRITE MULTIPLE themselves are still untried on hardware: the USB adapters never send them (the Evesham with block mode on is next).
+- **The Evesham, `DOSBENCH.IMG`, against 0.33.0** (its AMIBIOS turns block mode on by itself, 8 sectors; [docs/performance.md](docs/performance.md)): early answers reads 2.31 MB/s against 1.72 (+34%), writes 1.33 against 1.23; the data lane reads **3.35 against 3.96 (-15%)**, writes 2.18 against 2.03. All passed. One `BUSERR` on the lane with blocks (probably the observer, not the data).
+
+### Known
+- Block mode slows the data lane's reads; until that is fixed the drive should not offer it there.
 
 ## [0.33.1-dev.8] - 2026-11-15 (branch `performance`, from `review-fixes`)
 

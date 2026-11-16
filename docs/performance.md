@@ -1,6 +1,6 @@
 # Performance roadmap: faster reads and writes on rev 0.3
 
-**Status (15 Nov 2026): a plan, from a review at the desk. On branch `performance`: item 1 is written, host-tested and passes the USB adapter's tests with no slowdown (0.33.1-dev.9, 16 Nov), not yet tried on a retro PC, item 2 is a test plan needing no code.** Measurements go in [speed-log.md](speed-log.md) as they are made.
+**Status (15 Nov 2026): a plan, from a review at the desk. On branch `performance`: item 1 is written and on the Evesham (0.33.1-dev.9, 16 Nov): reads 34% faster on early answers, but 15% slower on the data lane, to be fixed before `main`; item 2 is a test plan needing no code.** Measurements go in [speed-log.md](speed-log.md) as they are made.
 
 Rev 0.4 doesn't make the bus faster: it adds the PSRAM, which makes large caches possible. Everything below except the large form of items 4 and 5 can be done and measured on rev 0.3.
 
@@ -18,7 +18,7 @@ PIO on a real PC runs at well under half of what its mode allows, and the card i
 
 ## The items, biggest expected gain first
 
-### 1. READ MULTIPLE, WRITE MULTIPLE and SET MULTIPLE MODE (written in 0.33.1-dev.8; not on hardware)
+### 1. READ MULTIPLE, WRITE MULTIPLE and SET MULTIPLE MODE (0.33.1-dev.9: a win on early answers, a loss on the data lane)
 
 **Why.** The drive refuses SET MULTIPLE MODE (C6h), so a DOS or Windows 9x host takes an interrupt, a Status read and a wait for DRQ for every sector. With multiple mode the host does that once per block of sectors. Not for the USB adapters: both ignore multiple mode.
 
@@ -36,6 +36,22 @@ PIO on a real PC runs at well under half of what its mode allows, and the card i
 **Risk.** It changes the device core 1 runs, the most-soaked code in the tree, and moves core 1's layout: benchmark and record it.
 
 **On the rig (0.33.1-dev.9, 16 Nov).** Slices 3-4 pass on every bus program through the JMicron (which never sends the new commands). dev.8 slowed PIO writes 6-9%, because the block buffers sat ahead of the device's other members; dev.9 puts them last and is back to 0.33.0's speeds ([speed-log.md](speed-log.md)). Still owed: the Evesham with block mode on.
+
+**On the Evesham (16 Nov, PCB, `pcb_drive`, PIO 3, `DOSBENCH.IMG` in 18 extents, no CD-ROM).** The AMIBIOS has no block-mode setting: it turns block mode on by itself whenever IDENTIFY offers it, sending SET MULTIPLE MODE with 8 after every reset, then only READ and WRITE MULTIPLE. So "before" is 0.33.0 (which doesn't offer it) and "after" dev.9, on the same disk and bus program; every run passed, 0 bad, no BIOS errors. Logs `host/runs/retro-20261116-*-evesham-*`.
+
+| Bus program | Firmware | Seq read | Random read | Seq write | 63-sector read in the drive | 63-sector write |
+|---|---|---|---|---|---|---|
+| Early answers | 0.33.0 | 1.72 MB/s | 0.87 ms | 1.23 MB/s | 18.4 ms | 25.3 ms |
+| Early answers | dev.9, blocks of 8 | **2.31** (+34%) | 0.87 | **1.33** (+8%) | 13.6 | 23.5 |
+| Data lane | 0.33.0 | 3.96 | 0.76 | 2.03 | 7.75 | 15.2 |
+| Data lane | dev.9, blocks of 8 | **3.35** (-15%) | 0.87 | 2.18 (+7%) | 10.3 | 14.3 |
+
+- **Early answers:** the win the item was for. The per-sector Status poll and interrupt it removes were most of a read's cost there.
+- **The data lane: reads 15% slower**, and single-sector reads 37 µs slower (603 against 566 µs). The device and the lane both ask for the next block's read-ahead as the host starts on the current one (`deliverSector`, `serveLaneT`), so the overlap is meant to be there; something in how the lane streams a 4,096-word block, or in core 0 filling one, loses it. Not yet known. Until it is, the drive shouldn't offer block mode while the lane runs.
+- **One `BUSERR` on the lane with blocks** (LBA 811, at boot: word 0 seen 0000, 211 words wrong), with `bus_lost` 56,858 against 2,128 on the lane without blocks (9 Nov). HDDBENCH's checks and the boot were right, so it's probably the observer losing its place in 8-sector blocks (`EXPECT_SLOTS`), not data on the cable; to be checked.
+- Slow Status reads as before (the lane: 3,984 past 1,250 ns, up to 1,810, all waited for; early answers' worst 1,040 ns), `iordy_ignored` 0.
+
+**Owed before `main`:** block mode off on the data lane (or the lane fixed), the `BUSERR`, a soak through the adapter, and the Evesham with the CD-ROM beside the disk (`ide_bus`).
 
 **As built (0.33.1-dev.8).** `MAX_MULTIPLE` is 8 (identify.h): 8.8 KB more RAM, 96.9% used. Going to 16 needs 16 KB more, and the bus observer's `EXPECT_SLOTS` (16: a block with the host and one read ahead) doubled with it. Core 0 still makes one card call per sector inside the block (item 4 makes it one per block). In table mode a block of 8 is 2,048 data writes against the write ring's 1,024 samples, drained as it fills.
 

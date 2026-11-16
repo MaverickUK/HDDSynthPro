@@ -175,6 +175,10 @@ The PCB through the JMicron adapter on the Mac, PIO 3, the test disk, `-m speed`
 
 What it showed: with 8 KB of buffers ahead of the device's other members, each core 1 function on the device path needs an extra instruction to reach them (Thumb-2 loads reach 4 KB from a base), which cost PIO writes 9% on early answers and 6% on the data lane, where core 1 handles each data word; the table, whose data goes by DMA, didn't move. With the buffers last, both are back to 0.33.0's figures. Layout recorded after these runs.
 
+## READ/WRITE MULTIPLE on the Evesham (16 Nov 2026)
+
+`DOSBENCH.IMG` on the PCB, PIO 3, no CD-ROM; 0.33.0 (no block mode) against 0.33.1-dev.9 (the AMIBIOS's blocks of 8): early answers 1.72 -> 2.31 MB/s reads, 1.23 -> 1.33 writes, random 0.87 ms both; the data lane 3.96 -> 3.35 reads, 2.03 -> 2.18 writes, random 0.76 -> 0.87 ms. In the drive, a 63-sector read: early answers 18.4 -> 13.6 ms, the lane 7.75 -> 10.3 ms. Details in [performance.md](performance.md), item 1.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:
