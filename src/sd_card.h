@@ -29,7 +29,8 @@ bool sdio();
 // HDDSYNTH.INI's sd_high_speed: the card's reads at 40 MHz over SDIO, from
 // now on and after every restart of the card; the driver falls back to 25
 // MHz, for good, if the card can't or gives a bad read. clockName() says
-// which: "high-speed", "25mhz" (SDIO, default speed), or "spi".
+// which: "high-speed", "25mhz" (SDIO, default speed), "idle" (SDIO, parked
+// while the test disk is served), or "spi".
 void setHighSpeed(bool on);
 const char* clockName();
 // Console `G`: the card's read speed on the served image (CARDBENCH line).

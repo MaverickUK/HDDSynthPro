@@ -256,7 +256,8 @@ void setHighSpeed(bool on) {
 
 const char* clockName() {
 #if SD_SDIO
-    if (s_on_sdio && !s_parked) return s_sd.sdioCard().highSpeed() ? "high-speed" : "25mhz";
+    if (s_parked) return "idle";  // the test disk served: the card's PIO block lent to the diagnostics
+    if (s_on_sdio) return s_sd.sdioCard().highSpeed() ? "high-speed" : "25mhz";
 #endif
     return s_on_sdio ? "25mhz" : "spi";
 }

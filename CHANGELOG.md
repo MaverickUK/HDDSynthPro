@@ -4,6 +4,19 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-16
+
+The SD card's high-speed mode on the PCB (`sd_high_speed = on`, experimental, off by default: reads from the card at 40 MHz, 17.7 MB/s against 9.2), console `G` (the card's speed), and `S` saying `clock=idle` while the card is parked (dev.3). Branch `sd-50mhz` (dev.1-3, below); release notes in [docs/release-notes/v0.34.0.md](docs/release-notes/v0.34.0.md).
+
+- **On the Evesham:** Windows 98 SE installed from the drive's CD-ROM and run with DMA; copying 200 MB from the CD to C:: PIO 4 min 20 s, DMA 1 min 16 s, DMA with the card in high-speed mode 1 min 1 s.
+- **Through the JMicron (Mac), regression:** slices 3-4 on early answers; `-m speed` as 0.33.2 on early answers (1.16 / 74.0 / 1.11), the data lane (1.29 / 78.0 / 1.63), the table (1.69 / 79.6 / 1.78) and in multiword DMA 2 (6.83 reads, 12.29 writes; 0.33.2 on the same setup 6.68-8.00 and 12.11-12.21).
+- **Known:** high-speed mode has been tried on one card; a long card soak is owed before it's on by default.
+
+## [0.34.0-dev.3] - 2026-11-16 (branch `main`)
+
+### Fixed
+- `S`'s `clock=` said `spi` while the card was parked on the PCB (the test disk served); it says `idle`.
+
 ## [0.34.0-dev.2] - 2026-11-16 (branch `sd-50mhz`)
 
 ### Changed

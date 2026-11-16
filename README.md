@@ -41,13 +41,14 @@ I'm not yet sure if this will exist alongside the original HDD Synth or will sup
 
 ## Status
 
-A working IDE hard disk and CD-ROM drive, serving disk images and ISOs from a microSD card, on the Olimex BB48 and the IDE Synth Bay PCB. The latest release is [v0.33.2](https://github.com/MaverickUK/HDDSynthPro/releases) (tagged on `main`, with the firmware files).
+A working IDE hard disk and CD-ROM drive, serving disk images and ISOs from a microSD card, on the Olimex BB48 and the IDE Synth Bay PCB. The latest release is [v0.34.0](https://github.com/MaverickUK/HDDSynthPro/releases) (tagged on `main`, with the firmware files).
 
 - **Transfer modes:** PIO 0-3 and multiword DMA 2, with block mode (READ/WRITE MULTIPLE, 8 sectors). Windows 98 runs on it with DMA.
 - **Settings:** few. `HDDSYNTH.INI` names the images ([docs/settings.md](docs/settings.md)); the geometry comes from the image's own partition table, so an image of an old drive boots with the BIOS on auto. Without a card it serves a small welcome disk.
 - **Bus programs:** early answers by default (every register ready the moment it's addressed, so controllers that ignore IORDY work); the data lane (`early_answers = off`), fastest on a PCI controller; the register table (experimental, `register_table = on`).
 - **Checked on the cable:** the drive watches its own bus and checks every data word the host takes off it.
-- **Next:** the SD card's high-speed mode (on branch `sd-50mhz`: reads from the card twice as fast), PCB rev 0.4 (ordered), the activity link to the HDD Synth ([docs/activity-link.md](docs/activity-link.md)).
+- **The SD card's high-speed mode** (experimental, `sd_high_speed = on`, the PCB): reads from the card twice as fast.
+- **Next:** a card soak so high-speed mode can be on by default, PCB rev 0.4 (ordered), the activity link to the HDD Synth ([docs/activity-link.md](docs/activity-link.md)).
 
 The listen-only build (`pio run -e bb48`) records every IDE register access it sees without driving any pin, for studying what a host does.
 
