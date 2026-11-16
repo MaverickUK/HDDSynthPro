@@ -4,6 +4,10 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-11-16
+
+IDENTIFY's checksum kept right after SET MULTIPLE MODE (0.33.1's known limit; dev.1, below). Release notes in [docs/release-notes/v0.33.2.md](docs/release-notes/v0.33.2.md).
+
 ## [0.33.2-dev.1] - 2026-11-16 (branch `identify-checksum`)
 
 ### Fixed
