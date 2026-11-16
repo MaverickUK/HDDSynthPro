@@ -346,6 +346,9 @@ void setup1() {
     else
         ide_bus::begin(g_isa.load(), g_early.load(), g_iordy.load(), !g_no_lane.load());
     busSwitchesOn();
+    // READ/WRITE MULTIPLE, before loop1 makes the devices: not on the data
+    // lane (docs/performance.md, item 1).
+    ata::Device::offerMultiple(g_table.load() || !ide_bus::dataLaneOn());
     // Whether to offer DMA, before anything builds IDENTIFY (driveIdentity).
     g_dmarq_wired.store(dmarqWired());
     // Both builds by the same settings (`mode`, `dma`): the CD-ROM drive moves
@@ -1135,7 +1138,7 @@ constexpr size_t HELD_MAX = 4;
 static HeldResult g_held[HELD_MAX];
 static size_t g_held_first = 0, g_held_count = 0;
 
-static void releaseHeld() {
+CORE0_RAM static void releaseHeld() {
     if (!g_held_count) return;
     uint64_t now = time_us_64();
     while (g_held_count && g_held[g_held_first].ready_us <= now) {
@@ -1145,7 +1148,7 @@ static void releaseHeld() {
     }
 }
 
-static void serveFetches() {
+CORE0_RAM static void serveFetches() {
     releaseHeld();
     ata::Fetch fetch;
     while (g_held_count < HELD_MAX && g_mailbox.takeRequest(fetch)) {

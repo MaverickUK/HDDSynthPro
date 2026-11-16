@@ -90,6 +90,11 @@ void setWriteCacheEnabled(uint16_t words[256], bool on);
 // per DRQ block, or 0 while multiple mode is off.
 void setMultipleSectors(uint16_t words[256], uint8_t sectors);
 
+// READ/WRITE MULTIPLE not offered (word 47 = 0, as before 0.33.1), checksum
+// fixed: a BIOS that sees it moves one sector per interrupt. Run from flash at
+// start-up (ata::Device's constructor), never by core 1 per access.
+void offerNoMultiple(uint16_t words[256]);
+
 // ATA strings are space-padded and stored two characters per word with the
 // first character in the high byte. Writes `len_words` words.
 void putAtaString(uint16_t* words, unsigned len_words, const char* text);

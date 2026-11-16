@@ -19,7 +19,15 @@ LD = """    .data : {
         *(.time_critical*)
 
         *(.text*)
+
+        *(.data*)
+        *(.sdata*)
     } > RAM AT> FLASH
+
+    .tbss (NOLOAD) : {
+        . = ALIGN(4);
+        __bss_start__ = .;
+    } > RAM
 """
 
 
@@ -46,6 +54,34 @@ def test_crlf_scripts_keep_their_line_endings():
 def test_a_changed_framework_script_fails_the_build():
     with pytest.raises(RuntimeError, match="vtable"):
         core1_layout.patch_text(LD.replace("*(vtable)", "*(vtables)"))
+
+
+def test_the_data_keeps_its_ram_banks_whatever_the_code_size():
+    # The end of core 1's block, .data's variables and .bss start on 32-byte
+    # boundaries: code growing or shrinking moves the data in whole bank periods.
+    out = core1_layout.patch_text(LD)
+    align = f". = ALIGN({core1_layout.BANK_PERIOD});"
+    assert core1_layout.BANK_PERIOD == 32
+    assert out.index("__core1_hd_end = .;") < out.index(align) < out.index("*(.time_critical*)")
+    data = out.index("        *(.data*)")
+    assert out.rindex(align, 0, data) > out.index("*(.text*)")
+    assert out.index(align + "\n        __bss_start__ = .;") > data
+    assert out.count(align) == 4  # after core 1's block, after core 0's, .data's variables, .bss
+
+
+def test_core0_per_sector_code_follows_core1s_block():
+    # CORE0_RAM (serveFetches and the disks' reads and writes): in RAM, right
+    # after core 1's block, before anything else that runs from RAM.
+    out = core1_layout.patch_text(LD)
+    assert (out.index("__core1_hd_end = .;") < out.index("__core0_hot_start = .;")
+            < out.index("*(.time_critical.core0)") < out.index("__core0_hot_end = .;")
+            < out.index("        *(.time_critical*)"))
+
+
+def test_a_framework_script_without_the_data_anchors_fails_the_build():
+    for missing in ("        *(.data*)\n", "        __bss_start__ = .;\n"):
+        with pytest.raises(RuntimeError, match="align the variables"):
+            core1_layout.patch_text(LD.replace(missing, ""))
 
 
 def test_the_hard_disk_files_are_listed_and_the_cd_rom_files_are_not():

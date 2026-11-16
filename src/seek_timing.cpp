@@ -1,5 +1,7 @@
 #include "seek_timing.h"
 
+#include "core1_ram.h"  // CORE0_RAM
+
 #include <cstdio>
 #include <cstring>
 
@@ -76,7 +78,7 @@ void Scheduler::setGeometry(uint32_t total_sectors, uint32_t sectors_per_track) 
     sectors_per_track_ = sectors_per_track ? sectors_per_track : 1;
 }
 
-Release Scheduler::onSector(uint64_t now_us, uint32_t command_lba, uint32_t lba) {
+CORE0_RAM Release Scheduler::onSector(uint64_t now_us, uint32_t command_lba, uint32_t lba) {
     uint32_t k = lba - command_lba;
     bool first = !in_command_ || command_lba != command_lba_ || lba < command_lba || k <= last_k_;
     Release r{now_us, first, now_us};

@@ -4,6 +4,20 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.1-dev.10] - 2026-11-16 (branch `performance`)
+
+### Changed
+- **No READ/WRITE MULTIPLE offered on the data lane** (IDENTIFY word 47 = 0, as before 0.33.1), where the Evesham's reads were 15% slower with blocks of 8. Early answers, `ide_bus` and the table still offer 8. Set from flash at start-up (`ata::Device::offerMultiple`, `identify::offerNoMultiple` keeps the checksum), so core 1's code is unchanged.
+- **Core 0's per-sector code runs from RAM** (`CORE0_RAM`: `serveFetches`, `releaseHeld`, the test disk's, RAM overlay's and image's reads and writes, `bus_observer::expect`, seek timing's `onSector`; 1.5 KB, RAM 97.1%), placed by `scripts/core1_layout.py` after core 1's block. From flash, a few hundred bytes of new start-up code made the data lane's reads 10% slower (357-361 µs a sector against 321-331) with core 1's code byte-identical: the flash cache's contents decided how fast core 0 fetched.
+- `scripts/core1_layout.py` rounds the end of core 1's and core 0's blocks, `.data`'s variables and `.bss` up to 32 bytes, the RAM banks' period, so code changes move the data only in whole bank periods; `check_core1_layout.py` records core 0's block and `.bss`'s start too.
+
+### Tested (16 Nov, the PCB, the JMicron on the Mac, PIO 3, the test disk; `docs/speed-log.md`)
+- `-m speed`: the data lane 1.21-1.25 MB/s reads (324-337 µs a sector), 1.63 writes; early answers 1.16 / 74.1 / 1.11; the table 1.69 / 80.1 / 1.78: all as dev.9. Slices 3-4 on early answers.
+- The same build without the safeguard's flash code (only flash moved; both RAM blocks and `.bss` unchanged): the data lane 335-346 µs a sector, inside the lane's usual spread (0.33.0: 326-341), against 355-361 for the flash-only changes before core 0's code moved to RAM. Core 0's main loop is still in flash, so a few µs may still depend on it.
+
+### Found
+- `setMultipleSectors()` (IDENTIFY word 59 after SET MULTIPLE MODE) doesn't fix up word 255's checksum, so IDENTIFY's checksum is wrong once a host sets block mode. Core 1 code: to fix with the next core 1 change.
+
 ## [0.33.1-dev.9] - 2026-11-16 (branch `performance`)
 
 ### Fixed

@@ -179,6 +179,22 @@ What it showed: with 8 KB of buffers ahead of the device's other members, each c
 
 `DOSBENCH.IMG` on the PCB, PIO 3, no CD-ROM; 0.33.0 (no block mode) against 0.33.1-dev.9 (the AMIBIOS's blocks of 8): early answers 1.72 -> 2.31 MB/s reads, 1.23 -> 1.33 writes, random 0.87 ms both; the data lane 3.96 -> 3.35 reads, 2.03 -> 2.18 writes, random 0.76 -> 0.87 ms. In the drive, a 63-sector read: early answers 18.4 -> 13.6 ms, the lane 7.75 -> 10.3 ms. Details in [performance.md](performance.md), item 1.
 
+## Core 0's per-sector code into RAM (0.33.1-dev.10, 16 Nov 2026)
+
+The JMicron on the Mac, PIO 3, the test disk, `-m speed`, the data lane unless noted. Every dev.10 attempt changed only flash code or a few bytes of core 1's, yet read slower; the control (dev.9 flashed again) was still fast:
+
+| Build | Data lane, per sector (reads) | Seq read |
+|---|---|---|
+| dev.9 (morning; control in the afternoon) | 321-326; 323-331 µs | 1.22-1.25 MB/s |
+| dev.10, SET MULTIPLE MODE checks the offer (core 1 +44 bytes) | 357-360 | 1.14-1.16 |
+| dev.10, the check in the constructor (`loop1` +28 bytes) | 358 | 1.14-1.15 |
+| the same with the 32-byte data alignment | 358-361 | 1.14-1.15 |
+| B: core 1's code byte-identical to dev.9, the safeguard in flash only | 355-359 | 1.14-1.16 |
+| **dev.10: core 0's per-sector code in RAM, the alignment, the safeguard** | **324-337** | **1.21-1.25** |
+| the same without the safeguard's flash code (only flash moved) | 335-346 | 1.19-1.22 |
+
+Early answers on dev.10: 1.16 MB/s reads, 74.1 IOPS, 1.11 writes; the table 1.69 / 80.1 / 1.78; both as dev.9. B ruled out core 1's code and the data's placement: the data lane serves data words fast enough that core 0's fetches set its pace, and core 0 ran its per-sector code from flash, through a cache whose contents any flash change rearranged. Layout recorded after these runs.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

@@ -20,6 +20,25 @@ it adds, first in `.data` (RAM):
 The CD-ROM's core 1 code (CORE1_RAM_CD) stays in `.after_data.*`, later.
 Adding a file here moves the code after it: benchmark reads (`-m speed`) and
 update the layout (`scripts/check_core1_layout.py --update`).
+
+After core 1's block comes core 0's per-sector code (CORE0_RAM:
+serveFetches and the disks' reads and writes, between __core0_hot_start and
+__core0_hot_end). It ran from flash, so any change to flash code moved it in
+the flash cache: the data lane, whose reads wait on core 0, read about 10%
+slower after 0.33.1-dev.10 added a few hundred bytes of start-up code
+(docs/speed-log.md, 16 Nov 2026).
+
+It also rounds four places up to a multiple of BANK_PERIOD (32 bytes): the
+end of core 1's block, the end of core 0's, the start of `.data`'s variables
+and the start of `.bss`. Every RAM variable (the rings, the device and its buffers, the PIO
+FIFOs' DMA buffers) comes after the code, and the RP2350 spreads RAM across 8
+banks a word at a time, so a buffer's bank repeats every 32 bytes. Without
+this, any change in the size of the code before them moved every buffer to
+other banks: 0.33.1-dev.10's SET MULTIPLE MODE check (44 bytes) and then a
+28-byte change in loop1 each made the data lane's reads about 10% slower with
+the lane's code untouched (docs/speed-log.md, 16 Nov 2026). Now the code can
+grow or shrink and the data moves only in whole 32-byte steps, keeping its
+banks. A change to the variables themselves can still move them.
 """
 from __future__ import annotations
 
@@ -37,6 +56,9 @@ FILES = (
 
 ANCHOR = "        *(vtable)\n"
 MARK = "__core1_hd_start"
+BANK_PERIOD = 32  # bytes: 8 banks, word-interleaved (RP2350 datasheet, SRAM)
+DATA_ANCHOR = "        *(.data*)\n"
+BSS_ANCHOR = "        . = ALIGN(4);\n        __bss_start__ = .;\n"
 
 
 def patch_text(text: str) -> str:
@@ -48,6 +70,12 @@ def patch_text(text: str) -> str:
     if text.count(anchor) != 1:
         raise RuntimeError("core1_layout: the linker script has no single `*(vtable)` line in .data "
                            "to place core 1's code after (did Arduino-Pico's memmap_default.ld change?)")
+    data_anchor = DATA_ANCHOR.replace("\n", nl)
+    bss_anchor = BSS_ANCHOR.replace("\n", nl)
+    for found, what in ((data_anchor, "`*(.data*)`"), (bss_anchor, "`. = ALIGN(4); __bss_start__ = .;`")):
+        if text.count(found) != 1:
+            raise RuntimeError(f"core1_layout: the linker script has no single {what} to align the "
+                               "variables at (did Arduino-Pico's memmap_default.ld change?)")
     block = [
         "",
         "        /* HDDSynthPro (scripts/core1_layout.py): core 1's hard disk code first, in a",
@@ -56,9 +84,19 @@ def patch_text(text: str) -> str:
         *(f"        *{name}(.time_critical.core1)" for name in FILES),
         "        *(.time_critical.core1)",
         "        __core1_hd_end = .;",
+        f"        . = ALIGN({BANK_PERIOD});  /* HDDSynthPro: the code after it, and the data, keep their RAM banks */",
+        "        /* Core 0's per-sector code (CORE0_RAM: serveFetches and the disks' reads",
+        "           and writes), in RAM so the flash cache's contents can't slow it. */",
+        "        __core0_hot_start = .;",
+        "        *(.time_critical.core0)",
+        "        __core0_hot_end = .;",
+        f"        . = ALIGN({BANK_PERIOD});",
         "",
     ]
-    return text.replace(anchor, anchor + nl.join(block) + nl)
+    text = text.replace(anchor, anchor + nl.join(block) + nl)
+    text = text.replace(data_anchor, f"        . = ALIGN({BANK_PERIOD});  /* HDDSynthPro (core1_layout.py): RAM banks */"
+                        + nl + data_anchor)
+    return text.replace(bss_anchor, bss_anchor.replace("ALIGN(4)", f"ALIGN({BANK_PERIOD})"))
 
 
 def patch_file(path: str) -> None:

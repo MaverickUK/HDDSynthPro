@@ -79,3 +79,14 @@ block 20000110-200033a0 (12944 bytes)
 20002dd6   118 postFetch(ata::Device&, unsigned long&) [clone .constprop.0]
 20002e4c  1076 runDrive(ata::Device&) [clone .constprop.0]
 20003280   288 loop1
+core0 block 200033a0-20003994 (1524 bytes)
+200033a0    32 bus_observer::expect(unsigned long, unsigned short const*)
+200033c0   124 GeneratedDisk::read(unsigned long, unsigned short*)
+2000343c    46 ImageDisk::read(unsigned long, unsigned short*)
+2000346a    46 ImageDisk::write(unsigned long, unsigned short const*)
+20003498    70 RamOverlayDisk<512u>::read(unsigned long, unsigned short*)
+200034de    90 RamOverlayDisk<512u>::write(unsigned long, unsigned short const*)
+20003538   140 releaseHeld()
+200035c4   400 serveFetches()
+20003754   576 seek_timing::Scheduler::onSector(unsigned long long, unsigned long, unsigned long)
+bss 2000ba00

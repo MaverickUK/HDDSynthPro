@@ -16,9 +16,19 @@ Device::Device(const IdentifyInfo& info, const IdentifyInfo* device1) : has_devi
         unit.info = n == 0 ? info : *device1;
         unit.geometry = startGeometry(unit.info);
         buildIdentify(unit.info, unit.identify);
+        if (s_no_multiple) offerNoMultiple(unit.identify);
     }
     resetToSignature();
 }
+
+// READ/WRITE MULTIPLE offered or not, for devices made from now on: not with
+// the data lane, whose reads blocks of 8 made 15% slower on the Evesham
+// (docs/performance.md, item 1). Only IDENTIFY changes, from flash, so core
+// 1's code stays as measured; a host that asks for blocks anyway still gets
+// them, slower on the lane but right.
+bool Device::s_no_multiple = false;
+
+void Device::offerMultiple(bool on) { s_no_multiple = !on; }
 
 // The host changed the Device register: which unit answers from now on.
 CORE1_RAM void Device::deviceWritten() {

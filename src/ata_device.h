@@ -156,6 +156,9 @@ struct CommandInfo {
 
 class Device {
 public:
+    // Whether IDENTIFY offers READ/WRITE MULTIPLE (word 47), for devices made
+    // after the call (start-up: core 1's setup1, before loop1 makes them).
+    static void offerMultiple(bool on);
     // `device1`: device 1's identity, or nullptr for device 0 alone.
     explicit Device(const IdentifyInfo& info, const IdentifyInfo* device1 = nullptr);
     bool hasDevice1() const { return has_device1_; }
@@ -300,6 +303,7 @@ public:
     bool transferring() const { return !dma_ && (data_ != nullptr || receiving_); }
 
 private:
+    static bool s_no_multiple;  // offerMultiple(false)
     // One drive's own state. The selected unit's status, error and
     // interrupt live in status_, error_ and irq_pending_ (every access reads
     // those); the other unit's wait here until it's selected (selectUnit).

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "core1_ram.h"  // CORE0_RAM: the reads and writes are core 0's per-sector code
 #include "gen_disk.h"
 
 class BlockSource {
@@ -32,7 +33,7 @@ class GeneratedDisk : public BlockSource {
 public:
     explicit GeneratedDisk(uint32_t sectors = gen_disk::DEFAULT_SECTORS) : sectors_(sectors) {}
     uint32_t sectors() const override { return sectors_; }
-    bool read(uint32_t lba, uint16_t words[256]) override {
+    CORE0_RAM bool read(uint32_t lba, uint16_t words[256]) override {
         if (lba >= sectors_) return false;
         uint8_t bytes[gen_disk::SECTOR_BYTES];
         gen_disk::sector(lba, bytes);
@@ -57,14 +58,14 @@ public:
     void setBase(BlockSource& base) { base_ = &base; }
     uint32_t sectors() const override { return base_->sectors(); }
 
-    bool read(uint32_t lba, uint16_t words[256]) override {
+    CORE0_RAM bool read(uint32_t lba, uint16_t words[256]) override {
         int slot = find(lba);
         if (slot < 0) return base_->read(lba, words);
         std::memcpy(words, data_[slot], sizeof data_[slot]);
         return true;
     }
 
-    bool write(uint32_t lba, const uint16_t words[256]) override {
+    CORE0_RAM bool write(uint32_t lba, const uint16_t words[256]) override {
         if (lba >= sectors()) return false;
         int slot = find(lba);
         if (slot < 0) {
@@ -79,7 +80,7 @@ public:
     size_t used() const { return used_; }
 
 private:
-    int find(uint32_t lba) const {
+    CORE0_RAM int find(uint32_t lba) const {
         for (size_t i = 0; i < used_; ++i)
             if (lbas_[i] == lba) return int(i);
         return -1;
@@ -112,12 +113,12 @@ public:
     explicit ImageDisk(ImageFile& file) : file_(file) {}
     uint32_t sectors() const override { return uint32_t(file_.size() / gen_disk::SECTOR_BYTES); }
 
-    bool read(uint32_t lba, uint16_t words[256]) override {
+    CORE0_RAM bool read(uint32_t lba, uint16_t words[256]) override {
         if (lba >= sectors()) return false;
         return file_.readAt(uint64_t(lba) * gen_disk::SECTOR_BYTES, words, gen_disk::SECTOR_BYTES);
     }
 
-    bool write(uint32_t lba, const uint16_t words[256]) override {
+    CORE0_RAM bool write(uint32_t lba, const uint16_t words[256]) override {
         if (lba >= sectors()) return false;
         return file_.writeAt(uint64_t(lba) * gen_disk::SECTOR_BYTES, words, gen_disk::SECTOR_BYTES);
     }

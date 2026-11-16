@@ -98,6 +98,12 @@ CORE1_RAM void setWriteCacheEnabled(uint16_t w[256], bool on) {
     w[255] = uint16_t((checksum << 8) | 0xA5);
 }
 
+void offerNoMultiple(uint16_t w[256]) {
+    uint8_t checksum = uint8_t(uint8_t(w[255] >> 8) + byteSum(w[47]));
+    w[47] = 0x0000;
+    w[255] = uint16_t((checksum << 8) | 0xA5);
+}
+
 void buildIdentify(const IdentifyInfo& info, uint16_t w[256]) {
     std::memset(w, 0, 256 * sizeof(uint16_t));
     Geometry g = startGeometry(info);

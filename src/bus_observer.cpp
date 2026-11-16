@@ -19,6 +19,7 @@
 #endif
 #include "bus_sample.h"
 #include "config.h"
+#include "core1_ram.h"  // CORE0_RAM
 #include "identify.h"
 #include "sector_check.h"
 
@@ -224,7 +225,7 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
 void setImageChecks(bool on) { s_image = on; }
 bool imageChecks() { return s_image; }
 
-void expect(uint32_t lba, const uint16_t words[256]) {
+CORE0_RAM void expect(uint32_t lba, const uint16_t words[256]) {
     if (s_image && s_checker) s_checker->expect(lba, words);
 }
 uint32_t expectMissed() { return s_checker ? s_checker->expectMissed() : 0; }

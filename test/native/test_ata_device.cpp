@@ -1732,6 +1732,31 @@ TEST(test_set_multiple_mode) {
     CHECK_EQ(id[59], 0);
 }
 
+TEST(test_multiple_mode_not_offered) {
+    // The data lane: IDENTIFY's word 47 says READ/WRITE MULTIPLE isn't
+    // supported, as before 0.33.1, with the checksum still right; devices made
+    // before the call keep offering them.
+    Device before(INFO);
+    Device::offerMultiple(false);
+    Device d(INFO);
+    Device::offerMultiple(true);
+    VirtualHost h{d};
+    uint16_t id[256];
+    CHECK(h.identify(id));
+    CHECK_EQ(id[47], 0);
+    uint8_t sum = 0;
+    for (uint16_t w : id) sum = uint8_t(sum + (w & 0xFF) + (w >> 8));
+    CHECK_EQ(sum, 0);  // word 255's checksum covers the change
+    CHECK_EQ(id[255] & 0xFF, 0xA5);
+    VirtualHost hb{before};
+    CHECK(hb.identify(id));
+    CHECK_EQ(id[47], 0x8000 | MAX_MULTIPLE);
+    Device after(INFO);
+    VirtualHost ha{after};
+    CHECK(ha.identify(id));
+    CHECK_EQ(id[47], 0x8000 | MAX_MULTIPLE);
+}
+
 TEST(test_read_and_write_multiple_need_the_mode_set) {
     Device d(INFO);
     GeneratedDisk disk;
@@ -2278,6 +2303,7 @@ void runAtaDeviceTests() {
     RUN(test_queued_command_rules);
     RUN(test_reset_cancels_waking);
     RUN(test_set_multiple_mode);
+    RUN(test_multiple_mode_not_offered);
     RUN(test_read_and_write_multiple_need_the_mode_set);
     RUN(test_read_multiple);
     RUN(test_read_multiple_without_read_ahead);
