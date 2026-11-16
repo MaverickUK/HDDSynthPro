@@ -9,6 +9,11 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Fixed
 - **A false `BUSERR` on an image after the observer dropped samples.** To find where the next sector starts it looked for the generated disk's header (the LBA, then the LBA inverted), which image data can match: a FAT's two free entries and two end-of-chain ones (`0000 0000 FFFF FFFF`) read as sector 0. It then compared two sectors' halves with the closest copy. On the Evesham with READ MULTIPLE (dev.9, the data lane, `DOSBENCH.IMG`): `BUSERR lba=811 word=0 seen=0000`, while FreeDOS read its FAT and directories, in the short last block of a 52-sector READ MULTIPLE; HDDBENCH found every sector right. Blocks of 8 leave 2,048 data words between Status polls, against 256 a sector before, so it was eight times likelier there. Now `bus_observer::poll()` looks for headers only on the generated disk; on an image it waits for the next read that isn't data, as `resync()` meant. Core 0's code, in flash: both RAM blocks unchanged.
 
+### Tested (16 Nov, the Evesham, PCB, PIO 3; logs `host/runs/retro-20261116-14*-evesham-dev11-*`)
+- **Your usual setup** (`ICL386MB.IMG`, Doom's CD-ROM as device 1, `ide_bus`): the BIOS sets blocks of 8; Doom from the CD (2,908 READ(10)) and DOS on C: (1,144 READ MULTIPLE, 75 WRITE MULTIPLE), none failed; 15,894 sectors checked on the cable, none bad; `iordy_ignored` 0.
+- **`DOSBENCH.IMG` on the data lane:** the BIOS sends no SET MULTIPLE MODE (word 47 is 0) and uses READ/WRITE SECTORS; 4.12 MB/s reads, 0.76 ms random, 2.00 writes (0.33.0: 3.96, 0.76, 2.03). PASS.
+- **`DOSBENCH.IMG` on early answers, blocks of 8:** 2.27 MB/s reads, 0.98 ms random (one 55 ms BIOS tick over 500 reads from dev.9's 0.87; the drive's single-sector reads 660 µs, as before), 1.32 writes (0.33.0: 1.72, 0.87, 1.23). PASS; no `BUSERR` after 28,866 drops, 4,569 sectors checked, none bad.
+
 ## [0.33.1-dev.10] - 2026-11-16 (branch `performance`)
 
 ### Changed
