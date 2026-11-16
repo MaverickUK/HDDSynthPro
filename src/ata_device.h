@@ -352,11 +352,6 @@ private:
     bool has_device1_ = false;
     // Device 1 selected with no device 1: device 0 answers for it (Status 00h).
     bool absent_selected_ = false;
-    // Two sector buffers: while the host reads one, core 0 fills the other
-    // with the next sector of the read (read-ahead); while the host writes
-    // one, core 0 stores the other (write-behind).
-    uint16_t sectors_[2][BLOCK_WORDS];  // two blocks: one with the host, one with core 0
-
     // Task file
     uint8_t features_ = 0;
     uint8_t sector_count_ = 0;
@@ -423,6 +418,13 @@ private:
     CommandInfo last_{};
     uint32_t commands_started_ = 0;
     uint32_t commands_completed_ = 0;
+
+    // Two sector buffers: while the host reads one, core 0 fills the other
+    // with the next sector of the read (read-ahead); while the host writes
+    // one, core 0 stores the other (write-behind). Last, so every other
+    // member stays within a load's 4 KB reach of `this` (8 KB of buffers
+    // before them cost core 1 an address calculation per call).
+    uint16_t sectors_[2][BLOCK_WORDS];  // two blocks: one with the host, one with core 0
 };
 
 // Inline: on core 1 it sits between a read arriving and its answer.
