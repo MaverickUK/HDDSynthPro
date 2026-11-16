@@ -342,19 +342,102 @@ fail:
 // HDDSynthPro: SD high-speed mode (sdio_card.h). In it the card changes its
 // data just after the clock's rising edge (up to 14 ns after; held 2.5 ns
 // past the next), so at 50 MHz the bits are steady only in the 8 ns before
-// a rising edge. rd_data sampled just after it saw the clock rise (right for
-// default speed, where the card changes data on the falling edge); in
-// high-speed mode it waits for the clock to rise, then to fall, and samples
-// there: the inputs reach the PIO through two synchroniser cycles, so that
-// is about 15-20 ns after the rising edge. rd_clk's low phase goes from 3
-// cycles to 2 (2 + 2 at 200 MHz: 50 MHz). Patched in instruction memory, so
-// no PIO space is used; begin() loads the programs afresh.
-void Card::patchHighSpeedPrograms(bool on) {
-  m_pio->instr_mem[m_rdDataOffset + rd_data_offset_wait0] = pio_encode_wait_gpio(on ? 1 : 0, m_clkPin);
-  m_pio->instr_mem[m_rdDataOffset + rd_data_offset_wait1] = pio_encode_wait_gpio(on ? 0 : 1, m_clkPin);
+// a rising edge. Where rd_data samples, against the real clock, depends on
+// the input synchronisers (two PIO cycles) and on how the card's start bit
+// lines up with rd_clk, so the switch finds it by trying them all: phase
+// 0-3 samples 0-3 PIO cycles (5 ns each at 50 MHz) after rd_data sees the
+// clock rise (the default-speed program's place, plus a delay), 4-7 the
+// same after it sees the clock fall. rd_clk's low phase goes from 3 cycles to
+// 2 (2 + 2: 50 MHz). Patched in instruction memory, so no PIO space is used;
+// begin() loads the programs afresh.
+// cmd_rsp's instructions that end its clock's high phase (sdio_card.pio.h):
+// the nop before `jmp pin` that waits for the response, and the `jmp y--`
+// before each `in`. With one optional side-set bit the delay is bits 8-10.
+static constexpr uint CMD_WAIT_HIGH = 5;
+static constexpr uint CMD_READ_HIGH = 9;
+static uint16_t withDelay(uint16_t inst, uint delay) { return uint16_t((inst & ~0x0700u) | (delay << 8)); }
+static_assert(sizeof(cmd_rsp_program_instructions) / sizeof(uint16_t) == 10, "cmd_rsp changed: check CMD_WAIT_HIGH and CMD_READ_HIGH");
+
+void Card::patchHighSpeedPrograms(bool on, uint8_t phase) {
+  const bool fall = on && phase >= 4;
+  const uint delay = on ? phase & 3u : 0;
+  m_pio->instr_mem[m_rdDataOffset + rd_data_offset_wait0] = pio_encode_wait_gpio(fall ? 1 : 0, m_clkPin);
+  m_pio->instr_mem[m_rdDataOffset + rd_data_offset_wait1] =
+      uint16_t(pio_encode_wait_gpio(fall ? 0 : 1, m_clkPin) | pio_encode_delay(delay));
   // out null, 1  side 0 [2] -> [1]: the delay is bits 8-10 (one side-set bit, optional).
   uint16_t low = rd_clk_program_instructions[rd_clk_wrap_target];
   m_pio->instr_mem[m_rdClkOffset + rd_clk_wrap_target] = on ? uint16_t((low & ~0x0700u) | (1u << 8)) : low;
+  // The command response changes just after the rising edge too, and
+  // cmd_rsp sampled about there (its CRC7 failed at every data phase, 16 Nov
+  // 2026): two more cycles high where it waits for the start bit (5: nop
+  // side 1 [2] -> [4]) and where it reads each bit (9: jmp side 1 [1] -> [3]),
+  // so it samples 20-30 ns after the rise, at 25 MHz's PIO clock.
+  const uint extra = on ? m_cmdExtra : 0;
+  m_pio->instr_mem[m_cmdRspOffset + CMD_WAIT_HIGH] = withDelay(cmd_rsp_program_instructions[CMD_WAIT_HIGH], 2 + extra);
+  m_pio->instr_mem[m_cmdRspOffset + CMD_READ_HIGH] = withDelay(cmd_rsp_program_instructions[CMD_READ_HIGH], 1 + extra);
+}
+
+// Diagnostic (16 Nov 2026): CMD13 bit-banged at about 100 kHz through SIO,
+// each response bit read mid-way through the clock's high phase, so no PIO
+// timing is involved. Returns 1 for a response with a good CRC7, 0 for a bad
+// one, -1 for none in 64 clocks. The pins go back to the PIO afterwards.
+int Card::bitBangCmd13() {
+  const uint clk = m_clkPin, cmd = m_cmdPin;
+  gpio_set_function(clk, GPIO_FUNC_SIO);
+  gpio_set_function(cmd, GPIO_FUNC_SIO);
+  gpio_set_dir(clk, true);
+  gpio_put(clk, 0);
+  auto clock = [&](bool out_bit, bool drive) -> bool {
+    if (drive) gpio_put(cmd, out_bit);
+    busy_wait_us(5);
+    gpio_put(clk, 1);
+    busy_wait_us(2);
+    bool in = gpio_get(cmd);
+    busy_wait_us(3);
+    gpio_put(clk, 0);
+    return in;
+  };
+  uint8_t buf[6];
+  buf[0] = uint8_t(13 | 0x40);
+  buf[1] = uint8_t(m_rca >> 24);
+  buf[2] = uint8_t(m_rca >> 16);
+  buf[3] = buf[4] = 0;
+  buf[5] = CRC7(buf, 5);
+  gpio_set_dir(cmd, true);
+  for (int i = 0; i < 8; ++i) clock(true, true);
+  for (int b = 0; b < 48; ++b) clock((buf[b / 8] >> (7 - b % 8)) & 1, true);
+  gpio_set_dir(cmd, false);
+  int result = -1;
+  for (int n = 0; n < 64; ++n) {
+    if (!clock(true, false)) {  // the start bit
+      uint8_t rsp[6] = {0};
+      for (int b = 1; b < 48; ++b)
+        if (clock(true, false)) rsp[b / 8] |= uint8_t(1u << (7 - b % 8));
+      result = rsp[5] == CRC7(rsp, 5) ? 1 : 0;
+      break;
+    }
+  }
+  for (int i = 0; i < 8; ++i) clock(true, false);
+  pio_gpio_init(m_pio, clk);
+  pio_gpio_init(m_pio, cmd);
+  return result;
+}
+
+// Four CMD13s (the card's status: a command and its CRC7-checked response,
+// no data).
+bool Card::highSpeedCommandsPass() {
+  for (int i = 0; i < 4; ++i) {
+    if (!cardCommand(CMD13_R1, m_rca)) return false;
+  }
+  return true;
+}
+
+// Four reads of the 64-byte SD status (ACMD13), each CRC-checked.
+bool Card::highSpeedReadsPass() {
+  for (int i = 0; i < 4; ++i) {
+    if (!cardAcmd(m_rca, ACMD13_R1, 0) || !readData(&m_sds, sizeof(m_sds))) return false;
+  }
+  return true;
 }
 
 bool Card::switchHighSpeed() {
@@ -379,6 +462,8 @@ bool Card::switchHighSpeed() {
     m_highSpeedNote = "the card has no high-speed mode";
     return false;
   }
+  m_controlPass = highSpeedCommandsPass();  // the same test at default speed, as a control
+  m_bangBefore = bitBangCmd13();
   if (!cardCMD6(0x80FFFFF1, status) || (status[16] & 0x0F) != 1) {
     m_highSpeedFailed = true;
     m_highSpeedNote = "the card didn't switch to high speed";
@@ -387,20 +472,64 @@ bool Card::switchHighSpeed() {
   }
   // The card is in high-speed mode now (8 clocks on, which the next command
   // gives). Data at 50 MHz: half the divider; commands and the write
-  // response keep theirs.
-  patchHighSpeedPrograms(true);
+  // response keep theirs. First the command response's sampling (0-3 extra
+  // cycles high), then each data sampling point (m_highSpeed stays false
+  // meanwhile, so a failed read doesn't end high-speed mode).
+  m_bangAfter = bitBangCmd13();
+  int best_cmd = -1;
+  for (uint e = 0; e < 4; ++e) {
+    m_cmdExtra = e;
+    patchHighSpeedPrograms(true, 0);
+    m_errorCode = SD_CARD_ERROR_NONE;
+    m_quietFailLine = 0;
+    bool ok = highSpeedCommandsPass();
+    m_cmdMap[e] = ok ? '1' : '0';
+    m_cmdLines[e] = ok ? 0 : uint16_t(m_errorLine ? m_errorLine : m_quietFailLine);
+    m_errorLine = 0;
+    if (ok && best_cmd < 0) best_cmd = int(e);  // the earliest that works: closest to the default
+  }
+  if (best_cmd < 0) {
+    m_highSpeedFailed = true;
+    m_highSpeedNote = "no command sampling point worked at high speed";
+    begin(PioSdioConfig(m_clkPin, m_cmdPin, m_dat0Pin, m_configDiv));
+    return false;
+  }
+  m_cmdExtra = uint(best_cmd);
   float fast = m_clkDiv / 2;
   sm_config_set_clkdiv(&m_rdClkConfig, fast);
   sm_config_set_clkdiv(&m_rdDataConfig, fast);
   sm_config_set_clkdiv(&m_wrDataConfig, fast);
-  m_highSpeed = true;
-  // A read at the new speed, CRC-checked: the 64-byte SD status (ACMD13).
-  if (!cardAcmd(m_rca, ACMD13_R1, 0) || !readData(&m_sds, sizeof(m_sds))) {
+  bool pass[8];
+  for (uint8_t p = 0; p < 8; ++p) {
+    patchHighSpeedPrograms(true, p);
+    m_errorCode = SD_CARD_ERROR_NONE;
+    m_errorLine = 0;
+    m_quietFailLine = 0;
+    pass[p] = highSpeedReadsPass();
+    m_phaseMap[p] = pass[p] ? '1' : '0';
+    m_phaseErrors[p] = pass[p] ? 0 : uint8_t(m_errorCode);
+    m_phaseLines[p] = pass[p] ? 0 : uint16_t(m_errorLine ? m_errorLine : m_quietFailLine);
+  }
+  m_errorCode = SD_CARD_ERROR_NONE;
+  // The passing point with the most passing neighbours (in its group of four).
+  int best = -1, best_score = -1;
+  for (int p = 0; p < 8; ++p) {
+    if (!pass[p]) continue;
+    int score = ((p & 3) > 0 && pass[p - 1]) + ((p & 3) < 3 && pass[p + 1]);
+    if (score > best_score) {
+      best = p;
+      best_score = score;
+    }
+  }
+  m_phase = best;
+  if (best < 0) {
     m_highSpeedFailed = true;
-    m_highSpeedNote = "the first read at 50 MHz failed";
+    m_highSpeedNote = "no sampling point read right at 50 MHz";
     begin(PioSdioConfig(m_clkPin, m_cmdPin, m_dat0Pin, m_configDiv));  // back to default speed and the original programs
     return false;
   }
+  patchHighSpeedPrograms(true, uint8_t(best));
+  m_highSpeed = true;
   m_highSpeedNote = "";
   return true;
 }
@@ -455,6 +584,7 @@ bool Card::cardCommand(CmdRsp_t cmd, uint32_t arg, void* rsp) {
     m_pio->fdebug = fdebug_tx_stall;
     while (!(m_pio->fdebug & fdebug_tx_stall)) {
       if (timeout.timedOut()) {
+        m_quietFailLine = __LINE__;  // HDDSynthPro: no response (no error code, as the library had it)
         goto fail;
       }
     }
@@ -465,6 +595,7 @@ bool Card::cardCommand(CmdRsp_t cmd, uint32_t arg, void* rsp) {
   for (uint i = 0; i < nRsp; i++) {
     while (pio_sm_is_rx_fifo_empty(m_pio, m_sm0)) {
       if (timeout.timedOut()) {
+        m_quietFailLine = __LINE__;  // HDDSynthPro: no response (no error code, as the library had it)
         goto fail;
       }
     }
@@ -472,6 +603,7 @@ bool Card::cardCommand(CmdRsp_t cmd, uint32_t arg, void* rsp) {
   }
   if (cmd.rsp == RSP_R3) {
     if (rtn[0] != 0X3F || rtn[5] != 0XFF) {
+      m_quietFailLine = __LINE__;
       goto fail;
     }
   } else {

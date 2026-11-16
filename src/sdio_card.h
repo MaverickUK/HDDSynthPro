@@ -93,6 +93,20 @@ class Card : public SdCardInterface {
   bool highSpeed() const { return m_highSpeed; }
   /** \return why high-speed mode is off, or "" (switchHighSpeed). */
   const char* highSpeedNote() const { return m_highSpeedNote; }
+  /** \return the last calibration: which of the 8 sampling points passed
+   * ('1') or failed ('0'), and the one chosen (-1: none), see
+   * patchHighSpeedPrograms. */
+  const char* highSpeedPhases() const { return m_phaseMap; }
+  int highSpeedPhase() const { return m_phase; }
+  /** \return each sampling point's error code (0: passed). */
+  const uint8_t* highSpeedErrors() const { return m_phaseErrors; }
+  const uint16_t* highSpeedErrorLines() const { return m_phaseLines; }
+  const char* highSpeedCommandMap() const { return m_cmdMap; }
+  uint highSpeedCommandExtra() const { return m_cmdExtra; }
+  const uint16_t* highSpeedCommandLines() const { return m_cmdLines; }
+  bool highSpeedControlPassed() const { return m_controlPass; }
+  int highSpeedBangBefore() const { return m_bangBefore; }
+  int highSpeedBangAfter() const { return m_bangAfter; }
   /** Disable an SDIO card.
    * not implemented.
    */
@@ -287,7 +301,10 @@ class Card : public SdCardInterface {
       m_highSpeedNote = code == SD_CARD_ERROR_READ_CRC ? "a read CRC error at 50 MHz" : "a write the card refused at 50 MHz";
     }
   }
-  void patchHighSpeedPrograms(bool on);
+  void patchHighSpeedPrograms(bool on, uint8_t phase = 0);
+  bool highSpeedReadsPass();
+  bool highSpeedCommandsPass();
+  int bitBangCmd13();
   static const uint8_t IDLE_STATE = 0;
   static const uint8_t READ_STATE = 1;
   static const uint8_t WRITE_STATE = 2;
@@ -311,6 +328,16 @@ class Card : public SdCardInterface {
   bool m_highSpeed = false;        // HDDSynthPro: switchHighSpeed() took
   bool m_highSpeedFailed = false;  // kept over begin(): 25 MHz until a power cycle
   const char* m_highSpeedNote = "not asked for";
+  char m_phaseMap[9] = "--------";
+  int m_phase = -1;
+  uint8_t m_phaseErrors[8] = {};
+  uint16_t m_phaseLines[8] = {};
+  uint32_t m_quietFailLine = 0;
+  uint m_cmdExtra = 0;               // cmd_rsp's extra cycles high in high-speed mode
+  char m_cmdMap[5] = "----";
+  uint16_t m_cmdLines[4] = {};
+  bool m_controlPass = false;
+  int m_bangBefore = 9, m_bangAfter = 9;  // HDDSynthPro: a command that failed without an error code
   uint m_clkPin = 63u;   // PIN_SDIO_UNDEFINED;
   uint m_cmdPin = 63u;   // PIN_SDIO_UNDEFINED;
   uint m_dat0Pin = 63u;  // PIN_SDIO_UNDEFINED;
