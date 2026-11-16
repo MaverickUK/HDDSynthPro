@@ -312,6 +312,11 @@ TEST(test_sector_check_align_at_a_sector_start) {
     CHECK(!c.isSectorStart(w[1], w[2], w[3], w[4]));
     CHECK(!c.isSectorStart(0x1234, 0x0000, 0x1234, 0xFFFF));  // not inverted
     CHECK(!c.isSectorStart(0x0000, 0x0010, 0xFFFF, 0xFFEF));  // past the disk's end
+    // An image's data can look like a sector start: a FAT's two free entries
+    // and two end-of-chain ones read as sector 0. So bus_observer::poll()
+    // looks for sector starts only on the generated disk; on an image it
+    // waits for the next read that isn't data (16 Nov 2026).
+    CHECK(c.isSectorStart(0x0000, 0x0000, 0xFFFF, 0xFFFF));
     c.alignAt();
     int bad = 0;
     for (uint16_t v : w) bad += c.observe(o.dma(v));

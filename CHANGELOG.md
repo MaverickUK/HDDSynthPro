@@ -4,6 +4,11 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.1-dev.11] - 2026-11-16 (branch `performance`)
+
+### Fixed
+- **A false `BUSERR` on an image after the observer dropped samples.** To find where the next sector starts it looked for the generated disk's header (the LBA, then the LBA inverted), which image data can match: a FAT's two free entries and two end-of-chain ones (`0000 0000 FFFF FFFF`) read as sector 0. It then compared two sectors' halves with the closest copy. On the Evesham with READ MULTIPLE (dev.9, the data lane, `DOSBENCH.IMG`): `BUSERR lba=811 word=0 seen=0000`, while FreeDOS read its FAT and directories, in the short last block of a 52-sector READ MULTIPLE; HDDBENCH found every sector right. Blocks of 8 leave 2,048 data words between Status polls, against 256 a sector before, so it was eight times likelier there. Now `bus_observer::poll()` looks for headers only on the generated disk; on an image it waits for the next read that isn't data, as `resync()` meant. Core 0's code, in flash: both RAM blocks unchanged.
+
 ## [0.33.1-dev.10] - 2026-11-16 (branch `performance`)
 
 ### Changed

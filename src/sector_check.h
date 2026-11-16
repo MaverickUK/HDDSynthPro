@@ -109,7 +109,8 @@ public:
     // Whether four data words are the start of a generated sector (its LBA,
     // then the LBA inverted): how a caller that skipped reads finds a sector
     // start in the middle of a DMA command. Then call alignAt() and observe
-    // from the first of them.
+    // from the first of them. Only on the generated disk: other data can
+    // look like it (0000 0000 FFFF FFFF is "sector 0").
     bool isSectorStart(uint16_t w0, uint16_t w1, uint16_t w2, uint16_t w3) const {
         return w2 == uint16_t(~w0) && w3 == uint16_t(~w1) && (uint32_t(w0) | (uint32_t(w1) << 16)) < disk_sectors_;
     }

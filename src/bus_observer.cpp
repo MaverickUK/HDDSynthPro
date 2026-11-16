@@ -168,13 +168,19 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
             look(written);
         }
         // Out of step: pass over data reads, at a few cycles a word, to the
-        // next sector start or the next read that ends the data.
+        // next sector start or the next read that ends the data. A sector
+        // start (its LBA, then the LBA inverted) only on the generated disk
+        // (`check`): an image's data can look like one (a FAT's free and
+        // end-of-chain entries, 0000 0000 FFFF FFFF, read as sector 0), and
+        // checking from there compared two sectors' halves with the closest
+        // copy: a false BUSERR on the Evesham (16 Nov 2026), where READ
+        // MULTIPLE's blocks of 8 leave 2,048 data words between status polls.
         while (!s_checker->aligned()) {
             if ((written - s_read) % RING_WORDS < 4) break;  // wait for more
             uint32_t w[4];
             for (unsigned k = 0; k < 4; ++k) w[k] = s_ring[(s_read + k) % RING_WORDS];
             if (endsData(w[0])) break;  // observe() aligns on it
-            if (!endsData(w[1]) && !endsData(w[2]) && !endsData(w[3]) &&
+            if (check && !endsData(w[1]) && !endsData(w[2]) && !endsData(w[3]) &&
                 s_checker->isSectorStart(uint16_t(w[0]), uint16_t(w[1]), uint16_t(w[2]), uint16_t(w[3]))) {
                 s_checker->alignAt();
                 break;
