@@ -87,7 +87,8 @@ void setMdmaModeSelected(uint16_t words[256], uint8_t mode);
 // or 82h, and fixes up the checksum, as setCurrentGeometry does.
 void setWriteCacheEnabled(uint16_t words[256], bool on);
 // READ/WRITE MULTIPLE's block, as SET MULTIPLE MODE left it (word 59): sectors
-// per DRQ block, or 0 while multiple mode is off.
+// per DRQ block, or 0 while multiple mode is off; fixes up the checksum, as
+// setCurrentGeometry does (0.33.1 left it wrong).
 void setMultipleSectors(uint16_t words[256], uint8_t sectors);
 
 // READ/WRITE MULTIPLE not offered (word 47 = 0, as before 0.33.1), checksum

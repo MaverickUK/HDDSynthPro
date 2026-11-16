@@ -88,7 +88,10 @@ CORE1_RAM void setMdmaModeSelected(uint16_t w[256], uint8_t mode) {
 }
 
 CORE1_RAM void setMultipleSectors(uint16_t w[256], uint8_t sectors) {
-    w[59] = sectors ? uint16_t(0x0100 | sectors) : 0;  // bit 8: the setting in bits 7-0 is valid
+    uint16_t word = sectors ? uint16_t(0x0100 | sectors) : 0;  // bit 8: the setting in bits 7-0 is valid
+    uint8_t checksum = uint8_t(uint8_t(w[255] >> 8) + byteSum(w[59]) - byteSum(word));
+    w[59] = word;
+    w[255] = uint16_t((checksum << 8) | 0xA5);
 }
 
 CORE1_RAM void setWriteCacheEnabled(uint16_t w[256], bool on) {

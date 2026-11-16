@@ -195,6 +195,10 @@ The JMicron on the Mac, PIO 3, the test disk, `-m speed`, the data lane unless n
 
 Early answers on dev.10: 1.16 MB/s reads, 74.1 IOPS, 1.11 writes; the table 1.69 / 80.1 / 1.78; both as dev.9. B ruled out core 1's code and the data's placement: the data lane serves data words fast enough that core 0's fetches set its pace, and core 0 ran its per-sector code from flash, through a cache whose contents any flash change rearranged. Layout recorded after these runs.
 
+## IDENTIFY's checksum fix (0.33.2-dev.1, 16 Nov 2026)
+
+The JMicron on the Mac, PIO 3, the test disk, `-m speed`: 38 bytes more in core 1's block, 24 functions moved, core 0's block and `.bss` 64 bytes on. The data lane 1.20-1.24 MB/s reads (327-343 µs a sector), 1.63 writes; early answers 1.16 / 74.4 / 1.11; the table 1.69 / 80.1 / 1.78. All within 0.33.1's figures: the first core 1 change since the data was aligned to the RAM banks, and nothing moved the speeds.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

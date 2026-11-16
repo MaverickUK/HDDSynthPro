@@ -51,6 +51,8 @@ PIO on a real PC runs at well under half of what its mode allows, and the card i
 - **One `BUSERR` on the lane with blocks** (LBA 811, at boot: word 0 seen 0000, 211 words wrong), with `bus_lost` 56,858 against 2,128 on the lane without blocks (9 Nov). HDDBENCH's checks and the boot were right, so it's probably the observer losing its place in 8-sector blocks (`EXPECT_SLOTS`), not data on the cable; to be checked.
 - Slow Status reads as before (the lane: 3,984 past 1,250 ns, up to 1,810, all waited for; early answers' worst 1,040 ns), `iordy_ignored` 0.
 
+**After 0.33.1:** IDENTIFY's checksum after SET MULTIPLE MODE fixed in 0.33.2-dev.1.
+
 **Owed before `main`:** ~~block mode off on the data lane~~ (0.33.1-dev.10: not offered there; finding why the lane is slower with blocks is still open), ~~the `BUSERR`~~ (dev.11: the observer re-aligning on image data that looked like a generated sector's header, not the data), ~~a soak through the adapter~~ (dev.10, an hour on early answers, clean), and ~~the Evesham with the CD-ROM beside the disk (`ide_bus`)~~ (dev.11, 16 Nov: clean, and the data lane back to 0.33.0's speed with no block mode; CHANGELOG). Ready for `main`. On the way, dev.10 moved core 0's per-sector code into RAM: flash-only changes had been slowing the data lane's reads 10% ([speed-log.md](speed-log.md)).
 
 **As built (0.33.1-dev.8).** `MAX_MULTIPLE` is 8 (identify.h): 8.8 KB more RAM, 96.9% used. Going to 16 needs 16 KB more, and the bus observer's `EXPECT_SLOTS` (16: a block with the host and one read ahead) doubled with it. Core 0 still makes one card call per sector inside the block (item 4 makes it one per block). In table mode a block of 8 is 2,048 data writes against the write ring's 1,024 samples, drained as it fills.

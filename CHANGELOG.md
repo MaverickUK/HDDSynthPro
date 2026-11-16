@@ -4,6 +4,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.2-dev.1] - 2026-11-16 (branch `identify-checksum`)
+
+### Fixed
+- **IDENTIFY's checksum after SET MULTIPLE MODE** (0.33.1's known limit): `setMultipleSectors()` changed word 59 without fixing up word 255, so a host that read IDENTIFY again after setting block mode saw a wrong checksum. It now does as the other setters do; `test_set_multiple_mode` checks the checksum after every change (and fails on 0.33.1's code).
+
+### Tested (16 Nov, the JMicron on the Mac, PIO 3, the test disk)
+- Core 1's code: `setMultipleSectors` 12 -> 50 bytes, 24 functions after it moved; core 0's block and `.bss` 64 bytes on (two bank periods). `-m speed`: the data lane 1.20-1.24 MB/s reads (327-343 µs a sector), 1.63 writes; early answers 1.16 / 74.4 / 1.11, slices 3-4; the table 1.69 / 80.1 / 1.78: all as 0.33.1. Layout recorded.
+
 ## [0.33.1] - 2026-11-16
 
 READ MULTIPLE, WRITE MULTIPLE and SET MULTIPLE MODE in blocks of up to 8 sectors ([docs/performance.md](docs/performance.md), item 1), not offered on the data lane; core 0's per-sector code in RAM and the data aligned to the RAM banks, so flash changes no longer move the data lane's speed; the bus observer's false `BUSERR` on images fixed; the console, disks and link code out of `main.cpp`. Branch `performance` (dev.1-11, below); release notes in [docs/release-notes/v0.33.1.md](docs/release-notes/v0.33.1.md).

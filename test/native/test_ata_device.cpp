@@ -1717,10 +1717,12 @@ TEST(test_set_multiple_mode) {
     CHECK_EQ(d.lastCommand().count, 4);  // in the trace: what the host asked for
     CHECK(h.identify(id));
     CHECK_EQ(id[59], 0x0104);
+    CHECK(identifyChecksumOk(id));  // word 255 follows word 59 (0.33.1 left it wrong)
     // A soft reset keeps it; RESET# turns it off, as at power-on.
     h.softReset();
     CHECK(h.identify(id));
     CHECK_EQ(id[59], 0x0104);
+    CHECK(identifyChecksumOk(id));  // word 255 follows word 59 (0.33.1 left it wrong)
     d.hardReset(true);
     d.hardReset(false);
     CHECK(h.identify(id));
@@ -1730,6 +1732,8 @@ TEST(test_set_multiple_mode) {
     CHECK(h.setMultiple(0));
     CHECK(h.identify(id));
     CHECK_EQ(id[59], 0);
+    CHECK(h.identify(id));
+    CHECK(identifyChecksumOk(id));
 }
 
 TEST(test_multiple_mode_not_offered) {
