@@ -210,6 +210,8 @@ The PCB, the card on SDIO, console `G` (the card alone, no host), `ICL386MB.IMG`
 
 The whole 245 MB image checksums the same at both. Sampling points in high-speed mode, 8 reads each (after the falling edge; delays in 5 ns PIO cycles at divider 1): 20 MHz 8/8/8/timeout/timeout, 40 MHz the same, 50 MHz 8/8/timeout/timeout/timeout. After the rising edge (the default-speed place), 40 MHz read right at delay 0 only (the old bit's hold time), CRC errors at 1-2.
 
+**Through a host (the Evesham, the data lane, `DOSBENCH.IMG`, the same firmware, 16 Nov):** high-speed mode off then on: the PC's reads 4.18 -> 4.30 MB/s, random 0.87 -> 0.76 ms (within a 55 ms tick), writes 2.03 both; in the drive a 63-sector read 7.54 -> 7.37 ms and a single sector 562 -> 511 µs. The card was no longer what held PIO reads back: at about 30 µs a sector against 55, the rest of the 117 µs a sector is the host's per-sector interrupt, Status poll and transfer. The gain should show with DMA, and on the data lane with block mode (if its slowdown with blocks is found).
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:
