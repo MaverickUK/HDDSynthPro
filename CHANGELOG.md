@@ -20,8 +20,12 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (the PCB, console `G`, no host)
 - Reads: **17.7 MB/s** in 8-sector runs and 17.3 a sector at a time, against 9.2 and 9.1 at default speed; the whole 245 MB image checksums the same at both clocks and on every pass. Writes 7.4-9.2 MB/s at both (the card's own pace), 4,096 runs of 8 read back right. The calibration passed every point on every boot tried.
 
+### Tested through a host (16 Nov, the Evesham)
+- **Windows 98 SE**, installed on a blank 4 GB image from the CD on the CD-ROM ([docs/retro-test.md](docs/retro-test.md)), runs with its own disk driver; **multiword DMA under Windows** for the first time (READ/WRITE DMA, none failed). Copying the CD's `WIN98` folder to C:: PIO 4 min 20 s, DMA 1 min 16 s, DMA with `sd_high_speed = on` **1 min 1 s** (0.79, 2.4 and 3.0 MB/s).
+- `DOSBENCH.IMG` on the data lane (PIO): 4.30 MB/s reads with high-speed mode, 4.18 without: in PIO the host's per-sector exchange sets the pace, not the card.
+
 ### Not yet tested
-- Through a host: the drive's own speed from an image with high-speed mode (the data lane and DMA are the paths it should lift), and a long card soak.
+- A long card soak in high-speed mode.
 
 ## [0.34.0-dev.1] - 2026-11-16 (branch `sd-50mhz`)
 

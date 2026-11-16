@@ -212,6 +212,10 @@ The whole 245 MB image checksums the same at both. Sampling points in high-speed
 
 **Through a host (the Evesham, the data lane, `DOSBENCH.IMG`, the same firmware, 16 Nov):** high-speed mode off then on: the PC's reads 4.18 -> 4.30 MB/s, random 0.87 -> 0.76 ms (within a 55 ms tick), writes 2.03 both; in the drive a 63-sector read 7.54 -> 7.37 ms and a single sector 562 -> 511 µs. The card was no longer what held PIO reads back: at about 30 µs a sector against 55, the rest of the 117 µs a sector is the host's per-sector interrupt, Status poll and transfer. The gain should show with DMA, and on the data lane with block mode (if its slowdown with blocks is found).
 
+## Windows 98 SE on the Evesham: PIO, DMA, and the card's high-speed mode (16 Nov 2026)
+
+The PCB, 0.34.0-dev.2, `WIN98.IMG` with the Windows 98 SE CD as device 1 (`ide_bus`), Windows' own driver; the CD's `WIN98` folder copied to C: ([retro-test.md](retro-test.md)): PIO 4 min 20 s (0.79 MB/s), multiword DMA 2 1 min 16 s (2.4 MB/s), DMA with `sd_high_speed = on` 1 min 1 s (3.0 MB/s). In the drive, per 32 KB: CD reads 16.5, 4.8, 3.6 ms; disk writes 26.3, 5.2, 4.1 ms.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

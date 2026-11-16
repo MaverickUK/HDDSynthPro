@@ -6,6 +6,24 @@ Two passes, ideally on separate evenings:
 1. **The test disk, PIO mode 0.** Every sector read is checked on the cable by the bus observer, so this pass says whether the controller works with the drive at all, and whether it waits for IORDY.
 2. **The scratch image, `auto`.** FDISK, FORMAT, copying files and benchmarks, on `HDDBENCH.IMG`. The SD card's `HDDSYNTH.IMG` isn't touched.
 
+## Session, 16 Nov 2026: Windows 98 SE on the Evesham, PIO and DMA (0.34.0-dev.2)
+
+The first operating system to use the drive's multiword DMA. The PCB on the Evesham (Athlon XP 2000+, 1,280 MB, AMIBIOS), a blank 4,095 MiB `WIN98.IMG` as device 0 and the Windows 98 SE CD (`WIN98SE.ISO`) on the CD-ROM as device 1 (so `ide_bus`); logs `host/runs/retro-20261116-17*`, `-18*` and `-19*`.
+
+**Installing.** From the Windows 98 startup floppy with CD-ROM support: FDISK with large disk support (FAT32), then `D:\WIN98\FORMAT C:` (the floppy's RAM drive didn't appear, so FORMAT came loose from the CD's `WIN98` folder; `EDIT` is `D:\TOOLS\OLDMSDOS\QBASIC /EDITOR` the same way), then `D:\WIN98\SETUP.EXE`. Setup's first boot from C: rebooted every time, a few seconds in, with every drive command right (none failed, 0 of 2,823 sectors bad on the cable, `iordy_ignored` 0): Windows 98 can't run with more than about 512 MB of RAM. `MaxPhysPage=20000` under `[386Enh]` in `C:\WINDOWS\SYSTEM.INI` (512 MB) fixed it, and setup ran to the desktop: 48,248 commands, 26,901 sectors checked on the cable, none bad.
+
+**Windows' own disk driver** (`ESDI_506.PDR`) uses READ and WRITE SECTORS in PIO (no block mode), 64 sectors a command for writes. **DMA**: `dma = on` (the drive then offers multiword DMA 2), and DMA ticked for the disk and the CD-ROM in Device Manager; after the restart Windows sent READ DMA and WRITE DMA without a SET FEATURES for the mode (it programs the controller's timing itself). No DMA command failed.
+
+**The test:** the CD's `WIN98` folder (about 200 MB) copied to C: in Explorer, timed by hand; in the drive, from its log:
+
+| Copy, CD to C: | Time | Overall | CD read, 32 KB | Disk write, 32 KB |
+|---|---|---|---|---|
+| PIO (mode 3) | 4 min 20 s | 0.79 MB/s | 16.5 ms | 26.3 ms |
+| Multiword DMA 2 | 1 min 16 s | 2.4 MB/s | 4.8 ms | 5.2 ms |
+| Multiword DMA 2, the card in high-speed mode (`sd_high_speed = on`) | **1 min 1 s** | **3.0 MB/s** | 3.6 ms | 4.1 ms |
+
+DMA is 3.4 times as fast as PIO here, and the card's high-speed mode takes another 20% off: under DMA the card was setting the pace (a 16 KB CD read in 2.6 ms, about the card's speed at its default clock), as it doesn't in PIO (on the data lane under DOS it gained 3%). The only errors in the logs are the usual probes (IDENTIFY to the CD-ROM, an MMC command the drive doesn't support).
+
 ## Session, 3 Nov 2026: the data lane and two drives (0.29.0-2d.4)
 
 Two questions for the ICL 386 and the Evesham. The answers decide what comes next:

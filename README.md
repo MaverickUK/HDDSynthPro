@@ -4,7 +4,7 @@
 
 An RP2350 that pretends to be an IDE hard disk and CD-ROM drive, as the base for a future HDD Synth that *is* the drive rather than one that listens to it.
 
-At this stage it is a proof of concept on an Olimex RP2350-PICO2-BB48. It is tested through a USB-IDE adapter from macOS and Windows, and in real retro PCs (see [Testing](#testing)). See [docs/plan.md](docs/plan.md) for the slices and [docs/wiring.md](docs/wiring.md) for the connections. For an interactive wiring diagram, open [docs/wiring.html](docs/wiring.html) in a browser. [docs/bringup.md](docs/bringup.md) is the checklist for hardware day. [docs/pcb-bom.md](docs/pcb-bom.md) sketches the custom PCB that follows the prototype. [docs/activity.md](docs/activity.md) explains how the drive tells sequential from random activity, for more realistic sounds.
+It started as a proof of concept on an Olimex RP2350-PICO2-BB48 and now has its own PCB. It is tested through USB-IDE adapters from macOS and Windows, and in real retro PCs (see [Testing](#testing)). See [docs/plan.md](docs/plan.md) for the slices and [docs/wiring.md](docs/wiring.md) for the connections. For an interactive wiring diagram, open [docs/wiring.html](docs/wiring.html) in a browser. [docs/bringup.md](docs/bringup.md) is the checklist for hardware day. [docs/pcb-bom.md](docs/pcb-bom.md) sketches the custom PCB that follows the prototype. [docs/activity.md](docs/activity.md) explains how the drive tells sequential from random activity, for more realistic sounds.
 
 Formerly HDD Synth Pro: renamed IDE Synth Bay once it served CD-ROM drives as well as hard disks. The repository, file names and the firmware's own messages keep the old name.
 
@@ -41,14 +41,13 @@ I'm not yet sure if this will exist alongside the original HDD Synth or will sup
 
 ## Status
 
-The drive works as a read/write IDE hard disk (and, exploratory, a CD-ROM drive), serving disk images from a microSD card, on the Olimex BB48 and on the IDE Synth Bay PCB (rev 0.3). It has run four retro PCs and soaked for 10 hours at a time behind a USB-IDE adapter. Releases are tagged on `main` with the firmware files (`v0.31.0`: on the PCB the card runs over 4-bit SDIO).
+A working IDE hard disk and CD-ROM drive, serving disk images and ISOs from a microSD card, on the Olimex BB48 and the IDE Synth Bay PCB. The latest release is [v0.33.2](https://github.com/MaverickUK/HDDSynthPro/releases) (tagged on `main`, with the firmware files).
 
-- **The drive build** (`pio run -e bb48_drive`) serves `HDDSYNTH.IMG` from a microSD card, or whichever image `HDDSYNTH.INI` names ([docs/settings.md](docs/settings.md)). Without a card it serves a 64 MB welcome disk, with writes kept in RAM until reboot.
-- **Transfer modes:** PIO modes 0-3 and multiword DMA mode 2. Every register's value is ready as soon as it's addressed (early answers, on by default since 0.27.0), so controllers that ignore IORDY work too, and IORDY is let go after 23 µs with no strobe, which keeps 16-bit ISA cards safe; they also get IOCS16#. Experimental, on branch `register-table`: the register table (`register_table = on`, [docs/register-table.md](docs/register-table.md)), where the drive's PIO answers every register read itself within about 30 ns, so no read waits for its processor; the fastest PIO through USB adapters yet, not yet tried on retro PCs.
-- **Few settings needed:** the drive takes its CHS geometry from the image's own partition table (an image from an old drive boots with the BIOS on auto), and an image over 4 GB can be split across files on a FAT32 card (`tools/split_image.py`; 0.28.0, not yet tried on hardware). `HDDSYNTH.INI` mostly just names the image.
-- **Checked on the cable:** the drive watches its own bus, and checks every data word the host takes off it against what it meant to send.
-- **The board's LED** lights for drive activity, as a hard disk's would.
-- **Next:** the register table on retro PCs, then into a release; PCB rev 0.4 (ordered 10 Nov: IOCS16# for ISA cards, PSRAM, CD audio); the activity link to the HDD Synth ([docs/activity-link.md](docs/activity-link.md)).
+- **Transfer modes:** PIO 0-3 and multiword DMA 2, with block mode (READ/WRITE MULTIPLE, 8 sectors). Windows 98 runs on it with DMA.
+- **Settings:** few. `HDDSYNTH.INI` names the images ([docs/settings.md](docs/settings.md)); the geometry comes from the image's own partition table, so an image of an old drive boots with the BIOS on auto. Without a card it serves a small welcome disk.
+- **Bus programs:** early answers by default (every register ready the moment it's addressed, so controllers that ignore IORDY work); the data lane (`early_answers = off`), fastest on a PCI controller; the register table (experimental, `register_table = on`).
+- **Checked on the cable:** the drive watches its own bus and checks every data word the host takes off it.
+- **Next:** the SD card's high-speed mode (on branch `sd-50mhz`: reads from the card twice as fast), PCB rev 0.4 (ordered), the activity link to the HDD Synth ([docs/activity-link.md](docs/activity-link.md)).
 
 The listen-only build (`pio run -e bb48`) records every IDE register access it sees without driving any pin, for studying what a host does.
 
@@ -56,50 +55,44 @@ The listen-only build (`pio run -e bb48`) records every IDE register access it s
 
 ### Machines
 
-| Machine | IDE controller | Mode used | Firmware | What ran | Result |
-|---|---|---|---|---|---|
-| USB-IDE adapter (Norelsys NS1081; JMicron ID on Windows), from macOS and Windows | Adapter's own | PIO 0-3, multiword DMA 2 | 0.16-0.18 | Detection and re-detection, partitioning and formatting, the rig tests (slices 0-5), standby and wake, FLUSH CACHE, a card pulled and put back, soaks | 10-hour soaks clean in PIO mode 3 (28.9 GB, 49.5 million sectors checked on the cable, 0 bad) and in DMA (51.9 GB, 89.0 million sectors, 0 bad) |
-| ICL HRA 386 (BIOS 1.20, 1992) | 16-bit ISA IDE card | PIO 0 (the card's ISA timing) | 0.22.0, 0.23.15 | Boots MS-DOS 5 from a copy of its own CF card; CHKDSK, copying files. The benchmark image: `HDDBENCH` and a 14-minute soak | Works: the benchmark passed, and the soak checked about 400 MB with 0 bad sectors. Needs the IOCS16# wire (IDE pin 32 to GPIO 2); since 0.27.0 no settings (it boots on the defaults) |
-| Pentium 200 (Intel PIIX, Phoenix BIOS) | PIIX, on the motherboard | PIO 3 (no DMA offered yet) | 0.23.15 | Boots Windows 95 from a copy of its own 4 GB CF card, with Windows' own 32-bit disk driver (`ESDI_506.PDR`) | Works. 163,847 sectors checked on the cable, 0 bad. Needs `early_answers = on`: in its BIOS's timing the PIIX ignores IORDY ([docs/no-iordy.md](docs/no-iordy.md)) |
-| Evesham, on the IDE Synth Bay PCB | On the motherboard | PIO 3 | 0.31.0 (`pcb_drive`, `bb48_hdcd`) | The benchmark image over SDIO, on early answers and on the data lane, and a 15-minute soak; Doom from the CD-ROM (device 1) beside the 386's disk | Works: 2.39 million sectors checked on the cable in the soak, 0 bad; no read the PC didn't wait for, the CD's included (the BB48 had 26 on 4 Nov) |
-| Evesham, AMD Athlon XP 2000+, 1 GB, GeForce 2 GTS | On the motherboard | PIO 3 | 0.25.0-0.26.1 | Booted the benchmark image first time (`HDDBENCH`). Booted the ICL 386's MS-DOS 5 disk with the BIOS on auto, using `geometry = 756/13/51` (that drive's own geometry); ran Duke Nukem | Works: the benchmark passed, with 47,423 sectors checked on the cable and 0 bad. Needs `early_answers = on`: it didn't wait for IORDY on 115 reads under DOS |
+| Machine | IDE controller | What ran | Result |
+|---|---|---|---|
+| USB-IDE adapters (JMicron; Innostor), from macOS and Windows | The adapter's | The rig's tests, partitioning and formatting, standby and wake; 10-hour soaks in PIO and DMA | Clean: 138 million sectors checked on the cable in the soaks, none bad |
+| ICL HRA 386 (1992) | 16-bit ISA card, PIO 0 | MS-DOS 5 from a copy of its own disk; the benchmark and a soak | Works, with `isa = on` and the IOCS16# wire |
+| Pentium 200 | Intel PIIX, PIO 3 | Windows 95 from a copy of its own disk, with Windows' own disk driver | Works, with early answers (the PIIX ignores IORDY) |
+| Evesham, Athlon XP 2000+ | On the motherboard, PIO 3 and DMA | MS-DOS and the benchmark; Doom from the CD-ROM; Windows 98 SE installed from its CD and run with DMA | Works (Windows 98 needs `MaxPhysPage` with more than 512 MB of RAM) |
+| Amiga 1200 | Gayle | | Doesn't boot yet |
 
-What each machine needed, and the dead ends, are in [CHANGELOG.md](CHANGELOG.md) (0.19-0.23) and [docs/retro-test.md](docs/retro-test.md).
+What each machine needed, and the dead ends: [docs/retro-test.md](docs/retro-test.md).
 
 ### Speeds
 
-Measured from the host, in MB/s:
+The best figures so far, in MB/s:
 
-| Host | Disk | Mode | Read | Write |
-|---|---|---|---|---|
-| USB-IDE adapter | built-in test disk (RAM) | PIO 3 | 1.36 | 1.79 |
-| USB-IDE adapter | built-in test disk (RAM) | Multiword DMA 2 | 7.70 (1,100 random 4 KB reads/s) | 13.9 |
-| USB-IDE adapter | SD card image (SPI) | PIO 0 | 1.31 | 1.61 (write-behind on), 0.94 (off) |
-| USB-IDE adapter | SD card image (SPI) | PIO 3 | not measured | 1.65 (write-behind on), 1.05 (off) |
-| USB-IDE adapter | SD card image (SPI) | Multiword DMA 2 | not measured | 2.23 (write-behind on) |
-| ICL 386 (`DOSBENCH.IMG`, through the BIOS) | SD card image | PIO 0 | 1.51 (random: 1.09 ms a read) | 0.72 |
-| Pentium 200 | SD card image | PIO 3 | not measured yet | not measured yet |
-| Evesham Athlon XP 2000+ (`DOSBENCH.IMG`, through the BIOS) | SD card image | PIO 3 | 1.81 (random: 0.98 ms a read) | 1.28 |
-| USB-IDE adapter, the PCB | SD card image (SDIO) | PIO 3 | 1.20 | 1.02 |
-| USB-IDE adapter, the PCB | SD card image (SDIO) | Multiword DMA 2 | 6.2-6.6 (about 680 random 4 KB reads/s) | 5.8-7.2 |
-| Evesham, the PCB (`DOSBENCH.IMG`) | SD card image (SDIO) | PIO 3, early answers | 2.29 (random: 0.98 ms) | 1.25 |
-| Evesham, the PCB (`DOSBENCH.IMG`) | SD card image (SDIO) | PIO 3, data lane | **4.24** (random: 0.76 ms) | 2.03 |
+| Host | How | Read | Write |
+|---|---|---|---|
+| Evesham, MS-DOS benchmark | PIO 3, the data lane | **4.30** | 2.03 |
+| Evesham, MS-DOS benchmark | PIO 3, early answers, block mode | 2.27 | 1.32 |
+| ICL 386, MS-DOS benchmark | PIO 0, ISA card | 1.51 | 0.72 |
+| USB-IDE adapter | PIO 3, the register table | 1.69 (Innostor: 2.40) | 1.78 (Innostor: 2.65) |
+| USB-IDE adapter | Multiword DMA 2, an image on the card | 6.2-6.6 | 5.8-7.2 |
+| USB-IDE adapter | Multiword DMA 2, the built-in test disk (RAM) | 7.70 | 13.9 |
 
-**Limits on these figures:**
-- In PIO the adapter paces itself (about 1.1 µs a word, and 10 ms before each READ), so faster PIO modes can't speed it up; DMA avoids both.
-- The SD card over SPI caps image transfers at about 2 MB/s, whatever the mode; the PCB's SDIO lifts it to about 7. The Athlon's 1.81 MB/s reads on the BB48 were at the SPI limit; on the PCB, on the data lane, they're 4.24.
-- The retro PCs' figures come from the benchmark image (below), through the BIOS as DOS uses the disk. The Pentium's run was cut short when its power supply failed, which was unrelated to the drive.
+Windows 98 SE on the Evesham, copying 200 MB from the CD-ROM to the hard disk:
 
-Every step is in [docs/speed-log.md](docs/speed-log.md).
+| Mode | Time | Speed |
+|---|---|---|
+| PIO 3 | 4 min 20 s | 0.79 MB/s |
+| Multiword DMA 2 | 1 min 16 s | 2.4 MB/s |
+| Multiword DMA 2, the card in high-speed mode | **1 min 1 s** | **3.0 MB/s** |
+
+The SD card on its own (the PCB, 4-bit SDIO) reads 9.2 MB/s, or 17.7 in high-speed mode.
+
+Through a USB adapter in PIO, the adapter sets the pace whatever the mode. The retro PCs' DOS figures come from the benchmark image, through the BIOS. Every measurement, with its setup: [docs/speed-log.md](docs/speed-log.md).
 
 ### The benchmark image
 
-[tools/bench-image](tools/bench-image) builds `DOSBENCH.IMG`, a 128 MB disk that boots FreeDOS and runs `HDDBENCH`:
-- sequential reads and writes, and random reads, all through the BIOS;
-- checks of every sector it reads against a known pattern;
-- a soak that runs until a key is pressed.
-
-Each run does the same operations on every machine, so results compare directly between machines. It runs on a 386 or later.
+[tools/bench-image](tools/bench-image) builds `DOSBENCH.IMG`, a 128 MB disk that boots FreeDOS and runs `HDDBENCH`: sequential and random reads and writes through the BIOS, a check of every sector it reads, and a soak. It runs the same way on any 386 or later, so results compare directly between machines.
 
 ## Quick start
 
