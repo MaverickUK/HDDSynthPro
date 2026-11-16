@@ -339,6 +339,7 @@ void chooseDisk() {
         drive_config::parse(text, len, g_config);
         g_config_state = truncated ? "truncated" : "present";
     }
+    sd_card::setHighSpeed(g_config.sd_high_speed);  // before the image opens, so it's read at the new speed
     const char* why = "";
     if (drive_config::device0IsCdrom(g_config) && !benchRequested()) {
         chooseCdrom0();  // console `J` still serves the bench image, as a hard disk
@@ -546,7 +547,7 @@ void editConfig(const char* line) {
     }
     size_t n = drive_config::setKey(text, len, key, value, edited, drive_config::MAX_FILE);
     if (n == 0) {
-        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy, register_table, geometry), "
+        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy, register_table, sd_high_speed, geometry), "
                       "or the file would be too long\n", key);
         return;
     }

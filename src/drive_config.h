@@ -17,6 +17,7 @@
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
 //   register_table = off   # on: every read answered by the PIO from a table core 1 keeps (docs/register-table.md)
+//   sd_high_speed = off    # on: the card's data at 50 MHz over SDIO (the PCB), 25 if it won't (docs/performance.md, 3)
 //   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
 //   cdrom = HDDSYNTH.ISO   # the CD-ROM drive's disc (device0 or device1 = cdrom): an ISO or a CUE
 //                          # sheet; none: the test disc
@@ -86,6 +87,7 @@ constexpr uint8_t AUTO_PIO_MODE = 3;
 // long test (the DMA soak); `mode = mdma2` asks for it meanwhile.
 constexpr bool DEFAULT_DMA = false;
 constexpr bool DEFAULT_WRITE_BEHIND = true;
+constexpr bool DEFAULT_SD_HIGH_SPEED = false;  // until soaked on more than one card
 constexpr bool DEFAULT_READ_AHEAD = true;
 constexpr bool DEFAULT_ACTIVITY_LINK = true;
 // `isa = on`: release IORDY when it has been held for about 23 us
@@ -132,6 +134,7 @@ struct Config {
     bool early_answers = DEFAULT_EARLY_ANSWERS;
     bool iordy = DEFAULT_IORDY;
     bool register_table = DEFAULT_REGISTER_TABLE;
+    bool sd_high_speed = DEFAULT_SD_HIGH_SPEED;  // the card at 50 MHz (sdio::Card::switchHighSpeed)
     // `geometry = C/H/S`: the default geometry IDENTIFY reports, for an image
     // from an old drive whose partition table and boot code use its own (a
     // BIOS's auto-detect then picks it up); 0 cylinders: auto (16 x 63).

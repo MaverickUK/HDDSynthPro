@@ -172,6 +172,7 @@ void defaults(Config& out) {
     out.early_answers = DEFAULT_EARLY_ANSWERS;
     out.iordy = DEFAULT_IORDY;
     out.register_table = DEFAULT_REGISTER_TABLE;
+    out.sd_high_speed = DEFAULT_SD_HIGH_SPEED;
     out.geometry = Geometry{};
     out.seek_timing = seek_timing::Setting{};
     out.warning_count = 0;
@@ -193,6 +194,7 @@ const Switch SWITCHES[] = {
     {"early_answers", &Config::early_answers},
     {"iordy", &Config::iordy},
     {"register_table", &Config::register_table},
+    {"sd_high_speed", &Config::sd_high_speed},
 };
 constexpr size_t SWITCH_COUNT = sizeof SWITCHES / sizeof SWITCHES[0];
 
@@ -497,6 +499,11 @@ const char* defaultFile() {
            "# time for controllers that never wait). The hard disk only, without DMA;\r\n"
            "# isa = on overrides it. Not yet tried on retro PCs.\r\n"
            "register_table = off\r\n"
+           "\r\n"
+           "# Experimental: the SD card's data at 50 MHz instead of 25 (the PCB only,\r\n"
+           "# over SDIO), for faster reads from an image. The drive falls back to\r\n"
+           "# 25 MHz by itself if the card can't, or gives a bad read.\r\n"
+           "sd_high_speed = off\r\n"
            "\r\n"
            "# The CHS geometry the drive reports, which a BIOS's auto-detect picks up:\r\n"
            "# auto (the one the image's partition table was made with, else 16 heads\r\n"

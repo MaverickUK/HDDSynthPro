@@ -34,6 +34,7 @@ public:
         if (card_) card_->end();
     }
     SdCardInterface* card() { return card_; }
+    sdio::Card& sdioCard() { return sdio_; }
     uint8_t sdErrorCode() { return card_ ? card_->errorCode() : SD_CARD_ERROR_INVALID_CARD_CONFIG; }
     uint32_t sdErrorData() { return card_ ? card_->errorData() : 0; }
 
@@ -111,6 +112,18 @@ static bool (*s_lend)() = nullptr;
 static void (*s_reclaim)() = nullptr;
 #endif
 
+// HDDSYNTH.INI's sd_high_speed (setHighSpeed): the card's data at 50 MHz,
+// asked for again after each SDIO start (sdio::Card::begin always starts at
+// 25 MHz). The driver keeps a failure for good, so a card that couldn't, or
+// gave a bad read at 50 MHz, stays at 25 until a power cycle.
+static bool s_want_high_speed = false;
+
+static void applyHighSpeed() {
+#if SD_SDIO
+    if (s_want_high_speed && s_on_sdio && !s_parked) s_sd.sdioCard().switchHighSpeed();
+#endif
+}
+
 // Starts the card and mounts its volume (a fresh volume: whatever SdFat had
 // cached from a card before is dropped). The PCB build starts it over SDIO;
 // a card that's in but won't (most likely left in SPI mode, which only a
@@ -120,6 +133,7 @@ static bool startCard() {
     if (s_sdio_allowed) {
         if (s_sd.begin(SdioConfig(cfg::PIN_SD_CLK, cfg::PIN_SD_CMD, cfg::PIN_SD_DAT0, cfg::SD_SDIO_CLKDIV))) {
             s_on_sdio = true;
+            applyHighSpeed();
             return true;
         }
         s_sd.end();  // frees the PIO block SdFat's driver claimed, even when it failed
@@ -216,15 +230,31 @@ void printInfo(Print& out) {
     Lend lend;
     if (!mount(out) || !wakeIfSilent(out)) return;
     uint32_t sectors = s_sd.card()->sectorCount();
-    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s bus=%s\n", cardType(s_sd.card()->type()),
+    out.printf("SD ok type=%s size_mb=%lu fs=%s image=%s bench=%s config=%s bus=%s clock=%s\n", cardType(s_sd.card()->type()),
                (unsigned long)(sectors / 2048), fsType(s_sd.fatType()),
                imageState(IMAGE_NAME), imageState(BENCH_IMAGE_NAME),
-               s_sd.exists(drive_config::FILE_NAME) ? "present" : "none", busName());
+               s_sd.exists(drive_config::FILE_NAME) ? "present" : "none", busName(), clockName());
+#if SD_SDIO
+    if (s_want_high_speed && s_on_sdio && !s_sd.sdioCard().highSpeed())
+        out.printf("SD note: sd_high_speed = on, but the card runs at 25 MHz: %s\n", s_sd.sdioCard().highSpeedNote());
+#endif
 #if SD_SDIO
     if (s_sdio_refused)
         out.println("SD warning: the card didn't start over SDIO, so it runs over SPI (about a quarter of the speed). "
                     "It was most likely left in SPI mode: take it out and put it back for SDIO.");
 #endif
+}
+
+void setHighSpeed(bool on) {
+    s_want_high_speed = on;
+    applyHighSpeed();
+}
+
+const char* clockName() {
+#if SD_SDIO
+    if (s_on_sdio && !s_parked) return s_sd.sdioCard().highSpeed() ? "50mhz" : "25mhz";
+#endif
+    return s_on_sdio ? "25mhz" : "spi";
 }
 
 const char* busName() {

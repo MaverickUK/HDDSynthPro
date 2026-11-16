@@ -80,6 +80,19 @@ class Card : public SdCardInterface {
    * \return true for success or false for failure.
    */
   bool cardCMD6(uint32_t arg, uint8_t* status) final;
+  /** HDDSynthPro: SD high-speed mode, data at 50 MHz (docs/performance.md,
+   * item 3). After begin(), which always runs at 25 MHz (reads 20): CMD6
+   * checks then selects function group 1's high-speed function, and if the
+   * card confirms it, reads and writes move to 50 MHz; commands and the
+   * write response stay at 25 MHz, where their sampling has margin. A read
+   * CRC error or a rejected write in high-speed mode marks it failed for good
+   * (until a power cycle): the next begin() is at 25 MHz and this refuses.
+   * \return true if the card is now in high-speed mode. */
+  bool switchHighSpeed();
+  /** \return whether high-speed mode is on (since the last begin()). */
+  bool highSpeed() const { return m_highSpeed; }
+  /** \return why high-speed mode is off, or "" (switchHighSpeed). */
+  const char* highSpeedNote() const { return m_highSpeedNote; }
   /** Disable an SDIO card.
    * not implemented.
    */
@@ -268,7 +281,13 @@ class Card : public SdCardInterface {
   void setSdErrorCode(uint8_t code, uint32_t line) {
     m_errorCode = code;
     m_errorLine = line;
+    // HDDSynthPro: data that went wrong at 50 MHz ends high-speed mode.
+    if (m_highSpeed && (code == SD_CARD_ERROR_READ_CRC || code == SD_CARD_ERROR_WRITE_DATA)) {
+      m_highSpeedFailed = true;
+      m_highSpeedNote = code == SD_CARD_ERROR_READ_CRC ? "a read CRC error at 50 MHz" : "a write the card refused at 50 MHz";
+    }
   }
+  void patchHighSpeedPrograms(bool on);
   static const uint8_t IDLE_STATE = 0;
   static const uint8_t READ_STATE = 1;
   static const uint8_t WRITE_STATE = 2;
@@ -288,6 +307,10 @@ class Card : public SdCardInterface {
   sds_t m_sds;
 
   float m_clkDiv = 0;
+  float m_configDiv = 0;           // HDDSynthPro: begin()'s divider, to start again at 25 MHz
+  bool m_highSpeed = false;        // HDDSynthPro: switchHighSpeed() took
+  bool m_highSpeedFailed = false;  // kept over begin(): 25 MHz until a power cycle
+  const char* m_highSpeedNote = "not asked for";
   uint m_clkPin = 63u;   // PIN_SDIO_UNDEFINED;
   uint m_cmdPin = 63u;   // PIN_SDIO_UNDEFINED;
   uint m_dat0Pin = 63u;  // PIN_SDIO_UNDEFINED;

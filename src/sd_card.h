@@ -26,6 +26,12 @@ void printInfo(Print& out);
 // on SDIO is tried only if it was running, since its block may be in use.
 const char* busName();
 bool sdio();
+// HDDSYNTH.INI's sd_high_speed: the card's data at 50 MHz over SDIO, from
+// now on and after every restart of the card; the driver falls back to 25
+// MHz, for good, if the card can't or gives a bad read. clockName() says
+// which: "50mhz", "25mhz" (SDIO), or "spi".
+void setHighSpeed(bool on);
+const char* clockName();
 void sharePio();
 // The PCB: a disc put in at run time (console `M`) kept the PIO block the
 // diagnostics lent the parked card, so they're off until a restart.

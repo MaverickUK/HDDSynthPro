@@ -4,6 +4,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.34.0-dev.1] - 2026-11-16 (branch `sd-50mhz`)
+
+### Added
+- **The SD card at 50 MHz over SDIO** (the PCB; [docs/performance.md](docs/performance.md), item 3), behind a new setting, `sd_high_speed = on` (off by default). After the card starts (always at 25 MHz) and `HDDSYNTH.INI` is read, CMD6 checks for and selects the card's high-speed mode; if the card confirms, reads and writes move to 50 MHz and a first read (the SD status, CRC-checked) must pass. In high-speed mode the card changes its data just after the clock rises, so `rd_data` samples where it sees the clock fall (its two waits swapped) and `rd_clk` runs 2 + 2 cycles (it ran 3 + 2: reads were at 20 MHz, not 25), both patched in instruction memory. Commands and the write response stay at 25 MHz. A read CRC error or a refused write at 50 MHz ends high-speed mode until a power cycle: the card restarts at 25 MHz. `S` shows `clock=50mhz` or `25mhz`, and why when high speed was asked for but isn't on.
+
+### Not yet tested
+- On hardware: the switch, the sampling point at 50 MHz, the speed, and a card soak.
+
 ## [0.33.2] - 2026-11-16
 
 IDENTIFY's checksum kept right after SET MULTIPLE MODE (0.33.1's known limit; dev.1, below). Release notes in [docs/release-notes/v0.33.2.md](docs/release-notes/v0.33.2.md).

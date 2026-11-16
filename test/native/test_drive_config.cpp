@@ -288,6 +288,11 @@ TEST(test_config_isa) {
     CHECK(parsed("register_table = on\n").register_table);
     CHECK(!parsed(drive_config::defaultFile()).register_table);
     CHECK(drive_config::isKey("register_table"));
+    // sd_high_speed = on: the card at 50 MHz (docs/performance.md, item 3); off by default
+    CHECK(!parsed("").sd_high_speed);
+    CHECK(parsed("sd_high_speed = on\n").sd_high_speed);
+    CHECK(!parsed(drive_config::defaultFile()).sd_high_speed);
+    CHECK(drive_config::isKey("sd_high_speed"));
     CHECK(parsed(drive_config::defaultFile()).warning_count == 0);
     {  // a last line ending in a bare CR: setKey finishes it with LF only, and the value has no CR
         const char in[] = "isa = off\r\ncdrom = DOOM_SE.ISO\r";

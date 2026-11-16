@@ -225,6 +225,8 @@ bool Card::begin(PioSdioConfig sdioConfig) {
   m_highCapacity = false;
   m_initDone = false;
   m_version2 = false;
+  m_highSpeed = false;  // HDDSynthPro: always 25 MHz first (switchHighSpeed)
+  m_configDiv = sdioConfig.clkDiv();
   m_clkPin = sdioConfig.clkPin();
   m_cmdPin = sdioConfig.cmdPin();
   m_dat0Pin = sdioConfig.dat0Pin();
@@ -335,6 +337,72 @@ bool Card::begin(PioSdioConfig sdioConfig) {
   return true;
 fail:
   return false;
+}
+//------------------------------------------------------------------------------
+// HDDSynthPro: SD high-speed mode (sdio_card.h). In it the card changes its
+// data just after the clock's rising edge (up to 14 ns after; held 2.5 ns
+// past the next), so at 50 MHz the bits are steady only in the 8 ns before
+// a rising edge. rd_data sampled just after it saw the clock rise (right for
+// default speed, where the card changes data on the falling edge); in
+// high-speed mode it waits for the clock to rise, then to fall, and samples
+// there: the inputs reach the PIO through two synchroniser cycles, so that
+// is about 15-20 ns after the rising edge. rd_clk's low phase goes from 3
+// cycles to 2 (2 + 2 at 200 MHz: 50 MHz). Patched in instruction memory, so
+// no PIO space is used; begin() loads the programs afresh.
+void Card::patchHighSpeedPrograms(bool on) {
+  m_pio->instr_mem[m_rdDataOffset + rd_data_offset_wait0] = pio_encode_wait_gpio(on ? 1 : 0, m_clkPin);
+  m_pio->instr_mem[m_rdDataOffset + rd_data_offset_wait1] = pio_encode_wait_gpio(on ? 0 : 1, m_clkPin);
+  // out null, 1  side 0 [2] -> [1]: the delay is bits 8-10 (one side-set bit, optional).
+  uint16_t low = rd_clk_program_instructions[rd_clk_wrap_target];
+  m_pio->instr_mem[m_rdClkOffset + rd_clk_wrap_target] = on ? uint16_t((low & ~0x0700u) | (1u << 8)) : low;
+}
+
+bool Card::switchHighSpeed() {
+  if (m_highSpeed) return true;
+  if (m_highSpeedFailed) return false;  // the note says why
+  if (!m_initDone) {
+    m_highSpeedNote = "the card isn't started";
+    return false;
+  }
+  if (m_scr.sdSpec() < 1) {  // CMD6 came with SD 1.10
+    m_highSpeedNote = "the card predates CMD6 (SD 1.0)";
+    return false;
+  }
+  uint8_t status[64];
+  // Function group 1 (access mode) is bits 415-400 of the reply (supported)
+  // and 379-376 (selected): bytes 13 and 16, MSB first.
+  if (!cardCMD6(0x00FFFFF1, status)) {
+    m_highSpeedNote = "CMD6 (check) failed";
+    return false;
+  }
+  if (!(status[13] & 0x02)) {
+    m_highSpeedNote = "the card has no high-speed mode";
+    return false;
+  }
+  if (!cardCMD6(0x80FFFFF1, status) || (status[16] & 0x0F) != 1) {
+    m_highSpeedFailed = true;
+    m_highSpeedNote = "the card didn't switch to high speed";
+    begin(PioSdioConfig(m_clkPin, m_cmdPin, m_dat0Pin, m_configDiv));  // back to default speed (CMD0), at 25 MHz
+    return false;
+  }
+  // The card is in high-speed mode now (8 clocks on, which the next command
+  // gives). Data at 50 MHz: half the divider; commands and the write
+  // response keep theirs.
+  patchHighSpeedPrograms(true);
+  float fast = m_clkDiv / 2;
+  sm_config_set_clkdiv(&m_rdClkConfig, fast);
+  sm_config_set_clkdiv(&m_rdDataConfig, fast);
+  sm_config_set_clkdiv(&m_wrDataConfig, fast);
+  m_highSpeed = true;
+  // A read at the new speed, CRC-checked: the 64-byte SD status (ACMD13).
+  if (!cardAcmd(m_rca, ACMD13_R1, 0) || !readData(&m_sds, sizeof(m_sds))) {
+    m_highSpeedFailed = true;
+    m_highSpeedNote = "the first read at 50 MHz failed";
+    begin(PioSdioConfig(m_clkPin, m_cmdPin, m_dat0Pin, m_configDiv));  // back to default speed and the original programs
+    return false;
+  }
+  m_highSpeedNote = "";
+  return true;
 }
 //------------------------------------------------------------------------------
 bool Card::cardCMD6(uint32_t arg, uint8_t* status) {
