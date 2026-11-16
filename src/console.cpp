@@ -566,7 +566,7 @@ void handleConsole() {
                                "x short test (cable unplugged), b reboot to bootloader");
 #else
                 Serial.println("# h help, p pins, s stats, r reset read timings, t raw bus trace on/off, "
-                               "m mark, S SD card and settings, C create HDDSYNTH.INI, E set a setting, ! restart, "
+                               "m mark, S SD card and settings, G card read speed, C create HDDSYNTH.INI, E set a setting, ! restart, "
                                "I create SD image, K create bench image, "
                                "J serve the bench image or back (restarts), T serve the test disk or back (restarts), "
                                "L activity link, U link loopback test, V drive gone/back, W write-behind, O observer full/spot checks, "
@@ -665,6 +665,9 @@ void handleConsole() {
             case 'S':
                 sd_card::printInfo(Serial);
                 printConfig();
+                break;
+            case 'G':  // the card's read speed on the served image
+                sd_card::benchReads(Serial);
                 break;
             case 'C':  // create HDDSYNTH.INI with the defaults, if it isn't there
                 if (sd_card::configExists()) {

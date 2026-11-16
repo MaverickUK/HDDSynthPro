@@ -4,6 +4,25 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.34.0-dev.2] - 2026-11-16 (branch `sd-50mhz`)
+
+### Changed
+- **High-speed mode works, with reads at 40 MHz** (`sd_high_speed = on`, still off by default). After CMD6, the drive calibrates and keeps the middle of what works: commands at 12.5 MHz (divider 4; at the default divider their responses fail the CRC in high-speed mode), with the extra delay that works best (0-3 cycles); reads at 40 MHz (divider 1, rd_clk 3 + 2), sampled **after the falling edge** (rd_data's two waits swapped), with the delay that works best (0-2). Writes stay at 25 MHz. `S` shows `clock=high-speed` and the calibration (`SD high_speed commands=1111 extra=1 reads=111 delay=1`).
+- A read timeout in high-speed mode now ends it too (rd_data's loop slipping a clock shows as one), as a CRC error or a refused write did.
+
+### Added
+- **Console `G`**: the card's read speed on the served image, straight from the card (no host): 4 MB in 8-sector runs, 1 MB a sector at a time, and a checksum of the whole image (`CARDBENCH` line; up to half a minute). With the scratch `HDDBENCH.IMG` served (`J`) it also writes 4 MB of a pattern, times it and reads it back.
+
+### Found (on the PCB, 16 Nov; docs/speed-log.md)
+- Three bugs in dev.1's instruction patching made its first results meaningless: jmp targets not relocated (the SDK adds the load address), the write-only instruction memory read as 16-bit memory, and `wait gpio` missing the SDK's flip of bit 4 for a GPIO base of 16.
+- In high-speed mode the card changes its outputs just after the rising edge. Sampled after the rising edge, as at default speed, reads catch the previous bit's hold time: right at 40 MHz on this card only (the spec promises 2.5 ns) and wrong a step either side. Sampled after the falling edge, every delay rd_data's loop can keep up with reads right: 0-2 at 20 and 40 MHz, 0-1 at 50 MHz (longer delays miss clock edges). 50 MHz is left for later, with less margin.
+
+### Tested (the PCB, console `G`, no host)
+- Reads: **17.7 MB/s** in 8-sector runs and 17.3 a sector at a time, against 9.2 and 9.1 at default speed; the whole 245 MB image checksums the same at both clocks and on every pass. Writes 7.4-9.2 MB/s at both (the card's own pace), 4,096 runs of 8 read back right. The calibration passed every point on every boot tried.
+
+### Not yet tested
+- Through a host: the drive's own speed from an image with high-speed mode (the data lane and DMA are the paths it should lift), and a long card soak.
+
 ## [0.34.0-dev.1] - 2026-11-16 (branch `sd-50mhz`)
 
 ### Added

@@ -640,6 +640,82 @@ static bool mapAgrees(FsFile& f, uint32_t base, uint32_t sectors, size_t first_e
     return true;
 }
 
+// Console `G`: how fast the card reads the served image, straight from the
+// card (no host): 4 MB from its start in 8-sector runs (a READ MULTIPLE
+// block's fetch), then 1 MB a sector at a time, then a checksum of the whole
+// image. Only reads; core 0 is busy for up to half a minute, so not with a
+// host running.
+void benchReads(Print& out) {
+    if (!s_extent_count || s_served_size < 4u * 1024 * 1024) {
+        out.println("# G: needs an image of 4 MB or more served from the card");
+        return;
+    }
+    static_assert(scratch::SIZE >= 8 * 512);
+    uint8_t* buf = reinterpret_cast<uint8_t*>(scratch::a);
+    uint32_t sum = 2166136261u;  // of the runs' data: the same on every pass and at every clock
+    auto run = [&](uint32_t sectors, uint32_t per, bool add) -> uint32_t {  // kB/s, 0 on a failed read
+        uint32_t start = micros();
+        for (uint32_t s = 0; s < sectors; s += per) {
+            bool ok = mapped(uint64_t(s) * 512, per * 512, [&](Sector_t at, uint32_t done, uint32_t n) {
+                return s_sd.card()->readSectors(at, buf + done * 512, n);
+            });
+            if (!ok) return 0;
+            if (add)
+                for (uint32_t i = 0; i < per * 512; i += 4) {
+                    uint32_t w;
+                    memcpy(&w, buf + i, 4);
+                    sum = (sum ^ w) * 16777619u;  // FNV-1a's step: no pattern cancels out
+                }
+        }
+        uint32_t us = micros() - start;
+        return us ? uint32_t(uint64_t(sectors) * 512 * 1000 / us) : 0;
+    };
+    uint32_t runs = run(8192, 8, false);
+    uint32_t singles = run(2048, 1, false);
+    // The checksum over the whole image, in runs of 8 (a few seconds a
+    // hundred MB): the same at every clock and on every pass.
+    const uint32_t whole = uint32_t(s_served_size / 512) & ~7u;
+    uint32_t all = run(whole, 8, true);
+    out.printf("CARDBENCH clock=%s runs_of_8=%lu.%02lu MB/s single=%lu.%02lu MB/s whole_image=%lu MB %s sum=%08lx\n",
+               clockName(), (unsigned long)(runs / 1000), (unsigned long)(runs % 1000 / 10),
+               (unsigned long)(singles / 1000), (unsigned long)(singles % 1000 / 10), (unsigned long)(whole / 2048),
+               all ? "read" : "FAILED", (unsigned long)sum);
+    // Writes only to the scratch bench image (console `J`): 4 MB of a pattern
+    // from each sector's number and a seed, in runs of 8, then read back.
+    if (!s_open_name || strcasecmp(s_open_name, BENCH_IMAGE_NAME) != 0) return;
+    const uint32_t seed = micros();
+    auto fill = [&](uint32_t s) {
+        for (uint32_t k = 0; k < 8; ++k)
+            for (uint32_t i = 0; i < 512; i += 4) {
+                uint32_t w = (s + k) * 2654435761u ^ (i * 40503u) ^ seed;
+                memcpy(buf + k * 512 + i, &w, 4);
+            }
+    };
+    uint32_t start = micros();
+    bool wrote = true;
+    for (uint32_t s = 0; s < 8192 && wrote; s += 8) {
+        fill(s);
+        wrote = mapped(uint64_t(s) * 512, 8 * 512, [&](Sector_t at, uint32_t done, uint32_t n) {
+            return s_sd.card()->writeSectors(at, buf + done * 512, n);
+        });
+    }
+    wrote = wrote && s_sd.card()->syncDevice();
+    uint32_t us = micros() - start;
+    uint32_t wkb = wrote && us ? uint32_t(uint64_t(8192) * 512 * 1000 / us) : 0;
+    uint32_t bad = 0;
+    uint8_t* want = reinterpret_cast<uint8_t*>(scratch::b);  // free here: only `E` and a cue sheet use it
+    for (uint32_t s = 0; s < 8192 && wrote; s += 8) {
+        bool ok = mapped(uint64_t(s) * 512, 8 * 512, [&](Sector_t at, uint32_t done, uint32_t n) {
+            return s_sd.card()->readSectors(at, buf + done * 512, n);
+        });
+        memcpy(want, buf, 8 * 512);
+        fill(s);
+        if (!ok || memcmp(want, buf, 8 * 512) != 0) ++bad;
+    }
+    out.printf("CARDBENCH writes=%lu.%02lu MB/s %s, read back: %lu of 1024 runs wrong\n", (unsigned long)(wkb / 1000),
+               (unsigned long)(wkb % 1000 / 10), wrote ? "written" : "FAILED", (unsigned long)bad);
+}
+
 class SdImageFile : public ImageFile {
 public:
     uint64_t size() const override { return s_served_size; }

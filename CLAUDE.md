@@ -113,7 +113,8 @@ Console:
 - `A`: read-ahead off or on until a restart (`read_ahead` in `HDDSYNTH.INI`);
 - `m`: print a `MARK` timestamp (used by the activity rig test);
 - `S`: start the microSD card and report it, then `CONFIG` lines: the settings from `HDDSYNTH.INI`, the image served, why a configured image wasn't used, warnings (drive build; only reads);
-- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`device0`, `device1`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`, `seek_timing`, `isa`, `early_answers`, `iordy`, `register_table`, `geometry`), keeping the rest of the file; `!`: restart, to apply them (keeps `J` or `T`);
+- `G`: the card's read speed on the served image, straight from the card with no host (`CARDBENCH`; up to half a minute), and with `HDDBENCH.IMG` served (`J`) a 4 MB write and read-back;
+- `C`: create `HDDSYNTH.INI` with the defaults if it isn't there; `E` then `key = value` and Enter: set one setting (`device0`, `device1`, `mode`, `dma`, `write_behind`, `read_ahead`, `activity_link`, `seek_timing`, `isa`, `early_answers`, `iordy`, `register_table`, `sd_high_speed`, `geometry`), keeping the rest of the file; `!`: restart, to apply them (keeps `J` or `T`);
 - `I`: create `HDDSYNTH.IMG` (64 MB, zeros) on the card if it isn't there; reboot to use it;
 - `K`: create `HDDBENCH.IMG`, the scratch image for benchmarks that write; `J`: restart serving it, or back (kept in a watchdog scratch register, so a power cycle always returns to `HDDSYNTH.IMG`); `T`: restart serving the test disk, card or no card, or back (the same register, so `T` and `J` undo each other);
 - `L`: the activity link on or off until a restart (`activity_link` in `HDDSYNTH.INI`; `s` shows `link`, `link_sent` and `link_last`, `head_sent`/`head_replaced`/`head_last` for `$HDE`, and `hdm_valid`/`hdm_rejected`/`link_rx_errors` for the synth's `$HDM`);

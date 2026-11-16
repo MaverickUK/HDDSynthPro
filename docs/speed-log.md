@@ -199,6 +199,17 @@ Early answers on dev.10: 1.16 MB/s reads, 74.1 IOPS, 1.11 writes; the table 1.69
 
 The JMicron on the Mac, PIO 3, the test disk, `-m speed`: 38 bytes more in core 1's block, 24 functions moved, core 0's block and `.bss` 64 bytes on. The data lane 1.20-1.24 MB/s reads (327-343 µs a sector), 1.63 writes; early answers 1.16 / 74.4 / 1.11; the table 1.69 / 80.1 / 1.78. All within 0.33.1's figures: the first core 1 change since the data was aligned to the RAM banks, and nothing moved the speeds.
 
+## The card in high-speed mode (0.34.0-dev.2, 16 Nov 2026)
+
+The PCB, the card on SDIO, console `G` (the card alone, no host), `ICL386MB.IMG` and `HDDBENCH.IMG`:
+
+| Card mode | Read clock | Reads, 8-sector runs | Reads, single sectors | Writes, 8-sector runs |
+|---|---|---|---|---|
+| Default speed | 20 MHz | 9.20 MB/s | 9.10 MB/s | 8.4-9.2 MB/s |
+| High speed (`sd_high_speed = on`) | 40 MHz | **17.72 MB/s** | **17.35 MB/s** | 7.4-9.2 MB/s |
+
+The whole 245 MB image checksums the same at both. Sampling points in high-speed mode, 8 reads each (after the falling edge; delays in 5 ns PIO cycles at divider 1): 20 MHz 8/8/8/timeout/timeout, 40 MHz the same, 50 MHz 8/8/timeout/timeout/timeout. After the rising edge (the default-speed place), 40 MHz read right at delay 0 only (the old bit's hold time), CRC errors at 1-2.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

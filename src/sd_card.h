@@ -32,6 +32,8 @@ bool sdio();
 // which: "high-speed", "25mhz" (SDIO, default speed), or "spi".
 void setHighSpeed(bool on);
 const char* clockName();
+// Console `G`: the card's read speed on the served image (CARDBENCH line).
+void benchReads(Print& out);
 void sharePio();
 // The PCB: a disc put in at run time (console `M`) kept the PIO block the
 // diagnostics lent the parked card, so they're off until a restart.

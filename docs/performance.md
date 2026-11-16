@@ -70,7 +70,9 @@ PIO on a real PC runs at well under half of what its mode allows, and the card i
 
 **Then.** If it's clean on the Evesham and the Pentium 200: `DEFAULT_DMA` on. A host that won't use DMA just stays in PIO.
 
-### 3. The card at 50 MHz (SD high-speed mode)
+### 3. The card at 50 MHz (SD high-speed mode) (0.34.0-dev.2, branch `sd-50mhz`: reads at 40 MHz, nearly twice as fast)
+
+**As built.** `sd_high_speed = on` (off by default): CMD6 selects high-speed mode, then the drive calibrates commands (12.5 MHz) and reads (40 MHz, sampled after the falling edge) and keeps the middle of what works; any read CRC error, timeout or refused write ends it until a power cycle. The card reads 17.7 MB/s against 9.2 (console `G`, [speed-log.md](speed-log.md)). 50 MHz reads also work, at two of the delays rd_data's loop can keep up with, so with less margin: later. **Owed:** the drive's speed through a host (the data lane on the Evesham, DMA through the adapter) and a long card soak before it can be on by default.
 
 **Why.** The card is the ceiling for an image: 6.2-6.6 MB/s at 25 MHz. High-speed mode doubles the clock.
 
