@@ -80,33 +80,27 @@ class Card : public SdCardInterface {
    * \return true for success or false for failure.
    */
   bool cardCMD6(uint32_t arg, uint8_t* status) final;
-  /** HDDSynthPro: SD high-speed mode, data at 50 MHz (docs/performance.md,
-   * item 3). After begin(), which always runs at 25 MHz (reads 20): CMD6
-   * checks then selects function group 1's high-speed function, and if the
-   * card confirms it, reads and writes move to 50 MHz; commands and the
-   * write response stay at 25 MHz, where their sampling has margin. A read
-   * CRC error or a rejected write in high-speed mode marks it failed for good
-   * (until a power cycle): the next begin() is at 25 MHz and this refuses.
+  /** HDDSynthPro: SD high-speed mode, reads at 40 MHz (docs/performance.md,
+   * item 3). After begin(), which always runs at default speed (reads at 20
+   * MHz, commands and writes at 25): CMD6 checks then selects function group
+   * 1's high-speed function; if the card confirms it, the command and read
+   * timings are calibrated (sdio_card.cpp) and reads move to 40 MHz, commands
+   * to 12.5, writes staying at 25. A read CRC error or timeout, or a refused
+   * write, in high-speed mode marks it failed for good (until a power
+   * cycle): the next begin() is at default speed and this refuses.
    * \return true if the card is now in high-speed mode. */
   bool switchHighSpeed();
   /** \return whether high-speed mode is on (since the last begin()). */
   bool highSpeed() const { return m_highSpeed; }
   /** \return why high-speed mode is off, or "" (switchHighSpeed). */
   const char* highSpeedNote() const { return m_highSpeedNote; }
-  /** \return the last calibration: which of the 8 sampling points passed
-   * ('1') or failed ('0'), and the one chosen (-1: none), see
-   * patchHighSpeedPrograms. */
-  const char* highSpeedPhases() const { return m_phaseMap; }
-  int highSpeedPhase() const { return m_phase; }
-  /** \return each sampling point's error code (0: passed). */
-  const uint8_t* highSpeedErrors() const { return m_phaseErrors; }
-  const uint16_t* highSpeedErrorLines() const { return m_phaseLines; }
+  /** \return the last calibration (switchHighSpeed): which command delays
+   * (0-3 extra cycles) and read delays (0-2) worked ('1'), and the ones
+   * chosen (-1: none). */
   const char* highSpeedCommandMap() const { return m_cmdMap; }
-  uint highSpeedCommandExtra() const { return m_cmdExtra; }
-  const uint16_t* highSpeedCommandLines() const { return m_cmdLines; }
-  bool highSpeedControlPassed() const { return m_controlPass; }
-  int highSpeedBangBefore() const { return m_bangBefore; }
-  int highSpeedBangAfter() const { return m_bangAfter; }
+  const char* highSpeedReadMap() const { return m_readMap; }
+  int highSpeedCommandExtra() const { return m_cmdExtra; }
+  int highSpeedReadDelay() const { return m_readDelay; }
   /** Disable an SDIO card.
    * not implemented.
    */
@@ -295,16 +289,19 @@ class Card : public SdCardInterface {
   void setSdErrorCode(uint8_t code, uint32_t line) {
     m_errorCode = code;
     m_errorLine = line;
-    // HDDSynthPro: data that went wrong at 50 MHz ends high-speed mode.
-    if (m_highSpeed && (code == SD_CARD_ERROR_READ_CRC || code == SD_CARD_ERROR_WRITE_DATA)) {
+    // HDDSynthPro: data that went wrong in high-speed mode ends it.
+    // A timeout too: rd_data's loop slipping a clock edge shows as one.
+    if (m_highSpeed && (code == SD_CARD_ERROR_READ_CRC || code == SD_CARD_ERROR_READ_TIMEOUT ||
+                        code == SD_CARD_ERROR_WRITE_DATA)) {
       m_highSpeedFailed = true;
-      m_highSpeedNote = code == SD_CARD_ERROR_READ_CRC ? "a read CRC error at 50 MHz" : "a write the card refused at 50 MHz";
+      m_highSpeedNote = code == SD_CARD_ERROR_READ_CRC       ? "a read CRC error in high-speed mode"
+                        : code == SD_CARD_ERROR_READ_TIMEOUT ? "a read timed out in high-speed mode"
+                                                             : "a write the card refused in high-speed mode";
     }
   }
-  void patchHighSpeedPrograms(bool on, uint8_t phase = 0);
+  void patchHighSpeedPrograms(uint cmdExtra, uint readDelay, bool fall, bool clk50);
   bool highSpeedReadsPass();
   bool highSpeedCommandsPass();
-  int bitBangCmd13();
   static const uint8_t IDLE_STATE = 0;
   static const uint8_t READ_STATE = 1;
   static const uint8_t WRITE_STATE = 2;
@@ -328,16 +325,11 @@ class Card : public SdCardInterface {
   bool m_highSpeed = false;        // HDDSynthPro: switchHighSpeed() took
   bool m_highSpeedFailed = false;  // kept over begin(): 25 MHz until a power cycle
   const char* m_highSpeedNote = "not asked for";
-  char m_phaseMap[9] = "--------";
-  int m_phase = -1;
-  uint8_t m_phaseErrors[8] = {};
-  uint16_t m_phaseLines[8] = {};
-  uint32_t m_quietFailLine = 0;
-  uint m_cmdExtra = 0;               // cmd_rsp's extra cycles high in high-speed mode
   char m_cmdMap[5] = "----";
-  uint16_t m_cmdLines[4] = {};
-  bool m_controlPass = false;
-  int m_bangBefore = 9, m_bangAfter = 9;  // HDDSynthPro: a command that failed without an error code
+  char m_readMap[4] = "---";
+  int m_cmdExtra = -1;
+  int m_readDelay = -1;
+  // HDDSynthPro: a command that failed without an error code
   uint m_clkPin = 63u;   // PIN_SDIO_UNDEFINED;
   uint m_cmdPin = 63u;   // PIN_SDIO_UNDEFINED;
   uint m_dat0Pin = 63u;  // PIN_SDIO_UNDEFINED;

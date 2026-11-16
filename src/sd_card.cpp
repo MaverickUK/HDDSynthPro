@@ -112,10 +112,10 @@ static bool (*s_lend)() = nullptr;
 static void (*s_reclaim)() = nullptr;
 #endif
 
-// HDDSYNTH.INI's sd_high_speed (setHighSpeed): the card's data at 50 MHz,
+// HDDSYNTH.INI's sd_high_speed (setHighSpeed): the card's reads at 40 MHz,
 // asked for again after each SDIO start (sdio::Card::begin always starts at
 // 25 MHz). The driver keeps a failure for good, so a card that couldn't, or
-// gave a bad read at 50 MHz, stays at 25 until a power cycle.
+// gave a bad read in high-speed mode, stays at default speed until a power cycle.
 static bool s_want_high_speed = false;
 
 static void applyHighSpeed() {
@@ -238,20 +238,9 @@ void printInfo(Print& out) {
     if (s_want_high_speed && s_on_sdio && !s_sd.sdioCard().highSpeed())
         out.printf("SD note: sd_high_speed = on, but the card runs at 25 MHz: %s\n", s_sd.sdioCard().highSpeedNote());
     if (s_want_high_speed && s_on_sdio)
-    {
-        const uint8_t* e = s_sd.sdioCard().highSpeedErrors();
-        out.printf("SD high_speed phases=%s chosen=%d errors=%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x\n",
-                   s_sd.sdioCard().highSpeedPhases(), s_sd.sdioCard().highSpeedPhase(),
-                   e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7]);
-        const uint16_t* l = s_sd.sdioCard().highSpeedErrorLines();
-        out.printf("SD high_speed error_lines=%u,%u,%u,%u,%u,%u,%u,%u\n", l[0], l[1], l[2], l[3], l[4], l[5], l[6], l[7]);
-        const uint16_t* cl = s_sd.sdioCard().highSpeedCommandLines();
-        out.printf("SD high_speed commands=%s extra=%u lines=%u,%u,%u,%u control=%s\n", s_sd.sdioCard().highSpeedCommandMap(),
-                   s_sd.sdioCard().highSpeedCommandExtra(), cl[0], cl[1], cl[2], cl[3],
-                   s_sd.sdioCard().highSpeedControlPassed() ? "pass" : "fail");
-        out.printf("SD high_speed bitbang_cmd13 before=%d after=%d (1 good, 0 bad CRC, -1 none)\n",
-                   s_sd.sdioCard().highSpeedBangBefore(), s_sd.sdioCard().highSpeedBangAfter());
-    }
+        out.printf("SD high_speed commands=%s extra=%d reads=%s delay=%d\n", s_sd.sdioCard().highSpeedCommandMap(),
+                   s_sd.sdioCard().highSpeedCommandExtra(), s_sd.sdioCard().highSpeedReadMap(),
+                   s_sd.sdioCard().highSpeedReadDelay());
 #endif
 #if SD_SDIO
     if (s_sdio_refused)
@@ -267,7 +256,7 @@ void setHighSpeed(bool on) {
 
 const char* clockName() {
 #if SD_SDIO
-    if (s_on_sdio && !s_parked) return s_sd.sdioCard().highSpeed() ? "50mhz" : "25mhz";
+    if (s_on_sdio && !s_parked) return s_sd.sdioCard().highSpeed() ? "high-speed" : "25mhz";
 #endif
     return s_on_sdio ? "25mhz" : "spi";
 }
