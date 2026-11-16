@@ -159,6 +159,22 @@ On the PCB through the JMicron adapter **on the Mac**, PIO 3, the test disk, `-m
 
 No slowdown: early answers agree to the digit, and the data lane's single runs vary by about 3%. The core 1 layout as recorded on the branch (`check_core1_layout.py pcb_drive`: 78 functions, none moved).
 
+## The performance branch: block buffers and PIO writes (15-16 Nov 2026)
+
+The PCB through the JMicron adapter on the Mac, PIO 3, the test disk, `-m speed`, the same setup as the table above. 0.33.1-dev.8 (READ/WRITE MULTIPLE, two 8-sector block buffers) against 0.33.0 and against dev.9 (the buffers moved to the end of `ata::Device`):
+
+| Bus program | Firmware | Seq read | Per sector | Random 4 KB | Seq write | Write command (128 sectors) |
+|---|---|---|---|---|---|---|
+| Early answers | 0.33.0 | 1.17 MB/s | 348-349 µs | 74.4 | 1.11 MB/s | 58.6 ms |
+| Early answers | dev.8 (three runs) | 1.15 | 355-356 | 73.9-74.0 | 1.01 | 64.4-64.5 ms |
+| Early answers | dev.9 (two runs) | 1.16-1.17 | 350 | 74.1-74.4 | 1.11 | 58.6 ms |
+| Data lane | 0.33.0 | 1.20-1.24 | 326-341 | 78.4-78.7 | 1.64-1.65 | 39.5-39.7 ms |
+| Data lane | dev.8 (two runs) | 1.23-1.27 | 319-325 | 77.9-78.3 | 1.55 | 41.9 ms |
+| Data lane | dev.9 (two runs) | 1.23-1.25 | 321-326 | 78.1-78.4 | 1.63-1.64 | 39.8-39.9 ms |
+| Register table | 0.33.0, dev.8, dev.9 | 1.69 | 211-212 | 80.1 | 1.78-1.79 | 36.4-36.5 ms |
+
+What it showed: with 8 KB of buffers ahead of the device's other members, each core 1 function on the device path needs an extra instruction to reach them (Thumb-2 loads reach 4 KB from a base), which cost PIO writes 9% on early answers and 6% on the data lane, where core 1 handles each data word; the table, whose data goes by DMA, didn't move. With the buffers last, both are back to 0.33.0's figures. Layout recorded after these runs.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

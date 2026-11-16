@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.1-dev.9] - 2026-11-16 (branch `performance`)
+
+### Fixed
+- **PIO writes back to 0.33.0's speed.** dev.8's 8 KB block buffers sat ahead of `ata::Device`'s other members, more than 4 KB from `this`, so every core 1 call on the device path first built the address (`add.w ..., #8192`). They are now the class's last member; each such function is 4 bytes shorter.
+
+### Tested (16 Nov, the PCB, the JMicron on the Mac, PIO 3, the test disk; `docs/speed-log.md`)
+- `-m speed`, twice each: early answers writes 1.11 MB/s (dev.8 1.01, 0.33.0 1.11), reads 1.16-1.17; the data lane writes 1.63-1.64 (dev.8 1.55, 0.33.0 1.64-1.65), reads 1.23-1.25; the table 1.69 / 80.1 / 1.79, unchanged.
+- Slices 3-4 on early answers and the table (dev.8 passed them on all three bus programs, 15 Nov). Core 1's layout recorded.
+- READ/WRITE MULTIPLE themselves are still untried on hardware: the USB adapters never send them (the Evesham with block mode on is next).
+
 ## [0.33.1-dev.8] - 2026-11-15 (branch `performance`, from `review-fixes`)
 
 (0.33.0 was released from `main` while this branch was open and is merged in here: what the branch first called 0.33.0-dev.2 to dev.9 are 0.33.1-dev.1 to dev.8.)

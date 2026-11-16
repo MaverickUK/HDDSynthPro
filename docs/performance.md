@@ -1,6 +1,6 @@
 # Performance roadmap: faster reads and writes on rev 0.3
 
-**Status (15 Nov 2026): a plan, from a review at the desk. On branch `performance`: item 1 is written and host-tested (0.33.1-dev.8), item 2 is a test plan needing no code; nothing here is measured yet.** Measurements go in [speed-log.md](speed-log.md) as they are made.
+**Status (15 Nov 2026): a plan, from a review at the desk. On branch `performance`: item 1 is written, host-tested and passes the USB adapter's tests with no slowdown (0.33.1-dev.9, 16 Nov), not yet tried on a retro PC, item 2 is a test plan needing no code.** Measurements go in [speed-log.md](speed-log.md) as they are made.
 
 Rev 0.4 doesn't make the bus faster: it adds the PSRAM, which makes large caches possible. Everything below except the large form of items 4 and 5 can be done and measured on rev 0.3.
 
@@ -34,6 +34,8 @@ PIO on a real PC runs at well under half of what its mode allows, and the card i
 **How to prove it.** Native tests for the device. On the Evesham: `DOSBENCH.IMG` before and after, on the data lane and on early answers; the BIOS's "block mode" setting on; `CMD c6` in the trace with the count it asked for, then `c4`/`c5`. Slices 3-4 and a soak through the adapter show nothing else changed (it never sends them).
 
 **Risk.** It changes the device core 1 runs, the most-soaked code in the tree, and moves core 1's layout: benchmark and record it.
+
+**On the rig (0.33.1-dev.9, 16 Nov).** Slices 3-4 pass on every bus program through the JMicron (which never sends the new commands). dev.8 slowed PIO writes 6-9%, because the block buffers sat ahead of the device's other members; dev.9 puts them last and is back to 0.33.0's speeds ([speed-log.md](speed-log.md)). Still owed: the Evesham with block mode on.
 
 **As built (0.33.1-dev.8).** `MAX_MULTIPLE` is 8 (identify.h): 8.8 KB more RAM, 96.9% used. Going to 16 needs 16 KB more, and the bus observer's `EXPECT_SLOTS` (16: a block with the host and one read ahead) doubled with it. Core 0 still makes one card call per sector inside the block (item 4 makes it one per block). In table mode a block of 8 is 2,048 data writes against the write ring's 1,024 samples, drained as it fills.
 
