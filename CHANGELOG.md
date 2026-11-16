@@ -4,6 +4,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.33.1] - 2026-11-16
+
+READ MULTIPLE, WRITE MULTIPLE and SET MULTIPLE MODE in blocks of up to 8 sectors ([docs/performance.md](docs/performance.md), item 1), not offered on the data lane; core 0's per-sector code in RAM and the data aligned to the RAM banks, so flash changes no longer move the data lane's speed; the bus observer's false `BUSERR` on images fixed; the console, disks and link code out of `main.cpp`. Branch `performance` (dev.1-11, below); release notes in [docs/release-notes/v0.33.1.md](docs/release-notes/v0.33.1.md).
+
+- **On the Evesham** (PCB, PIO 3, the card on SDIO): `DOSBENCH.IMG` on early answers with blocks of 8, 2.27 MB/s reads and 1.32 writes against 0.33.0's 1.72 and 1.23; on the data lane (no blocks offered) 4.12 and 2.00 against 3.96 and 2.03; the usual setup (`ICL386MB.IMG`, Doom's CD-ROM) clean on `ide_bus` with blocks.
+- **Through the JMicron (Mac):** slices 3-4 on every bus program, `-m speed` as 0.33.0, an hour's soak with full bus checks (2.24 GB, 3.8 million sectors on the cable, none bad).
+- **Known:** IDENTIFY's checksum is wrong after SET MULTIPLE MODE (word 59 changes without word 255); slices 1-2 by `V` still owed from the Windows rig.
+
 ## [0.33.1-dev.11] - 2026-11-16 (branch `performance`)
 
 ### Fixed
