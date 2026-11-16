@@ -19,7 +19,7 @@ HOST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "host")
 sys.path.insert(0, HOST)
 from hddproto.drive_log import DriveLog  # noqa: E402
 
-DATA_COMMANDS = {"READ_SECTORS", "READ_SECTORS_NR", "WRITE_SECTORS", "WRITE_SECTORS_NR", "READ_MULTIPLE",
+DATA_COMMANDS = {"READ_SECTORS", "READ_SECTORS_NR", "WRITE_SECTORS", "WRITE_SECTORS_NR", "READ_MULTIPLE", "WRITE_MULTIPLE",
                  "READ_DMA", "READ_DMA_NR", "WRITE_DMA", "WRITE_DMA_NR", "READ_VERIFY", "READ_VERIFY_NR"}
 ALERTS = ("NOIORDY", "BUSERR", "STUCK", "SLOWREAD", "CARD", "ABSENT", "AUTOBUS", "EARLYDATA")
 SUMMARY_FIELDS = ("iordy_ignored", "iordy_max_ns", "iordy_max_reg", "bus_sectors", "bus_bad", "bus_gaps",
