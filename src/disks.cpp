@@ -365,6 +365,7 @@ void chooseDisk() {
     g_mode_asked.store(uint8_t(g_config.mode), std::memory_order_relaxed);  // core 1 decides DMA from it
     // The on/off settings (the console's W, A and L change them until a restart).
     g_dma_auto.store(g_config.dma);
+    g_dma_when_learned.store(g_config.dma_auto);
     g_write_behind.store(g_config.write_behind);
     g_read_ahead.store(g_config.read_ahead);
     g_link_on = g_config.activity_link;
@@ -617,11 +618,16 @@ void printConfig() {
         Serial.printf("CONFIG device1 not used: %s\n", g_device1_note);
     }
     Serial.printf("CONFIG dmarq=%s dma=%s write_behind=%s read_ahead=%s activity_link=%s isa=%s early_answers=%s iordy=%s register_table=%s\n",
-                  g_dmarq_wired.load() ? "wired" : "absent", drive_config::onOff(g_config.dma),
+                  g_dmarq_wired.load() ? "wired" : "absent", g_config.dma_auto ? "auto" : drive_config::onOff(g_config.dma),
                   drive_config::onOff(g_config.write_behind), drive_config::onOff(g_config.read_ahead),
                   drive_config::onOff(g_config.activity_link), drive_config::onOff(g_config.isa),
                   drive_config::onOff(g_config.early_answers), drive_config::onOff(g_config.iordy),
                   drive_config::onOff(g_config.register_table));
+    if (g_config.dma_auto && !g_bus_auto.load())
+        Serial.printf("CONFIG dma = auto: no DMA offered, as it needs bus = auto (or console P a) to learn the PC\n");
+    else if (g_config.dma_auto)
+        Serial.printf("CONFIG dma = auto: %s\n", g_dma_added.load() ? "multiword DMA offered, the PC learned"
+                                                 : "offered once bus = auto has learned the PC");
     if (g_config.register_table && !g_table.load()) {
         const char* why = busRequested() ? "the console's bus program (P) is used instead"
                           : (g_device0_cdrom || g_device1_cdrom) ? "a CD-ROM is configured, so ide_bus runs"

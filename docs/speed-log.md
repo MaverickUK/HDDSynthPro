@@ -228,6 +228,22 @@ The PCB through the JMicron (Mac), the generated disk, `-m speed` (sequential re
 
 Within the run-to-run spread seen before (about 2-5%). The switch stress test (console `Z`, the program flipped every second under slices 3-4): 1,040 switches, none lost a command; dev.4 lost one in about 200.
 
+## `dma = auto`, and auto's code out of core 1's hot path (0.35.0-dev.6, 17 Nov 2026)
+
+The JMicron (Mac), the generated disk, `-m speed`, the data lane (`P l`) unless said; two runs each (sequential read / random 4 KB / sequential write, and ms per 64 KB write in the drive):
+
+| Build | Lane |
+|---|---|
+| 0.34.0, flashed again the same day | 1.29, 1.25 / 77.9 / 1.63 (39.9 ms) |
+| dev.6 as first built (the patch check in `runDrive`) | 1.25, 1.20, 1.20 / 77.0-77.7 / 1.59 (40.9 ms) |
+| without the per-pass barrier | 1.24, 1.20 / 77.5 / 1.59 (40.9 ms) |
+| `switchProgram` out of the hot block (`CORE1_RAM_RARE`) | 1.25, 1.20 / 77.7-78.1 / 1.59 (40.9 ms) |
+| the quiet timer per pass, not per access | 1.25, 1.20 / 77.7-77.8 / 1.60 (40.7 ms) |
+| the probe's hold out of line | 1.25, 1.21 / 77.4-77.9 / 1.60 (40.6 ms) |
+| `busAutoStep` out of line (as committed) | 1.25, 1.21 / 77.8-78.0 / 1.60 (40.6 ms) |
+
+Early answers on dev.6: 1.15 / 73.9 / 1.08 (as 0.34.0). Multiword DMA 2 offered by `dma = auto`, after a replug: 6.80 MB/s reads, 801.4 IOPS, 13.19 writes (0.34.0 with `dma = on`: 6.83 and 12.29). The lane's reads on this rig have ranged 1.20-1.36 run to run since 0.32.3, so the read figures are within noise; the writes are steady to 0.1 ms and 0.7 ms a command is still unexplained (core 1's block is 176 bytes larger than 0.34.0's; `serviceOnce` and `serveOther` about 20 bytes each).
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

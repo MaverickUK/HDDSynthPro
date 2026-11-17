@@ -91,6 +91,22 @@ void setWriteCacheEnabled(uint16_t words[256], bool on);
 // setCurrentGeometry does (0.33.1 left it wrong).
 void setMultipleSectors(uint16_t words[256], uint8_t sectors);
 
+// IDENTIFY's words that differ between two builds of it, ignoring the
+// integrity word (255): bus = auto adding multiword DMA once the host is
+// learned (dma = auto) works the change out on core 0 (identifyDiff, from two
+// buildIdentify() results), and core 1 applies it to the words a device has
+// been answering with (applyPatch), keeping what the host has set since
+// (geometry, multiple mode, write cache). False if more than MAX words differ.
+struct IdentifyPatch {
+    static constexpr unsigned MAX = 8;
+    uint8_t count = 0;
+    uint8_t word[MAX] = {};
+    uint16_t value[MAX] = {};
+};
+bool identifyDiff(const uint16_t from[256], const uint16_t to[256], IdentifyPatch& out);
+// Sets the patch's words and fixes up the checksum, as setCurrentGeometry does.
+void applyPatch(uint16_t words[256], const IdentifyPatch& patch);
+
 // READ/WRITE MULTIPLE not offered (word 47 = 0, as before 0.33.1), checksum
 // fixed: a BIOS that sees it moves one sector per interrupt. Run from flash at
 // start-up (ata::Device's constructor), never by core 1 per access.

@@ -159,6 +159,11 @@ public:
     // Whether IDENTIFY offers READ/WRITE MULTIPLE (word 47), for devices made
     // after the call (start-up: core 1's setup1, before loop1 makes them).
     static void offerMultiple(bool on);
+    // bus = auto with dma = auto (core 1, between commands): multiword DMA up
+    // to `mdma_mode` offered from now on, IDENTIFY patched to say so (each
+    // unit's patch from identifyDiff, worked out on core 0). Run once, from
+    // flash.
+    void offerDma(uint8_t mdma_mode, const IdentifyPatch& unit0, const IdentifyPatch& unit1);
     // `device1`: device 1's identity, or nullptr for device 0 alone.
     explicit Device(const IdentifyInfo& info, const IdentifyInfo* device1 = nullptr);
     bool hasDevice1() const { return has_device1_; }

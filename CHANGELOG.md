@@ -4,6 +4,19 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0-dev.6] - 2026-11-17 (branch `auto-config`)
+
+### Added
+- **`dma = auto`: multiword DMA as part of `bus = auto`** ([docs/auto-bus.md](docs/auto-bus.md)). Once the advisor first says `lane (ok)`, the PC isn't an ISA card, so core 0 stops the programs in the third PIO block (the diagnostics, or IOCS16# and the read timing probe, as `pio_plan` has them), starts `ide_dma`, and works out which IDENTIFY words change (`identifyDiff`); core 1 patches them between commands with the checksum (`ata::Device::offerDma`), keeping block mode and the write cache as the host set them. IDENTIFY offers multiword DMA 2 from the next time it's read (Windows' driver reads it again after the BIOS). The PC stays learned until power-off (`autobus_why=learned`): after a reset, early answers through detection, then the lane, with no evidence asked, since the diagnostics no longer run. `AUTODMA` line; `S`: `dma = auto: ...`; `s`: `dma_auto=off|waiting|offered`. `dma = on` and `off` as before; `dma = auto` without `bus = auto` offers none, and `S` says so.
+
+### Changed
+- Core 1's rarely run code is out of its hot block: `CORE1_RAM_RARE` (RAM after `.data`) for the program switch, the IORDY probe's hold and `bus = auto`'s step (`busAutoStep`), and the quiet timer reads the cycle counter per pass, not per access (outside early answers). Inside it, they slowed the data lane's writes 2.5%.
+
+### Tested
+- Through the JMicron (Mac), the build as committed: the switch stress test (`Z`, slices 3-4, three runs), 1,019 switches, all passed. `bus = auto` with `dma = auto` learned the host (first build: after 1,126 sectors and 221 long reads), offered DMA and moved to the lane; slices 3-4 passed. After a replug the adapter used READ/WRITE DMA: slices 3-4 and `-m speed` passed, 6.80 MB/s reads, 801 random 4 KB reads a second, 13.19 MB/s writes (as committed: 6.80, 806, 13.25), `bus_bad` 0.
+- **Known:** on the lane in PIO, writes are 1.7% slower than 0.34.0 (40.6 against 39.9 ms a 64 KB write, 0.34.0 measured again the same day) and reads 2-3%; early answers as 0.34.0. To be bisected (dev.1, dev.2, dev.3).
+- Item 2 of the plan: the lane serves READ/WRITE MULTIPLE right (0.33.1-dev.9 on the Evesham), so a host that turned block mode on under early answers keeps it after a switch, about 15% slower on the lane than without blocks. No change.
+
 ## [0.35.0-dev.5] - 2026-11-17 (branch `auto-config`)
 
 ### Fixed

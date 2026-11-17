@@ -12,6 +12,7 @@ const char* whyName(Why why) {
         case Why::NoProof: return "no-proof";     // too few long holds to show it waits
         case Why::Detecting: return "detecting";  // too soon after the reset
         case Why::Ok: return "ok";
+        case Why::Learned: return "learned";      // DMA added for a learned host: past detection is enough
     }
     return "?";
 }
@@ -40,6 +41,8 @@ bool Advisor::update(const Counters& now, uint32_t now_ms) {
     Why why;
     if (now.cdrom)
         why = Why::Cdrom;
+    else if (now.dma_by_auto && learned_)
+        why = sectors_ < config_.min_sectors ? Why::Detecting : Why::Learned;
     else if (now.dma_offered)
         why = Why::Dma;
     else if (caught_)
@@ -52,7 +55,8 @@ bool Advisor::update(const Counters& now, uint32_t now_ms) {
         why = Why::Detecting;
     else
         why = Why::Ok;
-    Choice choice = why == Why::Ok ? Choice::Lane : Choice::Early;
+    if (why == Why::Ok) learned_ = true;
+    Choice choice = why == Why::Ok || why == Why::Learned ? Choice::Lane : Choice::Early;
     bool changed = choice != choice_ || (choice == Choice::Early && why != why_ &&
                                          (why == Why::Isa || why == Why::NotWaited));
     if (choice != choice_) changed_ms_ = now_ms;

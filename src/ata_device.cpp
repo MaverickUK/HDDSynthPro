@@ -30,6 +30,14 @@ bool Device::s_no_multiple = false;
 
 void Device::offerMultiple(bool on) { s_no_multiple = !on; }
 
+void Device::offerDma(uint8_t mdma_mode, const IdentifyPatch& unit0, const IdentifyPatch& unit1) {
+    for (unsigned n = 0; n < (has_device1_ ? 2u : 1u); ++n) {
+        Unit& unit = units_[n];
+        unit.info.mdma_mode = mdma_mode;
+        applyPatch(unit.identify, n == 0 ? unit0 : unit1);
+    }
+}
+
 // The host changed the Device register: which unit answers from now on.
 CORE1_RAM void Device::deviceWritten() {
     uint8_t unit = (device_ & DEV_DEV) ? 1 : 0;

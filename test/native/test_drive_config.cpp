@@ -306,6 +306,24 @@ TEST(test_config_isa) {
     }
     CHECK(drive_config::isKey("bus"));
     CHECK(std::strcmp(drive_config::busName(drive_config::Bus::Auto), "auto") == 0);
+    // dma = auto: offered once bus = auto has learned the host (0.35.0)
+    CHECK(!parsed("").dma_auto);
+    {
+        Config c = parsed("dma = auto\n");
+        CHECK(c.dma_auto && !c.dma && c.warning_count == 0);
+    }
+    {
+        Config c = parsed("dma = auto\ndma = on\n");  // the last counts
+        CHECK(!c.dma_auto && c.dma && c.warning_count == 1);
+    }
+    {
+        Config c = parsed("dma = on\ndma = AUTO\n");
+        CHECK(c.dma_auto && !c.dma && c.warning_count == 1);
+    }
+    {
+        Config c = parsed("dma = sometimes\n");
+        CHECK(!c.dma_auto && !c.dma && c.warning_count == 1);
+    }
     CHECK(parsed(drive_config::defaultFile()).warning_count == 0);
     {  // a last line ending in a bare CR: setKey finishes it with LF only, and the value has no CR
         const char in[] = "isa = off\r\ncdrom = DOOM_SE.ISO\r";

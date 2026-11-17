@@ -101,6 +101,28 @@ CORE1_RAM void setWriteCacheEnabled(uint16_t w[256], bool on) {
     w[255] = uint16_t((checksum << 8) | 0xA5);
 }
 
+bool identifyDiff(const uint16_t from[256], const uint16_t to[256], IdentifyPatch& out) {
+    out = IdentifyPatch{};
+    for (unsigned i = 0; i < 255; ++i) {
+        if (from[i] == to[i]) continue;
+        if (out.count == IdentifyPatch::MAX) return false;
+        out.word[out.count] = uint8_t(i);
+        out.value[out.count] = to[i];
+        ++out.count;
+    }
+    return true;
+}
+
+void applyPatch(uint16_t w[256], const IdentifyPatch& patch) {
+    uint8_t checksum = uint8_t(w[255] >> 8);
+    for (unsigned k = 0; k < patch.count && k < IdentifyPatch::MAX; ++k) {
+        uint16_t& word = w[patch.word[k]];
+        checksum = uint8_t(checksum + byteSum(word) - byteSum(patch.value[k]));
+        word = patch.value[k];
+    }
+    w[255] = uint16_t((checksum << 8) | 0xA5);
+}
+
 void offerNoMultiple(uint16_t w[256]) {
     uint8_t checksum = uint8_t(uint8_t(w[255] >> 8) + byteSum(w[47]));
     w[47] = 0x0000;

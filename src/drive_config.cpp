@@ -173,6 +173,7 @@ void defaults(Config& out) {
     out.mode = Mode::Auto;
     out.bus = Bus::Settings;
     out.dma = DEFAULT_DMA;
+    out.dma_auto = false;
     out.write_behind = DEFAULT_WRITE_BEHIND;
     out.read_ahead = DEFAULT_READ_AHEAD;
     out.activity_link = DEFAULT_ACTIVITY_LINK;
@@ -258,7 +259,7 @@ void parse(const char* text, size_t len, Config& out) {
     defaults(out);
     // `image` is device0's old name: device0 counts over it, whichever comes first.
     bool seen_device0 = false, seen_image = false, seen_device1 = false, seen_mode = false,
-         seen_seek_timing = false, seen_geometry = false, seen_cdrom = false;
+         seen_seek_timing = false, seen_geometry = false, seen_cdrom = false, seen_dma = false;
     auto setDevice0 = [&](int n, const Line& l) {
         if (!validImageName(l.value)) {
             warn(out, "line %d: device0 '%.*s' isn't a file name in the root folder; ignored%s", n, l.value);
@@ -347,8 +348,30 @@ void parse(const char* text, size_t len, Config& out) {
                 out.geometry = Geometry{};
             }
         } else {
+            // dma = auto: offered once bus = auto has learned the host (not an ISA
+            // card); on or off as the other switches
+            const bool dma_key = equalsNoCase(l.key, "dma");
+            if (dma_key && equalsNoCase(l.value, "auto")) {
+                if (seen_dma) warn(out, "line %d: '%.*s' is set again; this one counts%s", n, l.key);
+                seen_dma = true;
+                out.dma = false;
+                out.dma_auto = true;
+                return;
+            }
             for (size_t i = 0; i < SWITCH_COUNT; ++i) {
                 if (!equalsNoCase(l.key, SWITCHES[i].key)) continue;
+                if (dma_key) {
+                    if (seen_dma) warn(out, "line %d: '%.*s' is set again; this one counts%s", n, l.key);
+                    seen_dma = true;
+                    bool on;
+                    if (!parseOnOff(l.value, on)) {
+                        warn(out, "line %d: dma '%.*s' isn't on, off or auto; ignored%s", n, l.value);
+                        return;
+                    }
+                    out.dma = on;
+                    out.dma_auto = false;
+                    return;
+                }
                 if (seen_switch[i]) warn(out, "line %d: '%.*s' is set again; this one counts%s", n, l.key);
                 seen_switch[i] = true;
                 bool on;
@@ -480,7 +503,9 @@ const char* defaultFile() {
            "# DMA needs DMARQ wired (IDE pin 21); without it the drive offers PIO.\r\n"
            "mode = auto\r\n"
            "\r\n"
-           "# Whether auto may offer multiword DMA, where DMARQ is wired: on or off.\r\n"
+           "# Whether auto may offer multiword DMA, where DMARQ is wired: on, off, or\r\n"
+           "# auto (with bus = auto: offered once the drive has learned the PC isn't\r\n"
+           "# using an ISA card, to Windows' driver when it asks again).\r\n"
            "dma = off\r\n"
            "\r\n"
            "# Acknowledge each written sector while it's being stored: about 50%\r\n"

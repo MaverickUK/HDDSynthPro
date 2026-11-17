@@ -8,7 +8,8 @@
 //   device1 = GAMES        # a second drive, device 1: an image or a folder (read-only), or cdrom
 //                          # (or an .ISO/.CUE) for a CD-ROM drive; none by default
 //   mode = auto           # auto, or a transfer mode such as pio0
-//   dma = off              # whether auto may offer multiword DMA (where DMARQ is wired)
+//   dma = off              # whether auto may offer multiword DMA (where DMARQ is wired); auto: once
+//                          # bus = auto has learned the host isn't an ISA card
 //   write_behind = on      # acknowledge a write while it's stored (faster)
 //   read_ahead = on        # fetch the next sector while the host reads this one
 //   activity_link = on     # tell an HDD Synth what the drive is doing
@@ -137,6 +138,7 @@ struct Config {
     Mode mode = Mode::Auto;
     Bus bus = Bus::Settings;
     bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
+    bool dma_auto = false;                     // dma = auto: offered once bus = auto has learned the host
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
     bool read_ahead = DEFAULT_READ_AHEAD;      // see Device::setReadAhead
     bool activity_link = DEFAULT_ACTIVITY_LINK;

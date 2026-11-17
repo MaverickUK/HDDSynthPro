@@ -122,6 +122,47 @@ TEST(auto_bus_thresholds_come_from_the_config) {
     CHECK(std::string(auto_bus::whyName(a.why())) == "ok");
 }
 
+TEST(auto_bus_a_learned_host_keeps_the_lane_after_dma_replaces_the_evidence) {
+    Advisor a;
+    Counters c = quiet();
+    a.reset(c, 0);
+    CHECK(!a.learned());
+    c = waitedThrough(c, 1000, 30);
+    CHECK(a.update(c, 5000));
+    CHECK(a.why() == Why::Ok);
+    CHECK(a.learned());
+    // dma = auto: ide_dma in place of the diagnostics, DMA offered
+    c.no_cs_known = c.iordy_known = false;
+    c.dma_offered = c.dma_by_auto = true;
+    CHECK(!a.update(c, 5100));
+    CHECK(a.choice() == Choice::Lane);
+    CHECK(a.why() == Why::Learned);
+    // a reset (the PC restarting): early answers through detection, then the
+    // lane again with no evidence asked
+    a.reset(c, 6000);
+    CHECK(a.learned());
+    CHECK(!a.update(waitedThrough(c, 500, 0), 7000));
+    CHECK(a.choice() == Choice::Early);
+    CHECK(a.why() == Why::Detecting);
+    CHECK(a.update(waitedThrough(c, 1000, 0), 9000));
+    CHECK(a.choice() == Choice::Lane);
+    CHECK(a.why() == Why::Learned);
+}
+
+TEST(auto_bus_dma_offered_from_the_start_is_not_learned) {
+    // dma = on: offered at power-up, the host never learned: early answers
+    Advisor a;
+    Counters c = quiet();
+    c.dma_offered = true;
+    a.reset(c, 0);
+    a.update(waitedThrough(c, 2000, 50), 9000);
+    CHECK(a.why() == Why::Dma);
+    CHECK(!a.learned());
+    c.dma_by_auto = true;  // even if it said so, not without having learned
+    a.update(waitedThrough(c, 2000, 50), 9100);
+    CHECK(a.why() == Why::Dma);
+}
+
 void runAutoBusTests() {
     RUN(auto_bus_a_host_that_waits_gets_the_lane_after_detection);
     RUN(auto_bus_an_isa_card_never_gets_the_lane);
@@ -130,4 +171,6 @@ void runAutoBusTests() {
     RUN(auto_bus_no_advice_without_the_evidence);
     RUN(auto_bus_dma_and_a_cdrom_keep_early_answers);
     RUN(auto_bus_thresholds_come_from_the_config);
+    RUN(auto_bus_a_learned_host_keeps_the_lane_after_dma_replaces_the_evidence);
+    RUN(auto_bus_dma_offered_from_the_start_is_not_learned);
 }

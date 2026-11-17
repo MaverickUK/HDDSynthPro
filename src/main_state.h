@@ -85,6 +85,9 @@ extern SharedFlag g_bus_auto;      // bus = auto: core 1 switches early answers 
 extern SharedFlag g_bus_want_lane;  // core 0's advice for it
 extern std::atomic<uint32_t> g_bus_switches;  // switches made, for `s`
 extern std::atomic<uint32_t> g_bus_switch_us;
+extern SharedFlag g_dma_when_learned;  // dma = auto
+extern SharedFlag g_dma_added;         // multiword DMA added for a learned host
+bool offerDmaToLearnedHost();          // main.cpp (core 0): false if it can't, or already has
 extern SharedFlag g_bus_trace_switches;
 extern SharedFlag g_table;    // HDDSYNTH.INI register_table, or console `P t`
 extern SharedFlag g_isa;      // HDDSYNTH.INI isa

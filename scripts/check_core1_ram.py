@@ -31,6 +31,7 @@ ONE_OFFS = (
     "hdcd::Device::Device(",
     "ide_bus::restart(",          # when the host releases RESET#
     "iordy_timer::requestReset(",  # likewise
+    "ata::Device::offerDma(",     # dma = auto: once, when the host is learned
     "stayAbsent(",                # console `V`: the drive goes silent, once per absence
     "void stayAbsent<",           # likewise, one per device type
     "__cxa_guard_acquire",        # guards for function-local statics

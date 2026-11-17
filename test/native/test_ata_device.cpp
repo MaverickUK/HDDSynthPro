@@ -2227,6 +2227,54 @@ TEST(test_new_command_ends_dma) {
     CHECK(!d.dmaCommand());
 }
 
+TEST(test_offer_dma_later) {
+    // bus = auto with dma = auto: DMA added to a device that has been running
+    // without it, IDENTIFY patched, keeping what the host set meanwhile.
+    Device d(INFO);
+    GeneratedDisk disk;
+    VirtualHost h{d, &disk};
+    CHECK(h.setMultiple(4));
+    CHECK_EQ(command(d, CMD_SET_FEATURES, SF_DISABLE_WRITE_CACHE), ST_DRDY | ST_DSC);
+    h.setLba(0, 1);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    CHECK_EQ(d.error(), ER_ABRT);  // not offered yet
+    uint16_t before[256], with[256];
+    buildIdentify(INFO, before);
+    buildIdentify(dmaInfo(2), with);
+    IdentifyPatch patch;
+    CHECK(identifyDiff(before, with, patch));
+    CHECK(patch.count > 0 && patch.count <= IdentifyPatch::MAX);
+    d.offerDma(2, patch, patch);
+    uint16_t id[256];
+    CHECK(h.identify(id));
+    CHECK(identifyChecksumOk(id));
+    CHECK(id[49] & (1u << 8));    // DMA supported
+    CHECK_EQ(id[63], 0x0407);     // as a device made with it
+    CHECK_EQ(id[59], 0x0104);     // multiple mode kept
+    CHECK(!(id[85] & (1u << 5))); // write cache still off
+    for (unsigned i = 0; i < 255; ++i)
+        if (i != 59 && i != 85) CHECK_EQ(id[i], with[i]);
+    // READ DMA and SET FEATURES for the mode now taken
+    CHECK_EQ(command(d, CMD_SET_FEATURES, SF_SET_TRANSFER_MODE, XFER_MDMA_0 + 2), ST_DRDY | ST_DSC);
+    h.setLba(4000, 2);
+    d.write(Reg::StatusCommand, CMD_READ_DMA);
+    std::vector<uint16_t> got;
+    CHECK(runDma(d, h, &got, nullptr));
+    CHECK(sameAsDisk(got, 4000, 2));
+}
+
+TEST(test_identify_diff_limits) {
+    uint16_t a[256] = {}, b[256] = {};
+    IdentifyPatch p;
+    CHECK(identifyDiff(a, b, p));
+    CHECK_EQ(p.count, 0);
+    b[255] = 0x12A5;  // the integrity word isn't part of it
+    CHECK(identifyDiff(a, b, p));
+    CHECK_EQ(p.count, 0);
+    for (unsigned i = 0; i < IdentifyPatch::MAX + 1; ++i) b[i] = 1;
+    CHECK(!identifyDiff(a, b, p));  // too many
+}
+
 void runAtaDeviceTests() {
     RUN(test_identify_offers_multiword_dma);
     RUN(test_set_features_multiword_dma);
@@ -2307,6 +2355,8 @@ void runAtaDeviceTests() {
     RUN(test_queued_command_rules);
     RUN(test_reset_cancels_waking);
     RUN(test_set_multiple_mode);
+    RUN(test_offer_dma_later);
+    RUN(test_identify_diff_limits);
     RUN(test_multiple_mode_not_offered);
     RUN(test_read_and_write_multiple_need_the_mode_set);
     RUN(test_read_multiple);

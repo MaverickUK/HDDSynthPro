@@ -19,7 +19,9 @@
 //   - past detection: `min_sectors` data sectors served, so the BIOS's and
 //     the operating system's probes, in their least careful timing, are over.
 // A host caught as ISA or not waiting stays on early answers until the next
-// reset. Plain C++, no SDK: host-tested (test_auto_bus.cpp).
+// reset. A host that earned the lane is learned until power-off: once DMA
+// has been offered for it (Counters::dma_by_auto), the lane follows each
+// reset as soon as detection is over (Why::Learned), with no evidence asked. Plain C++, no SDK: host-tested (test_auto_bus.cpp).
 #pragma once
 
 #include <cstdint>
@@ -41,12 +43,15 @@ struct Counters {
     uint32_t long_reads = 0;   // reads IORDY held long, the host waiting
     uint32_t sectors = 0;      // data sectors served (read or written)
     bool cdrom = false;        // a CD-ROM configured: the lane doesn't serve one
+    // DMA offered by bus = auto (dma = auto) once the host was learned: its
+    // program replaced the diagnostics, so the evidence above stops
+    bool dma_by_auto = false;
 };
 
 enum class Choice : uint8_t { Early, Lane };
 
 // Why the advice is what it is: the first rule not met, or Ok for the lane.
-enum class Why : uint8_t { Cdrom, Dma, Unknown, Isa, NotWaited, NoProof, Detecting, Ok };
+enum class Why : uint8_t { Cdrom, Dma, Unknown, Isa, NotWaited, NoProof, Detecting, Ok, Learned };
 
 const char* whyName(Why why);
 
@@ -61,6 +66,9 @@ public:
     bool update(const Counters& now, uint32_t now_ms);
 
     Choice choice() const { return choice_; }
+    // The host has earned the lane once since power-up (Why::Ok): the same
+    // PC until the drive loses power, so a reset doesn't undo it.
+    bool learned() const { return learned_; }
     Why why() const { return why_; }
     uint32_t sinceResetMs(uint32_t now_ms) const { return now_ms - reset_ms_; }
     uint32_t changedAtMs() const { return changed_ms_ - reset_ms_; }  // since the reset
@@ -73,6 +81,7 @@ private:
     uint32_t reset_ms_ = 0;
     uint32_t changed_ms_ = 0;
     bool caught_ = false;  // ISA or not waiting since the reset: early until the next
+    bool learned_ = false;  // kept across resets (learned())
     Why caught_why_ = Why::Ok;
     uint32_t sectors_ = 0, long_reads_ = 0;
     Choice choice_ = Choice::Early;

@@ -141,12 +141,14 @@ auto_bus::Counters autoBusCounters() {
     c.long_reads = iordy_timer::longTotal();
     c.sectors = g_sectors_served;
     c.cdrom = g_device0_cdrom || g_device1_cdrom;
+    c.dma_by_auto = g_dma_added.load();
     return c;
 }
 
 // Console `Z` (debug, bus = auto): the wanted program flips every second,
 // whatever the advice, so core 1's live switch is exercised under load.
 static bool g_bus_flip = false;
+static uint32_t g_dma_offered_ms = 0;  // an AUTODMA line to print (dma = auto)
 
 // An AUTOBUS line when the advice changes: the program the drive would run
 // now, why, and when since the reset. Every 100 ms is plenty.
@@ -189,10 +191,16 @@ void printAutoBus() {
             }
         } else if (g_bus_auto.load()) {
             g_bus_want_lane.store(g_auto_bus.choice() == auto_bus::Choice::Lane);
+            // dma = auto: a host that earned the lane isn't an ISA card
+            if (g_dma_when_learned.load() && g_auto_bus.why() == auto_bus::Why::Ok && offerDmaToLearnedHost())
+                g_dma_offered_ms = now;
             if (g_auto_bus.why() == auto_bus::Why::NoProof && !ide_bus::dataLaneOn() && !ide_bus::probePending())
                 ide_bus::requestProbe();
         }
     }
+    if (g_dma_offered_ms && printfLine("AUTODMA mdma%u offered %lu ms after reset: the PC learned; IDENTIFY says so from the next time it's read\n",
+                                       unsigned(MAX_MDMA_MODE), (unsigned long)g_auto_bus.sinceResetMs(g_dma_offered_ms)))
+        g_dma_offered_ms = 0;
     if (!unprinted) return;
     if (printfLine("AUTOBUS %s (%s) %lu ms after reset: %lu sectors, %lu long reads waited; running %s\n",
                    g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early",
@@ -382,6 +390,7 @@ static void printStats() {
                   (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads());
     Serial.printf(" bus_auto=%s bus_switches=%lu iordy_probes=%lu", g_bus_auto.load() ? "on" : "off",
                   (unsigned long)g_bus_switches.load(std::memory_order_relaxed), (unsigned long)ide_bus::probes());
+    Serial.printf(" dma_auto=%s", !g_dma_when_learned.load() ? "off" : g_dma_added.load() ? "offered" : "waiting");
     if (ide_bus::dataLaneOn())
         Serial.printf(" lane_blocks=%lu lane_switch_max_ns=%lu", (unsigned long)ide_bus::laneSwitches(),
                       (unsigned long)ide_bus::laneSwitchMaxNs());

@@ -691,7 +691,7 @@ static void capture(Image& im) {
 // Register writes only, from RAM: IORDY is held for about a microsecond. The
 // first version, through the SDK from flash, held it 58 us, and 1 switch in
 // 200 lost the host's next command on the USB adapter (17 Nov 2026).
-CORE1_RAM bool switchProgram(bool early) {
+CORE1_RAM_RARE bool switchProgram(bool early) {
     if (!s_switchable || early == s_early) return false;
     const Image& from = s_images[s_early ? 1 : 0];
     const Image& to = s_images[early ? 1 : 0];
@@ -776,6 +776,15 @@ __attribute__((always_inline)) static inline void waitCycles(uint32_t cycles) {
     }
 }
 
+// bus = auto's IORDY probe, out of line and out of core 1's hot block: inlined,
+// it grew serve() for every access.
+CORE1_RAM_RARE __attribute__((noinline)) static void probeHold(ata::Reg reg) {
+    if (reg != ata::Reg::StatusCommand && reg != ata::Reg::AltStatusDevCtrl) return;
+    waitCycles(s_probe_cycles);  // IORDY stays low meanwhile: the probe
+    s_probe = 0;
+    s_probes = s_probes + 1;
+}
+
 // Inlined into both callers: a call here costs every access its register
 // saves and restores, about 100 ns (0.8.1's worst read).
 template <class Dev>
@@ -784,11 +793,7 @@ __attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sampl
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (s_early) {
         if ((sample & STROBE_BITS) == 0) {  // an answer request: the value, no side effects yet
-            if (s_probe && (reg == ata::Reg::StatusCommand || reg == ata::Reg::AltStatusDevCtrl)) {
-                waitCycles(s_probe_cycles);  // IORDY stays low meanwhile: the probe
-                s_probe = 0;
-                s_probes = s_probes + 1;
-            }
+            if (__builtin_expect(s_probe, 0)) probeHold(reg);
             pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
             answered(reg == ata::Reg::Data);
             return;

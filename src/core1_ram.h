@@ -26,6 +26,11 @@
 // The register table's core 1 code (docs/register-table.md): in RAM after the
 // CD-ROM's, for the same reason: the other bus programs' code stays put.
 #define CORE1_RAM_TABLE __attribute__((section(".after_data.core1_table")))
+// Core 1 code that runs rarely but mustn't wait on flash (bus = auto's
+// program switch, which holds IORDY meanwhile): in RAM after .data, outside
+// CORE1_RAM's block. Inside it, 0.35.0-dev.5's switch (720 bytes) moved every
+// hot function after it, and the data lane's writes slowed 2.5%.
+#define CORE1_RAM_RARE __attribute__((section(".after_data.core1_rare")))
 // Core 0's per-sector code: serveFetches() and the disks' reads and writes,
 // run for every sector the host moves. From flash, any change to flash code
 // moved it in the flash cache and the data lane's reads (which wait on core 0)
@@ -36,6 +41,7 @@
 #define CORE1_RAM
 #define CORE1_RAM_CD
 #define CORE1_RAM_TABLE
+#define CORE1_RAM_RARE
 #define CORE0_RAM
 #endif
 

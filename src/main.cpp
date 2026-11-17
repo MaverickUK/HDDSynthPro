@@ -171,6 +171,15 @@ SharedFlag g_bus_want_lane{false};  // core 0's advice (auto_bus): the lane, or 
 std::atomic<uint32_t> g_bus_switches{0};
 std::atomic<uint32_t> g_bus_switch_us{0};  // when the last switch was made (core 1)
 SharedFlag g_bus_trace_switches{false};     // debug (set it here): the raw trace on for 30 ms at each switch
+// dma = auto (with bus = auto): multiword DMA added once the host is learned.
+// Core 0 (offerDmaToLearnedHost) writes the patch, then bumps the sequence;
+// core 1 applies it to the device between commands.
+SharedFlag g_dma_when_learned{false};       // HDDSYNTH.INI dma = auto
+SharedFlag g_dma_added{false};              // offerDmaToLearnedHost has run
+static IdentifyPatch g_dma_patch[2];        // device 0's and device 1's
+static uint8_t g_dma_patch_mode = NO_DMA;
+static std::atomic<uint32_t> g_dma_patch_seq{0};
+static uint32_t g_dma_patch_applied = 0;    // core 1's
 SharedFlag g_table{false};       // HDDSYNTH.INI register_table, or console `P t`: ide_table (docs/register-table.md)
 SharedFlag g_isa{false};         // HDDSYNTH.INI isa: iordy_watchdog and IOCS16# (ide_bus::begin)
 SharedFlag g_no_lane{false};     // a CD-ROM: ide_bus, never the data lane (ide_bus::begin)
@@ -286,6 +295,42 @@ const char* const GAP_NAMES[GAP_KINDS] = {"-", "access", "lane", "command", "bus
 // The diagnostics the PIO plan has room for (iordy_timer, bus_observer):
 // started by core 1 at start-up, and by core 0 again when the PCB's card
 // gives back the PIO block it borrowed for a card operation.
+// bus = auto with dma = auto (core 0, printAutoBus): the host earned the lane,
+// so it isn't an ISA card and multiword DMA can be offered. The DMA program
+// takes the block the diagnostics (the PCB) or IOCS16# and the read timing
+// probe (the BB48) had (pio_plan), and IDENTIFY says so from the next time
+// the host asks: Windows' own driver does, after the BIOS has booted it. The
+// advisor keeps the host learned, since the diagnostics' evidence stops.
+bool offerDmaToLearnedHost() {
+    if (g_dma_added.load() || !g_dmarq_wired.load() || g_mdma_mode.load() != NO_DMA) return false;
+    const uint8_t mode = MAX_MDMA_MODE;
+    uint16_t without[256], with[256];
+    IdentifyInfo info = driveIdentity();
+    buildIdentify(info, without);
+    info.mdma_mode = mode;
+    buildIdentify(info, with);
+    if (!identifyDiff(without, with, g_dma_patch[0])) return false;
+    info = device1Identity();
+    buildIdentify(info, without);
+    info.mdma_mode = mode;
+    buildIdentify(info, with);
+    if (!identifyDiff(without, with, g_dma_patch[1])) return false;
+
+    const pio_plan::Plan was = g_pio_plan;
+    const pio_plan::Plan now = pio_plan::choose(sd_card::sdio(), true, false);
+    if (was.iordy_timer && !now.iordy_timer) iordy_timer::end();
+    if (was.bus_observer && !now.bus_observer) bus_observer::end();
+    if (was.iocs16 && !now.iocs16) iocs16::end();
+    if (was.bus_timing && !now.bus_timing) bus_timing::end();
+    ide_dma::begin();  // core 1 uses it only once the device takes a DMA command
+    g_pio_plan = now;
+    g_mdma_mode.store(mode, std::memory_order_relaxed);
+    g_dma_patch_mode = mode;
+    g_dma_added.store(true);
+    g_dma_patch_seq.store(1, std::memory_order_release);
+    return true;
+}
+
 static void startDiagnostics() {
     if (g_pio_plan.iordy_timer) iordy_timer::begin(cfg::IORDY_REPORT_NS);
     if (g_pio_plan.bus_observer) {
@@ -586,6 +631,37 @@ __attribute__((noinline)) static void stayAbsent(Dev& dev) {
 // in the FIFO is served back to back, and only when it is empty does core 1
 // do one small bookkeeping step before looking again. So a read waits for one
 // step at most; iordy_timer.pio measures how long the host actually waits.
+// bus = auto's step in core 1's loop (the hard disk only), out of line and out
+// of core 1's hot block (CORE1_RAM_RARE): inlined, it grew runDrive and the data
+// lane's writes slowed (0.35.0-dev.6).
+//  - dma = auto: multiword DMA added (offerDmaToLearnedHost), between commands;
+//  - the program core 0 advises, switched while RESET# is held (back to early
+//    answers, the bus idle by definition) or at a quiet moment: no command,
+//    not BSY or DRQ, no fetch out, no access for a while.
+enum class AutoStep : uint8_t { None, Switched, Busy };
+CORE1_RAM_RARE __attribute__((noinline)) static AutoStep busAutoStep(ata::Device& dev, bool reset_low, bool data_lane,
+                                                                     uint32_t last_access_cycles) {
+    const bool idle = !dev.commandQueued() && !g_command_active.load() && !(dev.status() & (ata::ST_BSY | ata::ST_DRQ));
+    const uint32_t seq = g_dma_patch_seq.load(std::memory_order_relaxed);
+    if (seq != g_dma_patch_applied && idle) {
+        std::atomic_thread_fence(std::memory_order_acquire);  // the patch core 0 wrote before seq
+        dev.offerDma(g_dma_patch_mode, g_dma_patch[0], g_dma_patch[1]);
+        g_dma_patch_applied = seq;
+    }
+    const bool want_lane = g_bus_want_lane.load() && !reset_low;
+    if (want_lane == data_lane) return AutoStep::None;
+    if (!reset_low && !(idle && !dev.pendingFetchId() &&
+                        m33_hw->dwt_cyccnt - last_access_cycles >= g_switch_quiet_cycles))
+        return AutoStep::None;
+    if (!ide_bus::switchProgram(!want_lane)) return AutoStep::Busy;  // an access under way
+    if (g_bus_trace_switches.load()) g_trace_bus.store(true);  // debug: the accesses around it
+    g_bus_switch_us.store(time_us_32(), std::memory_order_relaxed);
+    g_early.store(!want_lane);
+    ide_bus::updateIntrq(dev);
+    g_bus_switches.fetch_add(1, std::memory_order_relaxed);
+    return AutoStep::Switched;
+}
+
 template <class Dev>
 __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first) {
     uint32_t started = dev.commandsStarted();
@@ -601,6 +677,7 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
     const bool data_lane = ide_bus::dataLaneOn();  // data reads never reach core 1 (docs/data-lane.md)
     unsigned served_with_command = 0;  // accesses served since a command was queued
     uint32_t last_access_cycles = 0;  // core 1's cycle counter: core-local, unlike the timer behind the APB bridge
+    bool accessed = false;  // an access since bus = auto's quiet test last looked
     const uint32_t bus_only_cycles = g_bus_only_cycles;
     ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
     unsigned step = 0;
@@ -628,8 +705,9 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
         }
         if (got) {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
-            last_access_cycles = m33_hw->dwt_cyccnt;  // early answers' bus-only spell; bus = auto's quiet test
+            accessed = true;  // bus = auto's quiet test (the cycle counter only under early answers: per word on the lane it cost writes 2.5%)
             if (early) {
+                last_access_cycles = m33_hw->dwt_cyccnt;  // early answers' bus-only spell
                 ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, static_cast<void (*)(Dev&)>(earlyIdle),
                                        static_cast<void (*)(Dev&)>(runCommandEarly), g_trace_bus.load() ? recordBus : nullptr);
             }
@@ -788,28 +866,17 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
                     ide_bus::updateIntrq(dev);
                     record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
                 }
-                // bus = auto (docs/auto-bus.md, the hard disk only): the program
-                // core 0 advises, switched while RESET# is held (back to early
-                // answers, the bus idle by definition) or at a quiet moment: no
-                // command, not BSY or DRQ, no fetch out, no access for a while.
+                // bus = auto (docs/auto-bus.md, the hard disk only), out of line:
+                // one test here when it's off
                 if constexpr (std::is_same_v<Dev, ata::Device>) {
                     if (g_bus_auto.load()) {
-                        bool want_lane = g_bus_want_lane.load() && !reset_low;
-                        if (want_lane != data_lane &&
-                            (reset_low || (!dev.commandQueued() && !g_command_active.load() &&
-                                           !(dev.status() & (ata::ST_BSY | ata::ST_DRQ)) && !dev.pendingFetchId() &&
-                                           m33_hw->dwt_cyccnt - last_access_cycles >= g_switch_quiet_cycles))) {
-                            if (!ide_bus::switchProgram(!want_lane)) {
-                                last_access_cycles = m33_hw->dwt_cyccnt;  // an access under way: after the next quiet spell
-                                break;
-                            }
-                            if (g_bus_trace_switches.load()) g_trace_bus.store(true);  // debug: the accesses around it
-                            g_bus_switch_us.store(time_us_32(), std::memory_order_relaxed);
-                            g_early.store(!want_lane);
-                            ide_bus::updateIntrq(dev);
-                            g_bus_switches.fetch_add(1, std::memory_order_relaxed);
-                            return;  // loop1 enters again with the new program
+                        if (accessed) {  // the quiet spell starts over
+                            accessed = false;
+                            last_access_cycles = m33_hw->dwt_cyccnt;
                         }
+                        const AutoStep r = busAutoStep(dev, reset_low, data_lane, last_access_cycles);
+                        if (r == AutoStep::Switched) return;  // loop1 enters again with the new program
+                        if (r == AutoStep::Busy) last_access_cycles = m33_hw->dwt_cyccnt;  // after the next quiet spell
                     }
                 }
                 break;
