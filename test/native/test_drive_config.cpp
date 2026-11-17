@@ -293,6 +293,19 @@ TEST(test_config_isa) {
     CHECK(!parsed("sd_high_speed = off\n").sd_high_speed);
     CHECK(parsed(drive_config::defaultFile()).sd_high_speed);
     CHECK(drive_config::isKey("sd_high_speed"));
+    // bus: the bus program (docs/auto-bus.md); left out, early_answers and isa decide
+    CHECK(parsed("").bus == drive_config::Bus::Settings);
+    CHECK(parsed("bus = auto\n").bus == drive_config::Bus::Auto);
+    CHECK(parsed("bus = LANE\n").bus == drive_config::Bus::Lane);
+    CHECK(parsed("bus = ide_bus\n").bus == drive_config::Bus::IdeBus);
+    CHECK(parsed("bus = early\n").bus == drive_config::Bus::Early);
+    {
+        Config c = parsed("bus = fast\n");
+        CHECK(c.bus == drive_config::Bus::Settings);
+        CHECK(c.warning_count == 1);
+    }
+    CHECK(drive_config::isKey("bus"));
+    CHECK(std::strcmp(drive_config::busName(drive_config::Bus::Auto), "auto") == 0);
     CHECK(parsed(drive_config::defaultFile()).warning_count == 0);
     {  // a last line ending in a bare CR: setKey finishes it with LF only, and the value has no CR
         const char in[] = "isa = off\r\ncdrom = DOOM_SE.ISO\r";

@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0-dev.2] - 2026-11-17 (branch `auto-config`)
+
+### Added
+- **`bus = auto`: the drive picks its own bus program** ([docs/auto-bus.md](docs/auto-bus.md), step two), opt-in for now (`bus = auto` in `HDDSYNTH.INI`, or console `P a` until a power cycle). Every power-up and RESET# starts on early answers; once the advisor (`AUTOBUS`) has seen a host that isn't an ISA card, waits for IORDY and is past detection, core 1 switches to the data lane live, at a quiet moment (no command, not BSY or DRQ, no fetch out, 10 ms with no access), and back to early answers while RESET# is held or if the advice changes. `bus = early`, `lane` and `ide_bus` pin a program; left out, `early_answers` and `isa` decide as before. Not with a CD-ROM (it runs `ide_bus`), `isa = on` or `iordy = off`.
+- **The IORDY probe:** under early answers almost every read is answered quickly, so the advisor never had proof that a host waits for IORDY (`no-proof` on every early-answers run on the Evesham). With `bus = auto`, while it lacks proof, the next Status or Alternate Status answer is held 1.5 µs (at most every 100 ms): a host that waits shows it; one that doesn't reads FFh (BSY) and polls again.
+- `s`: `bus_auto`, `bus_switches`, `iordy_probes`. Console `Z` (debug): with `bus = auto`, flip the program every second, to test the switch under load.
+
+### Not yet tested
+- On hardware.
+
 ## [0.35.0-dev.1] - 2026-11-17 (branch `auto-config`)
 
 ### Changed

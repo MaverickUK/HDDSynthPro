@@ -29,6 +29,19 @@ namespace ide_bus {
 // off), without the watchdog: for a CD-ROM, which the lane doesn't serve.
 void begin(bool isa, bool early, bool iordy = true, bool lane = true);
 
+// bus = auto (docs/auto-bus.md): unloads the running program and loads early
+// answers (`early`) or the data lane in its place, the pins untouched. Only
+// at a quiet moment (no access, no command, not BSY or DRQ) or while RESET#
+// is held; the caller updates INTRQ after. Not with isa = on or iordy = off.
+void switchProgram(bool early);
+
+// bus = auto's IORDY probe: the next Status or Alternate Status answer under
+// early answers is held cfg::IORDY_PROBE_NS, so iordy_timer sees whether the
+// host waits for it. A host that doesn't reads FFh (BSY) and polls again.
+void requestProbe();
+bool probePending();
+uint32_t probes();  // probes made, for `s`
+
 // Serves at most one register access. Call in a tight loop on core 1.
 // Returns true if there was one; `sample` gets the pin sample for the trace.
 bool serviceOnce(ata::Device& dev, uint32_t& sample);

@@ -39,6 +39,17 @@ static constexpr uint32_t DRIVE_DD = 0xFFFF0000u;
 static uint32_t s_drive_for[32];
 static std::atomic<uint32_t> s_data_delay_cycles{0};  // setDataReadDelay
 static bool s_early = false;    // ide_bus_early: answers asked for at the chip select (begin)
+// What loadProgram() claimed, so unloadProgram() can give it back (switchProgram).
+static const pio_program* s_program = nullptr;
+static int s_watchdog_offset = -1;  // iordy_watchdog, loaded beside ide_bus
+static int s_watchdog_sm = -1;      // and running, with isa = on
+// The IORDY probe (requestProbe): the next Status or Alternate Status answer
+// under early answers is held this long, so a host that waits for IORDY shows
+// it (iordy_timer counts the long read) and one that doesn't reads the bus
+// floating high (FFh: BSY), which only makes it poll again.
+static volatile uint8_t s_probe = 0;
+static uint32_t s_probe_cycles = 0;
+static volatile uint32_t s_probes = 0;
 static const char* s_bus_name = "ide_bus";  // which program serves the bus (busName)
 static uint s_idle_offset = 0;  // where the program's `idle` is, for restart()
 
@@ -431,24 +442,11 @@ static constexpr uint32_t ACCESS_BITS = (31u << REG_INDEX_SHIFT) | bus::maskOf(c
                                         bus::maskOf(cfg::PIN_DIOW_N);
 static constexpr uint32_t DATA_READ = bus::maskOf(cfg::PIN_CS1_N) | bus::maskOf(cfg::PIN_DIOW_N);
 
-void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
-    s_early = early;
-    for (unsigned i = 0; i < 32; ++i) {
-        uint32_t sample = i << REG_INDEX_SHIFT;
-        bus::Block block = bus::block(sample);
-        s_reg_for[i] = ata::regFor(block == bus::Block::Command, block == bus::Block::Control,
-                                   bus::address(sample));
-        s_drive_for[i] = s_reg_for[i] == ata::Reg::None ? 0 : DRIVE_DD;
-    }
-    for (unsigned pin = cfg::BUS_FIRST_PIN; pin <= cfg::BUS_LAST_PIN; ++pin) {
-        if (pin == cfg::PIN_BOARD_LED) continue;
-        gpio_init(pin);           // input until claimed below
-        gpio_disable_pulls(pin);  // never internal pull-downs (RP2350 erratum E9)
-    }
-    // INTRQ: SIO, released until the device drives it (updateIntrq).
-    gpio_put(cfg::PIN_INTRQ, 1);
-    gpio_set_dir(cfg::PIN_INTRQ, false);
-
+// The bus program and what goes with it, in the bus pins' PIO block: begin()
+// at start-up, and switchProgram() between early answers and the data lane
+// (HDDSYNTH.INI bus = auto, docs/auto-bus.md). The pins themselves are set up
+// once, by begin().
+static void loadProgram(bool isa, bool early, bool iordy, bool lane_allowed) {
     // early_answers with iordy = off: ide_bus_noiordy, for hosts whose address
     // lines change as the strobe starts (an Amiga 1200), and that never use IORDY
     const bool noiordy = early && !iordy;
@@ -472,6 +470,7 @@ void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
                     : early ? ide_bus_early_offset_idle
                     : lane  ? ide_bus_data_offset_idle
                             : ide_bus_offset_idle;
+    s_program = program;
     bool ok = pio_claim_free_sm_and_add_program_for_gpio_range(
         program, &s_pio, &s_sm, &s_offset, cfg::BUS_FIRST_PIN,
         cfg::BUS_LAST_PIN - cfg::BUS_FIRST_PIN + 1, true);
@@ -486,8 +485,8 @@ void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
     // DD12 sometimes hadn't fallen at 4 mA (0.23.13: word 0, bit 12 set).
     // Not otherwise: on the USB adapter's DMA, 8 mA with fast slew made the
     // lines noisier (0.17.1).
-    if (early)
-        for (unsigned i = 0; i < 16; ++i) gpio_set_drive_strength(cfg::PIN_DD0 + i, GPIO_DRIVE_STRENGTH_8MA);
+    for (unsigned i = 0; i < 16; ++i)
+        gpio_set_drive_strength(cfg::PIN_DD0 + i, early ? GPIO_DRIVE_STRENGTH_8MA : GPIO_DRIVE_STRENGTH_4MA);
     pio_sm_set_pins_with_mask(s_pio, s_sm, 0, 1u << cfg::PIN_IORDY);
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);
 
@@ -549,8 +548,10 @@ void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
     if (early) return;
     hard_assert(pio_can_add_program(s_pio, &iordy_watchdog_program));
     uint watchdog_offset = pio_add_program(s_pio, &iordy_watchdog_program);
+    s_watchdog_offset = int(watchdog_offset);
     if (isa) {
         uint sm = uint(pio_claim_unused_sm(s_pio, true));
+        s_watchdog_sm = int(sm);
         pio_sm_config w = iordy_watchdog_program_get_default_config(watchdog_offset);
         sm_config_set_jmp_pin(&w, cfg::PIN_IORDY);
         sm_config_set_set_pins(&w, cfg::PIN_IORDY, 1);
@@ -558,6 +559,67 @@ void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
         pio_sm_set_enabled(s_pio, sm, true);
     }
 }
+
+void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
+    s_probe_cycles = uint32_t(uint64_t(cfg::IORDY_PROBE_NS) * clock_get_hz(clk_sys) / 1000000000ull);
+    s_early = early;
+    for (unsigned i = 0; i < 32; ++i) {
+        uint32_t sample = i << REG_INDEX_SHIFT;
+        bus::Block block = bus::block(sample);
+        s_reg_for[i] = ata::regFor(block == bus::Block::Command, block == bus::Block::Control,
+                                   bus::address(sample));
+        s_drive_for[i] = s_reg_for[i] == ata::Reg::None ? 0 : DRIVE_DD;
+    }
+    for (unsigned pin = cfg::BUS_FIRST_PIN; pin <= cfg::BUS_LAST_PIN; ++pin) {
+        if (pin == cfg::PIN_BOARD_LED) continue;
+        gpio_init(pin);           // input until claimed below
+        gpio_disable_pulls(pin);  // never internal pull-downs (RP2350 erratum E9)
+    }
+    // INTRQ: SIO, released until the device drives it (updateIntrq).
+    gpio_put(cfg::PIN_INTRQ, 1);
+    gpio_set_dir(cfg::PIN_INTRQ, false);
+
+    loadProgram(isa, early, iordy, lane_allowed);
+}
+
+// Gives back everything loadProgram() claimed, leaving DD and IORDY released.
+static void unloadProgram() {
+    if (s_lane) {
+        laneStop();
+        dma_hw->abort = 1u << s_lane_dma;
+        while (dma_hw->ch[s_lane_dma].ctrl_trig & DMA_CH0_CTRL_TRIG_BUSY_BITS) {
+        }
+        dma_channel_unclaim(s_lane_dma);
+        pio_sm_set_enabled(s_pio, s_data_sm, false);
+        pio_remove_program(s_pio, &ide_data_in_program, s_data_offset);
+        pio_sm_unclaim(s_pio, s_data_sm);
+    }
+    if (s_watchdog_sm >= 0) {
+        pio_sm_set_enabled(s_pio, uint(s_watchdog_sm), false);
+        pio_sm_unclaim(s_pio, uint(s_watchdog_sm));
+        s_watchdog_sm = -1;
+    }
+    if (s_watchdog_offset >= 0) {
+        pio_remove_program(s_pio, &iordy_watchdog_program, uint(s_watchdog_offset));
+        s_watchdog_offset = -1;
+    }
+    pio_sm_set_enabled(s_pio, s_sm, false);
+    pio_sm_clear_fifos(s_pio, s_sm);
+    pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);  // release DD and IORDY
+    pio_remove_program(s_pio, s_program, s_offset);
+    pio_sm_unclaim(s_pio, s_sm);
+    s_lane = false;
+    s_lane_words = nullptr;
+}
+
+void switchProgram(bool early) {
+    unloadProgram();
+    loadProgram(false, early, true, true);
+}
+
+void requestProbe() { s_probe = 1; }
+uint32_t probes() { return s_probes; }
+bool probePending() { return s_probe != 0; }
 
 // The RX FIFO's empty flag, always inlined: the SDK's pio_sm_is_rx_fifo_empty()
 // can end up out of line, in flash, once core 1 calls it from several places.
@@ -581,6 +643,11 @@ __attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sampl
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (s_early) {
         if ((sample & STROBE_BITS) == 0) {  // an answer request: the value, no side effects yet
+            if (s_probe && (reg == ata::Reg::StatusCommand || reg == ata::Reg::AltStatusDevCtrl)) {
+                waitCycles(s_probe_cycles);  // IORDY stays low meanwhile: the probe
+                s_probe = 0;
+                s_probes = s_probes + 1;
+            }
             pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
             answered(reg == ata::Reg::Data);
             return;

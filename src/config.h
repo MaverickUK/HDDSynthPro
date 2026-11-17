@@ -48,6 +48,14 @@ constexpr uint32_t EARLY_BUS_ONLY_US = 10000;
 // (an ICL 386). PCs look at IORDY only during a strobe, so it's harmless to
 // them (the Evesham holds a chip select up to 75 us before a read).
 constexpr uint32_t IORDY_STALL_US = 23;
+// bus = auto's IORDY probe (ide_bus::requestProbe): how long a Status answer
+// is held under early answers. Past 1,000 ns, so iordy_timer counts it as a
+// long read the host waited through (or not), and well under the stall
+// release above.
+constexpr uint32_t IORDY_PROBE_NS = 1500;
+// bus = auto: how long the host must have left the bus alone (no access, no
+// command running) before core 1 switches the bus program between commands.
+constexpr uint32_t BUS_SWITCH_QUIET_US = 10000;
 
 // PCB only (rev 0.3; on the BB48 rig these GPIOs are unconnected, so driving
 // and reading them there is harmless). The IDE bus goes through bus switches

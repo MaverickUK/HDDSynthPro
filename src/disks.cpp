@@ -110,12 +110,13 @@ bool benchRequested() { return watchdog_hw->scratch[0] == BENCH_MAGIC; }
 bool testDiskRequested() { return watchdog_hw->scratch[0] == TEST_DISK_MAGIC; }
 // Console `P`: a bus program after the restart it triggers, whatever
 // HDDSYNTH.INI says, until a power cycle (watchdog scratch 1): `e` early
-// answers, `l` the data lane, `i` ide_bus (as `isa = on`), `0` the settings'.
+// answers, `l` the data lane, `i` ide_bus (as `isa = on`), `t` the register
+// table, `a` auto (as `bus = auto`), `0` the settings'.
 // For the rig, to compare programs with no card or without editing the file.
 static char busRequested() {
     uint32_t v = watchdog_hw->scratch[1];
     char c = char(v & 0xff);
-    return (v & 0xffffff00) == BUS_MAGIC && (c == 'e' || c == 'l' || c == 'i' || c == 't') ? c : 0;
+    return (v & 0xffffff00) == BUS_MAGIC && (c == 'e' || c == 'l' || c == 'i' || c == 't' || c == 'a') ? c : 0;
 }
 
 // The generated test disk instead of the welcome disk, under the RAM overlay.
@@ -374,7 +375,25 @@ void chooseDisk() {
     // register_table = on: the table in place of early answers or the data
     // lane; isa = on keeps its own program
     g_table.store(g_config.register_table && !g_config.isa);
+    // bus (docs/auto-bus.md), over early_answers and register_table; isa = on
+    // keeps its own program, and iordy = off its own (bus = auto never switches it).
+    g_bus_auto.store(false);
+    if (!g_config.isa) {
+        switch (g_config.bus) {
+            case drive_config::Bus::Auto:
+                g_early.store(true);  // every power-up and reset starts on early answers
+                g_table.store(false);
+                g_bus_auto.store(g_config.iordy);
+                break;
+            case drive_config::Bus::Early: g_early.store(true); g_table.store(false); break;
+            case drive_config::Bus::Lane: g_early.store(false); g_table.store(false); break;
+            case drive_config::Bus::IdeBus: g_early.store(false); g_table.store(false); g_no_lane.store(true); break;
+            default: break;
+        }
+    }
+    if (busRequested()) g_bus_auto.store(false);
     switch (busRequested()) {  // console `P`, over the settings
+        case 'a': g_isa.store(false); g_early.store(true); g_table.store(false); g_bus_auto.store(g_config.iordy); break;
         case 'e': g_isa.store(false); g_early.store(true); g_table.store(false); break;
         case 't': g_isa.store(false); g_early.store(false); g_table.store(true); break;
         case 'l': g_isa.store(false); g_early.store(false); g_table.store(false); break;
@@ -426,6 +445,7 @@ void chooseDisk() {
     if ((g_device0_cdrom || g_device1_cdrom) && busRequested() != 'e') {
         g_no_lane.store(true);
         g_early.store(false);
+        g_bus_auto.store(false);  // a CD-ROM runs ide_bus: nothing to switch
     }
     g_disk_sectors.store(g_disk->sectors(), std::memory_order_relaxed);
     g_disk_chosen.store(true, std::memory_order_release);  // after the mode and device 1: core 1 reads them

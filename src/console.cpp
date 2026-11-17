@@ -144,6 +144,10 @@ auto_bus::Counters autoBusCounters() {
     return c;
 }
 
+// Console `Z` (debug, bus = auto): the wanted program flips every second,
+// whatever the advice, so core 1's live switch is exercised under load.
+static bool g_bus_flip = false;
+
 // An AUTOBUS line when the advice changes: the program the drive would run
 // now, why, and when since the reset. Every 100 ms is plenty.
 void printAutoBus() {
@@ -161,6 +165,20 @@ void printAutoBus() {
         if (g_auto_bus.update(autoBusCounters(), now)) {
             unprinted = true;
             changed_ms = now;
+        }
+        // bus = auto: core 1 switches to what the advice says (main.cpp); and
+        // while there's no proof the host waits for IORDY, early answers hold a
+        // Status answer now and then so there will be (ide_bus::requestProbe).
+        if (g_bus_auto.load() && g_bus_flip) {  // console `Z`: the switch tested, every second
+            static uint32_t flip_ms = 0;
+            if (now - flip_ms >= 1000) {
+                flip_ms = now;
+                g_bus_want_lane.store(!g_bus_want_lane.load());
+            }
+        } else if (g_bus_auto.load()) {
+            g_bus_want_lane.store(g_auto_bus.choice() == auto_bus::Choice::Lane);
+            if (g_auto_bus.why() == auto_bus::Why::NoProof && !ide_bus::dataLaneOn() && !ide_bus::probePending())
+                ide_bus::requestProbe();
         }
     }
     if (!unprinted) return;
@@ -350,6 +368,8 @@ static void printStats() {
     Serial.printf(" autobus=%s autobus_why=%s autobus_sectors=%lu autobus_long=%lu",
                   g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early", auto_bus::whyName(g_auto_bus.why()),
                   (unsigned long)g_auto_bus.sectors(), (unsigned long)g_auto_bus.longReads());
+    Serial.printf(" bus_auto=%s bus_switches=%lu iordy_probes=%lu", g_bus_auto.load() ? "on" : "off",
+                  (unsigned long)g_bus_switches.load(std::memory_order_relaxed), (unsigned long)ide_bus::probes());
     if (ide_bus::dataLaneOn())
         Serial.printf(" lane_blocks=%lu lane_switch_max_ns=%lu", (unsigned long)ide_bus::laneSwitches(),
                       (unsigned long)ide_bus::laneSwitchMaxNs());
@@ -531,12 +551,13 @@ void handleConsole() {
             }
             continue;
         }
-        static bool bus_letter_next = false;  // `P` then e, l, i or 0
+        static bool bus_letter_next = false;  // `P` then a, e, l, i, t or 0
         if (bus_letter_next) {
             bus_letter_next = false;
-            if (c == 'e' || c == 'l' || c == 'i' || c == 't' || c == '0') {
+            if (c == 'e' || c == 'l' || c == 'i' || c == 't' || c == 'a' || c == '0') {
                 watchdog_hw->scratch[1] = c == '0' ? 0 : BUS_MAGIC | uint32_t(c);
-                Serial.printf("# restarting with %s\n", c == 'e'   ? "early answers"
+                Serial.printf("# restarting with %s\n", c == 'a'   ? "the bus program chosen automatically"
+                                                        : c == 'e' ? "early answers"
                                                         : c == 'l' ? "the data lane"
                                                         : c == 'i' ? "ide_bus"
                                                         : c == 't' ? "the register table"
@@ -614,6 +635,11 @@ void handleConsole() {
                 break;
             case 'D': delay_digit_next = true; break;  // debug: delay data reads
             case 'P': bus_letter_next = true; break;  // a bus program until a power cycle
+            case 'Z':  // debug, bus = auto: flip the program every second
+                g_bus_flip = !g_bus_flip;
+                Serial.printf("BUSFLIP %s%s\n", g_bus_flip ? "on" : "off",
+                              g_bus_auto.load() ? "" : " (needs bus = auto or console P a)");
+                break;
             case 'U': startLoopback(); break;  // the link's loopback test
             case 'V': setAbsent(!g_absent.load(), ""); break;  // the drive gone from the bus, or back
             case 'H':  // seek timing off or on, until a restart (to benchmark)

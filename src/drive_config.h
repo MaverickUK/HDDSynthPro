@@ -16,6 +16,7 @@
 //   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
+//   bus = auto             # the bus program: auto, early, lane or ide_bus; none given: early_answers and isa decide
 //   register_table = off   # on: every read answered by the PIO from a table core 1 keeps (docs/register-table.md)
 //   sd_high_speed = on     # the card's reads at 40 MHz over SDIO (the PCB), 20 if it can't (docs/performance.md, 3)
 //   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
@@ -61,6 +62,14 @@ enum class Mode : uint8_t {
 };
 
 const char* modeName(Mode m);  // "auto", "pio0", ... "udma6"
+
+// `bus`: which bus program serves the bus (docs/auto-bus.md). Settings: none
+// given, `early_answers` and `isa` decide as before. Auto: early answers at
+// every power-up and reset, the data lane once the host has shown it's a PCI
+// controller that waits for IORDY, switched live. Early, Lane, IdeBus: that
+// program (`isa = on` still keeps ide_bus with its watchdog).
+enum class Bus : uint8_t { Settings, Auto, Early, Lane, IdeBus };
+const char* busName(Bus b);  // "settings", "auto", "early", "lane", "ide_bus"
 
 // Can this firmware run `m`? Auto, PIO 0-3 and multiword DMA 0-2 so far.
 bool modeSupported(Mode m);
@@ -126,6 +135,7 @@ struct Config {
     char device1[MAX_NAME + 1];
     char cdrom[MAX_NAME + 1];  // the CD-ROM drive's disc, for `device0` or `device1 = cdrom`
     Mode mode = Mode::Auto;
+    Bus bus = Bus::Settings;
     bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
     bool read_ahead = DEFAULT_READ_AHEAD;      // see Device::setReadAhead

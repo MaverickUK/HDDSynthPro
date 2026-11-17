@@ -166,6 +166,9 @@ static FetchMailbox g_mailbox;
 SharedFlag g_trace_bus{false};  // console `t`
 SharedFlag g_fast_lane{true};   // console `F` (debug)
 SharedFlag g_early{false};       // HDDSYNTH.INI early_answers: ide_bus_early (ide_bus::begin)
+SharedFlag g_bus_auto{false};    // bus = auto (docs/auto-bus.md): core 1 switches the program live
+SharedFlag g_bus_want_lane{false};  // core 0's advice (auto_bus): the lane, or early answers
+std::atomic<uint32_t> g_bus_switches{0};
 SharedFlag g_table{false};       // HDDSYNTH.INI register_table, or console `P t`: ide_table (docs/register-table.md)
 SharedFlag g_isa{false};         // HDDSYNTH.INI isa: iordy_watchdog and IOCS16# (ide_bus::begin)
 SharedFlag g_no_lane{false};     // a CD-ROM: ide_bus, never the data lane (ide_bus::begin)
@@ -274,6 +277,7 @@ CORE1_RAM __attribute__((noinline)) static void benchFromRam() {
 }
   // core 1's loop passes, for the average (`c1_pass_ns`)
 static uint32_t g_bus_only_cycles;  // cfg::EARLY_BUS_ONLY_US in core 1's cycles, set in setup1
+static uint32_t g_switch_quiet_cycles;  // cfg::BUS_SWITCH_QUIET_US likewise (bus = auto)
 const char* const GAP_NAMES[GAP_KINDS] = {"-", "access", "lane", "command", "busonly",
                                                   "step0", "step1", "step2", "step3", "step4"};
 
@@ -323,6 +327,7 @@ void setup1() {
     m33_hw->demcr |= M33_DEMCR_TRCENA_BITS;  // core 1's own cycle counter, for g_c1_gap
     m33_hw->dwt_ctrl |= M33_DWT_CTRL_CYCCNTENA_BITS;
     g_bus_only_cycles = cfg::EARLY_BUS_ONLY_US * (clock_get_hz(clk_sys) / 1000000);
+    g_switch_quiet_cycles = cfg::BUS_SWITCH_QUIET_US * (clock_get_hz(clk_sys) / 1000000);
     {  // micro-benchmark (diagnostic): cycles per 1000 reads, on core 1, from flash code here
         uint32_t t = m33_hw->dwt_cyccnt;
         for (int i = 0; i < 1000; ++i) __asm volatile("nop");
@@ -406,7 +411,7 @@ void setup1() {
     static void recordDone(D& dev);                         \
     static void earlyIdle(D& dev);                          \
     static void runCommandEarly(D& dev);                    \
-    static void runDrive(D& dev);
+    static void runDrive(D& dev, bool first);
 CORE1_DECLARE(ata::Device)
 CORE1_DECLARE(hdcd::Device)
 
@@ -573,12 +578,14 @@ __attribute__((noinline)) static void stayAbsent(Dev& dev) {
 }
 
 // Core 1's loop for one kind of device (drive_device.h): the hard disk alone,
-// or with a CD-ROM. Never returns. The bus comes first: every access waiting
+// or with a CD-ROM. Returns only when bus = auto has switched the bus program
+// (docs/auto-bus.md): loop1 then enters it again with `first` false, so the
+// device carries on as it was rather than being reset. The bus comes first: every access waiting
 // in the FIFO is served back to back, and only when it is empty does core 1
 // do one small bookkeeping step before looking again. So a read waits for one
 // step at most; iordy_timer.pio measures how long the host actually waits.
 template <class Dev>
-__attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
+__attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first) {
     uint32_t started = dev.commandsStarted();
     g_done_recorded = dev.commandsCompleted();
     uint32_t command_start_us = 0;
@@ -587,7 +594,7 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
     bool quiet = false;  // a command just started: bookkeeping waits (COMMAND_QUIET_US)
     uint32_t posted_fetch = 0;
     bool reset_low = !bus::high(pinsAsSample(), cfg::PIN_RESET_N);
-    dev.hardReset(reset_low);
+    if (first) dev.hardReset(reset_low);  // a switched program carries on with the device as it was
     const bool early = g_early.load();  // ide_bus_early's samples (early_answers)
     const bool data_lane = ide_bus::dataLaneOn();  // data reads never reach core 1 (docs/data-lane.md)
     unsigned served_with_command = 0;  // accesses served since a command was queued
@@ -619,8 +626,8 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
         }
         if (got) {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
+            last_access_cycles = m33_hw->dwt_cyccnt;  // early answers' bus-only spell; bus = auto's quiet test
             if (early) {
-                last_access_cycles = m33_hw->dwt_cyccnt;
                 ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, static_cast<void (*)(Dev&)>(earlyIdle),
                                        static_cast<void (*)(Dev&)>(runCommandEarly), g_trace_bus.load() ? recordBus : nullptr);
             }
@@ -779,6 +786,25 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
                     ide_bus::updateIntrq(dev);
                     record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
                 }
+                // bus = auto (docs/auto-bus.md, the hard disk only): the program
+                // core 0 advises, switched while RESET# is held (back to early
+                // answers, the bus idle by definition) or at a quiet moment: no
+                // command, not BSY or DRQ, no fetch out, no access for a while.
+                if constexpr (std::is_same_v<Dev, ata::Device>) {
+                    if (g_bus_auto.load()) {
+                        bool want_lane = g_bus_want_lane.load() && !reset_low;
+                        if (want_lane != data_lane &&
+                            (reset_low || (!dev.commandQueued() && !g_command_active.load() &&
+                                           !(dev.status() & (ata::ST_BSY | ata::ST_DRQ)) && !dev.pendingFetchId() &&
+                                           m33_hw->dwt_cyccnt - last_access_cycles >= g_switch_quiet_cycles))) {
+                            ide_bus::switchProgram(!want_lane);
+                            g_early.store(!want_lane);
+                            ide_bus::updateIntrq(dev);
+                            g_bus_switches.fetch_add(1, std::memory_order_relaxed);
+                            return;  // loop1 enters again with the new program
+                        }
+                    }
+                }
                 break;
             }
         }
@@ -800,7 +826,7 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev) {
     RAM static void busyTimers(D& dev) { busyTimersT(dev); }                                    \
     RAM static void earlyIdle(D& dev) { earlyIdleT(dev); }                                      \
     RAM static void postFetch(D& dev, uint32_t& posted_fetch) { postFetchT(dev, posted_fetch); } \
-    RAM __attribute__((noinline)) static void runDrive(D& dev) { runDriveT(dev); }
+    RAM __attribute__((noinline)) static void runDrive(D& dev, bool first) { runDriveT(dev, first); }
 CORE1_FOR(ata::Device, CORE1_RAM)
 CORE1_FOR(hdcd::Device, CORE1_RAM_CD)
 
@@ -996,10 +1022,12 @@ CORE1_RAM void loop1() {
     const bool cdrom0 = g_device0_cdrom, cdrom1 = g_device1_cdrom;
     if (g_table.load() && !cdrom0 && !cdrom1)  // the register table: the hard disk only
         runTable(*new (g_device_mem) ata::Device(device0, device1.total_sectors ? &device1 : nullptr));
-    if (cdrom0 || cdrom1)  // a CD-ROM alone as device 0 (core 0 leaves device 1 out), or as device 1
-        runDrive(*new (g_device_mem) hdcd::Device(device0, nullptr, cdrom0 ? &device0 : &device1, cdrom0 ? 0 : 1));
-    else
-        runDrive(*new (g_device_mem) ata::Device(device0, device1.total_sectors ? &device1 : nullptr));
+    if (cdrom0 || cdrom1) {  // a CD-ROM alone as device 0 (core 0 leaves device 1 out), or as device 1
+        auto& dev = *new (g_device_mem) hdcd::Device(device0, nullptr, cdrom0 ? &device0 : &device1, cdrom0 ? 0 : 1);
+        for (bool first = true;; first = false) runDrive(dev, first);
+    }
+    auto& dev = *new (g_device_mem) ata::Device(device0, device1.total_sectors ? &device1 : nullptr);
+    for (bool first = true;; first = false) runDrive(dev, first);  // again after a bus = auto switch
 }
 
 // The BB48's LED as the drive's activity light, like a hard disk's: lit while

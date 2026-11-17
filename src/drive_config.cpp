@@ -134,6 +134,13 @@ bool parseMode(Span v, Mode& out) {
 
 const char* modeName(Mode m) { return size_t(m) < MODE_COUNT ? MODE_NAMES[size_t(m)] : "?"; }
 
+namespace {
+const char* const BUS_NAMES[] = {"settings", "auto", "early", "lane", "ide_bus"};
+constexpr size_t BUS_COUNT = sizeof BUS_NAMES / sizeof BUS_NAMES[0];
+}  // namespace
+
+const char* busName(Bus b) { return size_t(b) < BUS_COUNT ? BUS_NAMES[size_t(b)] : "?"; }
+
 static bool isPio(Mode m) { return m >= Mode::Pio0 && m <= Mode::Pio4; }
 static bool isMdma(Mode m) { return m >= Mode::Mdma0 && m <= Mode::Mdma2; }
 
@@ -164,6 +171,7 @@ void defaults(Config& out) {
     out.device1[0] = 0;
     std::snprintf(out.cdrom, sizeof out.cdrom, "%s", DEFAULT_CDROM);
     out.mode = Mode::Auto;
+    out.bus = Bus::Settings;
     out.dma = DEFAULT_DMA;
     out.write_behind = DEFAULT_WRITE_BEHIND;
     out.read_ahead = DEFAULT_READ_AHEAD;
@@ -239,7 +247,7 @@ bool isKey(const char* key) {
     Span k{key, key + std::strlen(key)};
     if (equalsNoCase(k, "device0") || equalsNoCase(k, "image") || equalsNoCase(k, "device1") ||
         equalsNoCase(k, "mode") || equalsNoCase(k, "seek_timing") || equalsNoCase(k, "geometry") ||
-        equalsNoCase(k, "cdrom"))
+        equalsNoCase(k, "cdrom") || equalsNoCase(k, "bus"))
         return true;
     for (const Switch& s : SWITCHES)
         if (equalsNoCase(k, s.key)) return true;
@@ -313,6 +321,18 @@ void parse(const char* text, size_t len, Config& out) {
             out.mode = m;
             if (!modeSupported(m))
                 warn(out, "line %d: mode %.*s isn't supported yet%s", n, l.value, "; using auto (PIO 0)");
+        } else if (equalsNoCase(l.key, "bus")) {
+            bool found = false;
+            for (size_t i = 1; i < BUS_COUNT; ++i) {  // not "settings": that's leaving it out
+                if (equalsNoCase(l.value, BUS_NAMES[i])) {
+                    out.bus = Bus(i);
+                    found = true;
+                }
+            }
+            if (!found) {
+                warn(out, "line %d: bus '%.*s' isn't auto, early, lane or ide_bus; ignored%s", n, l.value);
+                out.bus = Bus::Settings;
+            }
         } else if (equalsNoCase(l.key, "seek_timing")) {
             if (seen_seek_timing) warn(out, "line %d: '%.*s' is set again; this one counts%s", n, l.key);
             seen_seek_timing = true;
