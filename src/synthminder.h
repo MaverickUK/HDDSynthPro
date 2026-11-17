@@ -23,7 +23,10 @@ constexpr size_t MAX_SECTORS = 16;                        // a reply's, at most
 constexpr uint8_t FLAG_MORE = 0x01;                       // the reply continues in the next RECEIVE
 // The synth has this long to answer a relayed request (the drive answers
 // SynthMinder within a second whatever happens).
-constexpr uint32_t RELAY_TIMEOUT_MS = 500;
+// 1.5 s: the synth takes about 900 ms to list its packs (it reads each
+// pack's pack.json and looks for its drive.json on its card), and only then
+// sends the lines; SynthMinder waits 2 s for a reply (IDE.PAS).
+constexpr uint32_t RELAY_TIMEOUT_MS = 1500;
 // A reply's text, all sectors together: RAM is short (the drive builds use
 // 97%). A pack list's line is up to 88 bytes, so about 34 packs fit; past
 // that the list is cut short (SynthMinder shows what came).

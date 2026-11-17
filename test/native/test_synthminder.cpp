@@ -228,7 +228,7 @@ struct FakePlatform : synthminder::Platform {
 };
 
 // Sends `request` and collects the whole reply, RECEIVE by RECEIVE.
-std::vector<ReplySector> exchange(synthminder::Service& s, const std::string& request, uint32_t now = 0,
+std::vector<ReplySector> roundTrip(synthminder::Service& s, const std::string& request, uint32_t now = 0,
                                   uint16_t sequence = 7) {
     auto sector = requestSector(request, sequence);
     s.onSend(sector.data(), now);
@@ -245,7 +245,7 @@ std::vector<ReplySector> exchange(synthminder::Service& s, const std::string& re
 TEST(sm_bay_status) {
     FakePlatform p;
     synthminder::Service s(p);
-    auto r = exchange(s, sentence("SBQ,1,STATUS"));
+    auto r = roundTrip(s, sentence("SBQ,1,STATUS"));
     CHECK_EQ(r.size(), 1u);
     CHECK(r[0].valid && !r[0].more);
     CHECK_EQ(r[0].sequence, 7);
@@ -260,18 +260,18 @@ TEST(sm_bay_status) {
 TEST(sm_bay_commands_and_errors) {
     FakePlatform p;
     synthminder::Service s(p);
-    auto r = exchange(s, sentence("SBC,1,DISC,QUAKE.ISO"));
+    auto r = roundTrip(s, sentence("SBC,1,DISC,QUAKE.ISO"));
     CHECK_STR(r[0].text, sentence("SBK,1,DISC,OK,") + "\n");
     CHECK_STR(p.last.key, "QUAKE.ISO");
-    r = exchange(s, sentence("SBC,1,SET,device0,DOSBENCH.IMG"));
+    r = roundTrip(s, sentence("SBC,1,SET,device0,DOSBENCH.IMG"));
     CHECK_STR(p.last.key, "device0");
     CHECK_STR(p.last.value, "DOSBENCH.IMG");
     CHECK_STR(r[0].text, sentence("SBK,1,SET,ERR,key") + "\n");
-    r = exchange(s, sentence("SBQ,1,WHATEVER"));
+    r = roundTrip(s, sentence("SBQ,1,WHATEVER"));
     CHECK_STR(r[0].text, sentence("SBK,1,SBQ,ERR,unknown") + "\n");
-    r = exchange(s, sentence("XYZ,1"));
+    r = roundTrip(s, sentence("XYZ,1"));
     CHECK_STR(r[0].text, sentence("SBK,1,XYZ,ERR,unknown") + "\n");
-    r = exchange(s, "$SBQ,1,STATUS*00");  // a bad checksum
+    r = roundTrip(s, "$SBQ,1,STATUS*00");  // a bad checksum
     CHECK_STR(r[0].text, sentence("SBK,1,REQUEST,ERR,invalid") + "\n");
     auto bad = requestSector(sentence("SBQ,1,STATUS"));
     bad[0] = 'X';  // not SynthMinder's sector
@@ -286,7 +286,7 @@ TEST(sm_a_long_reply_spans_sectors_whole_sentences_each) {
     FakePlatform p;
     p.files = 20;  // about 640 bytes: two sectors
     synthminder::Service s(p);
-    auto r = exchange(s, sentence("SBQ,1,FILES"));
+    auto r = roundTrip(s, sentence("SBQ,1,FILES"));
     CHECK_EQ(r.size(), 2u);
     CHECK(r[0].more && !r[1].more);
     std::string all;
@@ -304,7 +304,7 @@ TEST(sm_relays_and_collects_the_synths_answer) {
     FakePlatform p;
     synthminder::Service s(p);
     std::string q = sentence("HDQ,1,STATUS");
-    auto r = exchange(s, q, 1000);
+    auto r = roundTrip(s, q, 1000);
     CHECK(r.empty());  // waiting for the synth
     CHECK(s.relaying());
     CHECK(p.relayed.size() == 1 && p.relayed[0] == q);
@@ -321,7 +321,7 @@ TEST(sm_relays_and_collects_the_synths_answer) {
 TEST(sm_relays_a_pack_list_by_its_count) {
     FakePlatform p;
     synthminder::Service s(p);
-    exchange(s, sentence("HDQ,1,PACKS"));
+    roundTrip(s, sentence("HDQ,1,PACKS"));
     for (int i = 0; i < 3; ++i) {
         CHECK(s.relaying());
         char body[80];
@@ -341,24 +341,25 @@ TEST(sm_relays_a_pack_list_by_its_count) {
 TEST(sm_relay_errors) {
     FakePlatform p;
     synthminder::Service s(p);
-    // The synth doesn't answer in 500 ms.
-    exchange(s, sentence("HDC,1,VOL,55"), 1000);
+    // The synth doesn't answer within RELAY_TIMEOUT_MS.
+    roundTrip(s, sentence("HDC,1,VOL,55"), 1000);
     uint8_t buf[512];
-    CHECK(!s.onReceive(buf, 1499));
-    CHECK(s.onReceive(buf, 1500));
+    const uint32_t due = 1000 + synthminder::RELAY_TIMEOUT_MS;
+    CHECK(!s.onReceive(buf, due - 1));
+    CHECK(s.onReceive(buf, due));
     CHECK_STR(readReply(buf).text, sentence("SBK,1,RELAY,ERR,nosynth") + "\n");
     CHECK_EQ(s.timeouts(), 1u);
     std::string late = sentence("HDK,1,VOL,OK,");
     s.onLinkLine(late.data(), late.size());  // too late: ignored
-    CHECK(s.onReceive(buf, 1600));
+    CHECK(s.onReceive(buf, due + 100));
     CHECK_STR(readReply(buf).text, sentence("SBK,1,REQUEST,ERR,none") + "\n");
     // The link is off.
     p.link = false;
-    auto r = exchange(s, sentence("HDQ,1,STATUS"));
+    auto r = roundTrip(s, sentence("HDQ,1,STATUS"));
     CHECK_STR(r[0].text, sentence("SBK,1,RELAY,ERR,nosynth") + "\n");
     // A sentence the synth doesn't know.
     p.link = true;
-    r = exchange(s, sentence("HDX,1"));
+    r = roundTrip(s, sentence("HDX,1"));
     CHECK_STR(r[0].text, sentence("SBK,1,HDX,ERR,unknown") + "\n");
     CHECK_EQ(p.relayed.size(), 1u);  // only the first went to the synth
 }

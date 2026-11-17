@@ -25,6 +25,14 @@ SynthMinder, the DOS program, talks to the drive: [docs/synthminder-protocol.md]
 - Everything here is host-tested only: no PC has sent 8Dh to the drive yet, and no synth has answered over the link.
 - **Core 1's layout changed** (8Dh in `ata_device`: the block is 224 bytes longer, and core 0's 164), so `check_core1_layout.py` fails until reads are benchmarked on the rig (`-m speed`) and the new layout is recorded (`--update`).
 
+### Fixed (on the Evesham, 17 Nov 2026)
+- **The synth's pack list never reached SynthMinder:** the synth takes about 900 ms to answer `$HDQ,1,PACKS` (it reads each pack's `pack.json` and looks for its `drive.json`), and the relay gave up at 500 ms (`RELAY,ERR,nosynth`). `RELAY_TIMEOUT_MS` is 1.5 s, inside SynthMinder's own 2 s wait.
+- `hdm_rejected` rose with every relayed answer (`$HDS`, `$HDP`, `$HDK` went to the `$HDM` parser too). Only `$HDM` lines go to it now; every line still goes to SynthMinder.
+- `test_synthminder.cpp` didn't compile with libc++ (macOS): its helper `exchange(Service&, const std::string&)` lost to `std::exchange` by argument-dependent lookup. Renamed `roundTrip`.
+
+### Tested
+- **The Evesham, FreeDOS (`SYNTHMIN.IMG`), SynthMinder from its `firmware-protocol` branch, the HDD Synth Mk5 on 0.25.0:** the Bay's status and its disk and ISO lists, the synth's volume changed, and (with the longer relay timeout) its pack list. Exchanges take 0.2-6 ms; in the first minutes after a restart some took 50-109 ms, with the SEND ending still BSY (`d0`): not yet explained.
+
 ## [0.35.0] - 2026-11-17
 
 The drive sets itself up: `bus = auto` and `dma = auto` are the defaults (dev.2-dev.10). Every reset starts on early answers; the advisor learns the PC (ISA or not, waits for IORDY or not, with the IORDY probe); core 1 switches live to the data lane, from RAM, only between accesses; once the PC is learned, core 0 swaps the third PIO block for `ide_dma` and core 1 patches IDENTIFY, so Windows 98 on the Evesham gets DMA on its first boot. Also: `sd_high_speed` on by default (dev.1), seek timing with a drive cache and physical tracks (dev.9), the activity link run with the HDD Synth both ways (with HDDSynth_Native v0.24.1), false `BUSERR`s on images with READ MULTIPLE fixed (dev.8), the aligned DMA rings at the top of RAM (dev.5). Branch `auto-config` (dev.1-dev.10, below); release notes in [docs/release-notes/v0.35.0.md](docs/release-notes/v0.35.0.md).

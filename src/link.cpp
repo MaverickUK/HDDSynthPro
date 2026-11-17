@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <cstring>
+
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"
@@ -431,10 +433,17 @@ void serviceLinkRx() {
     uint8_t c;
     while (g_link_rx_ring.pop(c)) {
         switch (g_link_rx.feed(char(c))) {
-            case LineAssembler::Result::Line:
-                g_synth.onLine(g_link_rx.line(), g_link_rx.length(), now);
-                synthMinderLinkLine(g_link_rx.line(), g_link_rx.length());
+            case LineAssembler::Result::Line: {
+                // $HDM to the seek model (and SynthMinder, which can ask for
+                // it); the rest ($HDS, $HDP, $HDK: answers to its relays) to
+                // SynthMinder only, so they don't count as rejected models
+                // (hdm_rejected rose with every relay)
+                const char* line = g_link_rx.line();
+                const size_t len = g_link_rx.length();
+                if (len >= 4 && std::strncmp(line, "$HDM", 4) == 0) g_synth.onLine(line, len, now);
+                synthMinderLinkLine(line, len);
                 break;
+            }
             case LineAssembler::Result::Dropped: g_synth.onDropped(); break;
             default: break;
         }
