@@ -169,6 +169,8 @@ SharedFlag g_early{false};       // HDDSYNTH.INI early_answers: ide_bus_early (i
 SharedFlag g_bus_auto{false};    // bus = auto (docs/auto-bus.md): core 1 switches the program live
 SharedFlag g_bus_want_lane{false};  // core 0's advice (auto_bus): the lane, or early answers
 std::atomic<uint32_t> g_bus_switches{0};
+std::atomic<uint32_t> g_bus_switch_us{0};  // when the last switch was made (core 1)
+SharedFlag g_bus_trace_switches{false};     // debug (set it here): the raw trace on for 30 ms at each switch
 SharedFlag g_table{false};       // HDDSYNTH.INI register_table, or console `P t`: ide_table (docs/register-table.md)
 SharedFlag g_isa{false};         // HDDSYNTH.INI isa: iordy_watchdog and IOCS16# (ide_bus::begin)
 SharedFlag g_no_lane{false};     // a CD-ROM: ide_bus, never the data lane (ide_bus::begin)
@@ -797,7 +799,12 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
                             (reset_low || (!dev.commandQueued() && !g_command_active.load() &&
                                            !(dev.status() & (ata::ST_BSY | ata::ST_DRQ)) && !dev.pendingFetchId() &&
                                            m33_hw->dwt_cyccnt - last_access_cycles >= g_switch_quiet_cycles))) {
-                            ide_bus::switchProgram(!want_lane);
+                            if (!ide_bus::switchProgram(!want_lane)) {
+                                last_access_cycles = m33_hw->dwt_cyccnt;  // an access under way: after the next quiet spell
+                                break;
+                            }
+                            if (g_bus_trace_switches.load()) g_trace_bus.store(true);  // debug: the accesses around it
+                            g_bus_switch_us.store(time_us_32(), std::memory_order_relaxed);
                             g_early.store(!want_lane);
                             ide_bus::updateIntrq(dev);
                             g_bus_switches.fetch_add(1, std::memory_order_relaxed);

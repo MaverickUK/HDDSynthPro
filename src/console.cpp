@@ -169,6 +169,18 @@ void printAutoBus() {
         // bus = auto: core 1 switches to what the advice says (main.cpp); and
         // while there's no proof the host waits for IORDY, early answers hold a
         // Status answer now and then so there will be (ide_bus::requestProbe).
+        // Debug (console `Z`): a BUSSWITCH line for each switch, with the raw
+        // trace on from just before it until 30 ms after.
+        static uint32_t seen_switches = 0, switch_ms = 0;
+        uint32_t switches = g_bus_switches.load(std::memory_order_relaxed);
+        if (switches != seen_switches) {
+            seen_switches = switches;
+            switch_ms = now;
+            if (g_bus_flip)
+                Serial.printf("BUSSWITCH %lu to %s at %lu\n", (unsigned long)switches, ide_bus::busName(),
+                              (unsigned long)g_bus_switch_us.load(std::memory_order_relaxed));
+        }
+        if (g_bus_trace_switches.load() && now - switch_ms > 30 && g_trace_bus.load()) g_trace_bus.store(false);
         if (g_bus_auto.load() && g_bus_flip) {  // console `Z`: the switch tested, every second
             static uint32_t flip_ms = 0;
             if (now - flip_ms >= 1000) {

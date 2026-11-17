@@ -30,7 +30,6 @@ ONE_OFFS = (
     "atapi::Device::Device(",
     "hdcd::Device::Device(",
     "ide_bus::restart(",          # when the host releases RESET#
-    "ide_bus::switchProgram(",    # bus = auto: only while RESET# is held, or the host has left the bus for 10 ms
     "iordy_timer::requestReset(",  # likewise
     "stayAbsent(",                # console `V`: the drive goes silent, once per absence
     "void stayAbsent<",           # likewise, one per device type

@@ -31,10 +31,13 @@ static int s_dma = -1;
 
 // 4,096 samples (16 KB): at multiword DMA's rate 1,024 overflowed while core
 // 0 was busy (0.17.0's soak missed 94,071 words). The ring wraps at its size,
-// so it must be aligned to it.
+// so it must be aligned to it: at the top of RAM (.ram_rings, placed by
+// scripts/core1_layout.py), where code growth can't push it to the next
+// 16 KB boundary and waste the gap. Not zeroed at start-up: only words the
+// channel has written are read.
 static constexpr unsigned RING_BITS = 14;
 static constexpr uint32_t RING_WORDS = (1u << RING_BITS) / 4;
-alignas(1u << RING_BITS) static uint32_t s_ring[RING_WORDS];
+alignas(1u << RING_BITS) __attribute__((section(".ram_rings.observer"))) static uint32_t s_ring[RING_WORDS];
 static uint32_t s_read = 0;  // next word for core 0
 static sector_check::Checker* s_checker = nullptr;
 static uint32_t s_ring_max = 0;  // the most samples ever waiting (ringMax)

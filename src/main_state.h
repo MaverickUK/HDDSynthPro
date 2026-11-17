@@ -84,6 +84,8 @@ extern SharedFlag g_early;    // HDDSYNTH.INI early_answers
 extern SharedFlag g_bus_auto;      // bus = auto: core 1 switches early answers <-> the lane (docs/auto-bus.md)
 extern SharedFlag g_bus_want_lane;  // core 0's advice for it
 extern std::atomic<uint32_t> g_bus_switches;  // switches made, for `s`
+extern std::atomic<uint32_t> g_bus_switch_us;
+extern SharedFlag g_bus_trace_switches;
 extern SharedFlag g_table;    // HDDSYNTH.INI register_table, or console `P t`
 extern SharedFlag g_isa;      // HDDSYNTH.INI isa
 extern SharedFlag g_no_lane;  // a CD-ROM: ide_bus, never the data lane

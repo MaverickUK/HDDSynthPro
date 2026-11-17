@@ -43,6 +43,19 @@ static bool s_early = false;    // ide_bus_early: answers asked for at the chip 
 static const pio_program* s_program = nullptr;
 static int s_watchdog_offset = -1;  // iordy_watchdog, loaded beside ide_bus
 static int s_watchdog_sm = -1;      // and running, with isa = on
+// bus = auto: early answers and the data lane as loadProgram() leaves the
+// block for each, recorded at begin(), so switchProgram() can swap them with
+// register writes from RAM.
+struct Image {
+    uint16_t instr[32];  // the block's instructions, relocated
+    uint32_t clkdiv, execctrl, shiftctrl, pinctrl;  // the main state machine's
+    uint8_t sm, start, wrap_top, idle_offset, offset;  // start: `idle`'s address
+    const pio_program* program;
+    const char* name;
+};
+static Image s_images[2];  // [0] the data lane, [1] early answers
+static bool s_switchable = false;
+static uint32_t s_set_lane_y = 0;  // `set y, LANE_DATA_ADDRESS`, for the lane
 // The IORDY probe (requestProbe): the next Status or Alternate Status answer
 // under early answers is held this long, so a host that waits for IORDY shows
 // it (iordy_timer counts the long read) and one that doesn't reads the bus
@@ -446,7 +459,20 @@ static constexpr uint32_t DATA_READ = bus::maskOf(cfg::PIN_CS1_N) | bus::maskOf(
 // at start-up, and switchProgram() between early answers and the data lane
 // (HDDSYNTH.INI bus = auto, docs/auto-bus.md). The pins themselves are set up
 // once, by begin().
+static void capture(Image& im);
+static void unloadProgram();
+
+static void configureLaneDma() {
+    dma_channel_config dc = dma_channel_get_default_config(s_lane_dma);
+    channel_config_set_transfer_data_size(&dc, DMA_SIZE_16);
+    channel_config_set_read_increment(&dc, true);
+    channel_config_set_write_increment(&dc, false);
+    channel_config_set_dreq(&dc, pio_get_dreq(s_pio, s_data_sm, true));
+    dma_channel_configure(s_lane_dma, &dc, &s_pio->txf[s_data_sm], nullptr, 0, false);
+}
+
 static void loadProgram(bool isa, bool early, bool iordy, bool lane_allowed) {
+    s_early = early;  // how serve() reads the samples: here, not in begin(), or a switch keeps the old way
     // early_answers with iordy = off: ide_bus_noiordy, for hosts whose address
     // lines change as the strobe starts (an Amiga 1200), and that never use IORDY
     const bool noiordy = early && !iordy;
@@ -479,7 +505,8 @@ static void loadProgram(bool isa, bool early, bool iordy, bool lane_allowed) {
     // DD0-15 and IORDY are driven by PIO. Both start as inputs (released);
     // IORDY's output value is 0, so making it an output pulls it low.
     for (unsigned i = 0; i < 16; ++i) pio_gpio_init(s_pio, cfg::PIN_DD0 + i);
-    if (iordy) pio_gpio_init(s_pio, cfg::PIN_IORDY);  // else an SIO input: the side-set can't reach it
+    // else an SIO input: the side-set can't reach it
+    if (iordy) pio_gpio_init(s_pio, cfg::PIN_IORDY);
     // early_answers: DD at 8 mA. A host that ignores IORDY latches the first
     // word of a sector from lines it left floating high, and on the Pentium
     // DD12 sometimes hadn't fallen at 4 mA (0.23.13: word 0, bit 12 set).
@@ -531,12 +558,7 @@ static void loadProgram(bool isa, bool early, bool iordy, bool lane_allowed) {
         // Its channel: 16-bit words from the block into its TX FIFO, paced
         // by the FIFO's DREQ. Each block sets the source and count.
         s_lane_dma = uint(dma_claim_unused_channel(true));
-        dma_channel_config dc = dma_channel_get_default_config(s_lane_dma);
-        channel_config_set_transfer_data_size(&dc, DMA_SIZE_16);
-        channel_config_set_read_increment(&dc, true);
-        channel_config_set_write_increment(&dc, false);
-        channel_config_set_dreq(&dc, pio_get_dreq(s_pio, s_data_sm, true));
-        dma_channel_configure(s_lane_dma, &dc, &s_pio->txf[s_data_sm], nullptr, 0, false);
+        configureLaneDma();
         return;  // no room for iordy_watchdog: `isa = on` keeps ide_bus
     }
 
@@ -562,7 +584,6 @@ static void loadProgram(bool isa, bool early, bool iordy, bool lane_allowed) {
 
 void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
     s_probe_cycles = uint32_t(uint64_t(cfg::IORDY_PROBE_NS) * clock_get_hz(clk_sys) / 1000000000ull);
-    s_early = early;
     for (unsigned i = 0; i < 32; ++i) {
         uint32_t sample = i << REG_INDEX_SHIFT;
         bus::Block block = bus::block(sample);
@@ -579,7 +600,29 @@ void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
     gpio_put(cfg::PIN_INTRQ, 1);
     gpio_set_dir(cfg::PIN_INTRQ, false);
 
+    // bus = auto: both programs loaded once each and recorded, so
+    // switchProgram() can swap them from RAM (Image)
+    s_switchable = false;
+    if (!isa && iordy && lane_allowed) {
+        loadProgram(false, false, true, true);
+        capture(s_images[0]);
+        const PIO lane_pio = s_pio;
+        unloadProgram();
+        loadProgram(false, true, true, true);
+        capture(s_images[1]);
+        unloadProgram();
+        s_switchable = s_pio == lane_pio && s_images[0].sm == s_images[1].sm;
+        s_set_lane_y = pio_encode_set(pio_y, LANE_DATA_ADDRESS);
+    }
     loadProgram(isa, early, iordy, lane_allowed);
+    s_switchable = s_switchable && s_sm == s_images[0].sm && s_offset == s_images[early ? 1 : 0].offset;
+    if (s_switchable && !s_lane) {
+        // early answers now: the lane's state machine and channel stay
+        // claimed and set up, for a switch
+        pio_sm_claim(s_pio, s_data_sm);
+        dma_channel_claim(s_lane_dma);
+        configureLaneDma();
+    }
 }
 
 // Gives back everything loadProgram() claimed, leaving DD and IORDY released.
@@ -608,13 +651,111 @@ static void unloadProgram() {
     pio_sm_set_pindirs_with_mask(s_pio, s_sm, 0, DRIVEN_PINS);  // release DD and IORDY
     pio_remove_program(s_pio, s_program, s_offset);
     pio_sm_unclaim(s_pio, s_sm);
+    s_pio->irq = 1u << LANE_IRQ;  // the lane's flag, cleared (write 1 to clear), in case a block was cut short
     s_lane = false;
     s_lane_words = nullptr;
 }
 
-void switchProgram(bool early) {
-    unloadProgram();
-    loadProgram(false, early, true, true);
+// Puts down the block's 32 instructions as the SDK's pio_add_program would
+// at `offset`: jumps relocated, and `wait gpio` numbers taken relative to
+// the block's GPIO base.
+static void place(uint16_t* mem, const pio_program* program, uint offset) {
+    for (uint i = 0; i < program->length; ++i) {
+        uint16_t instr = program->instructions[i];
+#if PICO_PIO_USE_GPIO_BASE
+        if ((instr & 0xE000u) == 0x2000u && ((instr >> 5) & 3u) == 0)  // wait gpio
+            instr ^= uint16_t(pio_get_gpio_base(s_pio));
+#endif
+        mem[offset + i] = (instr & 0xE000u) == 0 ? uint16_t(instr + offset) : instr;  // jmp
+    }
+}
+
+static void capture(Image& im) {
+    for (auto& w : im.instr) w = 0;
+    place(im.instr, s_program, s_offset);
+    if (s_lane) place(im.instr, &ide_data_in_program, s_data_offset);
+    const auto& sm = s_pio->sm[s_sm];
+    im.clkdiv = sm.clkdiv;
+    im.execctrl = sm.execctrl;
+    im.shiftctrl = sm.shiftctrl;
+    im.pinctrl = sm.pinctrl;
+    im.sm = uint8_t(s_sm);
+    im.start = uint8_t(s_offset + s_idle_offset);
+    im.wrap_top = uint8_t((sm.execctrl & PIO_SM0_EXECCTRL_WRAP_TOP_BITS) >> PIO_SM0_EXECCTRL_WRAP_TOP_LSB);
+    im.idle_offset = uint8_t(s_idle_offset);
+    im.offset = uint8_t(s_offset);
+    im.program = s_program;
+    im.name = s_bus_name;
+}
+
+// Register writes only, from RAM: IORDY is held for about a microsecond. The
+// first version, through the SDK from flash, held it 58 us, and 1 switch in
+// 200 lost the host's next command on the USB adapter (17 Nov 2026).
+CORE1_RAM bool switchProgram(bool early) {
+    if (!s_switchable || early == s_early) return false;
+    const Image& from = s_images[s_early ? 1 : 0];
+    const Image& to = s_images[early ? 1 : 0];
+    const uint32_t iordy = 1u << cfg::PIN_IORDY;
+    const uint32_t main_bit = 1u << s_sm;
+    const uint32_t pio_func = (s_pio == pio0 ? GPIO_FUNC_PIO0 : s_pio == pio1 ? GPIO_FUNC_PIO1 : GPIO_FUNC_PIO2)
+                              << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB;
+    // IORDY held low through SIO (only ever low: it's open drain), so an access
+    // the host starts meanwhile waits for the new program
+    sio_hw->gpio_clr = iordy;
+    sio_hw->gpio_oe_set = iordy;
+    io_bank0_hw->io[cfg::PIN_IORDY].ctrl = GPIO_FUNC_SIO << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB;
+    hw_clear_bits(&s_pio->ctrl, main_bit);  // the old program paused
+    // Only between accesses: the old program in its idle loop, nothing in its
+    // RX FIFO for core 1, no chip select. Otherwise it carries on, and the
+    // caller tries again once the bus is quiet.
+    const uint pc = s_pio->sm[s_sm].addr;
+    const bool idle = pc >= from.start && pc <= from.wrap_top;
+    const bool rx_empty = s_pio->fstat & (1u << (PIO_FSTAT_RXEMPTY_LSB + s_sm));
+    const bool selected = ~sio_hw->gpio_in & ((1u << cfg::PIN_CS0_N) | (1u << cfg::PIN_CS1_N));
+    if (!idle || !rx_empty || selected) {
+        hw_set_bits(&s_pio->ctrl, main_bit);
+        io_bank0_hw->io[cfg::PIN_IORDY].ctrl = pio_func;
+        sio_hw->gpio_oe_clr = iordy;
+        return false;
+    }
+    if (s_lane) {
+        laneStop();                                  // the channel stopped, ide_data_in reset
+        hw_clear_bits(&s_pio->ctrl, 1u << s_data_sm);  // and stopped
+    }
+    for (uint i = 0; i < 32; ++i) s_pio->instr_mem[i] = to.instr[i];
+    auto& sm = s_pio->sm[s_sm];
+    sm.clkdiv = to.clkdiv;
+    sm.execctrl = to.execctrl;
+    sm.shiftctrl = to.shiftctrl;
+    sm.pinctrl = to.pinctrl;
+    hw_xor_bits(&sm.shiftctrl, PIO_SM0_SHIFTCTRL_FJOIN_RX_BITS);  // changing the FIFO join
+    hw_xor_bits(&sm.shiftctrl, PIO_SM0_SHIFTCTRL_FJOIN_RX_BITS);  // empties both FIFOs
+    hw_set_bits(&s_pio->ctrl, (1u << (PIO_CTRL_SM_RESTART_LSB + s_sm)) | (1u << (PIO_CTRL_CLKDIV_RESTART_LSB + s_sm)));
+    sm.instr = to.start;  // jmp idle (a jmp's encoding is its address)
+    if (!early) sm.instr = s_set_lane_y;
+    s_pio->irq = 1u << LANE_IRQ;  // the lane's flag clear (write 1 to clear)
+    // DD's drive strength, as loadProgram sets it
+    const uint32_t drive = uint32_t(early ? GPIO_DRIVE_STRENGTH_8MA : GPIO_DRIVE_STRENGTH_4MA) << PADS_BANK0_GPIO0_DRIVE_LSB;
+    for (uint i = 0; i < 16; ++i)
+        hw_write_masked(&pads_bank0_hw->io[cfg::PIN_DD0 + i], drive, PADS_BANK0_GPIO0_DRIVE_BITS);
+    s_early = early;
+    s_lane = !early;
+    s_lane_words = nullptr;
+    lane_busy = false;
+    s_lane_ahead = false;
+    s_stall_release = early;
+    s_armed = false;
+    s_program = to.program;
+    s_bus_name = to.name;
+    s_idle_offset = to.idle_offset;
+    s_offset = to.offset;
+    if (!early) laneDataSmReset();  // ide_data_in at its start, running
+    hw_set_bits(&s_pio->ctrl, main_bit);
+    // The new program runs (PIO waits on levels, so an access the host has
+    // started is seen at once): IORDY back to it
+    io_bank0_hw->io[cfg::PIN_IORDY].ctrl = pio_func;
+    sio_hw->gpio_oe_clr = iordy;
+    return true;
 }
 
 void requestProbe() { s_probe = 1; }

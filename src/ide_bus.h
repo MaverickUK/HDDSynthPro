@@ -29,11 +29,14 @@ namespace ide_bus {
 // off), without the watchdog: for a CD-ROM, which the lane doesn't serve.
 void begin(bool isa, bool early, bool iordy = true, bool lane = true);
 
-// bus = auto (docs/auto-bus.md): unloads the running program and loads early
-// answers (`early`) or the data lane in its place, the pins untouched. Only
-// at a quiet moment (no access, no command, not BSY or DRQ) or while RESET#
-// is held; the caller updates INTRQ after. Not with isa = on or iordy = off.
-void switchProgram(bool early);
+// bus = auto (docs/auto-bus.md): early answers (`early`) or the data lane in
+// place of the other, swapped with register writes in about a microsecond,
+// IORDY held meanwhile. Call only at a quiet moment (no command, not BSY or
+// DRQ) or while RESET# is held; the caller updates INTRQ after. False, and
+// nothing changed, if an access is under way (the caller tries again once
+// the bus is quiet) or the switch isn't possible (isa = on, iordy = off, a
+// CD-ROM).
+bool switchProgram(bool early);
 
 // bus = auto's IORDY probe: the next Status or Alternate Status answer under
 // early answers is held cfg::IORDY_PROBE_NS, so iordy_timer sees whether the

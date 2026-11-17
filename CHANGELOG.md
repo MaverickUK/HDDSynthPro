@@ -4,6 +4,30 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0-dev.5] - 2026-11-17 (branch `auto-config`)
+
+### Fixed
+- **`bus = auto` lost a command about once in 200 switches** through the JMicron (dev.3 and dev.4, `Z` stress runs): the host's Status read and Command write after a switch never reached the drive, and it waited 64 s for an interrupt. The switch ran the SDK's program loading from flash and held IORDY 58 µs. Now both programs are loaded once at start-up and recorded (instructions relocated as the SDK does, the state machine's four configuration registers), and the switch is register writes from RAM (`CORE1_RAM`), with IORDY held about a microsecond. It goes ahead only between accesses: the old program paused in its idle loop, its RX FIFO empty, no chip select; otherwise the old program carries on and the drive tries again after the next 10 ms quiet spell.
+
+### Changed
+- **The DMA rings that must be aligned to their size** (`bus_observer`'s 16 KB, the register table's 4 KB) have a fixed place at the top of RAM (`.ram_rings`, `scripts/core1_layout.py`). In `.bss`, 720 bytes more RAM code pushed the 16 KB ring to the next 16 KB boundary, and the gap wasted more than the RAM left (the link failed). The heap ends below them; `pcb_drive` has 12.8 KB of heap free, as before.
+- Console `Z` no longer turns the raw trace on around each switch: in a run of slices 3-4 it dropped 3.5 million events, `DONE` lines among them, which failed the tests with every command served right (`g_bus_trace_switches` stays, off, for debugging). The rig's `wait_quiet()` ignores `Z`'s `BUSSWITCH` lines.
+
+### Tested
+- Through the JMicron (Mac): the switch stress test (`Z` with slices 3-4, three runs): 1,040 switches, every test passed, no command lost. `-m speed`: early answers 1.16 / 74.0 / 1.08, the data lane 1.36 / 78.5 / 1.59, `bus = auto` 1.28 / 78.3 / 1.59 (it moved to the lane); core 1's layout recorded again.
+
+## [0.35.0-dev.4] - 2026-11-17 (branch `auto-config`)
+
+### Changed
+- `bus = auto`: IORDY held low through SIO while the programs are swapped, so an access the host starts meanwhile waits. Still lost a command now and then (dev.5 fixes it). Console `Z` also turns the raw trace on around each switch and prints `BUSSWITCH n to early|lane at t`.
+
+## [0.35.0-dev.3] - 2026-11-17 (branch `auto-config`)
+
+### Fixed
+- `bus = auto`'s first switch hung the drive: `serve()` kept reading samples the old program's way (`s_early` was set only at start-up); now with the program. The lane's IRQ flag is cleared when it's unloaded.
+- Core 1 builds its device once: the switch returns to `loop1`, which enters the bus loop again with the new program without resetting the device.
+- Tested through the JMicron (Mac): slices 3-4 pass on `bus = auto`, which chose the data lane after 1,111 sectors and 194 long reads; `-m speed` 1.25 / 78.1 / 1.60.
+
 ## [0.35.0-dev.2] - 2026-11-17 (branch `auto-config`)
 
 ### Added

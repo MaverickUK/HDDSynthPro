@@ -37,12 +37,14 @@ _PACKET_DONE = re.compile(r"DONE \d+ a0 ")
 
 class PollFilter:
     """Tells a CD-ROM's routine polls (their CMD line, the DONE that follows
-    it) from activity that should keep wait_quiet() waiting."""
+    it), and console `Z`'s BUSSWITCH lines, from activity that should keep wait_quiet() waiting."""
 
     def __init__(self):
         self._in_poll = False
 
     def is_activity(self, line: str) -> bool:
+        if line.startswith("BUSSWITCH "):  # console `Z` (bus = auto's test): one a second
+            return False
         if _POLL_CMD.match(line):
             self._in_poll = True
             return False

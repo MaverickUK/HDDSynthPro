@@ -216,6 +216,18 @@ The whole 245 MB image checksums the same at both. Sampling points in high-speed
 
 The PCB, 0.34.0-dev.2, `WIN98.IMG` with the Windows 98 SE CD as device 1 (`ide_bus`), Windows' own driver; the CD's `WIN98` folder copied to C: ([retro-test.md](retro-test.md)): PIO 4 min 20 s (0.79 MB/s), multiword DMA 2 1 min 16 s (2.4 MB/s), DMA with `sd_high_speed = on` 1 min 1 s (3.0 MB/s). In the drive, per 32 KB: CD reads 16.5, 4.8, 3.6 ms; disk writes 26.3, 5.2, 4.1 ms.
 
+## `bus = auto`'s switch in RAM (0.35.0-dev.5, 17 Nov 2026)
+
+The PCB through the JMicron (Mac), the generated disk, `-m speed` (sequential read / random 4 KB / sequential write). The switch's code (`switchProgram`, 720 bytes) joins core 1's block, and the DMA rings that must be aligned moved to the top of RAM (`.ram_rings`), so the layout was recorded again.
+
+| Program | 0.34.0 | 0.35.0-dev.5 |
+|---|---|---|
+| Early answers | 1.16 MB/s / 74.0 IOPS / 1.11 MB/s | 1.16 / 74.0 / 1.08 |
+| The data lane | 1.29 / 78.0 / 1.63 | 1.36 / 78.5 / 1.59 |
+| `bus = auto` (switched to the lane during the first run's sequential read; second run) | - | 1.28 / 78.3 / 1.59 |
+
+Within the run-to-run spread seen before (about 2-5%). The switch stress test (console `Z`, the program flipped every second under slices 3-4): 1,040 switches, none lost a command; dev.4 lost one in about 200.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

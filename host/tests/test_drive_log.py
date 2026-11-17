@@ -39,3 +39,10 @@ def test_a_packet_after_a_poll_is_activity():
         "CMD 3 a0 READ_10 16 1 d1",
         "DONE 4 a0 40 00 900",
     ]) == [False, False, True, True]
+
+
+def test_bus_switch_lines_are_not_activity():
+    # console `Z` prints one a second while it tests bus = auto's switch
+    polls = PollFilter()
+    assert not polls.is_activity("BUSSWITCH 12 to lane at 123456")
+    assert polls.is_activity("CMD 100 20 READ_SECTORS 0 1")

@@ -28,6 +28,13 @@ LD = """    .data : {
         . = ALIGN(4);
         __bss_start__ = .;
     } > RAM
+
+    .heap (NOLOAD):
+    {
+        __end__ = .;
+        . = ORIGIN(RAM) + LENGTH(RAM);
+        __HeapLimit = .;
+    } > RAM
 """
 
 
@@ -82,6 +89,20 @@ def test_a_framework_script_without_the_data_anchors_fails_the_build():
     for missing in ("        *(.data*)\n", "        __bss_start__ = .;\n"):
         with pytest.raises(RuntimeError, match="align the variables"):
             core1_layout.patch_text(LD.replace(missing, ""))
+
+
+def test_the_aligned_rings_sit_at_the_top_of_ram_below_the_heaps_end():
+    # In .bss, a little more code pushed the 16 KB ring to the next 16 KB
+    # boundary and the link ran out of RAM (0.35.0-dev.5).
+    out = core1_layout.patch_text(LD)
+    limit = f". = ORIGIN(RAM) + LENGTH(RAM) - {core1_layout.RINGS_BYTES:#x};"
+    assert out.index(limit) < out.index("__HeapLimit = .;")
+    places = [out.index(f"    {name} (NOLOAD) : {{") for name in core1_layout.RINGS]
+    assert out.index("__HeapLimit = .;") < places[0] < places[1] < out.index("__ram_rings_end = .;")
+    assert "ASSERT(__ram_rings_end <= ORIGIN(RAM) + LENGTH(RAM)" in out
+    # smallest first, so both land aligned: 4 KB, then 16 KB at a 16 KB boundary
+    assert core1_layout.RINGS == (".ram_rings.wring", ".ram_rings.observer")
+    assert (0x80000 - core1_layout.RINGS_BYTES + 0x1000) % 0x4000 == 0
 
 
 def test_the_hard_disk_files_are_listed_and_the_cd_rom_files_are_not():

@@ -63,7 +63,9 @@ uint32_t s_dummy = 0;
 // With 256, one block's worth, a whole lap read as no writes at all.
 constexpr unsigned WRING_BITS = 12;  // bytes, as a power of two
 constexpr uint32_t WRING_WORDS = (1u << WRING_BITS) / 4;
-alignas(1u << WRING_BITS) uint32_t s_wring_buf[WRING_WORDS];
+// At the top of RAM, beside bus_observer's ring (.ram_rings); not zeroed at
+// start-up: only words the channel has written are read.
+alignas(1u << WRING_BITS) __attribute__((section(".ram_rings.wring"))) uint32_t s_wring_buf[WRING_WORDS];
 uint32_t s_wring_read = 0;
 
 // bus_observer's ring, read from here for Status reads (its own position).

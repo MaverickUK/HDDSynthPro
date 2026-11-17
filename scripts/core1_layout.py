@@ -39,6 +39,11 @@ other banks: 0.33.1-dev.10's SET MULTIPLE MODE check (44 bytes) and then a
 the lane's code untouched (docs/speed-log.md, 16 Nov 2026). Now the code can
 grow or shrink and the data moves only in whole 32-byte steps, keeping its
 banks. A change to the variables themselves can still move them.
+
+Last, it gives the DMA rings that wrap at their size (so must be aligned to
+it) a fixed place at the top of RAM, `.ram_rings.*` below RAM's end, with the
+heap ending under them (RINGS, RINGS_BYTES). A new ring of that kind goes
+there too.
 """
 from __future__ import annotations
 
@@ -59,6 +64,14 @@ MARK = "__core1_hd_start"
 BANK_PERIOD = 32  # bytes: 8 banks, word-interleaved (RP2350 datasheet, SRAM)
 DATA_ANCHOR = "        *(.data*)\n"
 BSS_ANCHOR = "        . = ALIGN(4);\n        __bss_start__ = .;\n"
+HEAP_ANCHOR = "        . = ORIGIN(RAM) + LENGTH(RAM);\n        __HeapLimit = .;\n    } > RAM\n"
+# The DMA rings that wrap at their size, so must be aligned to it (bus_observer's
+# 16 KB, ide_table's 4 KB), at the top of RAM: in .bss, 720 bytes more RAM code
+# (0.35.0-dev.5) pushed the 16 KB one to the next 16 KB boundary and wasted
+# the gap, more than the RAM left. Smallest first, so each lands aligned
+# (4 KB at 0x2007B000, 16 KB at 0x2007C000).
+RINGS_BYTES = 0x5000
+RINGS = (".ram_rings.wring", ".ram_rings.observer")
 
 
 def patch_text(text: str) -> str:
@@ -72,7 +85,9 @@ def patch_text(text: str) -> str:
                            "to place core 1's code after (did Arduino-Pico's memmap_default.ld change?)")
     data_anchor = DATA_ANCHOR.replace("\n", nl)
     bss_anchor = BSS_ANCHOR.replace("\n", nl)
-    for found, what in ((data_anchor, "`*(.data*)`"), (bss_anchor, "`. = ALIGN(4); __bss_start__ = .;`")):
+    heap_anchor = HEAP_ANCHOR.replace("\n", nl)
+    for found, what in ((data_anchor, "`*(.data*)`"), (bss_anchor, "`. = ALIGN(4); __bss_start__ = .;`"),
+                        (heap_anchor, "`. = ORIGIN(RAM) + LENGTH(RAM); __HeapLimit = .;` in .heap")):
         if text.count(found) != 1:
             raise RuntimeError(f"core1_layout: the linker script has no single {what} to align the "
                                "variables at (did Arduino-Pico's memmap_default.ld change?)")
@@ -96,6 +111,19 @@ def patch_text(text: str) -> str:
     text = text.replace(anchor, anchor + nl.join(block) + nl)
     text = text.replace(data_anchor, f"        . = ALIGN({BANK_PERIOD});  /* HDDSynthPro (core1_layout.py): RAM banks */"
                         + nl + data_anchor)
+    rings = [
+        heap_anchor.replace("LENGTH(RAM);", f"LENGTH(RAM) - {RINGS_BYTES:#x};  /* HDDSynthPro: .ram_rings after */", 1),
+        # one output section each: a section takes its largest input's alignment
+        *(line for name in RINGS for line in (
+            f"    {name} (NOLOAD) : {{",
+            f"        KEEP(*({name}))",
+            "    } > RAM",
+        )),
+        "    __ram_rings_end = .;",
+        f'    ASSERT(__ram_rings_end <= ORIGIN(RAM) + LENGTH(RAM), "core1_layout.py: the rings outgrew RINGS_BYTES")',
+        "",
+    ]
+    text = text.replace(heap_anchor, nl.join(rings))
     return text.replace(bss_anchor, bss_anchor.replace("ALIGN(4)", f"ALIGN({BANK_PERIOD})"))
 
 
