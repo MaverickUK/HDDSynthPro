@@ -478,6 +478,7 @@ static void printStats() {
                   (unsigned long)g_head.replaced(), head);
     Serial.printf(" hdm_valid=%lu hdm_rejected=%lu link_rx_errors=%lu", (unsigned long)g_synth.valid(),
                   (unsigned long)g_synth.rejected(), (unsigned long)g_link_rx_errors);
+    printSynthMinderStats(Serial);
     const SeekModel* model = g_seek.active() ? &g_seek.model() : nullptr;
     uint32_t commands = g_seek.commands();
     Serial.printf(" seek_timing=%s seek_active=%d seek_rpm=%ld seek_actuator=%s", seek_timing::settingName(g_config.seek_timing),
@@ -578,7 +579,7 @@ void handleConsole() {
                 while (*name == ' ') ++name;
                 for (size_t n = strlen(name); n && name[n - 1] == ' '; --n) name[n - 1] = '\0';
                 if (*name)
-                    startDiscChange(name);
+                    startDiscChange(name, Serial);
                 else
                     Serial.println("# DISC: nothing changed");
             } else if (disc_len + 1 < sizeof disc_buf) {

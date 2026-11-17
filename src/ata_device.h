@@ -96,6 +96,18 @@ constexpr uint8_t CMD_CHECK_POWER_MODE = 0xE5;
 constexpr uint8_t CMD_FLUSH_CACHE = 0xE7;  // BSY while core 0 flushes the storage
 constexpr uint8_t CMD_IDENTIFY_DEVICE = 0xEC;
 constexpr uint8_t CMD_SET_FEATURES = 0xEF;
+// SynthMinder's command (docs/synthminder-protocol.md), in ATA's vendor-specific
+// range: Features SEND (a one-sector PIO data-out: the request) or RECEIVE (a
+// one-sector PIO data-in: the reply), Sector Count 1, LBA Low 'S', LBA Mid 'M'
+// and LBA High the protocol version. Anything else is aborted, so a stray 8Dh
+// from another program does nothing. The sectors go to and from core 0 as a
+// Fetch with `message` set (synthminder.h answers them).
+constexpr uint8_t CMD_SYNTHMINDER = 0x8D;
+constexpr uint8_t SM_SEND = 0x01;
+constexpr uint8_t SM_RECEIVE = 0x02;
+constexpr uint8_t SM_LBA_LOW = 'S';
+constexpr uint8_t SM_LBA_MID = 'M';
+constexpr uint8_t SM_VERSION = 1;
 // The ATA-1 era opcodes for the power commands (94h-98h), still sent by some hosts.
 constexpr uint8_t CMD_STANDBY_IMMEDIATE_OLD = 0x94;
 constexpr uint8_t CMD_IDLE_IMMEDIATE_OLD = 0x95;
@@ -136,6 +148,7 @@ struct Fetch {
     uint32_t command_lba;      // seek timing and the activity link (seek_timing.h)
     uint8_t unit;              // 0: device 0's disk, 1: device 1's
     uint8_t sectors = 1;       // how many, from `lba` on (READ/WRITE MULTIPLE: a block's)
+    bool message = false;      // SynthMinder's 8Dh: `store` is a request, a read its reply (no disk, no LBA)
 };
 
 // A DMA burst for core 1 to run (READ DMA or WRITE DMA): the rest of a
@@ -333,6 +346,9 @@ private:
     void startCommand(uint8_t command);
     void startRead(uint8_t block = 1);   // `block`: sectors per DRQ block
     void startWrite(uint8_t block = 1);
+    void beginRead(uint32_t lba, uint32_t count, uint8_t block);   // after the range check
+    void beginWrite(uint32_t lba, uint32_t count, uint8_t block);
+    void synthMinder();  // CMD_SYNTHMINDER
     void setMultipleMode();
     void readVerify();
     void seek();
@@ -412,6 +428,7 @@ private:
     bool ahead_ok_ = false;
     bool ahead_failed_ = false;
     bool flushing_ = false;  // FLUSH CACHE: its fetch is a flush
+    bool message_ = false;   // CMD_SYNTHMINDER: its fetch carries a message, not a sector
     bool read_ahead_ = true;
     bool write_behind_ = true;  // SET FEATURES 02h/82h; off: each sector synced as it's stored
 

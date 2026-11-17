@@ -952,6 +952,33 @@ bool isFolder(const char* name) {
     return dir;
 }
 
+bool fileExists(const char* name) {
+    Lend lend;
+    NullPrint quiet;
+    if (!mount(quiet)) return false;
+    FsFile f;
+    if (!f.open(name, O_RDONLY)) return false;
+    bool file = !f.isDir();
+    f.close();
+    return file;
+}
+
+bool listRoot(void (*each)(const char* name, uint64_t size, void* context), void* context) {
+    Lend lend;
+    NullPrint quiet;
+    if (!mount(quiet)) return false;
+    FsFile root, f;
+    if (!root.open("/", O_RDONLY)) return false;
+    char name[64];  // longer names can't be 8.3, which is all SynthMinder lists
+    while (f.openNext(&root, O_RDONLY)) {
+        if (!f.isDir() && !f.isHidden() && !f.isSystem() && f.getName(name, sizeof name) && name[0] != '.')
+            each(name, f.fileSize(), context);
+        f.close();
+    }
+    root.close();
+    return true;
+}
+
 // Device 1's image: its name and how it was opened, to reopen it after the
 // card restarts (s_device1_image is declared above, with startCard).
 static char s_device1_name[drive_config::MAX_NAME + 1] = "";

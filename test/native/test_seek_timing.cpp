@@ -82,7 +82,7 @@ TEST(test_sentence_line_assembler) {
     feed("$HDQ,1$HDQ,1,PACKS*26\n");  // cut off by a '$'
     CHECK_EQ(dropped, 1);
     CHECK(lines.size() == 2 && lines[1] == "$HDQ,1,PACKS*26");
-    std::string longLine(81, 'x');
+    std::string longLine(SENTENCE_MAX_LINE, 'x');  // with the '$', one too long
     feed(("$" + longLine + "\n").c_str());
     CHECK_EQ(dropped, 2);
     CHECK_EQ(lines.size(), 2u);

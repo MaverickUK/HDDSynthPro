@@ -138,6 +138,22 @@ void beginSeekTiming();
 void serviceLink();
 void serviceLinkRx();
 void serviceLoopback();
+// SynthMinder (synthminder.h, bay_service.cpp): a sentence for the synth,
+// sent by serviceLink() (false with the link off); a line from the synth,
+// for the answer being collected; the link and seek timing for STATUS.
+bool relayToSynth(const char* line, size_t len);
+void synthMinderLinkLine(const char* line, size_t len);
+const char* linkState();
+void seekTimingSummary(char* out, size_t size);
+extern uint32_t g_link_rx_lost;  // link bytes that found the RX ring full
+// serveFetches(): a Fetch with `message` set. True with its result now, or
+// false while a RECEIVE waits for the synth; synthMinderReady() then gives
+// its id once the reply is in its buffer.
+namespace ata { struct Fetch; }
+bool synthMinderFetch(const ata::Fetch& fetch, bool& ok);
+bool synthMinderReady(uint32_t& id);
+extern bool g_synthminder_waiting;  // a RECEIVE is held: worth calling synthMinderReady()
+void printSynthMinderStats(Print& out);  // for `s`
 void printSeekConfig();  // console `S`'s seek timing lines
 const SeekModel* seekModel(uint32_t now_ms);
 void postHeadTarget(uint32_t lba, uint32_t sectors, activity_link::Op op, uint64_t at_us);
@@ -162,7 +178,12 @@ extern BlockSource* g_device1_disk;
 extern const char* g_device1_kind;  // "none", "image" or "folder"
 void editConfig(const char* line);       // console `E`
 void printConfig();                      // console `S`
-void startDiscChange(const char* name);  // console `M`
+const char* startDiscChange(const char* name, Print& out);  // console `M`: "" or why not
+// SynthMinder's requests for the drive itself (bay_service.cpp; synthminder.h).
+namespace synthminder { class Reply; }
+void bayStatus(synthminder::Reply& reply);
+const char* bayChangeDisc(const char* name);              // "" or why not
+const char* baySet(const char* key, const char* value);  // "" or why not
 
 // The activity classifier, the link and seek timing (core 0)
 extern activity::Classifier g_activity;

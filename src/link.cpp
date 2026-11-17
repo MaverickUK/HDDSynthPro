@@ -24,6 +24,7 @@
 #include "ide_listen.h"
 #else
 #include <hardware/clocks.h>
+#include <hardware/irq.h>
 #include <hardware/structs/busctrl.h>
 #include <hardware/uart.h>
 
@@ -58,6 +59,7 @@
 #include "iordy_timer.h"
 #include "sd_card.h"
 #include "scratch.h"
+#include "synthminder.h"
 #endif
 
 #include "main_state.h"
@@ -78,7 +80,8 @@ bool g_activity_unprinted = false;
 // cfg::LINK_HEAD_GAP_US, the newest).
 //
 // The other direction (GPIO 1, protocol version 2) brings the synth's $HDM:
-// the modelled drive it's playing, for seek_timing = synth. GPIO 1 is pulled
+// the modelled drive it's playing, for seek_timing = synth, and its answers to
+// what SynthMinder asks it through the drive (synthminder.h). GPIO 1 is pulled
 // up (a UART line idles high), so unconnected it reads idle, not noise.
 activity_link::Sender g_link(cfg::LINK_HEARTBEAT_MS);
 activity_link::HeadPacer g_head(cfg::LINK_HEAD_GAP_US);
@@ -87,11 +90,61 @@ static LineAssembler g_link_rx;
 seek_timing::SynthModel g_synth;
 uint32_t g_link_rx_errors = 0;  // framing, parity, break or overrun
 
+// What arrives is moved from the UART's 32-byte RX FIFO into this ring by an
+// interrupt on core 0: a pack list relayed from the synth for SynthMinder is
+// a few KB in one burst (the FIFO fills in 2.8 ms), more than a loop pass
+// can be relied on to keep up with. serviceLinkRx() and the loopback test
+// read the ring. A byte with an error (framing, parity, break or overrun) is
+// counted in g_link_rx_errors and dropped.
+static SpscRing<uint8_t, 1024> g_link_rx_ring;
+uint32_t g_link_rx_lost = 0;  // bytes that found the ring full
+
+static void linkRxInterrupt() {
+    uart_hw_t* hw = uart_get_hw(uart0);
+    while (!(hw->fr & UART_UARTFR_RXFE_BITS)) {
+        uint32_t dr = hw->dr;
+        if (dr & (UART_UARTDR_FE_BITS | UART_UARTDR_PE_BITS | UART_UARTDR_BE_BITS | UART_UARTDR_OE_BITS))
+            ++g_link_rx_errors;
+        else if (!g_link_rx_ring.push(uint8_t(dr & 0xFF)))
+            ++g_link_rx_lost;
+    }
+}
+
+// uart_init resets the UART, interrupt enables and all: this sets them again.
+static void startLinkUart() {
+    uart_init(uart0, cfg::LINK_BAUD);          // 8N1
+    uart_set_irq_enables(uart0, true, false);  // RX: the FIFO half full, or a pause after a byte
+}
+
 void beginLink() {
-    uart_init(uart0, cfg::LINK_BAUD);  // 8N1
+    startLinkUart();
     gpio_set_function(cfg::PIN_LINK_TX, GPIO_FUNC_UART);
     gpio_set_pulls(cfg::PIN_LINK_RX, true, false);  // a pull-up only (erratum E9)
     gpio_set_function(cfg::PIN_LINK_RX, GPIO_FUNC_UART);
+    irq_set_exclusive_handler(UART0_IRQ, linkRxInterrupt);  // on core 0, which calls this: core 1 never sees it
+    irq_set_enabled(UART0_IRQ, true);
+}
+
+// A sentence for the synth from SynthMinder (synthminder.h), sent by
+// serviceLink() between $HDA and $HDE sentences once the TX FIFO is empty. It
+// is at most synthminder::RELAY_LINE_MAX characters, so with its line ending
+// it fits the FIFO and sending it never waits.
+static char g_relay_line[synthminder::RELAY_LINE_MAX + 3];
+static size_t g_relay_len = 0;
+
+bool relayToSynth(const char* line, size_t len) {
+    if (!g_link_on || len > synthminder::RELAY_LINE_MAX) return false;
+    memcpy(g_relay_line, line, len);
+    g_relay_line[len] = '\r';
+    g_relay_line[len + 1] = '\n';
+    g_relay_len = len + 2;
+    return true;
+}
+
+// For STATUS's `link`: off, up (the synth's $HDM heard lately) or lost.
+const char* linkState() {
+    if (!g_link_on) return "off";
+    return g_synth.heard(millis()) ? "up" : "lost";
 }
 
 // A head target for $HDE: the command's first sector, from `at_us` (when its
@@ -108,6 +161,13 @@ static bool loopbackSending();
 
 void serviceLink() {
     if (!g_link_on || loopbackSending()) return;
+    if (g_relay_len) {  // SynthMinder's first: the PC is waiting for the answer
+        if (uart_get_hw(uart0)->fr & UART_UARTFR_TXFE_BITS) {
+            uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(g_relay_line), g_relay_len);  // fits: never waits
+            g_relay_len = 0;
+        }
+        return;
+    }
     activity_link::Fields f;
     f.busy = g_busy;
     f.state = g_activity.state();
@@ -170,6 +230,20 @@ static void describeModel(const SeekModel* m, char* out, size_t size) {
                       lroundf(m->trackMs * 10) / 10, lroundf(m->trackMs * 10) % 10, int(m->zoned));
 }
 
+// For STATUS's `seek_timing`: "off", or the setting and the model's speed,
+// e.g. "synth 5400 rpm", "voice97 5400 rpm", "synth (no model)".
+void seekTimingSummary(char* out, size_t size) {
+    if (!g_seek_on || g_config.seek_timing.source == seek_timing::Source::Off) {
+        std::snprintf(out, size, "off");
+        return;
+    }
+    const SeekModel* m = seekModel(millis());
+    if (m)
+        std::snprintf(out, size, "%s %ld rpm", seek_timing::settingName(g_config.seek_timing), lroundf(m->rpm));
+    else
+        std::snprintf(out, size, "%s (no model)", seek_timing::settingName(g_config.seek_timing));
+}
+
 // Console `S`'s line for seek timing.
 void printSeekConfig() {
     uint32_t now = millis();
@@ -206,6 +280,7 @@ static struct {
     uint32_t valid = 0, head_valid = 0, rejected = 0;
     activity_link::Fields last;
     LineAssembler rx;
+    uint32_t errors_before = 0;  // g_link_rx_errors at the start
     // The $HDM the test sends (longer than the TX FIFO, so a piece at a time),
     // and whether it came back.
     char model_line[SENTENCE_MAX_LINE + 4];
@@ -261,17 +336,14 @@ static void loopbackLine(const char* line, size_t len) {
     }
 }
 
-// Reads what has arrived, without waiting.
+// Reads what has arrived (the ring the RX interrupt fills), without waiting.
+// The interrupt counts errors, and drops their bytes.
 static void drainLoopback() {
-    uart_hw_t* hw = uart_get_hw(uart0);
-    while (!(hw->fr & UART_UARTFR_RXFE_BITS)) {
-        uint32_t dr = hw->dr;
+    g_loopback.errors = g_link_rx_errors - g_loopback.errors_before;
+    uint8_t c;
+    while (g_link_rx_ring.pop(c)) {
         ++g_loopback.bytes;
-        if (dr & (UART_UARTDR_FE_BITS | UART_UARTDR_PE_BITS | UART_UARTDR_BE_BITS | UART_UARTDR_OE_BITS)) {
-            ++g_loopback.errors;
-            continue;
-        }
-        switch (g_loopback.rx.feed(char(dr & 0xFF))) {
+        switch (g_loopback.rx.feed(char(c))) {
             case LineAssembler::Result::Line: loopbackLine(g_loopback.rx.line(), g_loopback.rx.length()); break;
             case LineAssembler::Result::Dropped: ++g_loopback.rejected; break;
             default: break;
@@ -298,9 +370,14 @@ void serviceLoopback() {
             // Resetting the UART then (nothing is being sent) clears anything
             // half received and any error left from before.
             if (sending) return;
-            uart_init(uart0, cfg::LINK_BAUD);
+            startLinkUart();
+            {
+                uint8_t c;
+                while (g_link_rx_ring.pop(c)) {}  // anything from before
+            }
             g_loopback.rx = LineAssembler();
             g_loopback.bytes = g_loopback.errors = 0;
+            g_loopback.errors_before = g_link_rx_errors;
             g_loopback.valid = g_loopback.head_valid = g_loopback.rejected = 0;
             g_loopback.model_back = g_loopback.model_wrong = false;
             g_loopback.model_len = loopbackModelLine(g_loopback.model_line, sizeof g_loopback.model_line);
@@ -345,22 +422,19 @@ void serviceLoopback() {
     g_loopback.phase = Phase::Off;
 }
 
-// The synth's side of the link: $HDM lines, read on every loop pass (an $HDM
-// is about 45 bytes, more than the RX FIFO holds; one lost now and then
-// doesn't matter, the next comes 2 s later). The loopback test reads the
-// FIFO itself while it runs.
+// The synth's side of the link, read on every loop pass from the ring the RX
+// interrupt fills: $HDM lines, and its answers to SynthMinder's requests. The
+// loopback test reads the ring itself while it runs.
 void serviceLinkRx() {
     if (g_loopback.phase != decltype(g_loopback)::Phase::Off) return;
-    uart_hw_t* hw = uart_get_hw(uart0);
     uint32_t now = millis();
-    while (!(hw->fr & UART_UARTFR_RXFE_BITS)) {
-        uint32_t dr = hw->dr;
-        if (dr & (UART_UARTDR_FE_BITS | UART_UARTDR_PE_BITS | UART_UARTDR_BE_BITS | UART_UARTDR_OE_BITS)) {
-            ++g_link_rx_errors;
-            continue;
-        }
-        switch (g_link_rx.feed(char(dr & 0xFF))) {
-            case LineAssembler::Result::Line: g_synth.onLine(g_link_rx.line(), g_link_rx.length(), now); break;
+    uint8_t c;
+    while (g_link_rx_ring.pop(c)) {
+        switch (g_link_rx.feed(char(c))) {
+            case LineAssembler::Result::Line:
+                g_synth.onLine(g_link_rx.line(), g_link_rx.length(), now);
+                synthMinderLinkLine(g_link_rx.line(), g_link_rx.length());
+                break;
             case LineAssembler::Result::Dropped: g_synth.onDropped(); break;
             default: break;
         }

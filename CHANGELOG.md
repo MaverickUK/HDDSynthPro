@@ -4,6 +4,27 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.36.0-dev.1] - 2026-11-17 (branch `synthminder`)
+
+SynthMinder, the DOS program, talks to the drive: [docs/synthminder-protocol.md](docs/synthminder-protocol.md) (moved here from SynthMinder's `docs/protocol.md`, now that the drive implements it). With HDDSynth_Native 0.25.0 on the synth, its Synth tab works through the drive too.
+
+### Added
+- **ATA command 8Dh** (`ata_device`): SynthMinder's SEND (a one-sector PIO data-out) and RECEIVE (a one-sector PIO data-in), checked by Features, Sector Count 1, `S` `M` in LBA Low and Mid and the protocol version in LBA High; anything else is aborted. The sectors go to core 0 as a `Fetch` with `message` set, through the same path as a one-sector WRITE or READ SECTORS (`beginWrite`/`beginRead`, split from `startWrite`/`startRead` after the range check), so the host sees DRQ and BSY as it would for them, never IORDY. On the hard disk (device 0, or device 1 as a second disk); a CD-ROM alone (`device0 = cdrom`) aborts it, so SynthMinder says the firmware can't talk.
+- **`synthminder.*`** (pure, host-tested in `test_synthminder.cpp`): the sector format, replies of up to 16 sectors with no sentence split between two, `$SBQ,1,STATUS`, `$SBQ,1,FILES`, `$SBC,1,DISC`, `$SBC,1,SET,device0` and the errors; `$HDQ`/`$HDC` relayed to the synth and its answer collected (`$HDS`, `$HDP` by their count, `$HDK`, `$HDM`), or `$SBK,1,RELAY,ERR,nosynth` after 500 ms or with the link off.
+- **`bay_service.cpp`** (core 0): the requests from `serveFetches()`; a RECEIVE waiting for the synth is held (BSY) and answered from `loop()`, unless another command has started since (then its buffer is left alone). `STATUS` from what `S` shows; `FILES` lists the card's root afresh each time (8.3 `.IMG`, `.ISO`, `.CUE`; up to 32); `DISC` as console `M`; `SET` as console `E`. What SynthMinder changes prints one `SYNTHMINDER` line, only if USB serial has room.
+- `s`: `sm_requests`, `sm_relays`, `sm_timeouts` and `link_rx_lost`.
+
+### Changed
+- **The link's RX is read by an interrupt** (core 0) into a 1 KB ring, which `serviceLinkRx()` and the loopback test read: a relayed pack list is a few KB in one burst, more than the 32-byte FIFO holds between loop passes.
+- The link sends SynthMinder's sentence for the synth first, when the TX FIFO is empty, between `$HDA` and `$HDE`.
+- `sentence.*` copied again from HDDSynth_Native (its 0.25.0): lines of up to 96 characters, so the longest `$HDP` can be relayed.
+- `startDiscChange()` returns why it didn't start (`nocdrom`, `busy`), and console `E`'s work is `setConfig()`, shared with SynthMinder's `SET`; both print to a `Print` they're given.
+- RAM: 94.9% used (93.8% before): the reply (3 KB), the RX ring (1 KB), the file list. A folder as device 1 takes its list from what's left, so it can hold fewer entries.
+
+### Not yet tested
+- Everything here is host-tested only: no PC has sent 8Dh to the drive yet, and no synth has answered over the link.
+- **Core 1's layout changed** (8Dh in `ata_device`: the block is 224 bytes longer, and core 0's 164), so `check_core1_layout.py` fails until reads are benchmarked on the rig (`-m speed`) and the new layout is recorded (`--update`).
+
 ## [0.35.0] - 2026-11-17
 
 The drive sets itself up: `bus = auto` and `dma = auto` are the defaults (dev.2-dev.10). Every reset starts on early answers; the advisor learns the PC (ISA or not, waits for IORDY or not, with the IORDY probe); core 1 switches live to the data lane, from RAM, only between accesses; once the PC is learned, core 0 swaps the third PIO block for `ide_dma` and core 1 patches IDENTIFY, so Windows 98 on the Evesham gets DMA on its first boot. Also: `sd_high_speed` on by default (dev.1), seek timing with a drive cache and physical tracks (dev.9), the activity link run with the HDD Synth both ways (with HDDSynth_Native v0.24.1), false `BUSERR`s on images with READ MULTIPLE fixed (dev.8), the aligned DMA rings at the top of RAM (dev.5). Branch `auto-config` (dev.1-dev.10, below); release notes in [docs/release-notes/v0.35.0.md](docs/release-notes/v0.35.0.md).

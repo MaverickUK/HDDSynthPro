@@ -433,6 +433,7 @@ void runMmcTests();
 void runAtapiDeviceTests();
 void runHdcdTests();
 void runAutoBusTests();
+void runSynthMinderTests();
 
 int main() {
     RUN(test_pin_layout);
@@ -477,6 +478,7 @@ int main() {
     runAtapiDeviceTests();
     runHdcdTests();
     runAutoBusTests();
+    runSynthMinderTests();
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

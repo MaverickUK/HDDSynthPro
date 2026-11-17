@@ -1251,9 +1251,23 @@ CORE0_RAM static void releaseHeld() {
 }
 
 CORE0_RAM static void serveFetches() {
+    uint32_t waited;  // SynthMinder's RECEIVE, once the synth has answered (bay_service.cpp; its code is in flash)
+    if (g_synthminder_waiting && g_held_count < HELD_MAX && synthMinderReady(waited)) {
+        g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{waited, true, 0}, 0};
+        ++g_held_count;
+    }
     releaseHeld();
     ata::Fetch fetch;
     while (g_held_count < HELD_MAX && g_mailbox.takeRequest(fetch)) {
+        if (fetch.message) {  // SynthMinder's 8Dh: no disk, no seek timing (bay_service.cpp)
+            bool ok;
+            if (synthMinderFetch(fetch, ok)) {
+                g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok, 0}, 0};
+                ++g_held_count;
+                releaseHeld();
+            }
+            continue;
+        }
         uint64_t now = time_us_64();  // the command's time starts before the card's
         BlockSource* disk = fetch.unit ? g_device1_disk : g_disk;  // device 1's, or device 0's
         // A fetch moves `sectors` of them (one, or READ/WRITE MULTIPLE's block),
