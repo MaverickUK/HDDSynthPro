@@ -4,6 +4,11 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0-dev.1] - 2026-11-17 (branch `auto-config`)
+
+### Changed
+- **`sd_high_speed` is on by default.** It checks itself at every start and falls back to the normal speed by itself (0.34.0). A card file that says `sd_high_speed = off` keeps it off.
+
 ## [0.34.0] - 2026-11-16
 
 The SD card's high-speed mode on the PCB (`sd_high_speed = on`, experimental, off by default: reads from the card at 40 MHz, 17.7 MB/s against 9.2), console `G` (the card's speed), and `S` saying `clock=idle` while the card is parked (dev.3). Branch `sd-50mhz` (dev.1-3, below); release notes in [docs/release-notes/v0.34.0.md](docs/release-notes/v0.34.0.md).
