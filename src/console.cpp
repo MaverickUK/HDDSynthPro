@@ -476,6 +476,10 @@ static void printStats() {
                   (unsigned long)commands, (unsigned long)g_seek.held(),
                   (unsigned long)(commands ? g_seek.totalUs() / commands : 0), (unsigned long)g_seek.maxUs(),
                   (unsigned long long)g_seek.totalUs(), (unsigned long)g_seek.capped());
+    Serial.printf(" seek_cache_kb=%lu seek_track_sectors=%lu seek_hits=%lu seek_cached_writes=%lu seek_flushes=%lu seek_pending=%lu",
+                  (unsigned long)(model ? g_seek.cacheSectors() / 2 : 0), (unsigned long)(model ? g_seek.trackSectors() : 0),
+                  (unsigned long)g_seek.hits(), (unsigned long)g_seek.cachedWrites(), (unsigned long)g_seek.flushes(),
+                  (unsigned long)g_seek.pendingSectors());
 #endif
     Serial.print("\n");
 }

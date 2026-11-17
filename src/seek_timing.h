@@ -90,7 +90,39 @@ struct Release {
     uint64_t ready_us;
     bool first;              // the command's first sector
     uint64_t seek_start_us;  // first only
+    // First only: the head moves for this command (a read the cache can't
+    // serve, a write the drive writes through), so its head target goes to
+    // the synth at seek_start_us. Not for a cache hit or a cached write.
+    bool moves = true;
+    // Cached writes written out to the media during this call (when idle,
+    // when the cache was full, or for FLUSH CACHE): the last run, for its
+    // head target (its first LBA, sectors and when the head set off).
+    bool flushed = false;
+    uint32_t flush_lba = 0, flush_sectors = 0;
+    uint64_t flush_at_us = 0;
 };
+
+// The modelled drive's cache, in sectors, until $HDM carries it: none for a
+// stepper drive (writes go straight through; reads go faster only straight
+// on, a revolution at most, as before the cache was modelled), and
+// for a voice coil by speed, as drives of each era had: 128 KB below 5,400
+// rpm, 512 KB at 5,400, 2 MB above. Writes are cached when it's non-zero.
+uint32_t cacheSectorsOf(const SeekModel& m);
+
+// Sectors on one of the modelled drive's physical tracks, which sets its
+// media rate (sectors x 512 bytes x revolutions a second), until $HDM carries
+// it: by cylinder count, as a stand-in for the era's recording density. 17
+// (MFM) below 800 cylinders, 40 below 2,000, 200 below 20,000, 900 above:
+// 0.5 MB/s for the 1985 stepper, 1.2 for 1991's, 9.2 for 1997's, 55 for
+// 2005's. Up to 0.35.0-dev.8 the host's CHS geometry (63) stood in for it,
+// which held a 2005 drive to 3.9 MB/s.
+uint32_t trackSectorsOf(const SeekModel& m);
+
+// The cache's write side writes runs out once the drive has been idle this
+// long (or when it's full, or for FLUSH CACHE).
+constexpr uint32_t IDLE_FLUSH_US = 10000;
+// Separate runs of cached writes it keeps (neighbouring writes merge).
+constexpr unsigned WRITE_RUNS = 16;
 
 // The modelled drive's head and platter, on one free-running microsecond
 // clock. For each command:
@@ -101,12 +133,26 @@ struct Release {
 //   wait    = rotationalWaitUs(arrive, lba, sectors_per_track)
 //   ready_k = arrive + wait + transferUs(k + 1)               sector k under the head
 //
-// A command that carries on from the last one's next sector doesn't seek or
-// wait for the platter: the head reads straight on from head_free_at, as a
-// drive's read-ahead or write cache lets it, with at most a revolution read
-// ahead if the host was slow to ask. Without that, a host that asks for the
-// next command a little after the last one ended would wait nearly a whole
-// turn each time, and sequential transfers would run at half the media rate.
+// The cache (cacheSectorsOf), as drives from the late 1980s on hid most of
+// their seeks behind one:
+//
+//   read-ahead  after a read the head reads on into the cache until it's
+//               needed elsewhere. A read of sectors it has passed (and not
+//               yet pushed out: the cache holds the last cacheSectors), or
+//               will pass within a revolution, is served from there with no
+//               seek. Without a cache (a stepper) only a read straight on
+//               gains, by a revolution at most. Without this, a host
+//               that asks for the next command a little after the last one
+//               ended would wait nearly a whole turn each time.
+//   write-back  a write is taken into the cache and released at once; the
+//               head stays where it is, so a copy's reads keep hitting.
+//               Neighbouring writes merge into runs, written out (a seek,
+//               the platter, the transfer) once the drive has been idle for
+//               IDLE_FLUSH_US, when a write wouldn't fit (the host waits for
+//               room), or for FLUSH CACHE (flushAll).
+//
+// Not modelled: the host turning the write cache off (SET FEATURES 82h),
+// reads served from cached writes, and segmented caches.
 //
 // Everything is capped at MAX_HOLD_US after the command's first sector
 // reached core 0.
@@ -118,12 +164,31 @@ public:
     bool active() const { return has_model_; }
     const SeekModel& model() const { return model_; }
 
+    // The disk's size; `sectors_per_track` is used only until a model is set
+    // (which brings its own, trackSectorsOf).
     void setGeometry(uint32_t total_sectors, uint32_t sectors_per_track);
+    // Sectors per physical track (set by setModel); for the tests of the
+    // mechanics, which use the host's geometry.
+    void setTrackSectors(uint32_t sectors) { sectors_per_track_ = sectors ? sectors : 1; }
+    uint32_t trackSectors() const { return sectors_per_track_; }
 
     // One sector of a media command reached core 0 at `now_us`: `lba` is the
     // sector, `command_lba` the command's first. Sectors come in order; a
     // command is new when its first sector changes or `lba` doesn't move on.
-    Release onSector(uint64_t now_us, uint32_t command_lba, uint32_t lba);
+    // `write`: a write command; `command_sectors`: its length (for the
+    // write cache, which takes a write whole).
+    Release onSector(uint64_t now_us, uint32_t command_lba, uint32_t lba, bool write = false,
+                     uint32_t command_sectors = 1);
+
+    // FLUSH CACHE: every cached write written out; when it's done (now_us if
+    // there was nothing to write). `out`, if given, gets the last run's head
+    // target.
+    uint64_t flushAll(uint64_t now_us, Release* out = nullptr);
+
+    // The cache in sectors (cacheSectorsOf the model, set by setModel); 0
+    // turns it off, for the tests of the mechanics alone.
+    void setCacheSectors(uint32_t sectors) { cache_sectors_ = sectors; }
+    uint32_t cacheSectors() const { return cache_sectors_; }
 
     // Counts, for the console, kept up to date sector by sector. A command's
     // time is from its first sector reaching core 0 to its latest being
@@ -133,7 +198,11 @@ public:
     uint64_t totalUs() const { return total_us_; }
     uint32_t maxUs() const { return max_us_; }
     uint32_t capped() const { return capped_; }      // commands that hit MAX_HOLD_US
-    void resetCounts() { commands_ = held_ = max_us_ = capped_ = 0, total_us_ = 0; }
+    uint32_t hits() const { return hits_; }          // reads served from the read-ahead
+    uint32_t cachedWrites() const { return cached_writes_; }  // writes taken into the cache
+    uint32_t flushes() const { return flushes_; }    // runs written out
+    uint32_t pendingSectors() const { return pend_sectors_; }  // cached, not yet written
+    void resetCounts() { commands_ = held_ = max_us_ = capped_ = hits_ = cached_writes_ = flushes_ = 0, total_us_ = 0; }
 
 private:
     SeekModel model_;
@@ -156,6 +225,28 @@ private:
 
     uint32_t commands_ = 0, held_ = 0, max_us_ = 0, capped_ = 0;
     uint64_t total_us_ = 0;
+
+    // The cache
+    uint32_t cache_sectors_ = 0;
+    bool command_cached_write_ = false;  // this command went into the write cache
+    uint64_t command_ready_ = 0;         // and when its sectors are released
+    // The read-ahead: sector seg_lba_ passes under the head at seg_base_,
+    // the ones after it in turn, until seg_end_ (the head moved away).
+    bool seg_valid_ = false;
+    uint32_t seg_lba_ = 0;
+    uint64_t seg_base_ = 0, seg_end_ = 0;
+    // Cached writes waiting to be written: runs of sectors, oldest first.
+    struct Run {
+        uint32_t lba, sectors;
+    };
+    Run runs_[WRITE_RUNS] = {};
+    unsigned run_first_ = 0, run_count_ = 0;
+    uint32_t pend_sectors_ = 0;
+    uint32_t hits_ = 0, cached_writes_ = 0, flushes_ = 0;
+
+    uint64_t readAheadAt(uint32_t sector) const;  // when `sector` passes the head (the read-ahead)
+    uint64_t flushRun(uint64_t start, Release& r);  // writes the oldest run from `start`; when done
+    void flushIdle(uint64_t now, Release& r);       // writes runs out while the drive was idle
 };
 
 }  // namespace seek_timing

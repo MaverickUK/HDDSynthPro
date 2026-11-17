@@ -1274,13 +1274,23 @@ CORE0_RAM static void serveFetches() {
             ++g_sectors_served;  // auto_bus: past detection?
             // Seek timing sees each sector, as it did one fetch at a time: the
             // block is ready when its last sector would be.
-            seek_timing::Release r = g_seek.onSector(now, fetch.command_lba, lba);
+            seek_timing::Release r = g_seek.onSector(now, fetch.command_lba, lba, fetch.store, fetch.command_sectors);
             ready = r.ready_us;
-            if (r.first)
+            // The head's moves to the synth: a cached write or a read from the
+            // cache moves nothing; a run of cached writes written out does.
+            if (r.flushed) postHeadTarget(r.flush_lba, r.flush_sectors, activity_link::Op::Write, r.flush_at_us);
+            if (r.first && r.moves)
                 postHeadTarget(fetch.command_lba, fetch.command_sectors,
                                fetch.store ? activity_link::Op::Write : activity_link::Op::Read, r.seek_start_us);
         }
-        if (ok && fetch.flush) ok = disk->flush();
+        if (ok && fetch.flush) {
+            ok = disk->flush();
+            // FLUSH CACHE: done once the modelled drive's cache is written out
+            seek_timing::Release f{};
+            uint64_t done = g_seek.flushAll(now, &f);
+            if (done > ready) ready = done;
+            if (f.flushed) postHeadTarget(f.flush_lba, f.flush_sectors, activity_link::Op::Write, f.flush_at_us);
+        }
         g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok, failed}, ready};
         ++g_held_count;
         releaseHeld();

@@ -4,6 +4,18 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0-dev.9] - 2026-11-17 (branch `auto-config`)
+
+### Added
+- **Seek timing models the drive's cache** ([docs/activity-link.md](docs/activity-link.md#authentic-seek-timing)): read-ahead (a read of what the head has read on past, or will within a revolution, needs no seek), and a write cache (writes released at once, merged into runs written out after 10 ms idle, when the cache is full, or for FLUSH CACHE). Head targets go to the synth only when the head moves. Its size by the model until `$HDM` carries it: none for the stepper, 128 KB / 512 KB / 2 MB for the 1991, 1997 and 2005 drives. `s`: `seek_cache_kb`, `seek_track_sectors`, `seek_hits`, `seek_cached_writes`, `seek_flushes`, `seek_pending`.
+
+### Fixed
+- **Seek timing's transfer used the host's CHS geometry** (63 sectors a track), holding a 2005 7,200 rpm drive to 3.9 MB/s off the platter. Now a physical track by era (`trackSectorsOf`): 17, 40, 200 and 900 sectors, 0.5 to 55 MB/s.
+
+### Tested
+- Host tests: the cache's sizes, write-back and idle write-out, read-ahead hits, a full cache making the host wait, FLUSH CACHE, the stepper writing through, and a 12.8 MB copy (2005 drive: 13.6 s without the cache, 0.7 s with).
+- The Evesham, Windows 98 with the Doom CD (`dma = on`), the synth's 2005 drive: copying `C:\WINDOWS` (184 MB each way) took 55 s, against 1 min 54 s on dev.8's timing and 51 s with none; 5,452 of 6,563 reads from the read-ahead, 6,212 writes cached in 2,170 runs; `iordy_ignored` 0. The CD-ROM seen and read in Windows.
+
 ### Tested
 - **The activity link with the HDD Synth** (0.35.0-dev.8 on the PCB, the Mk5 on v0.24.1, the Evesham running HDDBENCH; [docs/activity-link.md](docs/activity-link.md)): `$HDA`/`$HDE` followed by the synth (9,500 sentences, none rejected; seeks from the head positions on its modelled packs), `$HDM` received (from the synth's v0.24.1, which fixed its sending), and `seek_timing = synth` following the synth's pack: 1997 voice coil 4.4 ms average hold, the 1985 stepper 27 ms (519 ms at most), switched live within 2 s.
 

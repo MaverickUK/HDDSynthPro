@@ -220,10 +220,13 @@ TEST(test_hdm_times_out) {
 constexpr uint32_t TOTAL = 131072;  // the generated disk
 constexpr uint32_t SPT = 63;
 
+// The mechanics alone: no cache (the tests further on turn it on).
 static Scheduler scheduler(const SeekModel& m) {
     Scheduler s;
     s.setGeometry(TOTAL, SPT);
     s.setModel(&m);
+    s.setCacheSectors(0);
+    s.setTrackSectors(SPT);
     return s;
 }
 
@@ -373,6 +376,154 @@ TEST(test_hold_off_passes_through) {
     CHECK_EQ(s.commands(), 0u);  // not timed
 }
 
+// ---- The cache ---------------------------------------------------------------------------
+
+// The model's own cache (cacheSectorsOf), as the firmware runs it.
+static Scheduler cached(const SeekModel& m) {
+    Scheduler s;
+    s.setGeometry(TOTAL, SPT);
+    s.setModel(&m);
+    return s;
+}
+
+// A command of `n` sectors, as the fetch service gives them.
+static Release cmd(Scheduler& s, uint64_t now, uint32_t lba, uint32_t n, bool write, Release* first = nullptr) {
+    Release r{};
+    for (uint32_t k = 0; k < n; ++k) {
+        r = s.onSector(now, lba, lba + k, write, n);
+        if (k == 0 && first) *first = r;
+    }
+    return r;
+}
+
+TEST(test_cache_sizes_by_era) {
+    CHECK_EQ(seek_timing::trackSectorsOf(preset("stepper85")), 17u);
+    CHECK_EQ(seek_timing::trackSectorsOf(preset("voice91")), 40u);
+    CHECK_EQ(seek_timing::trackSectorsOf(preset("voice97")), 200u);
+    CHECK_EQ(seek_timing::trackSectorsOf(preset("fdb05")), 900u);
+    // media rates: 0.5, 1.2, 9.2 and 55 MB/s
+    double fdb = 900.0 * 512 * 7200 / 60.0 / 1e6;
+    CHECK(fdb > 50 && fdb < 60);
+    CHECK_EQ(seek_timing::cacheSectorsOf(preset("stepper85")), 0u);
+    CHECK_EQ(seek_timing::cacheSectorsOf(preset("voice91")), 256u);
+    CHECK_EQ(seek_timing::cacheSectorsOf(preset("voice97")), 1024u);
+    CHECK_EQ(seek_timing::cacheSectorsOf(preset("fdb05")), 4096u);
+}
+
+TEST(test_cache_write_released_at_once_and_written_when_idle) {
+    SeekModel m = preset("voice97");
+    Scheduler s = cached(m);
+    uint64_t now = 1000000;
+    Release r = cmd(s, now, 0, 8, false);  // the head at the outer edge
+    now = r.ready_us + 300;
+    Release first;
+    r = cmd(s, now, 100000, 64, true, &first);  // far away: no seek now
+    CHECK_EQ(r.ready_us, now);
+    CHECK(!first.moves);
+    CHECK_EQ(s.pendingSectors(), 64u);
+    CHECK_EQ(s.cachedWrites(), 1u);
+    // The next command after a quiet spell: the run was written meanwhile.
+    now += 50000;
+    Release f;
+    cmd(s, now, 10, 1, false, &f);
+    CHECK(f.flushed);
+    CHECK_EQ(f.flush_lba, 100000u);
+    CHECK_EQ(f.flush_sectors, 64u);
+    CHECK_EQ(s.pendingSectors(), 0u);
+    CHECK_EQ(s.flushes(), 1u);
+}
+
+TEST(test_cache_read_ahead_serves_what_follows) {
+    SeekModel m = preset("voice97");
+    Scheduler s = cached(m);
+    uint64_t now = 2000000;
+    Release r = cmd(s, now, 50000, 8, false);
+    // 20 sectors on, asked a little later: the head read on into the cache.
+    now = r.ready_us + 2000;
+    Release first;
+    r = cmd(s, now, 50020, 8, false, &first);
+    CHECK(!first.moves);
+    CHECK_EQ(s.hits(), 1u);
+    CHECK(r.ready_us <= now + revolutionUs(m) / 4);  // the head nearly there
+    // Far away: a seek, and the head goes there.
+    Release far;
+    cmd(s, r.ready_us + 300, 120000, 8, false, &far);
+    CHECK(far.moves);
+    CHECK_EQ(s.hits(), 1u);
+}
+
+TEST(test_cache_copy_is_far_faster_than_without) {
+    // Windows copying a folder: read 32 KB from one place, write it to
+    // another, over and over. Without a cache every command seeks; with one
+    // the reads follow on and the writes go out in long runs.
+    SeekModel m = preset("fdb05");
+    auto run = [&](bool with_cache, Scheduler& s) {
+        if (!with_cache) s.setCacheSectors(0);
+        uint64_t now = 3000000, start = now;
+        for (uint32_t i = 0; i < 400; ++i) {
+            Release r = cmd(s, now, 10000 + i * 64, 64, false);
+            now = r.ready_us + 300;
+            r = cmd(s, now, 90000 + i * 64, 64, true);
+            now = r.ready_us + 300;
+        }
+        return now - start;
+    };
+    Scheduler a = cached(m), b = cached(m);
+    uint64_t without = run(false, a), with = run(true, b);
+    std::printf("  copy 12.8 MB: %.0f ms without a cache, %.0f ms with (%u hits, %u runs written)\n",
+                without / 1000.0, with / 1000.0, unsigned(b.hits()), unsigned(b.flushes()));
+    CHECK(with * 3 < without);
+    CHECK(b.hits() >= 390u);  // the reads follow on
+    CHECK(b.flushes() <= 10u);  // the writes merge into long runs
+}
+
+TEST(test_cache_full_makes_the_host_wait) {
+    SeekModel m = preset("voice91");  // 256 sectors
+    Scheduler s = cached(m);
+    uint64_t now = 4000000;
+    cmd(s, now, 0, 1, false);
+    now += 20000;
+    Release r = cmd(s, now, 60000, 200, true);
+    CHECK_EQ(r.ready_us, now);
+    // Another 200 don't fit (and don't follow on): the first run is written first.
+    Release first;
+    r = cmd(s, now + 100, 20000, 200, true, &first);
+    CHECK(first.flushed);
+    CHECK(r.ready_us > now + 100);
+    CHECK_EQ(s.pendingSectors(), 200u);
+}
+
+TEST(test_cache_flush_all) {
+    SeekModel m = preset("voice97");
+    Scheduler s = cached(m);
+    uint64_t now = 5000000;
+    cmd(s, now, 0, 1, false);
+    now += 1000;
+    cmd(s, now, 70000, 16, true);
+    cmd(s, now, 30000, 16, true);
+    Release f;
+    uint64_t done = s.flushAll(now + 100, &f);
+    CHECK(f.flushed);
+    CHECK(done > now + seekTimeUs(m, 0, 0.3f));
+    CHECK_EQ(s.pendingSectors(), 0u);
+    CHECK_EQ(s.flushes(), 2u);
+    // Nothing waiting: done at once.
+    CHECK_EQ(s.flushAll(done + 50000), done + 50000);
+}
+
+TEST(test_cache_stepper_writes_through) {
+    SeekModel m = preset("stepper85");
+    Scheduler s = cached(m);
+    uint64_t now = 6000000;
+    cmd(s, now, 0, 1, false);
+    now += 500000;
+    Release first;
+    Release r = cmd(s, now, 100000, 8, true, &first);
+    CHECK(first.moves);
+    CHECK(r.ready_us > now + seekTimeUs(m, 0, 0.5f));
+    CHECK_EQ(s.cachedWrites(), 0u);
+}
+
 void runSeekTimingTests() {
     RUN(test_sentence_format_and_checksum);
     RUN(test_sentence_fields);
@@ -392,4 +543,11 @@ void runSeekTimingTests() {
     RUN(test_hold_capped_at_a_second);
     RUN(test_hold_stepper_full_stroke_under_the_cap);
     RUN(test_hold_off_passes_through);
+    RUN(test_cache_sizes_by_era);
+    RUN(test_cache_write_released_at_once_and_written_when_idle);
+    RUN(test_cache_read_ahead_serves_what_follows);
+    RUN(test_cache_copy_is_far_faster_than_without);
+    RUN(test_cache_full_makes_the_host_wait);
+    RUN(test_cache_flush_all);
+    RUN(test_cache_stepper_writes_through);
 }

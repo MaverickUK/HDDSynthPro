@@ -79,7 +79,7 @@ block 20000110-20003400 (13040 bytes)
 20002e0e   118 postFetch(ata::Device&, unsigned long&) [clone .constprop.0]
 20002e84  1108 runDrive(ata::Device&, bool) [clone .constprop.0]
 200032d8   296 loop1
-core0 block 20003400-200039f4 (1524 bytes)
+core0 block 20003400-20003e2c (2604 bytes)
 20003400    32 bus_observer::expect(unsigned long, unsigned short const*)
 20003420   124 GeneratedDisk::read(unsigned long, unsigned short*)
 2000349c    46 ImageDisk::read(unsigned long, unsigned short*)
@@ -87,6 +87,10 @@ core0 block 20003400-200039f4 (1524 bytes)
 200034f8    70 RamOverlayDisk<512u>::read(unsigned long, unsigned short*)
 2000353e    90 RamOverlayDisk<512u>::write(unsigned long, unsigned short const*)
 20003598   140 releaseHeld()
-20003624   400 serveFetches()
-200037b4   576 seek_timing::Scheduler::onSector(unsigned long long, unsigned long, unsigned long)
-bss 2000bf60
+20003624   516 serveFetches()
+20003828    28 seek_timing::Scheduler::readAheadAt(unsigned long) const
+20003844   236 seek_timing::Scheduler::flushRun(unsigned long long, seek_timing::Release&)
+20003930    56 seek_timing::Scheduler::flushIdle(unsigned long long, seek_timing::Release&)
+20003968   188 seek_timing::Scheduler::flushAll(unsigned long long, seek_timing::Release*)
+20003a24  1032 seek_timing::Scheduler::onSector(unsigned long long, unsigned long, unsigned long, bool, unsigned long)
+bss 2000c460
