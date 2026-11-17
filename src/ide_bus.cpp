@@ -758,6 +758,14 @@ CORE1_RAM_RARE bool switchProgram(bool early) {
     return true;
 }
 
+// bus = auto's quiet test (main.cpp's busAutoStep): a chip select asserted, or
+// a sample waiting for core 1. Looked at each time the test runs, not per
+// access: core 1's loop keeps its registers for the bus (0.35.0-dev.6).
+CORE1_RAM_RARE bool busActive() {
+    const bool selected = ~sio_hw->gpio_in & ((1u << cfg::PIN_CS0_N) | (1u << cfg::PIN_CS1_N));
+    return selected || !(s_pio->fstat & (1u << (PIO_FSTAT_RXEMPTY_LSB + s_sm)));
+}
+
 void requestProbe() { s_probe = 1; }
 uint32_t probes() { return s_probes; }
 bool probePending() { return s_probe != 0; }
@@ -787,13 +795,19 @@ CORE1_RAM_RARE __attribute__((noinline)) static void probeHold(ata::Reg reg) {
 
 // Inlined into both callers: a call here costs every access its register
 // saves and restores, about 100 ns (0.8.1's worst read).
-template <class Dev>
+// `Probe`: bus = auto's IORDY probe built in, only in early answers' own loop
+// (serveBusEarly). In serve()'s other copies (serviceOnce, serveOther: the
+// lane's path too) its call cost the code around it registers: s_early moved
+// to r8 and 16-bit instructions became 32-bit ones, and the lane's writes ran
+// 1.7% slower (0.35.0-dev.6).
+template <bool Probe = false, class Dev>
 __attribute__((always_inline)) static inline void serve(Dev& dev, uint32_t sample) {
     if (s_early) sample = earlyAddress(sample);
     ata::Reg reg = s_reg_for[regIndex(sample)];
     if (s_early) {
         if ((sample & STROBE_BITS) == 0) {  // an answer request: the value, no side effects yet
-            if (__builtin_expect(s_probe, 0)) probeHold(reg);
+            if constexpr (Probe)
+                if (__builtin_expect(s_probe, 0)) probeHold(reg);
             pio_sm_put(s_pio, s_sm, s_drive_for[regIndex(sample)] | dev.peek(reg));
             answered(reg == ata::Reg::Data);
             return;
@@ -1091,7 +1105,7 @@ __attribute__((always_inline)) static inline void serveBusEarlyT(Dev& dev, bool 
         if (rxWaiting(pio, sm)) {
             uint32_t sample = pio_sm_get(pio, sm);
             site(SITE_SERVE);
-            serve(dev, sample);
+            serve<true>(dev, sample);
             if (bus && (sample & STROBE_BITS) != 0) {
                 site(SITE_TRACE);
                 bus(sample);  // the trace, after the answer

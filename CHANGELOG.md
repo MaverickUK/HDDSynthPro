@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0-dev.7] - 2026-11-17 (branch `auto-config`)
+
+### Fixed
+- **The data lane's writes back to within 0.5% of 0.34.0** (dev.6: 1.7% slower). Comparing the compiled core 1 code with 0.34.0's showed two causes, both register allocation, not work:
+  - the IORDY probe's call, inlined into `serve()` everywhere, kept `s_early` in r8 and turned 16-bit instructions into 32-bit ones in `serviceOnce` and `serveOther`. Now `serve<true>` builds the probe in only in early answers' own loop (`serveBusEarly`), and `serviceOnce`, `serveOther` and `serveLane` are instruction-for-instruction 0.34.0's, at the same addresses;
+  - `bus = auto`'s per-access flag and quiet timer pushed `runDrive`'s `early` flag out of a register (a stack load at every test in the loop). The quiet spell is now timed inside `busAutoStep`, from what the bus shows when it runs (`ide_bus::busActive()`: a chip select, or a sample waiting); the switch itself still goes ahead only between accesses. `runDrive`'s loop is 0.34.0's again, but for two registers trading names.
+
+### Tested
+- Through the JMicron (Mac): the data lane 1.25 and 1.21 MB/s reads, 77.8-78.0 IOPS, 1.62 MB/s writes (40.1 ms a 64 KB write; 0.34.0 the same day 39.9, dev.6 40.6). The switch stress test (`Z`, three runs of slices 3-4): 703 switches, all passed. Learned and offered DMA, slices 3-4 passed; after a replug READ/WRITE DMA 6.78 MB/s reads, 809.9 IOPS, 13.13 writes, `bus_bad` 0.
+
 ## [0.35.0-dev.6] - 2026-11-17 (branch `auto-config`)
 
 ### Added

@@ -638,9 +638,15 @@ __attribute__((noinline)) static void stayAbsent(Dev& dev) {
 //  - the program core 0 advises, switched while RESET# is held (back to early
 //    answers, the bus idle by definition) or at a quiet moment: no command,
 //    not BSY or DRQ, no fetch out, no access for a while.
-enum class AutoStep : uint8_t { None, Switched, Busy };
-CORE1_RAM_RARE __attribute__((noinline)) static AutoStep busAutoStep(ata::Device& dev, bool reset_low, bool data_lane,
-                                                                     uint32_t last_access_cycles) {
+// Its quiet spell is timed here, from what the bus shows each time it runs
+// (ide_bus::busActive), not per access in runDrive: there the flag and timer
+// cost runDrive registers (`early` went to the stack) and the lane's writes
+// slowed 1.7%. Missing a short access only moves the moment; the switch
+// itself goes ahead only between accesses. True if it switched.
+static uint32_t g_auto_last_busy = 0;  // core 1's cycle counter when the bus last looked busy
+CORE1_RAM_RARE __attribute__((noinline)) static bool busAutoStep(ata::Device& dev, bool reset_low, bool data_lane) {
+    const uint32_t now = m33_hw->dwt_cyccnt;
+    if (ide_bus::busActive()) g_auto_last_busy = now;
     const bool idle = !dev.commandQueued() && !g_command_active.load() && !(dev.status() & (ata::ST_BSY | ata::ST_DRQ));
     const uint32_t seq = g_dma_patch_seq.load(std::memory_order_relaxed);
     if (seq != g_dma_patch_applied && idle) {
@@ -648,18 +654,21 @@ CORE1_RAM_RARE __attribute__((noinline)) static AutoStep busAutoStep(ata::Device
         dev.offerDma(g_dma_patch_mode, g_dma_patch[0], g_dma_patch[1]);
         g_dma_patch_applied = seq;
     }
+    if (!idle) g_auto_last_busy = now;
     const bool want_lane = g_bus_want_lane.load() && !reset_low;
-    if (want_lane == data_lane) return AutoStep::None;
-    if (!reset_low && !(idle && !dev.pendingFetchId() &&
-                        m33_hw->dwt_cyccnt - last_access_cycles >= g_switch_quiet_cycles))
-        return AutoStep::None;
-    if (!ide_bus::switchProgram(!want_lane)) return AutoStep::Busy;  // an access under way
+    if (want_lane == data_lane) return false;
+    if (!reset_low && !(idle && !dev.pendingFetchId() && now - g_auto_last_busy >= g_switch_quiet_cycles))
+        return false;
+    if (!ide_bus::switchProgram(!want_lane)) {  // an access under way: after the next quiet spell
+        g_auto_last_busy = now;
+        return false;
+    }
     if (g_bus_trace_switches.load()) g_trace_bus.store(true);  // debug: the accesses around it
     g_bus_switch_us.store(time_us_32(), std::memory_order_relaxed);
     g_early.store(!want_lane);
     ide_bus::updateIntrq(dev);
     g_bus_switches.fetch_add(1, std::memory_order_relaxed);
-    return AutoStep::Switched;
+    return true;
 }
 
 template <class Dev>
@@ -677,7 +686,6 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
     const bool data_lane = ide_bus::dataLaneOn();  // data reads never reach core 1 (docs/data-lane.md)
     unsigned served_with_command = 0;  // accesses served since a command was queued
     uint32_t last_access_cycles = 0;  // core 1's cycle counter: core-local, unlike the timer behind the APB bridge
-    bool accessed = false;  // an access since bus = auto's quiet test last looked
     const uint32_t bus_only_cycles = g_bus_only_cycles;
     ide_bus::updateIntrq(dev);  // driven low from the start: an ISA card's line would float high
     unsigned step = 0;
@@ -705,7 +713,6 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
         }
         if (got) {
             if (g_trace_bus.load()) record(TraceKind::Bus, sample);
-            accessed = true;  // bus = auto's quiet test (the cycle counter only under early answers: per word on the lane it cost writes 2.5%)
             if (early) {
                 last_access_cycles = m33_hw->dwt_cyccnt;  // early answers' bus-only spell
                 ide_bus::serveBusEarly(dev, reset_low, g_mailbox, posted_fetch, bus_only_cycles, static_cast<void (*)(Dev&)>(earlyIdle),
@@ -869,15 +876,8 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
                 // bus = auto (docs/auto-bus.md, the hard disk only), out of line:
                 // one test here when it's off
                 if constexpr (std::is_same_v<Dev, ata::Device>) {
-                    if (g_bus_auto.load()) {
-                        if (accessed) {  // the quiet spell starts over
-                            accessed = false;
-                            last_access_cycles = m33_hw->dwt_cyccnt;
-                        }
-                        const AutoStep r = busAutoStep(dev, reset_low, data_lane, last_access_cycles);
-                        if (r == AutoStep::Switched) return;  // loop1 enters again with the new program
-                        if (r == AutoStep::Busy) last_access_cycles = m33_hw->dwt_cyccnt;  // after the next quiet spell
-                    }
+                    if (g_bus_auto.load() && busAutoStep(dev, reset_low, data_lane))
+                        return;  // switched: loop1 enters again with the new program
                 }
                 break;
             }

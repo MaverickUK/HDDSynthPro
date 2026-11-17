@@ -240,9 +240,10 @@ The JMicron (Mac), the generated disk, `-m speed`, the data lane (`P l`) unless 
 | `switchProgram` out of the hot block (`CORE1_RAM_RARE`) | 1.25, 1.20 / 77.7-78.1 / 1.59 (40.9 ms) |
 | the quiet timer per pass, not per access | 1.25, 1.20 / 77.7-77.8 / 1.60 (40.7 ms) |
 | the probe's hold out of line | 1.25, 1.21 / 77.4-77.9 / 1.60 (40.6 ms) |
-| `busAutoStep` out of line (as committed) | 1.25, 1.21 / 77.8-78.0 / 1.60 (40.6 ms) |
+| `busAutoStep` out of line (dev.6 as committed) | 1.25, 1.21 / 77.8-78.0 / 1.60 (40.6 ms) |
+| dev.7: the probe only in `serveBusEarly`, the quiet timer inside `busAutoStep` | 1.25, 1.21 / 77.8-78.0 / 1.62 (40.1 ms) |
 
-Early answers on dev.6: 1.15 / 73.9 / 1.08 (as 0.34.0). Multiword DMA 2 offered by `dma = auto`, after a replug: 6.80 MB/s reads, 801.4 IOPS, 13.19 writes (0.34.0 with `dma = on`: 6.83 and 12.29). The lane's reads on this rig have ranged 1.20-1.36 run to run since 0.32.3, so the read figures are within noise; the writes are steady to 0.1 ms and 0.7 ms a command is still unexplained (core 1's block is 176 bytes larger than 0.34.0's; `serviceOnce` and `serveOther` about 20 bytes each).
+Early answers on dev.6: 1.15 / 73.9 / 1.08 (as 0.34.0). Multiword DMA 2 offered by `dma = auto`, after a replug: 6.80 MB/s reads, 801.4 IOPS, 13.19 writes (0.34.0 with `dma = on`: 6.83 and 12.29). The lane's reads on this rig have ranged 1.20-1.36 run to run since 0.32.3, so the read figures are within noise; the writes are steady to 0.1 ms. **dev.7 found the cause by comparing the compiled code with 0.34.0's:** register allocation, not work. The probe's call in `serve()` (inlined into `serviceOnce` and `serveOther`, which every lane write goes through) kept `s_early` in r8 and made 16-bit instructions 32-bit, and `bus = auto`'s per-access flag pushed `runDrive`'s `early` flag onto the stack. With both gone those three functions are 0.34.0's instruction for instruction, and `runDrive`'s loop is too, but for two registers' names: about 30 ns a written word, 6 cycles. The last 0.2 ms (0.5%) is within what the hot functions' placement can do (early answers' loop is 16 bytes larger, moving what follows it). With DMA after a replug: 6.78 / 809.9 / 13.13.
 
 ## Ceilings on this adapter
 

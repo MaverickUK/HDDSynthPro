@@ -42,6 +42,8 @@ bool switchProgram(bool early);
 // early answers is held cfg::IORDY_PROBE_NS, so iordy_timer sees whether the
 // host waits for it. A host that doesn't reads FFh (BSY) and polls again.
 void requestProbe();
+// bus = auto's quiet test: a chip select asserted, or an access waiting for core 1.
+bool busActive();
 bool probePending();
 uint32_t probes();  // probes made, for `s`
 
