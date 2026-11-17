@@ -4,6 +4,9 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+### Tested
+- **The activity link with the HDD Synth** (0.35.0-dev.8 on the PCB, the Mk5 on v0.24.1, the Evesham running HDDBENCH; [docs/activity-link.md](docs/activity-link.md)): `$HDA`/`$HDE` followed by the synth (9,500 sentences, none rejected; seeks from the head positions on its modelled packs), `$HDM` received (from the synth's v0.24.1, which fixed its sending), and `seek_timing = synth` following the synth's pack: 1997 voice coil 4.4 ms average hold, the 1985 stepper 27 ms (519 ms at most), switched live within 2 s.
+
 ## [0.35.0-dev.8] - 2026-11-17 (branch `auto-config`)
 
 ### Fixed
