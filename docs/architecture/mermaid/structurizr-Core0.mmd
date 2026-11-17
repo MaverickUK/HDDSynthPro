@@ -1,0 +1,69 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Component View: IDE Synth Bay - Core 0: services"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    3["<div style='font-weight: bold'>HDD Synth</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Plays hard disk sounds from<br />what the drive is doing<br />(HDDSynth_Native).</div>"]
+    style 3 fill:#999999,stroke:#6b6b6b,color:#ffffff
+
+    subgraph 5 ["IDE Synth Bay"]
+      style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
+
+      subgraph 15 ["Core 0: services"]
+        style 15 fill:#ffffff,stroke:#2e6295,color:#2e6295
+
+        16["<div style='font-weight: bold'>Fetch service</div><div style='font-size: 70%; margin-top: 0px'>[Component: main.cpp]</div><div style='font-size: 80%; margin-top:10px'>serveFetches(): takes core<br />1's fetches from the mailbox,<br />reads or writes the block<br />source, holds results for<br />seek timing. Per-sector code<br />in RAM (CORE0_RAM).</div>"]
+        style 16 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        17["<div style='font-weight: bold'>Block sources</div><div style='font-size: 70%; margin-top: 0px'>[Component: block_source.h, gen_disk, welcome_disk, folder_disk, image_parts, cue_sheet]</div><div style='font-size: 80%; margin-top:10px'>The disks served: an image on<br />the card (ImageDisk, split<br />images), a folder as a<br />read-only FAT16 disk, the<br />welcome disk, the generated<br />test disk, with a RAM overlay<br />for writes; ISO and BIN/CUE<br />discs for the CD-ROM.</div>"]
+        style 17 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        18["<div style='font-weight: bold'>SD card driver</div><div style='font-size: 70%; margin-top: 0px'>[Component: sd_card.cpp, sdio_card.cpp, card_retry, media_watch]</div><div style='font-size: 80%; margin-top:10px'>SdFat over SPI (BB48) or<br />4-bit SDIO (PCB), high-speed<br />mode with calibration,<br />retries, card removal and<br />return.</div>"]
+        style 18 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        19["<div style='font-weight: bold'>Settings and disks</div><div style='font-size: 70%; margin-top: 0px'>[Component: drive_config.cpp, disks.cpp]</div><div style='font-size: 80%; margin-top:10px'>Reads HDDSYNTH.INI, chooses<br />the image and the bus<br />program, console E/C edits<br />the file.</div>"]
+        style 19 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        20["<div style='font-weight: bold'>Serial console</div><div style='font-size: 70%; margin-top: 0px'>[Component: console.cpp, trace_format.h]</div><div style='font-size: 80%; margin-top:10px'>Commands (h, s, S, P, M, T,<br />J...), the trace and report<br />lines (CMD, DONE, AUTOBUS,<br />SLOWREAD...).</div>"]
+        style 20 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        21["<div style='font-weight: bold'>auto_bus advisor</div><div style='font-size: 70%; margin-top: 0px'>[Component: auto_bus.cpp, offerDmaToLearnedHost()]</div><div style='font-size: 80%; margin-top:10px'>From the diagnostics'<br />counters: is the host an ISA<br />card, does it wait for IORDY,<br />is detection over? Advises<br />early answers or the lane;<br />once learned, adds DMA (dma =<br />auto).</div>"]
+        style 21 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        22["<div style='font-weight: bold'>pio_plan</div><div style='font-size: 70%; margin-top: 0px'>[Component: pio_plan.h]</div><div style='font-size: 80%; margin-top:10px'>Shares the three PIO blocks<br />out: the bus program, the<br />card (SDIO), then DMA or<br />IOCS16# and the diagnostics.</div>"]
+        style 22 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        23["<div style='font-weight: bold'>Diagnostics</div><div style='font-size: 70%; margin-top: 0px'>[Component: iordy_timer, bus_observer, sector_check, bus_timing, stack_watch]</div><div style='font-size: 80%; margin-top:10px'>IORDY timing (slow reads,<br />reads the host didn't wait<br />for), the bus observer<br />checking data and IDENTIFY on<br />the cable, the read timing<br />probe, stack watermarks.</div>"]
+        style 23 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        24["<div style='font-weight: bold'>Activity link</div><div style='font-size: 70%; margin-top: 0px'>[Component: activity.cpp, activity_link.cpp, link.cpp, seek_timing.cpp]</div><div style='font-size: 80%; margin-top:10px'>Classifies the recent<br />commands (idle, sequential,<br />random), models seek and<br />rotation timing, sends<br />$HDA/$HDE to the synth and<br />takes $HDM back.</div>"]
+        style 24 fill:#85bbf0,stroke:#5d82a8,color:#000000
+      end
+
+      25["<div style='font-weight: bold'>PIO programs</div><div style='font-size: 70%; margin-top: 0px'>[Container: RP2350 PIO assembly (src/*.pio)]</div><div style='font-size: 80%; margin-top:10px'>State machines that meet the<br />IDE bus's nanosecond timing:<br />sample every access, pull<br />IORDY low within 35 ns, drive<br />DD for reads, move DMA data.<br />Three blocks of 32<br />instructions.</div>"]
+      style 25 fill:#2e7d5b,stroke:#20573f,color:#ffffff
+      31[("<div style='font-weight: bold'>microSD card</div><div style='font-size: 70%; margin-top: 0px'>[Container: FAT32]</div><div style='font-size: 80%; margin-top:10px'>FAT32: disk images<br />(HDDSYNTH.IMG and others),<br />ISOs and BIN/CUEs,<br />HDDSYNTH.INI, the scratch<br />HDDBENCH.IMG. Holds the<br />owner's data: the firmware<br />only touches the image<br />served, HDDBENCH.IMG and<br />HDDSYNTH.INI.</div>")]
+      style 31 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      32["<div style='font-weight: bold'>Rig and tools</div><div style='font-size: 70%; margin-top: 0px'>[Container: Python, Bash]</div><div style='font-size: 80%; margin-top:10px'>Host-side tests and tools:<br />pytest slices through the USB<br />adapter, the PIO simulator,<br />the trace parser, the<br />benchmark disk image, rig.sh<br />(build, flash, test).</div>"]
+      style 32 fill:#6a6a8a,stroke:#4a4a60,color:#ffffff
+      6["<div style='font-weight: bold'>Core 1: bus loop</div><div style='font-size: 70%; margin-top: 0px'>[Container: C++ (Arduino-Pico), RAM-resident]</div><div style='font-size: 80%; margin-top:10px'>The real-time half. Answers<br />every register access the PIO<br />hands it, runs the ATA/ATAPI<br />command state machines,<br />starts DMA bursts. Never<br />waits: everything it runs per<br />access is in RAM (CORE1_RAM),<br />never touches USB or the<br />card.</div>"]
+      style 6 fill:#438dd5,stroke:#2e6295,color:#ffffff
+    end
+
+    23-. "<div>Reads timings and bus samples</div><div style='font-size: 70%'>[PIO FIFOs, DMA ring]</div>" .->25
+    24-. "<div>Takes CMD and DONE events</div><div style='font-size: 70%'></div>" .->6
+    24-. "<div>Holds results for seek timing</div><div style='font-size: 70%'></div>" .->16
+    24-. "<div>$HDA, $HDE</div><div style='font-size: 70%'>[UART]</div>" .->3
+    3-. "<div>$HDM</div><div style='font-size: 70%'>[UART]</div>" .->24
+    32-. "<div>Commands and lines</div><div style='font-size: 70%'>[USB serial]</div>" .->20
+    32-. "<div>Runs the assembled programs<br />against host models</div><div style='font-size: 70%'>[pioasm output]</div>" .->25
+    25-. "<div>Hands each access over, asks<br />for read answers</div><div style='font-size: 70%'>[PIO FIFOs]</div>" .->6
+    6-. "<div>Answers reads, loads and<br />switches programs</div><div style='font-size: 70%'>[PIO FIFOs, registers]</div>" .->25
+    16-. "<div>Takes fetches, posts results</div><div style='font-size: 70%'></div>" .->6
+    16-. "<div>Reads and writes sectors</div><div style='font-size: 70%'></div>" .->17
+    17-. "<div>Reads and writes the image's<br />clusters</div><div style='font-size: 70%'></div>" .->18
+    18-. "<div>Commands and data</div><div style='font-size: 70%'>[SPI or SDIO]</div>" .->31
+    18-. "<div>Runs the card's bus</div><div style='font-size: 70%'>[PIO]</div>" .->25
+    19-. "<div>Reads HDDSYNTH.INI, edits it<br />on E</div><div style='font-size: 70%'></div>" .->31
+    19-. "<div>Chooses the disks served</div><div style='font-size: 70%'></div>" .->17
+    20-. "<div>Prints its events</div><div style='font-size: 70%'>[SPSC ring]</div>" .->6
+    20-. "<div>Feeds the counters, prints<br />AUTOBUS</div><div style='font-size: 70%'></div>" .->21
+    21-. "<div>Reads its evidence: DIOR#<br />with no chip select, reads<br />not waited for, long reads</div><div style='font-size: 70%'></div>" .->23
+    21-. "<div>Wanted program; the DMA patch</div><div style='font-size: 70%'>[Shared flags]</div>" .->6
+    21-. "<div>Frees the diagnostics' or<br />IOCS16#'s block for ide_dma</div><div style='font-size: 70%'></div>" .->22
+    22-. "<div>Starts what fits</div><div style='font-size: 70%'></div>" .->25
+
+  end

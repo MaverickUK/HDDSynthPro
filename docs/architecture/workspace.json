@@ -1,0 +1,2168 @@
+{
+  "configuration" : { },
+  "description" : "An IDE hard disk and CD-ROM drive emulated by an RP2350, served from a microSD card.",
+  "documentation" : { },
+  "id" : 1,
+  "lastModifiedDate" : "2026-11-17T18:09:45Z",
+  "model" : {
+    "deploymentNodes" : [ {
+      "children" : [ {
+        "containerInstances" : [ {
+          "containerId" : "6",
+          "environment" : "PCB",
+          "id" : "123",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "0c9ad29a-0a28-43ea-a3d6-0a7ae41f8af7"
+          },
+          "relationships" : [ {
+            "description" : "Posts fetches, records trace events",
+            "destinationId" : "124",
+            "id" : "126",
+            "linkedRelationshipId" : "49",
+            "sourceId" : "123",
+            "technology" : "Shared RAM (mailbox, SPSC ring)"
+          }, {
+            "description" : "Answers reads, loads and switches programs",
+            "destinationId" : "127",
+            "id" : "129",
+            "linkedRelationshipId" : "48",
+            "sourceId" : "123",
+            "technology" : "PIO FIFOs, registers"
+          } ],
+          "tags" : "Container Instance"
+        }, {
+          "containerId" : "15",
+          "environment" : "PCB",
+          "id" : "124",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "6339058c-fb1b-42a8-9d6f-17cd6761634c"
+          },
+          "relationships" : [ {
+            "description" : "Posts fetch results, wanted bus program, DMA patch",
+            "destinationId" : "123",
+            "id" : "125",
+            "linkedRelationshipId" : "50",
+            "sourceId" : "124",
+            "technology" : "Shared RAM"
+          }, {
+            "description" : "Runs the diagnostics and the card's programs",
+            "destinationId" : "127",
+            "id" : "130",
+            "linkedRelationshipId" : "52",
+            "sourceId" : "124",
+            "technology" : "PIO FIFOs, DMA"
+          }, {
+            "description" : "Reads and writes images, reads settings",
+            "destinationId" : "132",
+            "id" : "133",
+            "linkedRelationshipId" : "51",
+            "sourceId" : "124",
+            "technology" : "SPI or 4-bit SDIO"
+          } ],
+          "tags" : "Container Instance"
+        }, {
+          "containerId" : "25",
+          "environment" : "PCB",
+          "id" : "127",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "2536c752-3609-42f4-a525-b820ec7168d3"
+          },
+          "relationships" : [ {
+            "description" : "Hands each access over, asks for read answers",
+            "destinationId" : "123",
+            "id" : "128",
+            "linkedRelationshipId" : "47",
+            "sourceId" : "127",
+            "technology" : "PIO FIFOs"
+          }, {
+            "description" : "Answers reads, holds IORDY, DMARQ",
+            "destinationId" : "135",
+            "id" : "137",
+            "linkedRelationshipId" : "45",
+            "sourceId" : "127",
+            "technology" : "IDE bus"
+          } ],
+          "tags" : "Container Instance"
+        } ],
+        "description" : "Two Cortex-M33 cores at 200 MHz, 520 KB RAM, three PIO blocks",
+        "environment" : "PCB",
+        "id" : "122",
+        "instances" : "1",
+        "name" : "RP2350B",
+        "properties" : {
+          "structurizr.dsl.identifier" : "de8afcc0-9b6b-4e3a-8cf5-395e9f9d41f2"
+        },
+        "tags" : "Element,Deployment Node",
+        "technology" : "Microcontroller"
+      }, {
+        "containerInstances" : [ {
+          "containerId" : "31",
+          "environment" : "PCB",
+          "id" : "132",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "41fcecb6-6503-4d87-af67-62f39a651798"
+          },
+          "tags" : "Container Instance"
+        } ],
+        "description" : "4-bit SDIO, 20-40 MHz",
+        "environment" : "PCB",
+        "id" : "131",
+        "instances" : "1",
+        "name" : "microSD socket",
+        "properties" : {
+          "structurizr.dsl.identifier" : "39076011-8a3b-4392-933a-5cb215188b25"
+        },
+        "tags" : "Element,Deployment Node",
+        "technology" : "Socket"
+      } ],
+      "description" : "Rev 0.3/0.4: RP2350B, 3.3 V-5 V bus switches, microSD on SDIO, 40-pin IDE header",
+      "environment" : "PCB",
+      "id" : "121",
+      "instances" : "1",
+      "name" : "IDE Synth Bay PCB",
+      "properties" : {
+        "structurizr.dsl.identifier" : "62323296-24fe-49a4-81b6-ee13989f2e21"
+      },
+      "tags" : "Element,Deployment Node",
+      "technology" : "Hardware"
+    }, {
+      "environment" : "PCB",
+      "id" : "134",
+      "instances" : "1",
+      "name" : "Retro PC or USB-IDE adapter",
+      "properties" : {
+        "structurizr.dsl.identifier" : "4e3df948-904e-4fe3-aa3f-17e829a3fc39"
+      },
+      "softwareSystemInstances" : [ {
+        "environment" : "PCB",
+        "id" : "135",
+        "instanceId" : 1,
+        "properties" : {
+          "structurizr.dsl.identifier" : "5af52201-9c32-4c0b-8ae9-93e1213bee1f"
+        },
+        "relationships" : [ {
+          "description" : "Strobes registers and data",
+          "destinationId" : "127",
+          "id" : "136",
+          "linkedRelationshipId" : "44",
+          "sourceId" : "135",
+          "technology" : "IDE bus"
+        } ],
+        "softwareSystemId" : "2",
+        "tags" : "Software System Instance"
+      } ],
+      "tags" : "Element,Deployment Node",
+      "technology" : "IDE host"
+    }, {
+      "containerInstances" : [ {
+        "containerId" : "32",
+        "environment" : "PCB",
+        "id" : "139",
+        "instanceId" : 1,
+        "properties" : {
+          "structurizr.dsl.identifier" : "87cc9f4a-9e9b-4fe1-9bc7-095165dcd9df"
+        },
+        "relationships" : [ {
+          "description" : "Console commands, reads trace lines",
+          "destinationId" : "124",
+          "id" : "140",
+          "linkedRelationshipId" : "53",
+          "sourceId" : "139",
+          "technology" : "USB serial"
+        }, {
+          "description" : "Runs the assembled programs against host models",
+          "destinationId" : "127",
+          "id" : "141",
+          "linkedRelationshipId" : "119",
+          "sourceId" : "139",
+          "technology" : "pioasm output"
+        }, {
+          "description" : "Raw sector reads and writes",
+          "destinationId" : "135",
+          "id" : "142",
+          "linkedRelationshipId" : "54",
+          "sourceId" : "139",
+          "technology" : "USB mass storage (through the adapter)"
+        } ],
+        "tags" : "Container Instance"
+      } ],
+      "description" : "macOS or Windows",
+      "environment" : "PCB",
+      "id" : "138",
+      "instances" : "1",
+      "name" : "Dev computer",
+      "properties" : {
+        "structurizr.dsl.identifier" : "039b6b15-3143-4739-9b7b-7b8a51ca9bb4"
+      },
+      "tags" : "Element,Deployment Node",
+      "technology" : "Computer"
+    }, {
+      "children" : [ {
+        "containerInstances" : [ {
+          "containerId" : "6",
+          "environment" : "BB48",
+          "id" : "145",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "05dac079-1f9f-4d0a-94cd-322f4db02a9e"
+          },
+          "relationships" : [ {
+            "description" : "Posts fetches, records trace events",
+            "destinationId" : "146",
+            "id" : "148",
+            "linkedRelationshipId" : "49",
+            "sourceId" : "145",
+            "technology" : "Shared RAM (mailbox, SPSC ring)"
+          }, {
+            "description" : "Answers reads, loads and switches programs",
+            "destinationId" : "149",
+            "id" : "151",
+            "linkedRelationshipId" : "48",
+            "sourceId" : "145",
+            "technology" : "PIO FIFOs, registers"
+          } ],
+          "tags" : "Container Instance"
+        }, {
+          "containerId" : "15",
+          "environment" : "BB48",
+          "id" : "146",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "07de13c0-9d18-4c45-a263-b8e4497ac754"
+          },
+          "relationships" : [ {
+            "description" : "Posts fetch results, wanted bus program, DMA patch",
+            "destinationId" : "145",
+            "id" : "147",
+            "linkedRelationshipId" : "50",
+            "sourceId" : "146",
+            "technology" : "Shared RAM"
+          }, {
+            "description" : "Runs the diagnostics and the card's programs",
+            "destinationId" : "149",
+            "id" : "152",
+            "linkedRelationshipId" : "52",
+            "sourceId" : "146",
+            "technology" : "PIO FIFOs, DMA"
+          }, {
+            "description" : "Reads and writes images, reads settings",
+            "destinationId" : "154",
+            "id" : "155",
+            "linkedRelationshipId" : "51",
+            "sourceId" : "146",
+            "technology" : "SPI or 4-bit SDIO"
+          } ],
+          "tags" : "Container Instance"
+        }, {
+          "containerId" : "25",
+          "environment" : "BB48",
+          "id" : "149",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "bc315623-5f31-489b-8bee-85971054085f"
+          },
+          "relationships" : [ {
+            "description" : "Hands each access over, asks for read answers",
+            "destinationId" : "145",
+            "id" : "150",
+            "linkedRelationshipId" : "47",
+            "sourceId" : "149",
+            "technology" : "PIO FIFOs"
+          }, {
+            "description" : "Answers reads, holds IORDY, DMARQ",
+            "destinationId" : "157",
+            "id" : "159",
+            "linkedRelationshipId" : "45",
+            "sourceId" : "149",
+            "technology" : "IDE bus"
+          } ],
+          "tags" : "Container Instance"
+        } ],
+        "description" : "Two Cortex-M33 cores at 200 MHz, 520 KB RAM, three PIO blocks",
+        "environment" : "BB48",
+        "id" : "144",
+        "instances" : "1",
+        "name" : "RP2350B",
+        "properties" : {
+          "structurizr.dsl.identifier" : "446d3ec2-6340-4f0b-ab3b-43ddc9169915"
+        },
+        "tags" : "Element,Deployment Node",
+        "technology" : "Microcontroller"
+      }, {
+        "containerInstances" : [ {
+          "containerId" : "31",
+          "environment" : "BB48",
+          "id" : "154",
+          "instanceId" : 1,
+          "properties" : {
+            "structurizr.dsl.identifier" : "15cb6155-0861-4b74-a898-5f188176bfac"
+          },
+          "tags" : "Container Instance"
+        } ],
+        "description" : "SPI, 25 MHz",
+        "environment" : "BB48",
+        "id" : "153",
+        "instances" : "1",
+        "name" : "microSD breakout",
+        "properties" : {
+          "structurizr.dsl.identifier" : "33397b80-0740-426a-b2f3-fd501cf23904"
+        },
+        "tags" : "Element,Deployment Node",
+        "technology" : "Socket"
+      } ],
+      "description" : "The proof of concept: RP2350B on a breadboard, hand-wired to an IDE cable",
+      "environment" : "BB48",
+      "id" : "143",
+      "instances" : "1",
+      "name" : "Olimex RP2350-PICO2-BB48",
+      "properties" : {
+        "structurizr.dsl.identifier" : "ea4f3c7f-c0fb-422b-ae03-590e5de596fd"
+      },
+      "tags" : "Element,Deployment Node",
+      "technology" : "Hardware"
+    }, {
+      "environment" : "BB48",
+      "id" : "156",
+      "instances" : "1",
+      "name" : "USB-IDE adapter or retro PC",
+      "properties" : {
+        "structurizr.dsl.identifier" : "3a3d067a-90d4-4f3d-ba85-524e8a1fa4d9"
+      },
+      "softwareSystemInstances" : [ {
+        "environment" : "BB48",
+        "id" : "157",
+        "instanceId" : 1,
+        "properties" : {
+          "structurizr.dsl.identifier" : "17be6b58-1dc6-4854-9a7d-6d0c78534ddc"
+        },
+        "relationships" : [ {
+          "description" : "Strobes registers and data",
+          "destinationId" : "149",
+          "id" : "158",
+          "linkedRelationshipId" : "44",
+          "sourceId" : "157",
+          "technology" : "IDE bus"
+        } ],
+        "softwareSystemId" : "2",
+        "tags" : "Software System Instance"
+      } ],
+      "tags" : "Element,Deployment Node",
+      "technology" : "IDE host"
+    }, {
+      "containerInstances" : [ {
+        "containerId" : "32",
+        "environment" : "BB48",
+        "id" : "161",
+        "instanceId" : 1,
+        "properties" : {
+          "structurizr.dsl.identifier" : "5a0e7401-1e93-4df1-9211-d32276807382"
+        },
+        "relationships" : [ {
+          "description" : "Console commands, reads trace lines",
+          "destinationId" : "146",
+          "id" : "162",
+          "linkedRelationshipId" : "53",
+          "sourceId" : "161",
+          "technology" : "USB serial"
+        }, {
+          "description" : "Runs the assembled programs against host models",
+          "destinationId" : "149",
+          "id" : "163",
+          "linkedRelationshipId" : "119",
+          "sourceId" : "161",
+          "technology" : "pioasm output"
+        }, {
+          "description" : "Raw sector reads and writes",
+          "destinationId" : "157",
+          "id" : "164",
+          "linkedRelationshipId" : "54",
+          "sourceId" : "161",
+          "technology" : "USB mass storage (through the adapter)"
+        } ],
+        "tags" : "Container Instance"
+      } ],
+      "description" : "macOS or Windows",
+      "environment" : "BB48",
+      "id" : "160",
+      "instances" : "1",
+      "name" : "Dev computer",
+      "properties" : {
+        "structurizr.dsl.identifier" : "281fad40-8690-413d-ab85-5ea61b31df60"
+      },
+      "tags" : "Element,Deployment Node",
+      "technology" : "Computer"
+    } ],
+    "people" : [ {
+      "description" : "Sets the drive up (HDDSYNTH.INI, serial console), builds the firmware, runs the test rig.",
+      "id" : "1",
+      "name" : "Owner",
+      "properties" : {
+        "structurizr.dsl.identifier" : "owner"
+      },
+      "relationships" : [ {
+        "description" : "Configures and watches",
+        "destinationId" : "5",
+        "id" : "38",
+        "sourceId" : "1",
+        "tags" : "Relationship",
+        "technology" : "HDDSYNTH.INI, USB serial console"
+      }, {
+        "description" : "Builds, flashes and tests on",
+        "destinationId" : "4",
+        "id" : "42",
+        "sourceId" : "1",
+        "tags" : "Relationship"
+      } ],
+      "tags" : "Element,Person"
+    } ],
+    "softwareSystems" : [ {
+      "description" : "What the drive is plugged into: a retro PC's IDE controller (16-bit ISA card, Intel PIIX, VIA) or a USB-IDE adapter (JMicron, Innostor). Drives the 40-pin IDE bus: register reads and writes, PIO and multiword DMA data, RESET#.",
+      "documentation" : { },
+      "id" : "2",
+      "name" : "IDE host",
+      "properties" : {
+        "structurizr.dsl.identifier" : "host"
+      },
+      "relationships" : [ {
+        "description" : "Reads and writes sectors, sends ATA and ATAPI commands",
+        "destinationId" : "5",
+        "id" : "39",
+        "sourceId" : "2",
+        "tags" : "Relationship",
+        "technology" : "40-pin IDE (ATA PIO 0-3, MDMA 0-2)"
+      }, {
+        "description" : "Strobes registers and data",
+        "destinationId" : "25",
+        "id" : "44",
+        "sourceId" : "2",
+        "tags" : "Relationship",
+        "technology" : "IDE bus"
+      } ],
+      "tags" : "Element,Software System,External"
+    }, {
+      "description" : "Plays hard disk sounds from what the drive is doing (HDDSynth_Native).",
+      "documentation" : { },
+      "id" : "3",
+      "name" : "HDD Synth",
+      "properties" : {
+        "structurizr.dsl.identifier" : "synth"
+      },
+      "relationships" : [ {
+        "description" : "Says which drive it models",
+        "destinationId" : "5",
+        "id" : "41",
+        "sourceId" : "3",
+        "tags" : "Relationship",
+        "technology" : "UART, $HDM"
+      }, {
+        "description" : "$HDM",
+        "destinationId" : "24",
+        "id" : "108",
+        "sourceId" : "3",
+        "tags" : "Relationship",
+        "technology" : "UART"
+      }, {
+        "description" : "$HDM",
+        "destinationId" : "15",
+        "id" : "109",
+        "linkedRelationshipId" : "108",
+        "sourceId" : "3",
+        "technology" : "UART"
+      } ],
+      "tags" : "Element,Software System,External"
+    }, {
+      "description" : "Mac or Windows PC: PlatformIO, the USB adapter the rig tests drive through, USB serial to the board.",
+      "documentation" : { },
+      "id" : "4",
+      "name" : "Development computer",
+      "properties" : {
+        "structurizr.dsl.identifier" : "devMachine"
+      },
+      "relationships" : [ {
+        "description" : "Flashes, reads the console, drives tests through the USB adapter",
+        "destinationId" : "5",
+        "id" : "43",
+        "sourceId" : "4",
+        "tags" : "Relationship",
+        "technology" : "USB, UF2"
+      } ],
+      "tags" : "Element,Software System,External"
+    }, {
+      "containers" : [ {
+        "components" : [ {
+          "description" : "Loads and serves the bus program: ide_bus, early answers, the data lane, ide_bus_noiordy. Switches early answers <-> the lane live (bus = auto), holds IORDY while core 1 answers, drives INTRQ. The data lane streams data-in words by DMA, without core 1.",
+          "documentation" : { },
+          "id" : "7",
+          "name" : "ide_bus",
+          "properties" : {
+            "structurizr.dsl.identifier" : "ideBus"
+          },
+          "relationships" : [ {
+            "description" : "Register values to drive onto DD",
+            "destinationId" : "26",
+            "id" : "58",
+            "sourceId" : "7",
+            "tags" : "Relationship",
+            "technology" : "TX FIFO"
+          }, {
+            "description" : "Register values to drive onto DD",
+            "destinationId" : "25",
+            "id" : "59",
+            "linkedRelationshipId" : "58",
+            "sourceId" : "7",
+            "technology" : "TX FIFO"
+          }, {
+            "description" : "Register reads and writes, data words",
+            "destinationId" : "10",
+            "id" : "63",
+            "sourceId" : "7",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Register reads and writes, PACKET data",
+            "destinationId" : "11",
+            "id" : "64",
+            "sourceId" : "7",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "ide_bus.cpp"
+        }, {
+          "description" : "The register table: every register read answered by the PIO from values core 1 keeps ready, for hosts that ignore IORDY.",
+          "documentation" : { },
+          "id" : "8",
+          "name" : "ide_table",
+          "properties" : {
+            "structurizr.dsl.identifier" : "ideTable"
+          },
+          "relationships" : [ {
+            "description" : "Register values kept in the table",
+            "destinationId" : "26",
+            "id" : "61",
+            "sourceId" : "8",
+            "tags" : "Relationship",
+            "technology" : "PIO registers"
+          }, {
+            "description" : "Register values kept in the table",
+            "destinationId" : "25",
+            "id" : "62",
+            "linkedRelationshipId" : "61",
+            "sourceId" : "8",
+            "technology" : "PIO registers"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "ide_table.cpp, ide_table_write.cpp"
+        }, {
+          "description" : "Multiword DMA's data phase: hands DD0-15 to its PIO block for a burst, feeds it by a DMA channel, drives DMARQ.",
+          "documentation" : { },
+          "id" : "9",
+          "name" : "ide_dma",
+          "properties" : {
+            "structurizr.dsl.identifier" : "ideDma"
+          },
+          "relationships" : [ {
+            "description" : "Burst counts, DD hand-over",
+            "destinationId" : "27",
+            "id" : "65",
+            "sourceId" : "9",
+            "tags" : "Relationship",
+            "technology" : "PIO, DMA channel"
+          }, {
+            "description" : "Burst counts, DD hand-over",
+            "destinationId" : "25",
+            "id" : "66",
+            "linkedRelationshipId" : "65",
+            "sourceId" : "9",
+            "technology" : "PIO, DMA channel"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "ide_dma.cpp"
+        }, {
+          "description" : "The hard disk: task file, status, IDENTIFY (patched live when DMA is added), READ/WRITE SECTORS, MULTIPLE and DMA, read-ahead, write-behind, two units.",
+          "documentation" : { },
+          "id" : "10",
+          "name" : "ata::Device",
+          "properties" : {
+            "structurizr.dsl.identifier" : "ataDevice"
+          },
+          "relationships" : [ {
+            "description" : "DMA bursts (a sector each)",
+            "destinationId" : "9",
+            "id" : "68",
+            "sourceId" : "10",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Posts a fetch, takes the result",
+            "destinationId" : "14",
+            "id" : "69",
+            "sourceId" : "10",
+            "tags" : "Relationship"
+          }, {
+            "description" : "CMD and DONE events",
+            "destinationId" : "13",
+            "id" : "71",
+            "sourceId" : "10",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "ata_device.cpp, identify.cpp"
+        }, {
+          "description" : "PACKET commands, MMC (READ(10), TOC, GET EVENT), disc changes; hdcd::Device puts it beside the hard disk.",
+          "documentation" : { },
+          "id" : "11",
+          "name" : "ATAPI CD-ROM",
+          "properties" : {
+            "structurizr.dsl.identifier" : "atapiDevice"
+          },
+          "relationships" : [ {
+            "description" : "Posts a fetch, takes the result",
+            "destinationId" : "14",
+            "id" : "70",
+            "sourceId" : "11",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "atapi_device.cpp, mmc.cpp, hdcd_device.cpp"
+        }, {
+          "description" : "bus = auto on core 1: applies the DMA patch between commands and switches the program at a quiet moment or while RESET# is held.",
+          "documentation" : { },
+          "id" : "12",
+          "name" : "busAutoStep",
+          "properties" : {
+            "structurizr.dsl.identifier" : "busAutoStep"
+          },
+          "relationships" : [ {
+            "description" : "Switches the program",
+            "destinationId" : "7",
+            "id" : "72",
+            "sourceId" : "12",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Adds DMA to IDENTIFY (offerDma)",
+            "destinationId" : "10",
+            "id" : "73",
+            "sourceId" : "12",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "main.cpp (CORE1_RAM_RARE)"
+        }, {
+          "description" : "Commands, completions and (on request) every bus access, recorded for core 0 to print. Lock-free SPSC ring.",
+          "documentation" : { },
+          "id" : "13",
+          "name" : "Trace ring",
+          "properties" : {
+            "structurizr.dsl.identifier" : "traceRing"
+          },
+          "tags" : "Element,Component",
+          "technology" : "spsc_ring.h, access_log"
+        }, {
+          "description" : "The handshake between the cores: core 1 posts a fetch (LBA, buffer, read or write), core 0 posts the result. Shared memory.",
+          "documentation" : { },
+          "id" : "14",
+          "name" : "Fetch mailbox",
+          "properties" : {
+            "structurizr.dsl.identifier" : "fetchMailbox"
+          },
+          "tags" : "Element,Component",
+          "technology" : "fetch_mailbox.h"
+        } ],
+        "description" : "The real-time half. Answers every register access the PIO hands it, runs the ATA/ATAPI command state machines, starts DMA bursts. Never waits: everything it runs per access is in RAM (CORE1_RAM), never touches USB or the card.",
+        "documentation" : { },
+        "id" : "6",
+        "name" : "Core 1: bus loop",
+        "properties" : {
+          "structurizr.dsl.identifier" : "core1"
+        },
+        "relationships" : [ {
+          "description" : "Answers reads, loads and switches programs",
+          "destinationId" : "25",
+          "id" : "48",
+          "sourceId" : "6",
+          "tags" : "Relationship",
+          "technology" : "PIO FIFOs, registers"
+        }, {
+          "description" : "Posts fetches, records trace events",
+          "destinationId" : "15",
+          "id" : "49",
+          "sourceId" : "6",
+          "tags" : "Relationship",
+          "technology" : "Shared RAM (mailbox, SPSC ring)"
+        }, {
+          "description" : "Register values to drive onto DD",
+          "destinationId" : "26",
+          "id" : "60",
+          "linkedRelationshipId" : "58",
+          "sourceId" : "6",
+          "technology" : "TX FIFO"
+        }, {
+          "description" : "Burst counts, DD hand-over",
+          "destinationId" : "27",
+          "id" : "67",
+          "linkedRelationshipId" : "65",
+          "sourceId" : "6",
+          "technology" : "PIO, DMA channel"
+        } ],
+        "tags" : "Element,Container,Firmware",
+        "technology" : "C++ (Arduino-Pico), RAM-resident"
+      }, {
+        "components" : [ {
+          "description" : "serveFetches(): takes core 1's fetches from the mailbox, reads or writes the block source, holds results for seek timing. Per-sector code in RAM (CORE0_RAM).",
+          "documentation" : { },
+          "id" : "16",
+          "name" : "Fetch service",
+          "properties" : {
+            "structurizr.dsl.identifier" : "fetchService"
+          },
+          "relationships" : [ {
+            "description" : "Takes fetches, posts results",
+            "destinationId" : "14",
+            "id" : "74",
+            "sourceId" : "16",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Takes fetches, posts results",
+            "destinationId" : "6",
+            "id" : "75",
+            "linkedRelationshipId" : "74",
+            "sourceId" : "16"
+          }, {
+            "description" : "Reads and writes sectors",
+            "destinationId" : "17",
+            "id" : "77",
+            "sourceId" : "16",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "main.cpp"
+        }, {
+          "description" : "The disks served: an image on the card (ImageDisk, split images), a folder as a read-only FAT16 disk, the welcome disk, the generated test disk, with a RAM overlay for writes; ISO and BIN/CUE discs for the CD-ROM.",
+          "documentation" : { },
+          "id" : "17",
+          "name" : "Block sources",
+          "properties" : {
+            "structurizr.dsl.identifier" : "blockSources"
+          },
+          "relationships" : [ {
+            "description" : "Reads and writes the image's clusters",
+            "destinationId" : "18",
+            "id" : "78",
+            "sourceId" : "17",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "block_source.h, gen_disk, welcome_disk, folder_disk, image_parts, cue_sheet"
+        }, {
+          "description" : "SdFat over SPI (BB48) or 4-bit SDIO (PCB), high-speed mode with calibration, retries, card removal and return.",
+          "documentation" : { },
+          "id" : "18",
+          "name" : "SD card driver",
+          "properties" : {
+            "structurizr.dsl.identifier" : "sdCard"
+          },
+          "relationships" : [ {
+            "description" : "Commands and data",
+            "destinationId" : "31",
+            "id" : "79",
+            "sourceId" : "18",
+            "tags" : "Relationship",
+            "technology" : "SPI or SDIO"
+          }, {
+            "description" : "Runs the card's bus",
+            "destinationId" : "30",
+            "id" : "80",
+            "sourceId" : "18",
+            "tags" : "Relationship",
+            "technology" : "PIO"
+          }, {
+            "description" : "Runs the card's bus",
+            "destinationId" : "25",
+            "id" : "81",
+            "linkedRelationshipId" : "80",
+            "sourceId" : "18",
+            "technology" : "PIO"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "sd_card.cpp, sdio_card.cpp, card_retry, media_watch"
+        }, {
+          "description" : "Reads HDDSYNTH.INI, chooses the image and the bus program, console E/C edits the file.",
+          "documentation" : { },
+          "id" : "19",
+          "name" : "Settings and disks",
+          "properties" : {
+            "structurizr.dsl.identifier" : "driveConfig"
+          },
+          "relationships" : [ {
+            "description" : "Reads HDDSYNTH.INI, edits it on E",
+            "destinationId" : "31",
+            "id" : "83",
+            "sourceId" : "19",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Chooses the disks served",
+            "destinationId" : "17",
+            "id" : "84",
+            "sourceId" : "19",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "drive_config.cpp, disks.cpp"
+        }, {
+          "description" : "Commands (h, s, S, P, M, T, J...), the trace and report lines (CMD, DONE, AUTOBUS, SLOWREAD...).",
+          "documentation" : { },
+          "id" : "20",
+          "name" : "Serial console",
+          "properties" : {
+            "structurizr.dsl.identifier" : "console"
+          },
+          "relationships" : [ {
+            "description" : "Prints its events",
+            "destinationId" : "13",
+            "id" : "85",
+            "sourceId" : "20",
+            "tags" : "Relationship",
+            "technology" : "SPSC ring"
+          }, {
+            "description" : "Prints its events",
+            "destinationId" : "6",
+            "id" : "86",
+            "linkedRelationshipId" : "85",
+            "sourceId" : "20",
+            "technology" : "SPSC ring"
+          }, {
+            "description" : "Feeds the counters, prints AUTOBUS",
+            "destinationId" : "21",
+            "id" : "88",
+            "sourceId" : "20",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "console.cpp, trace_format.h"
+        }, {
+          "description" : "From the diagnostics' counters: is the host an ISA card, does it wait for IORDY, is detection over? Advises early answers or the lane; once learned, adds DMA (dma = auto).",
+          "documentation" : { },
+          "id" : "21",
+          "name" : "auto_bus advisor",
+          "properties" : {
+            "structurizr.dsl.identifier" : "autoBus"
+          },
+          "relationships" : [ {
+            "description" : "Reads its evidence: DIOR# with no chip select, reads not waited for, long reads",
+            "destinationId" : "23",
+            "id" : "89",
+            "sourceId" : "21",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Wanted program; the DMA patch",
+            "destinationId" : "12",
+            "id" : "90",
+            "sourceId" : "21",
+            "tags" : "Relationship",
+            "technology" : "Shared flags"
+          }, {
+            "description" : "Wanted program; the DMA patch",
+            "destinationId" : "6",
+            "id" : "91",
+            "linkedRelationshipId" : "90",
+            "sourceId" : "21",
+            "technology" : "Shared flags"
+          }, {
+            "description" : "Frees the diagnostics' or IOCS16#'s block for ide_dma",
+            "destinationId" : "22",
+            "id" : "93",
+            "sourceId" : "21",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Starts it (dma = auto)",
+            "destinationId" : "9",
+            "id" : "94",
+            "sourceId" : "21",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "auto_bus.cpp, offerDmaToLearnedHost()"
+        }, {
+          "description" : "Shares the three PIO blocks out: the bus program, the card (SDIO), then DMA or IOCS16# and the diagnostics.",
+          "documentation" : { },
+          "id" : "22",
+          "name" : "pio_plan",
+          "properties" : {
+            "structurizr.dsl.identifier" : "pioPlan"
+          },
+          "relationships" : [ {
+            "description" : "Starts what fits",
+            "destinationId" : "29",
+            "id" : "96",
+            "sourceId" : "22",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Starts what fits",
+            "destinationId" : "25",
+            "id" : "97",
+            "linkedRelationshipId" : "96",
+            "sourceId" : "22"
+          }, {
+            "description" : "Starts it when DMA isn't offered",
+            "destinationId" : "28",
+            "id" : "99",
+            "sourceId" : "22",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "pio_plan.h"
+        }, {
+          "description" : "IORDY timing (slow reads, reads the host didn't wait for), the bus observer checking data and IDENTIFY on the cable, the read timing probe, stack watermarks.",
+          "documentation" : { },
+          "id" : "23",
+          "name" : "Diagnostics",
+          "properties" : {
+            "structurizr.dsl.identifier" : "diagnostics"
+          },
+          "relationships" : [ {
+            "description" : "Reads timings and bus samples",
+            "destinationId" : "29",
+            "id" : "101",
+            "sourceId" : "23",
+            "tags" : "Relationship",
+            "technology" : "PIO FIFOs, DMA ring"
+          }, {
+            "description" : "Reads timings and bus samples",
+            "destinationId" : "25",
+            "id" : "102",
+            "linkedRelationshipId" : "101",
+            "sourceId" : "23",
+            "technology" : "PIO FIFOs, DMA ring"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "iordy_timer, bus_observer, sector_check, bus_timing, stack_watch"
+        }, {
+          "description" : "Classifies the recent commands (idle, sequential, random), models seek and rotation timing, sends $HDA/$HDE to the synth and takes $HDM back.",
+          "documentation" : { },
+          "id" : "24",
+          "name" : "Activity link",
+          "properties" : {
+            "structurizr.dsl.identifier" : "activityLink"
+          },
+          "relationships" : [ {
+            "description" : "Takes CMD and DONE events",
+            "destinationId" : "13",
+            "id" : "103",
+            "sourceId" : "24",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Takes CMD and DONE events",
+            "destinationId" : "6",
+            "id" : "104",
+            "linkedRelationshipId" : "103",
+            "sourceId" : "24"
+          }, {
+            "description" : "Holds results for seek timing",
+            "destinationId" : "16",
+            "id" : "105",
+            "sourceId" : "24",
+            "tags" : "Relationship"
+          }, {
+            "description" : "$HDA, $HDE",
+            "destinationId" : "3",
+            "id" : "106",
+            "sourceId" : "24",
+            "tags" : "Relationship",
+            "technology" : "UART"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "activity.cpp, activity_link.cpp, link.cpp, seek_timing.cpp"
+        } ],
+        "description" : "Everything slow: the card, USB serial, the activity link, the diagnostics' reports, the bus = auto advice. Keeps up with core 1's fetches before anything else.",
+        "documentation" : { },
+        "id" : "15",
+        "name" : "Core 0: services",
+        "properties" : {
+          "structurizr.dsl.identifier" : "core0"
+        },
+        "relationships" : [ {
+          "description" : "Posts fetch results, wanted bus program, DMA patch",
+          "destinationId" : "6",
+          "id" : "50",
+          "sourceId" : "15",
+          "tags" : "Relationship",
+          "technology" : "Shared RAM"
+        }, {
+          "description" : "Reads and writes images, reads settings",
+          "destinationId" : "31",
+          "id" : "51",
+          "sourceId" : "15",
+          "tags" : "Relationship",
+          "technology" : "SPI or 4-bit SDIO"
+        }, {
+          "description" : "Runs the diagnostics and the card's programs",
+          "destinationId" : "25",
+          "id" : "52",
+          "sourceId" : "15",
+          "tags" : "Relationship",
+          "technology" : "PIO FIFOs, DMA"
+        }, {
+          "description" : "Takes fetches, posts results",
+          "destinationId" : "14",
+          "id" : "76",
+          "linkedRelationshipId" : "74",
+          "sourceId" : "15"
+        }, {
+          "description" : "Runs the card's bus",
+          "destinationId" : "30",
+          "id" : "82",
+          "linkedRelationshipId" : "80",
+          "sourceId" : "15",
+          "technology" : "PIO"
+        }, {
+          "description" : "Prints its events",
+          "destinationId" : "13",
+          "id" : "87",
+          "linkedRelationshipId" : "85",
+          "sourceId" : "15",
+          "technology" : "SPSC ring"
+        }, {
+          "description" : "Wanted program; the DMA patch",
+          "destinationId" : "12",
+          "id" : "92",
+          "linkedRelationshipId" : "90",
+          "sourceId" : "15",
+          "technology" : "Shared flags"
+        }, {
+          "description" : "Starts it (dma = auto)",
+          "destinationId" : "9",
+          "id" : "95",
+          "linkedRelationshipId" : "94",
+          "sourceId" : "15"
+        }, {
+          "description" : "Starts what fits",
+          "destinationId" : "29",
+          "id" : "98",
+          "linkedRelationshipId" : "96",
+          "sourceId" : "15"
+        }, {
+          "description" : "Starts it when DMA isn't offered",
+          "destinationId" : "28",
+          "id" : "100",
+          "linkedRelationshipId" : "99",
+          "sourceId" : "15"
+        }, {
+          "description" : "$HDA, $HDE",
+          "destinationId" : "3",
+          "id" : "107",
+          "linkedRelationshipId" : "106",
+          "sourceId" : "15",
+          "technology" : "UART"
+        } ],
+        "tags" : "Element,Container,Firmware",
+        "technology" : "C++ (Arduino-Pico)"
+      }, {
+        "components" : [ {
+          "description" : "One of ide_bus, ide_bus_early, ide_bus_data + ide_data_in, ide_bus_noiordy, or ide_table (+ ide_table_write), with iordy_watchdog for ISA cards.",
+          "documentation" : { },
+          "id" : "26",
+          "name" : "Bus program",
+          "properties" : {
+            "structurizr.dsl.identifier" : "pioBus"
+          },
+          "relationships" : [ {
+            "description" : "Samples: each access, answer requests",
+            "destinationId" : "7",
+            "id" : "55",
+            "sourceId" : "26",
+            "tags" : "Relationship",
+            "technology" : "RX FIFO"
+          }, {
+            "description" : "Samples: each access, answer requests",
+            "destinationId" : "6",
+            "id" : "56",
+            "linkedRelationshipId" : "55",
+            "sourceId" : "26",
+            "technology" : "RX FIFO"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "ide_bus.pio, ide_table.pio"
+        }, {
+          "description" : "Multiword DMA read and write bursts.",
+          "documentation" : { },
+          "id" : "27",
+          "name" : "ide_dma",
+          "properties" : {
+            "structurizr.dsl.identifier" : "pioDma"
+          },
+          "tags" : "Element,Component",
+          "technology" : "ide_dma.pio"
+        }, {
+          "description" : "Pulls IOCS16# low for the data register, for 16-bit ISA cards.",
+          "documentation" : { },
+          "id" : "28",
+          "name" : "iocs16",
+          "properties" : {
+            "structurizr.dsl.identifier" : "pioIocs16"
+          },
+          "tags" : "Element,Component",
+          "technology" : "iocs16.pio"
+        }, {
+          "description" : "iordy_timer, iordy_check, bus_observer, bus_timing.",
+          "documentation" : { },
+          "id" : "29",
+          "name" : "Diagnostic programs",
+          "properties" : {
+            "structurizr.dsl.identifier" : "pioDiag"
+          },
+          "tags" : "Element,Component",
+          "technology" : "*.pio"
+        }, {
+          "description" : "The card's 4-bit bus (PCB).",
+          "documentation" : { },
+          "id" : "30",
+          "name" : "SDIO",
+          "properties" : {
+            "structurizr.dsl.identifier" : "pioSdio"
+          },
+          "tags" : "Element,Component",
+          "technology" : "sdio programs"
+        } ],
+        "description" : "State machines that meet the IDE bus's nanosecond timing: sample every access, pull IORDY low within 35 ns, drive DD for reads, move DMA data. Three blocks of 32 instructions.",
+        "documentation" : { },
+        "id" : "25",
+        "name" : "PIO programs",
+        "properties" : {
+          "structurizr.dsl.identifier" : "pio"
+        },
+        "relationships" : [ {
+          "description" : "Answers reads, holds IORDY, DMARQ",
+          "destinationId" : "2",
+          "id" : "45",
+          "sourceId" : "25",
+          "tags" : "Relationship",
+          "technology" : "IDE bus"
+        }, {
+          "description" : "Hands each access over, asks for read answers",
+          "destinationId" : "6",
+          "id" : "47",
+          "sourceId" : "25",
+          "tags" : "Relationship",
+          "technology" : "PIO FIFOs"
+        }, {
+          "description" : "Samples: each access, answer requests",
+          "destinationId" : "7",
+          "id" : "57",
+          "linkedRelationshipId" : "55",
+          "sourceId" : "25",
+          "technology" : "RX FIFO"
+        } ],
+        "tags" : "Element,Container,PIO",
+        "technology" : "RP2350 PIO assembly (src/*.pio)"
+      }, {
+        "description" : "FAT32: disk images (HDDSYNTH.IMG and others), ISOs and BIN/CUEs, HDDSYNTH.INI, the scratch HDDBENCH.IMG. Holds the owner's data: the firmware only touches the image served, HDDBENCH.IMG and HDDSYNTH.INI.",
+        "documentation" : { },
+        "id" : "31",
+        "name" : "microSD card",
+        "properties" : {
+          "structurizr.dsl.identifier" : "card"
+        },
+        "tags" : "Element,Container,Storage",
+        "technology" : "FAT32"
+      }, {
+        "components" : [ {
+          "description" : "pytest, one marker per slice: detection, reads, writes, speed, soak, CD-ROM, the link.",
+          "documentation" : { },
+          "id" : "33",
+          "name" : "Rig tests",
+          "properties" : {
+            "structurizr.dsl.identifier" : "rigTests"
+          },
+          "relationships" : [ {
+            "description" : "Console commands, trace lines",
+            "destinationId" : "35",
+            "id" : "110",
+            "sourceId" : "33",
+            "tags" : "Relationship"
+          }, {
+            "description" : "Sector reads and writes",
+            "destinationId" : "36",
+            "id" : "111",
+            "sourceId" : "33",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "host/tests"
+        }, {
+          "description" : "Runs the real pioasm output against PIO-mode and MDMA host models, holding the programs to ATA's timings (pytest -m sim, no hardware).",
+          "documentation" : { },
+          "id" : "34",
+          "name" : "PIO simulator and host models",
+          "properties" : {
+            "structurizr.dsl.identifier" : "pioSim"
+          },
+          "relationships" : [ {
+            "description" : "Runs the assembled programs against host models",
+            "destinationId" : "26",
+            "id" : "116",
+            "sourceId" : "34",
+            "tags" : "Relationship",
+            "technology" : "pioasm output"
+          }, {
+            "description" : "Runs the assembled programs against host models",
+            "destinationId" : "25",
+            "id" : "117",
+            "linkedRelationshipId" : "116",
+            "sourceId" : "34",
+            "technology" : "pioasm output"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "pio_sim.py, ide_host_model.py, mdma_host_model.py"
+        }, {
+          "description" : "Reads the board's serial console, parses CMD/DONE/EV lines.",
+          "documentation" : { },
+          "id" : "35",
+          "name" : "Drive log and trace parser",
+          "properties" : {
+            "structurizr.dsl.identifier" : "driveLog"
+          },
+          "relationships" : [ {
+            "description" : "Commands and lines",
+            "destinationId" : "20",
+            "id" : "112",
+            "sourceId" : "35",
+            "tags" : "Relationship",
+            "technology" : "USB serial"
+          }, {
+            "description" : "Commands and lines",
+            "destinationId" : "15",
+            "id" : "113",
+            "linkedRelationshipId" : "112",
+            "sourceId" : "35",
+            "technology" : "USB serial"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "drive_log.py, trace.py"
+        }, {
+          "description" : "Raw reads and writes to the emulated disk through the adapter, per OS.",
+          "documentation" : { },
+          "id" : "36",
+          "name" : "Host disk access",
+          "properties" : {
+            "structurizr.dsl.identifier" : "hostIo"
+          },
+          "relationships" : [ {
+            "description" : "Raw I/O",
+            "destinationId" : "2",
+            "id" : "115",
+            "sourceId" : "36",
+            "tags" : "Relationship",
+            "technology" : "USB mass storage"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "host.py, host_macos.py, host_windows.py"
+        }, {
+          "description" : "DOSBENCH.IMG: FreeDOS and HDDBENCH.COM for retro PCs.",
+          "documentation" : { },
+          "id" : "37",
+          "name" : "Benchmark image",
+          "properties" : {
+            "structurizr.dsl.identifier" : "benchImage"
+          },
+          "relationships" : [ {
+            "description" : "Booted by a retro PC from the drive",
+            "destinationId" : "2",
+            "id" : "120",
+            "sourceId" : "37",
+            "tags" : "Relationship"
+          } ],
+          "tags" : "Element,Component",
+          "technology" : "tools/bench-image"
+        } ],
+        "description" : "Host-side tests and tools: pytest slices through the USB adapter, the PIO simulator, the trace parser, the benchmark disk image, rig.sh (build, flash, test).",
+        "documentation" : { },
+        "id" : "32",
+        "name" : "Rig and tools",
+        "properties" : {
+          "structurizr.dsl.identifier" : "rig"
+        },
+        "relationships" : [ {
+          "description" : "Console commands, reads trace lines",
+          "destinationId" : "15",
+          "id" : "53",
+          "sourceId" : "32",
+          "tags" : "Relationship",
+          "technology" : "USB serial"
+        }, {
+          "description" : "Raw sector reads and writes",
+          "destinationId" : "2",
+          "id" : "54",
+          "sourceId" : "32",
+          "tags" : "Relationship",
+          "technology" : "USB mass storage (through the adapter)"
+        }, {
+          "description" : "Commands and lines",
+          "destinationId" : "20",
+          "id" : "114",
+          "linkedRelationshipId" : "112",
+          "sourceId" : "32",
+          "technology" : "USB serial"
+        }, {
+          "description" : "Runs the assembled programs against host models",
+          "destinationId" : "26",
+          "id" : "118",
+          "linkedRelationshipId" : "116",
+          "sourceId" : "32",
+          "technology" : "pioasm output"
+        }, {
+          "description" : "Runs the assembled programs against host models",
+          "destinationId" : "25",
+          "id" : "119",
+          "linkedRelationshipId" : "116",
+          "sourceId" : "32",
+          "technology" : "pioasm output"
+        } ],
+        "tags" : "Element,Container,Tools",
+        "technology" : "Python, Bash"
+      } ],
+      "description" : "Emulates an IDE hard disk (and an ATAPI CD-ROM drive) on an RP2350B: answers the IDE bus in real time and serves sectors from disk images on a microSD card.",
+      "documentation" : { },
+      "id" : "5",
+      "name" : "IDE Synth Bay",
+      "properties" : {
+        "structurizr.dsl.identifier" : "bay"
+      },
+      "relationships" : [ {
+        "description" : "Tells what the drive is doing",
+        "destinationId" : "3",
+        "id" : "40",
+        "sourceId" : "5",
+        "tags" : "Relationship",
+        "technology" : "UART, $HDA/$HDE sentences"
+      }, {
+        "description" : "Answers reads, holds IORDY, DMARQ",
+        "destinationId" : "2",
+        "id" : "46",
+        "linkedRelationshipId" : "45",
+        "sourceId" : "5",
+        "technology" : "IDE bus"
+      } ],
+      "tags" : "Element,Software System"
+    } ]
+  },
+  "name" : "IDE Synth Bay",
+  "properties" : {
+    "structurizr.inspection.error" : "37",
+    "structurizr.dsl" : "LyoKICogSURFIFN5bnRoIEJheTogdGhlIGFyY2hpdGVjdHVyZSBhcyBDNCBkaWFncmFtcyAoU3RydWN0dXJpenIgRFNMKS4KICogSG93IHRvIHZpZXcgYW5kIGV4cG9ydCB0aGVtOiBSRUFETUUubWQgYmVzaWRlIHRoaXMgZmlsZS4KICogS2VlcCBpdCB0byB3aGF0IHRoZSBjb2RlIGRvZXM7IHRoZSBkZXRhaWxzIGxpdmUgaW4gQ0xBVURFLm1kIGFuZCBkb2NzLy4KICovCndvcmtzcGFjZSAiSURFIFN5bnRoIEJheSIgIkFuIElERSBoYXJkIGRpc2sgYW5kIENELVJPTSBkcml2ZSBlbXVsYXRlZCBieSBhbiBSUDIzNTAsIHNlcnZlZCBmcm9tIGEgbWljcm9TRCBjYXJkLiIgewoKICAgIG1vZGVsIHsKICAgICAgICBvd25lciA9IHBlcnNvbiAiT3duZXIiICJTZXRzIHRoZSBkcml2ZSB1cCAoSEREU1lOVEguSU5JLCBzZXJpYWwgY29uc29sZSksIGJ1aWxkcyB0aGUgZmlybXdhcmUsIHJ1bnMgdGhlIHRlc3QgcmlnLiIKCiAgICAgICAgaG9zdCA9IHNvZnR3YXJlU3lzdGVtICJJREUgaG9zdCIgIldoYXQgdGhlIGRyaXZlIGlzIHBsdWdnZWQgaW50bzogYSByZXRybyBQQydzIElERSBjb250cm9sbGVyICgxNi1iaXQgSVNBIGNhcmQsIEludGVsIFBJSVgsIFZJQSkgb3IgYSBVU0ItSURFIGFkYXB0ZXIgKEpNaWNyb24sIElubm9zdG9yKS4gRHJpdmVzIHRoZSA0MC1waW4gSURFIGJ1czogcmVnaXN0ZXIgcmVhZHMgYW5kIHdyaXRlcywgUElPIGFuZCBtdWx0aXdvcmQgRE1BIGRhdGEsIFJFU0VUIy4iICJFeHRlcm5hbCIKICAgICAgICBzeW50aCA9IHNvZnR3YXJlU3lzdGVtICJIREQgU3ludGgiICJQbGF5cyBoYXJkIGRpc2sgc291bmRzIGZyb20gd2hhdCB0aGUgZHJpdmUgaXMgZG9pbmcgKEhERFN5bnRoX05hdGl2ZSkuIiAiRXh0ZXJuYWwiCiAgICAgICAgZGV2TWFjaGluZSA9IHNvZnR3YXJlU3lzdGVtICJEZXZlbG9wbWVudCBjb21wdXRlciIgIk1hYyBvciBXaW5kb3dzIFBDOiBQbGF0Zm9ybUlPLCB0aGUgVVNCIGFkYXB0ZXIgdGhlIHJpZyB0ZXN0cyBkcml2ZSB0aHJvdWdoLCBVU0Igc2VyaWFsIHRvIHRoZSBib2FyZC4iICJFeHRlcm5hbCIKCiAgICAgICAgYmF5ID0gc29mdHdhcmVTeXN0ZW0gIklERSBTeW50aCBCYXkiICJFbXVsYXRlcyBhbiBJREUgaGFyZCBkaXNrIChhbmQgYW4gQVRBUEkgQ0QtUk9NIGRyaXZlKSBvbiBhbiBSUDIzNTBCOiBhbnN3ZXJzIHRoZSBJREUgYnVzIGluIHJlYWwgdGltZSBhbmQgc2VydmVzIHNlY3RvcnMgZnJvbSBkaXNrIGltYWdlcyBvbiBhIG1pY3JvU0QgY2FyZC4iIHsKCiAgICAgICAgICAgIGNvcmUxID0gY29udGFpbmVyICJDb3JlIDE6IGJ1cyBsb29wIiAiVGhlIHJlYWwtdGltZSBoYWxmLiBBbnN3ZXJzIGV2ZXJ5IHJlZ2lzdGVyIGFjY2VzcyB0aGUgUElPIGhhbmRzIGl0LCBydW5zIHRoZSBBVEEvQVRBUEkgY29tbWFuZCBzdGF0ZSBtYWNoaW5lcywgc3RhcnRzIERNQSBidXJzdHMuIE5ldmVyIHdhaXRzOiBldmVyeXRoaW5nIGl0IHJ1bnMgcGVyIGFjY2VzcyBpcyBpbiBSQU0gKENPUkUxX1JBTSksIG5ldmVyIHRvdWNoZXMgVVNCIG9yIHRoZSBjYXJkLiIgIkMrKyAoQXJkdWluby1QaWNvKSwgUkFNLXJlc2lkZW50IiAiRmlybXdhcmUiIHsKICAgICAgICAgICAgICAgIGlkZUJ1cyA9IGNvbXBvbmVudCAiaWRlX2J1cyIgIkxvYWRzIGFuZCBzZXJ2ZXMgdGhlIGJ1cyBwcm9ncmFtOiBpZGVfYnVzLCBlYXJseSBhbnN3ZXJzLCB0aGUgZGF0YSBsYW5lLCBpZGVfYnVzX25vaW9yZHkuIFN3aXRjaGVzIGVhcmx5IGFuc3dlcnMgPC0+IHRoZSBsYW5lIGxpdmUgKGJ1cyA9IGF1dG8pLCBob2xkcyBJT1JEWSB3aGlsZSBjb3JlIDEgYW5zd2VycywgZHJpdmVzIElOVFJRLiBUaGUgZGF0YSBsYW5lIHN0cmVhbXMgZGF0YS1pbiB3b3JkcyBieSBETUEsIHdpdGhvdXQgY29yZSAxLiIgImlkZV9idXMuY3BwIgogICAgICAgICAgICAgICAgaWRlVGFibGUgPSBjb21wb25lbnQgImlkZV90YWJsZSIgIlRoZSByZWdpc3RlciB0YWJsZTogZXZlcnkgcmVnaXN0ZXIgcmVhZCBhbnN3ZXJlZCBieSB0aGUgUElPIGZyb20gdmFsdWVzIGNvcmUgMSBrZWVwcyByZWFkeSwgZm9yIGhvc3RzIHRoYXQgaWdub3JlIElPUkRZLiIgImlkZV90YWJsZS5jcHAsIGlkZV90YWJsZV93cml0ZS5jcHAiCiAgICAgICAgICAgICAgICBpZGVEbWEgPSBjb21wb25lbnQgImlkZV9kbWEiICJNdWx0aXdvcmQgRE1BJ3MgZGF0YSBwaGFzZTogaGFuZHMgREQwLTE1IHRvIGl0cyBQSU8gYmxvY2sgZm9yIGEgYnVyc3QsIGZlZWRzIGl0IGJ5IGEgRE1BIGNoYW5uZWwsIGRyaXZlcyBETUFSUS4iICJpZGVfZG1hLmNwcCIKICAgICAgICAgICAgICAgIGF0YURldmljZSA9IGNvbXBvbmVudCAiYXRhOjpEZXZpY2UiICJUaGUgaGFyZCBkaXNrOiB0YXNrIGZpbGUsIHN0YXR1cywgSURFTlRJRlkgKHBhdGNoZWQgbGl2ZSB3aGVuIERNQSBpcyBhZGRlZCksIFJFQUQvV1JJVEUgU0VDVE9SUywgTVVMVElQTEUgYW5kIERNQSwgcmVhZC1haGVhZCwgd3JpdGUtYmVoaW5kLCB0d28gdW5pdHMuIiAiYXRhX2RldmljZS5jcHAsIGlkZW50aWZ5LmNwcCIKICAgICAgICAgICAgICAgIGF0YXBpRGV2aWNlID0gY29tcG9uZW50ICJBVEFQSSBDRC1ST00iICJQQUNLRVQgY29tbWFuZHMsIE1NQyAoUkVBRCgxMCksIFRPQywgR0VUIEVWRU5UKSwgZGlzYyBjaGFuZ2VzOyBoZGNkOjpEZXZpY2UgcHV0cyBpdCBiZXNpZGUgdGhlIGhhcmQgZGlzay4iICJhdGFwaV9kZXZpY2UuY3BwLCBtbWMuY3BwLCBoZGNkX2RldmljZS5jcHAiCiAgICAgICAgICAgICAgICBidXNBdXRvU3RlcCA9IGNvbXBvbmVudCAiYnVzQXV0b1N0ZXAiICJidXMgPSBhdXRvIG9uIGNvcmUgMTogYXBwbGllcyB0aGUgRE1BIHBhdGNoIGJldHdlZW4gY29tbWFuZHMgYW5kIHN3aXRjaGVzIHRoZSBwcm9ncmFtIGF0IGEgcXVpZXQgbW9tZW50IG9yIHdoaWxlIFJFU0VUIyBpcyBoZWxkLiIgIm1haW4uY3BwIChDT1JFMV9SQU1fUkFSRSkiCiAgICAgICAgICAgICAgICB0cmFjZVJpbmcgPSBjb21wb25lbnQgIlRyYWNlIHJpbmciICJDb21tYW5kcywgY29tcGxldGlvbnMgYW5kIChvbiByZXF1ZXN0KSBldmVyeSBidXMgYWNjZXNzLCByZWNvcmRlZCBmb3IgY29yZSAwIHRvIHByaW50LiBMb2NrLWZyZWUgU1BTQyByaW5nLiIgInNwc2NfcmluZy5oLCBhY2Nlc3NfbG9nIgogICAgICAgICAgICAgICAgZmV0Y2hNYWlsYm94ID0gY29tcG9uZW50ICJGZXRjaCBtYWlsYm94IiAiVGhlIGhhbmRzaGFrZSBiZXR3ZWVuIHRoZSBjb3JlczogY29yZSAxIHBvc3RzIGEgZmV0Y2ggKExCQSwgYnVmZmVyLCByZWFkIG9yIHdyaXRlKSwgY29yZSAwIHBvc3RzIHRoZSByZXN1bHQuIFNoYXJlZCBtZW1vcnkuIiAiZmV0Y2hfbWFpbGJveC5oIgogICAgICAgICAgICB9CgogICAgICAgICAgICBjb3JlMCA9IGNvbnRhaW5lciAiQ29yZSAwOiBzZXJ2aWNlcyIgIkV2ZXJ5dGhpbmcgc2xvdzogdGhlIGNhcmQsIFVTQiBzZXJpYWwsIHRoZSBhY3Rpdml0eSBsaW5rLCB0aGUgZGlhZ25vc3RpY3MnIHJlcG9ydHMsIHRoZSBidXMgPSBhdXRvIGFkdmljZS4gS2VlcHMgdXAgd2l0aCBjb3JlIDEncyBmZXRjaGVzIGJlZm9yZSBhbnl0aGluZyBlbHNlLiIgIkMrKyAoQXJkdWluby1QaWNvKSIgIkZpcm13YXJlIiB7CiAgICAgICAgICAgICAgICBmZXRjaFNlcnZpY2UgPSBjb21wb25lbnQgIkZldGNoIHNlcnZpY2UiICJzZXJ2ZUZldGNoZXMoKTogdGFrZXMgY29yZSAxJ3MgZmV0Y2hlcyBmcm9tIHRoZSBtYWlsYm94LCByZWFkcyBvciB3cml0ZXMgdGhlIGJsb2NrIHNvdXJjZSwgaG9sZHMgcmVzdWx0cyBmb3Igc2VlayB0aW1pbmcuIFBlci1zZWN0b3IgY29kZSBpbiBSQU0gKENPUkUwX1JBTSkuIiAibWFpbi5jcHAiCiAgICAgICAgICAgICAgICBibG9ja1NvdXJjZXMgPSBjb21wb25lbnQgIkJsb2NrIHNvdXJjZXMiICJUaGUgZGlza3Mgc2VydmVkOiBhbiBpbWFnZSBvbiB0aGUgY2FyZCAoSW1hZ2VEaXNrLCBzcGxpdCBpbWFnZXMpLCBhIGZvbGRlciBhcyBhIHJlYWQtb25seSBGQVQxNiBkaXNrLCB0aGUgd2VsY29tZSBkaXNrLCB0aGUgZ2VuZXJhdGVkIHRlc3QgZGlzaywgd2l0aCBhIFJBTSBvdmVybGF5IGZvciB3cml0ZXM7IElTTyBhbmQgQklOL0NVRSBkaXNjcyBmb3IgdGhlIENELVJPTS4iICJibG9ja19zb3VyY2UuaCwgZ2VuX2Rpc2ssIHdlbGNvbWVfZGlzaywgZm9sZGVyX2Rpc2ssIGltYWdlX3BhcnRzLCBjdWVfc2hlZXQiCiAgICAgICAgICAgICAgICBzZENhcmQgPSBjb21wb25lbnQgIlNEIGNhcmQgZHJpdmVyIiAiU2RGYXQgb3ZlciBTUEkgKEJCNDgpIG9yIDQtYml0IFNESU8gKFBDQiksIGhpZ2gtc3BlZWQgbW9kZSB3aXRoIGNhbGlicmF0aW9uLCByZXRyaWVzLCBjYXJkIHJlbW92YWwgYW5kIHJldHVybi4iICJzZF9jYXJkLmNwcCwgc2Rpb19jYXJkLmNwcCwgY2FyZF9yZXRyeSwgbWVkaWFfd2F0Y2giCiAgICAgICAgICAgICAgICBkcml2ZUNvbmZpZyA9IGNvbXBvbmVudCAiU2V0dGluZ3MgYW5kIGRpc2tzIiAiUmVhZHMgSEREU1lOVEguSU5JLCBjaG9vc2VzIHRoZSBpbWFnZSBhbmQgdGhlIGJ1cyBwcm9ncmFtLCBjb25zb2xlIEUvQyBlZGl0cyB0aGUgZmlsZS4iICJkcml2ZV9jb25maWcuY3BwLCBkaXNrcy5jcHAiCiAgICAgICAgICAgICAgICBjb25zb2xlID0gY29tcG9uZW50ICJTZXJpYWwgY29uc29sZSIgIkNvbW1hbmRzIChoLCBzLCBTLCBQLCBNLCBULCBKLi4uKSwgdGhlIHRyYWNlIGFuZCByZXBvcnQgbGluZXMgKENNRCwgRE9ORSwgQVVUT0JVUywgU0xPV1JFQUQuLi4pLiIgImNvbnNvbGUuY3BwLCB0cmFjZV9mb3JtYXQuaCIKICAgICAgICAgICAgICAgIGF1dG9CdXMgPSBjb21wb25lbnQgImF1dG9fYnVzIGFkdmlzb3IiICJGcm9tIHRoZSBkaWFnbm9zdGljcycgY291bnRlcnM6IGlzIHRoZSBob3N0IGFuIElTQSBjYXJkLCBkb2VzIGl0IHdhaXQgZm9yIElPUkRZLCBpcyBkZXRlY3Rpb24gb3Zlcj8gQWR2aXNlcyBlYXJseSBhbnN3ZXJzIG9yIHRoZSBsYW5lOyBvbmNlIGxlYXJuZWQsIGFkZHMgRE1BIChkbWEgPSBhdXRvKS4iICJhdXRvX2J1cy5jcHAsIG9mZmVyRG1hVG9MZWFybmVkSG9zdCgpIgogICAgICAgICAgICAgICAgcGlvUGxhbiA9IGNvbXBvbmVudCAicGlvX3BsYW4iICJTaGFyZXMgdGhlIHRocmVlIFBJTyBibG9ja3Mgb3V0OiB0aGUgYnVzIHByb2dyYW0sIHRoZSBjYXJkIChTRElPKSwgdGhlbiBETUEgb3IgSU9DUzE2IyBhbmQgdGhlIGRpYWdub3N0aWNzLiIgInBpb19wbGFuLmgiCiAgICAgICAgICAgICAgICBkaWFnbm9zdGljcyA9IGNvbXBvbmVudCAiRGlhZ25vc3RpY3MiICJJT1JEWSB0aW1pbmcgKHNsb3cgcmVhZHMsIHJlYWRzIHRoZSBob3N0IGRpZG4ndCB3YWl0IGZvciksIHRoZSBidXMgb2JzZXJ2ZXIgY2hlY2tpbmcgZGF0YSBhbmQgSURFTlRJRlkgb24gdGhlIGNhYmxlLCB0aGUgcmVhZCB0aW1pbmcgcHJvYmUsIHN0YWNrIHdhdGVybWFya3MuIiAiaW9yZHlfdGltZXIsIGJ1c19vYnNlcnZlciwgc2VjdG9yX2NoZWNrLCBidXNfdGltaW5nLCBzdGFja193YXRjaCIKICAgICAgICAgICAgICAgIGFjdGl2aXR5TGluayA9IGNvbXBvbmVudCAiQWN0aXZpdHkgbGluayIgIkNsYXNzaWZpZXMgdGhlIHJlY2VudCBjb21tYW5kcyAoaWRsZSwgc2VxdWVudGlhbCwgcmFuZG9tKSwgbW9kZWxzIHNlZWsgYW5kIHJvdGF0aW9uIHRpbWluZywgc2VuZHMgJEhEQS8kSERFIHRvIHRoZSBzeW50aCBhbmQgdGFrZXMgJEhETSBiYWNrLiIgImFjdGl2aXR5LmNwcCwgYWN0aXZpdHlfbGluay5jcHAsIGxpbmsuY3BwLCBzZWVrX3RpbWluZy5jcHAiCiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIHBpbyA9IGNvbnRhaW5lciAiUElPIHByb2dyYW1zIiAiU3RhdGUgbWFjaGluZXMgdGhhdCBtZWV0IHRoZSBJREUgYnVzJ3MgbmFub3NlY29uZCB0aW1pbmc6IHNhbXBsZSBldmVyeSBhY2Nlc3MsIHB1bGwgSU9SRFkgbG93IHdpdGhpbiAzNSBucywgZHJpdmUgREQgZm9yIHJlYWRzLCBtb3ZlIERNQSBkYXRhLiBUaHJlZSBibG9ja3Mgb2YgMzIgaW5zdHJ1Y3Rpb25zLiIgIlJQMjM1MCBQSU8gYXNzZW1ibHkgKHNyYy8qLnBpbykiICJQSU8iIHsKICAgICAgICAgICAgICAgIHBpb0J1cyA9IGNvbXBvbmVudCAiQnVzIHByb2dyYW0iICJPbmUgb2YgaWRlX2J1cywgaWRlX2J1c19lYXJseSwgaWRlX2J1c19kYXRhICsgaWRlX2RhdGFfaW4sIGlkZV9idXNfbm9pb3JkeSwgb3IgaWRlX3RhYmxlICgrIGlkZV90YWJsZV93cml0ZSksIHdpdGggaW9yZHlfd2F0Y2hkb2cgZm9yIElTQSBjYXJkcy4iICJpZGVfYnVzLnBpbywgaWRlX3RhYmxlLnBpbyIKICAgICAgICAgICAgICAgIHBpb0RtYSA9IGNvbXBvbmVudCAiaWRlX2RtYSIgIk11bHRpd29yZCBETUEgcmVhZCBhbmQgd3JpdGUgYnVyc3RzLiIgImlkZV9kbWEucGlvIgogICAgICAgICAgICAgICAgcGlvSW9jczE2ID0gY29tcG9uZW50ICJpb2NzMTYiICJQdWxscyBJT0NTMTYjIGxvdyBmb3IgdGhlIGRhdGEgcmVnaXN0ZXIsIGZvciAxNi1iaXQgSVNBIGNhcmRzLiIgImlvY3MxNi5waW8iCiAgICAgICAgICAgICAgICBwaW9EaWFnID0gY29tcG9uZW50ICJEaWFnbm9zdGljIHByb2dyYW1zIiAiaW9yZHlfdGltZXIsIGlvcmR5X2NoZWNrLCBidXNfb2JzZXJ2ZXIsIGJ1c190aW1pbmcuIiAiKi5waW8iCiAgICAgICAgICAgICAgICBwaW9TZGlvID0gY29tcG9uZW50ICJTRElPIiAiVGhlIGNhcmQncyA0LWJpdCBidXMgKFBDQikuIiAic2RpbyBwcm9ncmFtcyIKICAgICAgICAgICAgfQoKICAgICAgICAgICAgY2FyZCA9IGNvbnRhaW5lciAibWljcm9TRCBjYXJkIiAiRkFUMzI6IGRpc2sgaW1hZ2VzIChIRERTWU5USC5JTUcgYW5kIG90aGVycyksIElTT3MgYW5kIEJJTi9DVUVzLCBIRERTWU5USC5JTkksIHRoZSBzY3JhdGNoIEhEREJFTkNILklNRy4gSG9sZHMgdGhlIG93bmVyJ3MgZGF0YTogdGhlIGZpcm13YXJlIG9ubHkgdG91Y2hlcyB0aGUgaW1hZ2Ugc2VydmVkLCBIRERCRU5DSC5JTUcgYW5kIEhERFNZTlRILklOSS4iICJGQVQzMiIgIlN0b3JhZ2UiCgogICAgICAgICAgICByaWcgPSBjb250YWluZXIgIlJpZyBhbmQgdG9vbHMiICJIb3N0LXNpZGUgdGVzdHMgYW5kIHRvb2xzOiBweXRlc3Qgc2xpY2VzIHRocm91Z2ggdGhlIFVTQiBhZGFwdGVyLCB0aGUgUElPIHNpbXVsYXRvciwgdGhlIHRyYWNlIHBhcnNlciwgdGhlIGJlbmNobWFyayBkaXNrIGltYWdlLCByaWcuc2ggKGJ1aWxkLCBmbGFzaCwgdGVzdCkuIiAiUHl0aG9uLCBCYXNoIiAiVG9vbHMiIHsKICAgICAgICAgICAgICAgIHJpZ1Rlc3RzID0gY29tcG9uZW50ICJSaWcgdGVzdHMiICJweXRlc3QsIG9uZSBtYXJrZXIgcGVyIHNsaWNlOiBkZXRlY3Rpb24sIHJlYWRzLCB3cml0ZXMsIHNwZWVkLCBzb2FrLCBDRC1ST00sIHRoZSBsaW5rLiIgImhvc3QvdGVzdHMiCiAgICAgICAgICAgICAgICBwaW9TaW0gPSBjb21wb25lbnQgIlBJTyBzaW11bGF0b3IgYW5kIGhvc3QgbW9kZWxzIiAiUnVucyB0aGUgcmVhbCBwaW9hc20gb3V0cHV0IGFnYWluc3QgUElPLW1vZGUgYW5kIE1ETUEgaG9zdCBtb2RlbHMsIGhvbGRpbmcgdGhlIHByb2dyYW1zIHRvIEFUQSdzIHRpbWluZ3MgKHB5dGVzdCAtbSBzaW0sIG5vIGhhcmR3YXJlKS4iICJwaW9fc2ltLnB5LCBpZGVfaG9zdF9tb2RlbC5weSwgbWRtYV9ob3N0X21vZGVsLnB5IgogICAgICAgICAgICAgICAgZHJpdmVMb2cgPSBjb21wb25lbnQgIkRyaXZlIGxvZyBhbmQgdHJhY2UgcGFyc2VyIiAiUmVhZHMgdGhlIGJvYXJkJ3Mgc2VyaWFsIGNvbnNvbGUsIHBhcnNlcyBDTUQvRE9ORS9FViBsaW5lcy4iICJkcml2ZV9sb2cucHksIHRyYWNlLnB5IgogICAgICAgICAgICAgICAgaG9zdElvID0gY29tcG9uZW50ICJIb3N0IGRpc2sgYWNjZXNzIiAiUmF3IHJlYWRzIGFuZCB3cml0ZXMgdG8gdGhlIGVtdWxhdGVkIGRpc2sgdGhyb3VnaCB0aGUgYWRhcHRlciwgcGVyIE9TLiIgImhvc3QucHksIGhvc3RfbWFjb3MucHksIGhvc3Rfd2luZG93cy5weSIKICAgICAgICAgICAgICAgIGJlbmNoSW1hZ2UgPSBjb21wb25lbnQgIkJlbmNobWFyayBpbWFnZSIgIkRPU0JFTkNILklNRzogRnJlZURPUyBhbmQgSEREQkVOQ0guQ09NIGZvciByZXRybyBQQ3MuIiAidG9vbHMvYmVuY2gtaW1hZ2UiCiAgICAgICAgICAgIH0KICAgICAgICB9CgogICAgICAgICMgU3lzdGVtIGNvbnRleHQKICAgICAgICBvd25lciAtPiBiYXkgIkNvbmZpZ3VyZXMgYW5kIHdhdGNoZXMiICJIRERTWU5USC5JTkksIFVTQiBzZXJpYWwgY29uc29sZSIKICAgICAgICBob3N0IC0+IGJheSAiUmVhZHMgYW5kIHdyaXRlcyBzZWN0b3JzLCBzZW5kcyBBVEEgYW5kIEFUQVBJIGNvbW1hbmRzIiAiNDAtcGluIElERSAoQVRBIFBJTyAwLTMsIE1ETUEgMC0yKSIKICAgICAgICBiYXkgLT4gc3ludGggIlRlbGxzIHdoYXQgdGhlIGRyaXZlIGlzIGRvaW5nIiAiVUFSVCwgJEhEQS8kSERFIHNlbnRlbmNlcyIKICAgICAgICBzeW50aCAtPiBiYXkgIlNheXMgd2hpY2ggZHJpdmUgaXQgbW9kZWxzIiAiVUFSVCwgJEhETSIKICAgICAgICBvd25lciAtPiBkZXZNYWNoaW5lICJCdWlsZHMsIGZsYXNoZXMgYW5kIHRlc3RzIG9uIgogICAgICAgIGRldk1hY2hpbmUgLT4gYmF5ICJGbGFzaGVzLCByZWFkcyB0aGUgY29uc29sZSwgZHJpdmVzIHRlc3RzIHRocm91Z2ggdGhlIFVTQiBhZGFwdGVyIiAiVVNCLCBVRjIiCgogICAgICAgICMgQ29udGFpbmVycwogICAgICAgIGhvc3QgLT4gcGlvICJTdHJvYmVzIHJlZ2lzdGVycyBhbmQgZGF0YSIgIklERSBidXMiCiAgICAgICAgcGlvIC0+IGhvc3QgIkFuc3dlcnMgcmVhZHMsIGhvbGRzIElPUkRZLCBETUFSUSIgIklERSBidXMiCiAgICAgICAgcGlvIC0+IGNvcmUxICJIYW5kcyBlYWNoIGFjY2VzcyBvdmVyLCBhc2tzIGZvciByZWFkIGFuc3dlcnMiICJQSU8gRklGT3MiCiAgICAgICAgY29yZTEgLT4gcGlvICJBbnN3ZXJzIHJlYWRzLCBsb2FkcyBhbmQgc3dpdGNoZXMgcHJvZ3JhbXMiICJQSU8gRklGT3MsIHJlZ2lzdGVycyIKICAgICAgICBjb3JlMSAtPiBjb3JlMCAiUG9zdHMgZmV0Y2hlcywgcmVjb3JkcyB0cmFjZSBldmVudHMiICJTaGFyZWQgUkFNIChtYWlsYm94LCBTUFNDIHJpbmcpIgogICAgICAgIGNvcmUwIC0+IGNvcmUxICJQb3N0cyBmZXRjaCByZXN1bHRzLCB3YW50ZWQgYnVzIHByb2dyYW0sIERNQSBwYXRjaCIgIlNoYXJlZCBSQU0iCiAgICAgICAgY29yZTAgLT4gY2FyZCAiUmVhZHMgYW5kIHdyaXRlcyBpbWFnZXMsIHJlYWRzIHNldHRpbmdzIiAiU1BJIG9yIDQtYml0IFNESU8iCiAgICAgICAgY29yZTAgLT4gcGlvICJSdW5zIHRoZSBkaWFnbm9zdGljcyBhbmQgdGhlIGNhcmQncyBwcm9ncmFtcyIgIlBJTyBGSUZPcywgRE1BIgogICAgICAgIHJpZyAtPiBjb3JlMCAiQ29uc29sZSBjb21tYW5kcywgcmVhZHMgdHJhY2UgbGluZXMiICJVU0Igc2VyaWFsIgogICAgICAgIHJpZyAtPiBob3N0ICJSYXcgc2VjdG9yIHJlYWRzIGFuZCB3cml0ZXMiICJVU0IgbWFzcyBzdG9yYWdlICh0aHJvdWdoIHRoZSBhZGFwdGVyKSIKCiAgICAgICAgIyBDb3JlIDEncyBjb21wb25lbnRzCiAgICAgICAgcGlvQnVzIC0+IGlkZUJ1cyAiU2FtcGxlczogZWFjaCBhY2Nlc3MsIGFuc3dlciByZXF1ZXN0cyIgIlJYIEZJRk8iCiAgICAgICAgaWRlQnVzIC0+IHBpb0J1cyAiUmVnaXN0ZXIgdmFsdWVzIHRvIGRyaXZlIG9udG8gREQiICJUWCBGSUZPIgogICAgICAgIGlkZVRhYmxlIC0+IHBpb0J1cyAiUmVnaXN0ZXIgdmFsdWVzIGtlcHQgaW4gdGhlIHRhYmxlIiAiUElPIHJlZ2lzdGVycyIKICAgICAgICBpZGVCdXMgLT4gYXRhRGV2aWNlICJSZWdpc3RlciByZWFkcyBhbmQgd3JpdGVzLCBkYXRhIHdvcmRzIgogICAgICAgIGlkZUJ1cyAtPiBhdGFwaURldmljZSAiUmVnaXN0ZXIgcmVhZHMgYW5kIHdyaXRlcywgUEFDS0VUIGRhdGEiCiAgICAgICAgaWRlRG1hIC0+IHBpb0RtYSAiQnVyc3QgY291bnRzLCBERCBoYW5kLW92ZXIiICJQSU8sIERNQSBjaGFubmVsIgogICAgICAgIGF0YURldmljZSAtPiBpZGVEbWEgIkRNQSBidXJzdHMgKGEgc2VjdG9yIGVhY2gpIgogICAgICAgIGF0YURldmljZSAtPiBmZXRjaE1haWxib3ggIlBvc3RzIGEgZmV0Y2gsIHRha2VzIHRoZSByZXN1bHQiCiAgICAgICAgYXRhcGlEZXZpY2UgLT4gZmV0Y2hNYWlsYm94ICJQb3N0cyBhIGZldGNoLCB0YWtlcyB0aGUgcmVzdWx0IgogICAgICAgIGF0YURldmljZSAtPiB0cmFjZVJpbmcgIkNNRCBhbmQgRE9ORSBldmVudHMiCiAgICAgICAgYnVzQXV0b1N0ZXAgLT4gaWRlQnVzICJTd2l0Y2hlcyB0aGUgcHJvZ3JhbSIKICAgICAgICBidXNBdXRvU3RlcCAtPiBhdGFEZXZpY2UgIkFkZHMgRE1BIHRvIElERU5USUZZIChvZmZlckRtYSkiCgogICAgICAgICMgQ29yZSAwJ3MgY29tcG9uZW50cwogICAgICAgIGZldGNoU2VydmljZSAtPiBmZXRjaE1haWxib3ggIlRha2VzIGZldGNoZXMsIHBvc3RzIHJlc3VsdHMiCiAgICAgICAgZmV0Y2hTZXJ2aWNlIC0+IGJsb2NrU291cmNlcyAiUmVhZHMgYW5kIHdyaXRlcyBzZWN0b3JzIgogICAgICAgIGJsb2NrU291cmNlcyAtPiBzZENhcmQgIlJlYWRzIGFuZCB3cml0ZXMgdGhlIGltYWdlJ3MgY2x1c3RlcnMiCiAgICAgICAgc2RDYXJkIC0+IGNhcmQgIkNvbW1hbmRzIGFuZCBkYXRhIiAiU1BJIG9yIFNESU8iCiAgICAgICAgc2RDYXJkIC0+IHBpb1NkaW8gIlJ1bnMgdGhlIGNhcmQncyBidXMiICJQSU8iCiAgICAgICAgZHJpdmVDb25maWcgLT4gY2FyZCAiUmVhZHMgSEREU1lOVEguSU5JLCBlZGl0cyBpdCBvbiBFIgogICAgICAgIGRyaXZlQ29uZmlnIC0+IGJsb2NrU291cmNlcyAiQ2hvb3NlcyB0aGUgZGlza3Mgc2VydmVkIgogICAgICAgIGNvbnNvbGUgLT4gdHJhY2VSaW5nICJQcmludHMgaXRzIGV2ZW50cyIgIlNQU0MgcmluZyIKICAgICAgICBjb25zb2xlIC0+IGF1dG9CdXMgIkZlZWRzIHRoZSBjb3VudGVycywgcHJpbnRzIEFVVE9CVVMiCiAgICAgICAgYXV0b0J1cyAtPiBkaWFnbm9zdGljcyAiUmVhZHMgaXRzIGV2aWRlbmNlOiBESU9SIyB3aXRoIG5vIGNoaXAgc2VsZWN0LCByZWFkcyBub3Qgd2FpdGVkIGZvciwgbG9uZyByZWFkcyIKICAgICAgICBhdXRvQnVzIC0+IGJ1c0F1dG9TdGVwICJXYW50ZWQgcHJvZ3JhbTsgdGhlIERNQSBwYXRjaCIgIlNoYXJlZCBmbGFncyIKICAgICAgICBhdXRvQnVzIC0+IHBpb1BsYW4gIkZyZWVzIHRoZSBkaWFnbm9zdGljcycgb3IgSU9DUzE2IydzIGJsb2NrIGZvciBpZGVfZG1hIgogICAgICAgIGF1dG9CdXMgLT4gaWRlRG1hICJTdGFydHMgaXQgKGRtYSA9IGF1dG8pIgogICAgICAgIHBpb1BsYW4gLT4gcGlvRGlhZyAiU3RhcnRzIHdoYXQgZml0cyIKICAgICAgICBwaW9QbGFuIC0+IHBpb0lvY3MxNiAiU3RhcnRzIGl0IHdoZW4gRE1BIGlzbid0IG9mZmVyZWQiCiAgICAgICAgZGlhZ25vc3RpY3MgLT4gcGlvRGlhZyAiUmVhZHMgdGltaW5ncyBhbmQgYnVzIHNhbXBsZXMiICJQSU8gRklGT3MsIERNQSByaW5nIgogICAgICAgIGFjdGl2aXR5TGluayAtPiB0cmFjZVJpbmcgIlRha2VzIENNRCBhbmQgRE9ORSBldmVudHMiCiAgICAgICAgYWN0aXZpdHlMaW5rIC0+IGZldGNoU2VydmljZSAiSG9sZHMgcmVzdWx0cyBmb3Igc2VlayB0aW1pbmciCiAgICAgICAgYWN0aXZpdHlMaW5rIC0+IHN5bnRoICIkSERBLCAkSERFIiAiVUFSVCIKICAgICAgICBzeW50aCAtPiBhY3Rpdml0eUxpbmsgIiRIRE0iICJVQVJUIgoKICAgICAgICAjIFRoZSByaWcncyBjb21wb25lbnRzCiAgICAgICAgcmlnVGVzdHMgLT4gZHJpdmVMb2cgIkNvbnNvbGUgY29tbWFuZHMsIHRyYWNlIGxpbmVzIgogICAgICAgIHJpZ1Rlc3RzIC0+IGhvc3RJbyAiU2VjdG9yIHJlYWRzIGFuZCB3cml0ZXMiCiAgICAgICAgZHJpdmVMb2cgLT4gY29uc29sZSAiQ29tbWFuZHMgYW5kIGxpbmVzIiAiVVNCIHNlcmlhbCIKICAgICAgICBob3N0SW8gLT4gaG9zdCAiUmF3IEkvTyIgIlVTQiBtYXNzIHN0b3JhZ2UiCiAgICAgICAgcGlvU2ltIC0+IHBpb0J1cyAiUnVucyB0aGUgYXNzZW1ibGVkIHByb2dyYW1zIGFnYWluc3QgaG9zdCBtb2RlbHMiICJwaW9hc20gb3V0cHV0IgogICAgICAgIGJlbmNoSW1hZ2UgLT4gaG9zdCAiQm9vdGVkIGJ5IGEgcmV0cm8gUEMgZnJvbSB0aGUgZHJpdmUiCgogICAgICAgICMgRGVwbG95bWVudAogICAgICAgIHBjYiA9IGRlcGxveW1lbnRFbnZpcm9ubWVudCAiUENCIiB7CiAgICAgICAgICAgIGRlcGxveW1lbnROb2RlICJJREUgU3ludGggQmF5IFBDQiIgIlJldiAwLjMvMC40OiBSUDIzNTBCLCAzLjMgVi01IFYgYnVzIHN3aXRjaGVzLCBtaWNyb1NEIG9uIFNESU8sIDQwLXBpbiBJREUgaGVhZGVyIiAiSGFyZHdhcmUiIHsKICAgICAgICAgICAgICAgIGRlcGxveW1lbnROb2RlICJSUDIzNTBCIiAiVHdvIENvcnRleC1NMzMgY29yZXMgYXQgMjAwIE1IeiwgNTIwIEtCIFJBTSwgdGhyZWUgUElPIGJsb2NrcyIgIk1pY3JvY29udHJvbGxlciIgewogICAgICAgICAgICAgICAgICAgIGNvbnRhaW5lckluc3RhbmNlIGNvcmUxCiAgICAgICAgICAgICAgICAgICAgY29udGFpbmVySW5zdGFuY2UgY29yZTAKICAgICAgICAgICAgICAgICAgICBjb250YWluZXJJbnN0YW5jZSBwaW8KICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIGRlcGxveW1lbnROb2RlICJtaWNyb1NEIHNvY2tldCIgIjQtYml0IFNESU8sIDIwLTQwIE1IeiIgIlNvY2tldCIgewogICAgICAgICAgICAgICAgICAgIGNvbnRhaW5lckluc3RhbmNlIGNhcmQKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgICAgICBkZXBsb3ltZW50Tm9kZSAiUmV0cm8gUEMgb3IgVVNCLUlERSBhZGFwdGVyIiAiIiAiSURFIGhvc3QiIHsKICAgICAgICAgICAgICAgIHNvZnR3YXJlU3lzdGVtSW5zdGFuY2UgaG9zdAogICAgICAgICAgICB9CiAgICAgICAgICAgIGRlcGxveW1lbnROb2RlICJEZXYgY29tcHV0ZXIiICJtYWNPUyBvciBXaW5kb3dzIiAiQ29tcHV0ZXIiIHsKICAgICAgICAgICAgICAgIGNvbnRhaW5lckluc3RhbmNlIHJpZwogICAgICAgICAgICB9CiAgICAgICAgfQogICAgICAgIGJiNDggPSBkZXBsb3ltZW50RW52aXJvbm1lbnQgIkJCNDgiIHsKICAgICAgICAgICAgZGVwbG95bWVudE5vZGUgIk9saW1leCBSUDIzNTAtUElDTzItQkI0OCIgIlRoZSBwcm9vZiBvZiBjb25jZXB0OiBSUDIzNTBCIG9uIGEgYnJlYWRib2FyZCwgaGFuZC13aXJlZCB0byBhbiBJREUgY2FibGUiICJIYXJkd2FyZSIgewogICAgICAgICAgICAgICAgZGVwbG95bWVudE5vZGUgIlJQMjM1MEIiICJUd28gQ29ydGV4LU0zMyBjb3JlcyBhdCAyMDAgTUh6LCA1MjAgS0IgUkFNLCB0aHJlZSBQSU8gYmxvY2tzIiAiTWljcm9jb250cm9sbGVyIiB7CiAgICAgICAgICAgICAgICAgICAgY29udGFpbmVySW5zdGFuY2UgY29yZTEKICAgICAgICAgICAgICAgICAgICBjb250YWluZXJJbnN0YW5jZSBjb3JlMAogICAgICAgICAgICAgICAgICAgIGNvbnRhaW5lckluc3RhbmNlIHBpbwogICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgZGVwbG95bWVudE5vZGUgIm1pY3JvU0QgYnJlYWtvdXQiICJTUEksIDI1IE1IeiIgIlNvY2tldCIgewogICAgICAgICAgICAgICAgICAgIGNvbnRhaW5lckluc3RhbmNlIGNhcmQKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgICAgICBkZXBsb3ltZW50Tm9kZSAiVVNCLUlERSBhZGFwdGVyIG9yIHJldHJvIFBDIiAiIiAiSURFIGhvc3QiIHsKICAgICAgICAgICAgICAgIHNvZnR3YXJlU3lzdGVtSW5zdGFuY2UgaG9zdAogICAgICAgICAgICB9CiAgICAgICAgICAgIGRlcGxveW1lbnROb2RlICJEZXYgY29tcHV0ZXIiICJtYWNPUyBvciBXaW5kb3dzIiAiQ29tcHV0ZXIiIHsKICAgICAgICAgICAgICAgIGNvbnRhaW5lckluc3RhbmNlIHJpZwogICAgICAgICAgICB9CiAgICAgICAgfQogICAgfQoKICAgIHZpZXdzIHsKICAgICAgICBzeXN0ZW1Db250ZXh0IGJheSAiQ29udGV4dCIgIldobyBhbmQgd2hhdCBJREUgU3ludGggQmF5IHRhbGtzIHRvLiIgewogICAgICAgICAgICBpbmNsdWRlICoKICAgICAgICAgICAgYXV0b0xheW91dCBscgogICAgICAgIH0KCiAgICAgICAgY29udGFpbmVyIGJheSAiQ29udGFpbmVycyIgIlRoZSB0d28gY29yZXMsIHRoZSBQSU8gcHJvZ3JhbXMsIHRoZSBjYXJkIGFuZCB0aGUgcmlnLiIgewogICAgICAgICAgICBpbmNsdWRlICoKICAgICAgICAgICAgYXV0b0xheW91dCBscgogICAgICAgIH0KCiAgICAgICAgY29tcG9uZW50IGNvcmUxICJDb3JlMSIgIkNvcmUgMTogdGhlIHJlYWwtdGltZSBidXMgbG9vcC4iIHsKICAgICAgICAgICAgaW5jbHVkZSAqCiAgICAgICAgICAgIGF1dG9MYXlvdXQgbHIKICAgICAgICB9CgogICAgICAgIGNvbXBvbmVudCBjb3JlMCAiQ29yZTAiICJDb3JlIDA6IHRoZSBjYXJkLCB0aGUgY29uc29sZSwgdGhlIGFkdmljZSwgdGhlIGxpbmsuIiB7CiAgICAgICAgICAgIGluY2x1ZGUgKgogICAgICAgICAgICBhdXRvTGF5b3V0IGxyCiAgICAgICAgfQoKICAgICAgICBjb21wb25lbnQgcGlvICJQSU8iICJUaGUgUElPIHByb2dyYW1zLCBzaGFyZWQgb3V0IGJ5IHBpb19wbGFuLiIgewogICAgICAgICAgICBpbmNsdWRlICoKICAgICAgICAgICAgYXV0b0xheW91dCBscgogICAgICAgIH0KCiAgICAgICAgY29tcG9uZW50IHJpZyAiUmlnIiAiVGhlIGhvc3Qtc2lkZSB0ZXN0cyBhbmQgdG9vbHMuIiB7CiAgICAgICAgICAgIGluY2x1ZGUgKgogICAgICAgICAgICBhdXRvTGF5b3V0IGxyCiAgICAgICAgfQoKICAgICAgICBkeW5hbWljIGJheSAiU2VjdG9yUmVhZCIgIkEgUkVBRCBTRUNUT1JTIG9uIHRoZSBoYXJkIGRpc2s6IGNvcmUgMSBuZXZlciB3YWl0cyBmb3IgdGhlIGNhcmQ7IEJTWSBjb3ZlcnMgdGhlIGZldGNoLCBuZXZlciBJT1JEWSAoQ0xBVURFLm1kLCBEcml2ZSBkYXRhIHBhdGgpLiIgewogICAgICAgICAgICBob3N0IC0+IHBpbyAiV3JpdGVzIHRoZSB0YXNrIGZpbGUgYW5kIHRoZSBDb21tYW5kIHJlZ2lzdGVyIgogICAgICAgICAgICBwaW8gLT4gY29yZTEgIkVhY2ggd3JpdGUncyBzYW1wbGUiCiAgICAgICAgICAgIGNvcmUxIC0+IGNvcmUwICJhdGE6OkRldmljZSBzZXRzIEJTWSBhbmQgcG9zdHMgYSBmZXRjaCAoTEJBLCBidWZmZXIpIHRvIHRoZSBtYWlsYm94IgogICAgICAgICAgICBjb3JlMCAtPiBjYXJkICJSZWFkcyB0aGUgc2VjdG9yIGZyb20gdGhlIGltYWdlIChyZWFkLWFoZWFkOiB0aGUgbmV4dCBvbmUgdG9vKSIKICAgICAgICAgICAgY29yZTAgLT4gY29yZTEgIlBvc3RzIHRoZSByZXN1bHQ7IGZldGNoRG9uZSgpIHNldHMgRFJRIGFuZCByYWlzZXMgSU5UUlEiCiAgICAgICAgICAgIGhvc3QgLT4gcGlvICJSZWFkcyBTdGF0dXMsIHRoZW4gMjU2IGRhdGEgd29yZHMiCiAgICAgICAgICAgIHBpbyAtPiBjb3JlMSAiRWFjaCByZWFkICh0aGUgZGF0YSBsYW5lIHN0cmVhbXMgdGhlIHdvcmRzIGJ5IERNQSBpbnN0ZWFkKSIKICAgICAgICAgICAgY29yZTEgLT4gcGlvICJEcml2ZXMgZWFjaCB3b3JkIG9udG8gREQsIHJlbGVhc2VzIElPUkRZIgogICAgICAgICAgICBjb3JlMSAtPiBjb3JlMCAiRE9ORSBpbiB0aGUgdHJhY2UgcmluZzogdGhlIGNvbnNvbGUgYW5kIHRoZSBhY3Rpdml0eSBsaW5rIgogICAgICAgICAgICBhdXRvTGF5b3V0IGxyCiAgICAgICAgfQoKICAgICAgICBkeW5hbWljIGJheSAiQXV0b0J1cyIgImJ1cyA9IGF1dG8gd2l0aCBkbWEgPSBhdXRvOiB0aGUgZHJpdmUgbGVhcm5zIHRoZSBQQywgbW92ZXMgdG8gdGhlIGRhdGEgbGFuZSwgdGhlbiBvZmZlcnMgRE1BLiIgewogICAgICAgICAgICBob3N0IC0+IHBpbyAiQklPUyBhbmQgRE9TIHJlYWQgb24gZWFybHkgYW5zd2Vyczsgc3RhdHVzIHJlYWRzIGhlbGQgMS41IHVzIG5vdyBhbmQgdGhlbiAodGhlIElPUkRZIHByb2JlKSIKICAgICAgICAgICAgcGlvIC0+IGNvcmUxICJFdmVyeSBhY2Nlc3MiCiAgICAgICAgICAgIGNvcmUxIC0+IGNvcmUwICJGZXRjaGVzOyB0aGUgZGlhZ25vc3RpY3MgY291bnQgbG9uZyByZWFkcywgcmVhZHMgbm90IHdhaXRlZCBmb3IsIERJT1IjIHdpdGggbm8gY2hpcCBzZWxlY3QiCiAgICAgICAgICAgIGNvcmUwIC0+IGNvcmUxICIxLDAwMCBzZWN0b3JzIGFuZCAyMCB3YWl0ZWQgcmVhZHMgbGF0ZXI6ICdsYW5lJzsgdGhlbiB0aGUgRE1BIHBhdGNoIgogICAgICAgICAgICBjb3JlMSAtPiBwaW8gIlN3aXRjaGVzIHRvIHRoZSBkYXRhIGxhbmUgYmV0d2VlbiBhY2Nlc3NlczsgcGF0Y2hlcyBJREVOVElGWSIKICAgICAgICAgICAgaG9zdCAtPiBwaW8gIldpbmRvd3MnIGRyaXZlciByZWFkcyBJREVOVElGWSBhZ2FpbjogbXVsdGl3b3JkIERNQSAyIgogICAgICAgICAgICBhdXRvTGF5b3V0IGxyCiAgICAgICAgfQoKICAgICAgICBkZXBsb3ltZW50IGJheSBwY2IgIkRlcGxveW1lbnRQQ0IiICJUaGUgZHJpdmUgb24gaXRzIG93biBQQ0IuIiB7CiAgICAgICAgICAgIGluY2x1ZGUgKgogICAgICAgICAgICBhdXRvTGF5b3V0IGxyCiAgICAgICAgfQoKICAgICAgICBkZXBsb3ltZW50IGJheSBiYjQ4ICJEZXBsb3ltZW50QkI0OCIgIlRoZSBwcm9vZiBvZiBjb25jZXB0IG9uIHRoZSBPbGltZXggQkI0OC4iIHsKICAgICAgICAgICAgaW5jbHVkZSAqCiAgICAgICAgICAgIGF1dG9MYXlvdXQgbHIKICAgICAgICB9CgogICAgICAgIHN0eWxlcyB7CiAgICAgICAgICAgIGVsZW1lbnQgIlBlcnNvbiIgewogICAgICAgICAgICAgICAgc2hhcGUgUGVyc29uCiAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kICMwODQyN2IKICAgICAgICAgICAgICAgIGNvbG9yICNmZmZmZmYKICAgICAgICAgICAgfQogICAgICAgICAgICBlbGVtZW50ICJTb2Z0d2FyZSBTeXN0ZW0iIHsKICAgICAgICAgICAgICAgIGJhY2tncm91bmQgIzExNjhiZAogICAgICAgICAgICAgICAgY29sb3IgI2ZmZmZmZgogICAgICAgICAgICB9CiAgICAgICAgICAgIGVsZW1lbnQgIkV4dGVybmFsIiB7CiAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kICM5OTk5OTkKICAgICAgICAgICAgICAgIGNvbG9yICNmZmZmZmYKICAgICAgICAgICAgfQogICAgICAgICAgICBlbGVtZW50ICJDb250YWluZXIiIHsKICAgICAgICAgICAgICAgIGJhY2tncm91bmQgIzQzOGRkNQogICAgICAgICAgICAgICAgY29sb3IgI2ZmZmZmZgogICAgICAgICAgICB9CiAgICAgICAgICAgIGVsZW1lbnQgIlBJTyIgewogICAgICAgICAgICAgICAgYmFja2dyb3VuZCAjMmU3ZDViCiAgICAgICAgICAgIH0KICAgICAgICAgICAgZWxlbWVudCAiU3RvcmFnZSIgewogICAgICAgICAgICAgICAgc2hhcGUgQ3lsaW5kZXIKICAgICAgICAgICAgfQogICAgICAgICAgICBlbGVtZW50ICJUb29scyIgewogICAgICAgICAgICAgICAgYmFja2dyb3VuZCAjNmE2YThhCiAgICAgICAgICAgIH0KICAgICAgICAgICAgZWxlbWVudCAiQ29tcG9uZW50IiB7CiAgICAgICAgICAgICAgICBiYWNrZ3JvdW5kICM4NWJiZjAKICAgICAgICAgICAgICAgIGNvbG9yICMwMDAwMDAKICAgICAgICAgICAgfQogICAgICAgIH0KICAgIH0KCn0=",
+    "structurizr.inspection.info" : "0",
+    "structurizr.inspection.ignore" : "0",
+    "structurizr.inspection.warning" : "0"
+  },
+  "views" : {
+    "componentViews" : [ {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "containerId" : "6",
+      "description" : "Core 1: the real-time bus loop.",
+      "elements" : [ {
+        "id" : "7",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "8",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "9",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "10",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "11",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "12",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "13",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "14",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "25",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalContainerBoundariesVisible" : false,
+      "key" : "Core1",
+      "name" : "Component View: IDE Synth Bay - Core 1: bus loop",
+      "order" : 3,
+      "relationships" : [ {
+        "id" : "52"
+      }, {
+        "id" : "57"
+      }, {
+        "id" : "59"
+      }, {
+        "id" : "62"
+      }, {
+        "id" : "63"
+      }, {
+        "id" : "64"
+      }, {
+        "id" : "66"
+      }, {
+        "id" : "68"
+      }, {
+        "id" : "69"
+      }, {
+        "id" : "70"
+      }, {
+        "id" : "71"
+      }, {
+        "id" : "72"
+      }, {
+        "id" : "73"
+      }, {
+        "id" : "76"
+      }, {
+        "id" : "87"
+      }, {
+        "id" : "92"
+      }, {
+        "id" : "95"
+      } ]
+    }, {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "containerId" : "15",
+      "description" : "Core 0: the card, the console, the advice, the link.",
+      "elements" : [ {
+        "id" : "3",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "6",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "16",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "17",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "18",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "19",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "20",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "21",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "22",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "23",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "24",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "25",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "31",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "32",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalContainerBoundariesVisible" : false,
+      "key" : "Core0",
+      "name" : "Component View: IDE Synth Bay - Core 0: services",
+      "order" : 4,
+      "relationships" : [ {
+        "id" : "102"
+      }, {
+        "id" : "104"
+      }, {
+        "id" : "105"
+      }, {
+        "id" : "106"
+      }, {
+        "id" : "108"
+      }, {
+        "id" : "114"
+      }, {
+        "id" : "119"
+      }, {
+        "id" : "47"
+      }, {
+        "id" : "48"
+      }, {
+        "id" : "75"
+      }, {
+        "id" : "77"
+      }, {
+        "id" : "78"
+      }, {
+        "id" : "79"
+      }, {
+        "id" : "81"
+      }, {
+        "id" : "83"
+      }, {
+        "id" : "84"
+      }, {
+        "id" : "86"
+      }, {
+        "id" : "88"
+      }, {
+        "id" : "89"
+      }, {
+        "id" : "91"
+      }, {
+        "id" : "93"
+      }, {
+        "id" : "97"
+      } ]
+    }, {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "containerId" : "25",
+      "description" : "The PIO programs, shared out by pio_plan.",
+      "elements" : [ {
+        "id" : "6",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "26",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "27",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "28",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "29",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "30",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "32",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalContainerBoundariesVisible" : false,
+      "key" : "PIO",
+      "name" : "Component View: IDE Synth Bay - PIO programs",
+      "order" : 5,
+      "relationships" : [ {
+        "id" : "100"
+      }, {
+        "id" : "118"
+      }, {
+        "id" : "49"
+      }, {
+        "id" : "50"
+      }, {
+        "id" : "53"
+      }, {
+        "id" : "56"
+      }, {
+        "id" : "60"
+      }, {
+        "id" : "67"
+      }, {
+        "id" : "82"
+      }, {
+        "id" : "98"
+      } ]
+    }, {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "containerId" : "32",
+      "description" : "The host-side tests and tools.",
+      "elements" : [ {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "25",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "33",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "34",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "35",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "36",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "37",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalContainerBoundariesVisible" : false,
+      "key" : "Rig",
+      "name" : "Component View: IDE Synth Bay - Rig and tools",
+      "order" : 6,
+      "relationships" : [ {
+        "id" : "110"
+      }, {
+        "id" : "111"
+      }, {
+        "id" : "113"
+      }, {
+        "id" : "115"
+      }, {
+        "id" : "117"
+      }, {
+        "id" : "120"
+      }, {
+        "id" : "44"
+      }, {
+        "id" : "45"
+      }, {
+        "id" : "52"
+      } ]
+    } ],
+    "configuration" : {
+      "styles" : {
+        "elements" : [ {
+          "background" : "#85bbf0",
+          "color" : "#000000",
+          "tag" : "Component"
+        }, {
+          "background" : "#438dd5",
+          "color" : "#ffffff",
+          "tag" : "Container"
+        }, {
+          "background" : "#999999",
+          "color" : "#ffffff",
+          "tag" : "External"
+        }, {
+          "background" : "#2e7d5b",
+          "tag" : "PIO"
+        }, {
+          "background" : "#08427b",
+          "color" : "#ffffff",
+          "shape" : "Person",
+          "tag" : "Person"
+        }, {
+          "background" : "#1168bd",
+          "color" : "#ffffff",
+          "tag" : "Software System"
+        }, {
+          "shape" : "Cylinder",
+          "tag" : "Storage"
+        }, {
+          "background" : "#6a6a8a",
+          "tag" : "Tools"
+        } ]
+      },
+      "terminology" : { }
+    },
+    "containerViews" : [ {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "description" : "The two cores, the PIO programs, the card and the rig.",
+      "elements" : [ {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "3",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "6",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "25",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "31",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "32",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalSoftwareSystemBoundariesVisible" : false,
+      "key" : "Containers",
+      "name" : "Container View: IDE Synth Bay",
+      "order" : 2,
+      "relationships" : [ {
+        "id" : "107"
+      }, {
+        "id" : "109"
+      }, {
+        "id" : "119"
+      }, {
+        "id" : "44"
+      }, {
+        "id" : "45"
+      }, {
+        "id" : "47"
+      }, {
+        "id" : "48"
+      }, {
+        "id" : "49"
+      }, {
+        "id" : "50"
+      }, {
+        "id" : "51"
+      }, {
+        "id" : "52"
+      }, {
+        "id" : "53"
+      }, {
+        "id" : "54"
+      } ],
+      "softwareSystemId" : "5"
+    } ],
+    "deploymentViews" : [ {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "description" : "The drive on its own PCB.",
+      "elements" : [ {
+        "id" : "121",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "122",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "123",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "124",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "127",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "131",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "132",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "134",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "135",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "138",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "139",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "environment" : "PCB",
+      "key" : "DeploymentPCB",
+      "name" : "Deployment View: IDE Synth Bay - PCB",
+      "order" : 9,
+      "relationships" : [ {
+        "id" : "125"
+      }, {
+        "id" : "126"
+      }, {
+        "id" : "128"
+      }, {
+        "id" : "129"
+      }, {
+        "id" : "130"
+      }, {
+        "id" : "133"
+      }, {
+        "id" : "136"
+      }, {
+        "id" : "137"
+      }, {
+        "id" : "140"
+      }, {
+        "id" : "141"
+      }, {
+        "id" : "142"
+      } ],
+      "softwareSystemId" : "5"
+    }, {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "description" : "The proof of concept on the Olimex BB48.",
+      "elements" : [ {
+        "id" : "143",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "144",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "145",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "146",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "149",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "153",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "154",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "156",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "157",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "160",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "161",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "environment" : "BB48",
+      "key" : "DeploymentBB48",
+      "name" : "Deployment View: IDE Synth Bay - BB48",
+      "order" : 10,
+      "relationships" : [ {
+        "id" : "147"
+      }, {
+        "id" : "148"
+      }, {
+        "id" : "150"
+      }, {
+        "id" : "151"
+      }, {
+        "id" : "152"
+      }, {
+        "id" : "155"
+      }, {
+        "id" : "158"
+      }, {
+        "id" : "159"
+      }, {
+        "id" : "162"
+      }, {
+        "id" : "163"
+      }, {
+        "id" : "164"
+      } ],
+      "softwareSystemId" : "5"
+    } ],
+    "dynamicViews" : [ {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "description" : "A READ SECTORS on the hard disk: core 1 never waits for the card; BSY covers the fetch, never IORDY (CLAUDE.md, Drive data path).",
+      "elementId" : "5",
+      "elements" : [ {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "6",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "25",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "31",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalBoundariesVisible" : false,
+      "key" : "SectorRead",
+      "name" : "Dynamic View: IDE Synth Bay",
+      "order" : 7,
+      "relationships" : [ {
+        "description" : "Writes the task file and the Command register",
+        "id" : "44",
+        "order" : "1",
+        "response" : false
+      }, {
+        "description" : "Each write's sample",
+        "id" : "47",
+        "order" : "2",
+        "response" : false
+      }, {
+        "description" : "ata::Device sets BSY and posts a fetch (LBA, buffer) to the mailbox",
+        "id" : "49",
+        "order" : "3",
+        "response" : false
+      }, {
+        "description" : "Reads the sector from the image (read-ahead: the next one too)",
+        "id" : "51",
+        "order" : "4",
+        "response" : false
+      }, {
+        "description" : "Posts the result; fetchDone() sets DRQ and raises INTRQ",
+        "id" : "50",
+        "order" : "5",
+        "response" : false
+      }, {
+        "description" : "Reads Status, then 256 data words",
+        "id" : "44",
+        "order" : "6",
+        "response" : false
+      }, {
+        "description" : "Each read (the data lane streams the words by DMA instead)",
+        "id" : "47",
+        "order" : "7",
+        "response" : false
+      }, {
+        "description" : "Drives each word onto DD, releases IORDY",
+        "id" : "48",
+        "order" : "8",
+        "response" : false
+      }, {
+        "description" : "DONE in the trace ring: the console and the activity link",
+        "id" : "49",
+        "order" : "9",
+        "response" : false
+      } ]
+    }, {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "description" : "bus = auto with dma = auto: the drive learns the PC, moves to the data lane, then offers DMA.",
+      "elementId" : "5",
+      "elements" : [ {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "6",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "15",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "25",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "externalBoundariesVisible" : false,
+      "key" : "AutoBus",
+      "name" : "Dynamic View: IDE Synth Bay",
+      "order" : 8,
+      "relationships" : [ {
+        "description" : "BIOS and DOS read on early answers; status reads held 1.5 us now and then (the IORDY probe)",
+        "id" : "44",
+        "order" : "1",
+        "response" : false
+      }, {
+        "description" : "Every access",
+        "id" : "47",
+        "order" : "2",
+        "response" : false
+      }, {
+        "description" : "Fetches; the diagnostics count long reads, reads not waited for, DIOR# with no chip select",
+        "id" : "49",
+        "order" : "3",
+        "response" : false
+      }, {
+        "description" : "1,000 sectors and 20 waited reads later: 'lane'; then the DMA patch",
+        "id" : "50",
+        "order" : "4",
+        "response" : false
+      }, {
+        "description" : "Switches to the data lane between accesses; patches IDENTIFY",
+        "id" : "48",
+        "order" : "5",
+        "response" : false
+      }, {
+        "description" : "Windows' driver reads IDENTIFY again: multiword DMA 2",
+        "id" : "44",
+        "order" : "6",
+        "response" : false
+      } ]
+    } ],
+    "systemContextViews" : [ {
+      "automaticLayout" : {
+        "edgeSeparation" : 50,
+        "nodeSeparation" : 50,
+        "rankDirection" : "LeftRight",
+        "rankSeparation" : 100,
+        "vertices" : true
+      },
+      "description" : "Who and what IDE Synth Bay talks to.",
+      "elements" : [ {
+        "id" : "1",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "2",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "3",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "4",
+        "x" : 0,
+        "y" : 0
+      }, {
+        "id" : "5",
+        "x" : 0,
+        "y" : 0
+      } ],
+      "enterpriseBoundaryVisible" : true,
+      "key" : "Context",
+      "name" : "System Context View: IDE Synth Bay",
+      "order" : 1,
+      "relationships" : [ {
+        "id" : "38"
+      }, {
+        "id" : "39"
+      }, {
+        "id" : "40"
+      }, {
+        "id" : "41"
+      }, {
+        "id" : "42"
+      }, {
+        "id" : "43"
+      }, {
+        "id" : "46"
+      } ],
+      "softwareSystemId" : "5"
+    } ]
+  }
+}

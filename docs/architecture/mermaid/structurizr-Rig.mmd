@@ -1,0 +1,44 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Component View: IDE Synth Bay - Rig and tools"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    2["<div style='font-weight: bold'>IDE host</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>What the drive is plugged<br />into: a retro PC's IDE<br />controller (16-bit ISA card,<br />Intel PIIX, VIA) or a USB-IDE<br />adapter (JMicron, Innostor).<br />Drives the 40-pin IDE bus:<br />register reads and writes,<br />PIO and multiword DMA data,<br />RESET#.</div>"]
+    style 2 fill:#999999,stroke:#6b6b6b,color:#ffffff
+
+    subgraph 5 ["IDE Synth Bay"]
+      style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
+
+      subgraph 32 ["Rig and tools"]
+        style 32 fill:#ffffff,stroke:#4a4a60,color:#4a4a60
+
+        33["<div style='font-weight: bold'>Rig tests</div><div style='font-size: 70%; margin-top: 0px'>[Component: host/tests]</div><div style='font-size: 80%; margin-top:10px'>pytest, one marker per slice:<br />detection, reads, writes,<br />speed, soak, CD-ROM, the<br />link.</div>"]
+        style 33 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        34["<div style='font-weight: bold'>PIO simulator and host models</div><div style='font-size: 70%; margin-top: 0px'>[Component: pio_sim.py, ide_host_model.py, mdma_host_model.py]</div><div style='font-size: 80%; margin-top:10px'>Runs the real pioasm output<br />against PIO-mode and MDMA<br />host models, holding the<br />programs to ATA's timings<br />(pytest -m sim, no hardware).</div>"]
+        style 34 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        35["<div style='font-weight: bold'>Drive log and trace parser</div><div style='font-size: 70%; margin-top: 0px'>[Component: drive_log.py, trace.py]</div><div style='font-size: 80%; margin-top:10px'>Reads the board's serial<br />console, parses CMD/DONE/EV<br />lines.</div>"]
+        style 35 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        36["<div style='font-weight: bold'>Host disk access</div><div style='font-size: 70%; margin-top: 0px'>[Component: host.py, host_macos.py, host_windows.py]</div><div style='font-size: 80%; margin-top:10px'>Raw reads and writes to the<br />emulated disk through the<br />adapter, per OS.</div>"]
+        style 36 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        37["<div style='font-weight: bold'>Benchmark image</div><div style='font-size: 70%; margin-top: 0px'>[Component: tools/bench-image]</div><div style='font-size: 80%; margin-top:10px'>DOSBENCH.IMG: FreeDOS and<br />HDDBENCH.COM for retro PCs.</div>"]
+        style 37 fill:#85bbf0,stroke:#5d82a8,color:#000000
+      end
+
+      15["<div style='font-weight: bold'>Core 0: services</div><div style='font-size: 70%; margin-top: 0px'>[Container: C++ (Arduino-Pico)]</div><div style='font-size: 80%; margin-top:10px'>Everything slow: the card,<br />USB serial, the activity<br />link, the diagnostics'<br />reports, the bus = auto<br />advice. Keeps up with core<br />1's fetches before anything<br />else.</div>"]
+      style 15 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      25["<div style='font-weight: bold'>PIO programs</div><div style='font-size: 70%; margin-top: 0px'>[Container: RP2350 PIO assembly (src/*.pio)]</div><div style='font-size: 80%; margin-top:10px'>State machines that meet the<br />IDE bus's nanosecond timing:<br />sample every access, pull<br />IORDY low within 35 ns, drive<br />DD for reads, move DMA data.<br />Three blocks of 32<br />instructions.</div>"]
+      style 25 fill:#2e7d5b,stroke:#20573f,color:#ffffff
+    end
+
+    33-. "<div>Console commands, trace lines</div><div style='font-size: 70%'></div>" .->35
+    33-. "<div>Sector reads and writes</div><div style='font-size: 70%'></div>" .->36
+    35-. "<div>Commands and lines</div><div style='font-size: 70%'>[USB serial]</div>" .->15
+    36-. "<div>Raw I/O</div><div style='font-size: 70%'>[USB mass storage]</div>" .->2
+    34-. "<div>Runs the assembled programs<br />against host models</div><div style='font-size: 70%'>[pioasm output]</div>" .->25
+    37-. "<div>Booted by a retro PC from the<br />drive</div><div style='font-size: 70%'></div>" .->2
+    2-. "<div>Strobes registers and data</div><div style='font-size: 70%'>[IDE bus]</div>" .->25
+    25-. "<div>Answers reads, holds IORDY,<br />DMARQ</div><div style='font-size: 70%'>[IDE bus]</div>" .->2
+    15-. "<div>Runs the diagnostics and the<br />card's programs</div><div style='font-size: 70%'>[PIO FIFOs, DMA]</div>" .->25
+
+  end

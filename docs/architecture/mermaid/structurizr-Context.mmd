@@ -1,0 +1,26 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["System Context View: IDE Synth Bay"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    1["<div style='font-weight: bold'>Owner</div><div style='font-size: 70%; margin-top: 0px'>[Person]</div><div style='font-size: 80%; margin-top:10px'>Sets the drive up<br />(HDDSYNTH.INI, serial<br />console), builds the<br />firmware, runs the test rig.</div>"]
+    style 1 fill:#08427b,stroke:#052e56,color:#ffffff
+    2["<div style='font-weight: bold'>IDE host</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>What the drive is plugged<br />into: a retro PC's IDE<br />controller (16-bit ISA card,<br />Intel PIIX, VIA) or a USB-IDE<br />adapter (JMicron, Innostor).<br />Drives the 40-pin IDE bus:<br />register reads and writes,<br />PIO and multiword DMA data,<br />RESET#.</div>"]
+    style 2 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    3["<div style='font-weight: bold'>HDD Synth</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Plays hard disk sounds from<br />what the drive is doing<br />(HDDSynth_Native).</div>"]
+    style 3 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    4["<div style='font-weight: bold'>Development computer</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Mac or Windows PC:<br />PlatformIO, the USB adapter<br />the rig tests drive through,<br />USB serial to the board.</div>"]
+    style 4 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    5["<div style='font-weight: bold'>IDE Synth Bay</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Emulates an IDE hard disk<br />(and an ATAPI CD-ROM drive)<br />on an RP2350B: answers the<br />IDE bus in real time and<br />serves sectors from disk<br />images on a microSD card.</div>"]
+    style 5 fill:#1168bd,stroke:#0b4884,color:#ffffff
+
+    1-. "<div>Configures and watches</div><div style='font-size: 70%'>[HDDSYNTH.INI, USB serial console]</div>" .->5
+    2-. "<div>Reads and writes sectors,<br />sends ATA and ATAPI commands</div><div style='font-size: 70%'>[40-pin IDE (ATA PIO 0-3, MDMA 0-2)]</div>" .->5
+    5-. "<div>Tells what the drive is doing</div><div style='font-size: 70%'>[UART, $HDA/$HDE sentences]</div>" .->3
+    3-. "<div>Says which drive it models</div><div style='font-size: 70%'>[UART, $HDM]</div>" .->5
+    1-. "<div>Builds, flashes and tests on</div><div style='font-size: 70%'></div>" .->4
+    4-. "<div>Flashes, reads the console,<br />drives tests through the USB<br />adapter</div><div style='font-size: 70%'>[USB, UF2]</div>" .->5
+    5-. "<div>Answers reads, holds IORDY,<br />DMARQ</div><div style='font-size: 70%'>[IDE bus]</div>" .->2
+
+  end

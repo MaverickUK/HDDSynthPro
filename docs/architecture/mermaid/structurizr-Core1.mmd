@@ -1,0 +1,55 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Component View: IDE Synth Bay - Core 1: bus loop"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    subgraph 5 ["IDE Synth Bay"]
+      style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
+
+      subgraph 6 ["Core 1: bus loop"]
+        style 6 fill:#ffffff,stroke:#2e6295,color:#2e6295
+
+        10["<div style='font-weight: bold'>ata::Device</div><div style='font-size: 70%; margin-top: 0px'>[Component: ata_device.cpp, identify.cpp]</div><div style='font-size: 80%; margin-top:10px'>The hard disk: task file,<br />status, IDENTIFY (patched<br />live when DMA is added),<br />READ/WRITE SECTORS, MULTIPLE<br />and DMA, read-ahead,<br />write-behind, two units.</div>"]
+        style 10 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        11["<div style='font-weight: bold'>ATAPI CD-ROM</div><div style='font-size: 70%; margin-top: 0px'>[Component: atapi_device.cpp, mmc.cpp, hdcd_device.cpp]</div><div style='font-size: 80%; margin-top:10px'>PACKET commands, MMC<br />(READ(10), TOC, GET EVENT),<br />disc changes; hdcd::Device<br />puts it beside the hard disk.</div>"]
+        style 11 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        12["<div style='font-weight: bold'>busAutoStep</div><div style='font-size: 70%; margin-top: 0px'>[Component: main.cpp (CORE1_RAM_RARE)]</div><div style='font-size: 80%; margin-top:10px'>bus = auto on core 1: applies<br />the DMA patch between<br />commands and switches the<br />program at a quiet moment or<br />while RESET# is held.</div>"]
+        style 12 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        13["<div style='font-weight: bold'>Trace ring</div><div style='font-size: 70%; margin-top: 0px'>[Component: spsc_ring.h, access_log]</div><div style='font-size: 80%; margin-top:10px'>Commands, completions and (on<br />request) every bus access,<br />recorded for core 0 to print.<br />Lock-free SPSC ring.</div>"]
+        style 13 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        14["<div style='font-weight: bold'>Fetch mailbox</div><div style='font-size: 70%; margin-top: 0px'>[Component: fetch_mailbox.h]</div><div style='font-size: 80%; margin-top:10px'>The handshake between the<br />cores: core 1 posts a fetch<br />(LBA, buffer, read or write),<br />core 0 posts the result.<br />Shared memory.</div>"]
+        style 14 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        7["<div style='font-weight: bold'>ide_bus</div><div style='font-size: 70%; margin-top: 0px'>[Component: ide_bus.cpp]</div><div style='font-size: 80%; margin-top:10px'>Loads and serves the bus<br />program: ide_bus, early<br />answers, the data lane,<br />ide_bus_noiordy. Switches<br />early answers <-> the lane<br />live (bus = auto), holds<br />IORDY while core 1 answers,<br />drives INTRQ. The data lane<br />streams data-in words by DMA,<br />without core 1.</div>"]
+        style 7 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        8["<div style='font-weight: bold'>ide_table</div><div style='font-size: 70%; margin-top: 0px'>[Component: ide_table.cpp, ide_table_write.cpp]</div><div style='font-size: 80%; margin-top:10px'>The register table: every<br />register read answered by the<br />PIO from values core 1 keeps<br />ready, for hosts that ignore<br />IORDY.</div>"]
+        style 8 fill:#85bbf0,stroke:#5d82a8,color:#000000
+        9["<div style='font-weight: bold'>ide_dma</div><div style='font-size: 70%; margin-top: 0px'>[Component: ide_dma.cpp]</div><div style='font-size: 80%; margin-top:10px'>Multiword DMA's data phase:<br />hands DD0-15 to its PIO block<br />for a burst, feeds it by a<br />DMA channel, drives DMARQ.</div>"]
+        style 9 fill:#85bbf0,stroke:#5d82a8,color:#000000
+      end
+
+      15["<div style='font-weight: bold'>Core 0: services</div><div style='font-size: 70%; margin-top: 0px'>[Container: C++ (Arduino-Pico)]</div><div style='font-size: 80%; margin-top:10px'>Everything slow: the card,<br />USB serial, the activity<br />link, the diagnostics'<br />reports, the bus = auto<br />advice. Keeps up with core<br />1's fetches before anything<br />else.</div>"]
+      style 15 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      25["<div style='font-weight: bold'>PIO programs</div><div style='font-size: 70%; margin-top: 0px'>[Container: RP2350 PIO assembly (src/*.pio)]</div><div style='font-size: 80%; margin-top:10px'>State machines that meet the<br />IDE bus's nanosecond timing:<br />sample every access, pull<br />IORDY low within 35 ns, drive<br />DD for reads, move DMA data.<br />Three blocks of 32<br />instructions.</div>"]
+      style 25 fill:#2e7d5b,stroke:#20573f,color:#ffffff
+    end
+
+    15-. "<div>Runs the diagnostics and the<br />card's programs</div><div style='font-size: 70%'>[PIO FIFOs, DMA]</div>" .->25
+    25-. "<div>Samples: each access, answer<br />requests</div><div style='font-size: 70%'>[RX FIFO]</div>" .->7
+    7-. "<div>Register values to drive onto<br />DD</div><div style='font-size: 70%'>[TX FIFO]</div>" .->25
+    8-. "<div>Register values kept in the<br />table</div><div style='font-size: 70%'>[PIO registers]</div>" .->25
+    7-. "<div>Register reads and writes,<br />data words</div><div style='font-size: 70%'></div>" .->10
+    7-. "<div>Register reads and writes,<br />PACKET data</div><div style='font-size: 70%'></div>" .->11
+    9-. "<div>Burst counts, DD hand-over</div><div style='font-size: 70%'>[PIO, DMA channel]</div>" .->25
+    10-. "<div>DMA bursts (a sector each)</div><div style='font-size: 70%'></div>" .->9
+    10-. "<div>Posts a fetch, takes the<br />result</div><div style='font-size: 70%'></div>" .->14
+    11-. "<div>Posts a fetch, takes the<br />result</div><div style='font-size: 70%'></div>" .->14
+    10-. "<div>CMD and DONE events</div><div style='font-size: 70%'></div>" .->13
+    12-. "<div>Switches the program</div><div style='font-size: 70%'></div>" .->7
+    12-. "<div>Adds DMA to IDENTIFY<br />(offerDma)</div><div style='font-size: 70%'></div>" .->10
+    15-. "<div>Takes fetches, posts results</div><div style='font-size: 70%'></div>" .->14
+    15-. "<div>Prints its events</div><div style='font-size: 70%'>[SPSC ring]</div>" .->13
+    15-. "<div>Wanted program; the DMA patch</div><div style='font-size: 70%'>[Shared flags]</div>" .->12
+    15-. "<div>Starts it (dma = auto)</div><div style='font-size: 70%'></div>" .->9
+
+  end

@@ -1,0 +1,28 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Dynamic View: IDE Synth Bay"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    subgraph 5 ["IDE Synth Bay"]
+      style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
+
+      15["<div style='font-weight: bold'>Core 0: services</div><div style='font-size: 70%; margin-top: 0px'>[Container: C++ (Arduino-Pico)]</div><div style='font-size: 80%; margin-top:10px'>Everything slow: the card,<br />USB serial, the activity<br />link, the diagnostics'<br />reports, the bus = auto<br />advice. Keeps up with core<br />1's fetches before anything<br />else.</div>"]
+      style 15 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      25["<div style='font-weight: bold'>PIO programs</div><div style='font-size: 70%; margin-top: 0px'>[Container: RP2350 PIO assembly (src/*.pio)]</div><div style='font-size: 80%; margin-top:10px'>State machines that meet the<br />IDE bus's nanosecond timing:<br />sample every access, pull<br />IORDY low within 35 ns, drive<br />DD for reads, move DMA data.<br />Three blocks of 32<br />instructions.</div>"]
+      style 25 fill:#2e7d5b,stroke:#20573f,color:#ffffff
+      6["<div style='font-weight: bold'>Core 1: bus loop</div><div style='font-size: 70%; margin-top: 0px'>[Container: C++ (Arduino-Pico), RAM-resident]</div><div style='font-size: 80%; margin-top:10px'>The real-time half. Answers<br />every register access the PIO<br />hands it, runs the ATA/ATAPI<br />command state machines,<br />starts DMA bursts. Never<br />waits: everything it runs per<br />access is in RAM (CORE1_RAM),<br />never touches USB or the<br />card.</div>"]
+      style 6 fill:#438dd5,stroke:#2e6295,color:#ffffff
+    end
+
+    2["<div style='font-weight: bold'>IDE host</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>What the drive is plugged<br />into: a retro PC's IDE<br />controller (16-bit ISA card,<br />Intel PIIX, VIA) or a USB-IDE<br />adapter (JMicron, Innostor).<br />Drives the 40-pin IDE bus:<br />register reads and writes,<br />PIO and multiword DMA data,<br />RESET#.</div>"]
+    style 2 fill:#999999,stroke:#6b6b6b,color:#ffffff
+
+    2-. "<div>1. BIOS and DOS read on early<br />answers; status reads held<br />1.5 us now and then (the<br />IORDY probe)</div><div style='font-size: 70%'>[IDE bus]</div>" .->25
+    25-. "<div>2. Every access</div><div style='font-size: 70%'>[PIO FIFOs]</div>" .->6
+    6-. "<div>3. Fetches; the diagnostics<br />count long reads, reads not<br />waited for, DIOR# with no<br />chip select</div><div style='font-size: 70%'>[Shared RAM (mailbox, SPSC ring)]</div>" .->15
+    15-. "<div>4. 1,000 sectors and 20<br />waited reads later: 'lane';<br />then the DMA patch</div><div style='font-size: 70%'>[Shared RAM]</div>" .->6
+    6-. "<div>5. Switches to the data lane<br />between accesses; patches<br />IDENTIFY</div><div style='font-size: 70%'>[PIO FIFOs, registers]</div>" .->25
+    2-. "<div>6. Windows' driver reads<br />IDENTIFY again: multiword DMA<br />2</div><div style='font-size: 70%'>[IDE bus]</div>" .->25
+
+  end

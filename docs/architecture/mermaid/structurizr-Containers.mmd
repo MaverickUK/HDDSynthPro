@@ -1,0 +1,41 @@
+graph LR
+  linkStyle default fill:#ffffff
+
+  subgraph diagram ["Container View: IDE Synth Bay"]
+    style diagram fill:#ffffff,stroke:#ffffff
+
+    2["<div style='font-weight: bold'>IDE host</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>What the drive is plugged<br />into: a retro PC's IDE<br />controller (16-bit ISA card,<br />Intel PIIX, VIA) or a USB-IDE<br />adapter (JMicron, Innostor).<br />Drives the 40-pin IDE bus:<br />register reads and writes,<br />PIO and multiword DMA data,<br />RESET#.</div>"]
+    style 2 fill:#999999,stroke:#6b6b6b,color:#ffffff
+    3["<div style='font-weight: bold'>HDD Synth</div><div style='font-size: 70%; margin-top: 0px'>[Software System]</div><div style='font-size: 80%; margin-top:10px'>Plays hard disk sounds from<br />what the drive is doing<br />(HDDSynth_Native).</div>"]
+    style 3 fill:#999999,stroke:#6b6b6b,color:#ffffff
+
+    subgraph 5 ["IDE Synth Bay"]
+      style 5 fill:#ffffff,stroke:#0b4884,color:#0b4884
+
+      15["<div style='font-weight: bold'>Core 0: services</div><div style='font-size: 70%; margin-top: 0px'>[Container: C++ (Arduino-Pico)]</div><div style='font-size: 80%; margin-top:10px'>Everything slow: the card,<br />USB serial, the activity<br />link, the diagnostics'<br />reports, the bus = auto<br />advice. Keeps up with core<br />1's fetches before anything<br />else.</div>"]
+      style 15 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      25["<div style='font-weight: bold'>PIO programs</div><div style='font-size: 70%; margin-top: 0px'>[Container: RP2350 PIO assembly (src/*.pio)]</div><div style='font-size: 80%; margin-top:10px'>State machines that meet the<br />IDE bus's nanosecond timing:<br />sample every access, pull<br />IORDY low within 35 ns, drive<br />DD for reads, move DMA data.<br />Three blocks of 32<br />instructions.</div>"]
+      style 25 fill:#2e7d5b,stroke:#20573f,color:#ffffff
+      31[("<div style='font-weight: bold'>microSD card</div><div style='font-size: 70%; margin-top: 0px'>[Container: FAT32]</div><div style='font-size: 80%; margin-top:10px'>FAT32: disk images<br />(HDDSYNTH.IMG and others),<br />ISOs and BIN/CUEs,<br />HDDSYNTH.INI, the scratch<br />HDDBENCH.IMG. Holds the<br />owner's data: the firmware<br />only touches the image<br />served, HDDBENCH.IMG and<br />HDDSYNTH.INI.</div>")]
+      style 31 fill:#438dd5,stroke:#2e6295,color:#ffffff
+      32["<div style='font-weight: bold'>Rig and tools</div><div style='font-size: 70%; margin-top: 0px'>[Container: Python, Bash]</div><div style='font-size: 80%; margin-top:10px'>Host-side tests and tools:<br />pytest slices through the USB<br />adapter, the PIO simulator,<br />the trace parser, the<br />benchmark disk image, rig.sh<br />(build, flash, test).</div>"]
+      style 32 fill:#6a6a8a,stroke:#4a4a60,color:#ffffff
+      6["<div style='font-weight: bold'>Core 1: bus loop</div><div style='font-size: 70%; margin-top: 0px'>[Container: C++ (Arduino-Pico), RAM-resident]</div><div style='font-size: 80%; margin-top:10px'>The real-time half. Answers<br />every register access the PIO<br />hands it, runs the ATA/ATAPI<br />command state machines,<br />starts DMA bursts. Never<br />waits: everything it runs per<br />access is in RAM (CORE1_RAM),<br />never touches USB or the<br />card.</div>"]
+      style 6 fill:#438dd5,stroke:#2e6295,color:#ffffff
+    end
+
+    15-. "<div>$HDA, $HDE</div><div style='font-size: 70%'>[UART]</div>" .->3
+    3-. "<div>$HDM</div><div style='font-size: 70%'>[UART]</div>" .->15
+    32-. "<div>Runs the assembled programs<br />against host models</div><div style='font-size: 70%'>[pioasm output]</div>" .->25
+    2-. "<div>Strobes registers and data</div><div style='font-size: 70%'>[IDE bus]</div>" .->25
+    25-. "<div>Answers reads, holds IORDY,<br />DMARQ</div><div style='font-size: 70%'>[IDE bus]</div>" .->2
+    25-. "<div>Hands each access over, asks<br />for read answers</div><div style='font-size: 70%'>[PIO FIFOs]</div>" .->6
+    6-. "<div>Answers reads, loads and<br />switches programs</div><div style='font-size: 70%'>[PIO FIFOs, registers]</div>" .->25
+    6-. "<div>Posts fetches, records trace<br />events</div><div style='font-size: 70%'>[Shared RAM (mailbox, SPSC ring)]</div>" .->15
+    15-. "<div>Posts fetch results, wanted<br />bus program, DMA patch</div><div style='font-size: 70%'>[Shared RAM]</div>" .->6
+    15-. "<div>Reads and writes images,<br />reads settings</div><div style='font-size: 70%'>[SPI or 4-bit SDIO]</div>" .->31
+    15-. "<div>Runs the diagnostics and the<br />card's programs</div><div style='font-size: 70%'>[PIO FIFOs, DMA]</div>" .->25
+    32-. "<div>Console commands, reads trace<br />lines</div><div style='font-size: 70%'>[USB serial]</div>" .->15
+    32-. "<div>Raw sector reads and writes</div><div style='font-size: 70%'>[USB mass storage (through the adapter)]</div>" .->2
+
+  end
