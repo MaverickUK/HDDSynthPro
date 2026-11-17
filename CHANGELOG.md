@@ -4,6 +4,16 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0-dev.8] - 2026-11-17 (branch `auto-config`)
+
+### Fixed
+- **`bus = auto` never switched on the Evesham:** its VIA controller leaves CS0# asserted (DA on Status) between accesses, which the USB adapter never did. The quiet test counted a held chip select as busy, and the switch went ahead only from the program's idle loop, while with a chip select held the program sits in its armed loop. The switch now goes ahead from either loop (both programs' armed-loop addresses recorded with the image), with no strobe asserted instead of no chip select, and the quiet test looks at the strobes and the RX FIFO only.
+- **False `BUSERR`s on image data with READ MULTIPLE:** with blocks of 8, read-ahead and the card in high-speed mode, core 0 serves more than the observer's 16 kept copies ahead of the host. The oldest were let go unread, the host's sector then matched none, and its report against the "closest" copy threw away copies of the sectors after it: 988 false reports in a run HDDBENCH passed (every word checked). After a copy is let go unseen, a block matching none is now counted as skipped (`bus_skipped`) and the copies kept; a match ends that. Host test `test_sector_check_image_host_behind_the_copies`.
+
+### Tested
+- **The Evesham, Windows 98 SE on `WIN98.IMG`, `bus = auto`, `dma = auto`, the card in high-speed mode:** first boot on early answers, learned the PC 14 s after the reset (16,199 sectors, 20 waited reads), offered DMA and moved to the lane; Windows' driver had read IDENTIFY just before, so that boot stayed in PIO. After a Windows restart, early answers through the BIOS, the lane 9 s after the reset as a learned PC, and Windows used DMA (6,644 READ DMA, 6,297 WRITE DMA): copying `C:\WINDOWS` to a new folder took 51 s (184 MB read, 182 MB written, about 3.6 MB/s each way). `iordy_ignored` 0.
+- `DOSBENCH.IMG` on early answers with block mode and the card in high-speed mode: HDDBENCH PASS twice; the observer's false `BUSERR`s 988 before the fix, none after (8,097 sectors checked, 1,112 skipped).
+
 ## [0.35.0-dev.7] - 2026-11-17 (branch `auto-config`)
 
 ### Fixed

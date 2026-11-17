@@ -421,6 +421,35 @@ TEST(test_sector_check_image_ring_overflow) {
     CHECK_EQ(c.expectMissed(), uint32_t(EXPECT_SLOTS + 2));
 }
 
+TEST(test_sector_check_image_host_behind_the_copies) {
+    // READ MULTIPLE with read-ahead: core 0 serves 20 sectors before the host
+    // reads the first, so the 4 oldest copies are let go. The host then reads
+    // all 20 in order: those 4 can't be checked (skipped, not bad, and the
+    // copies after them kept), the 16 after match, and a wrong sector after
+    // that is reported again (0.35.0-dev.8 reported 988 good sectors as bad).
+    Checker c(gen_disk::DEFAULT_SECTORS);
+    Observer o;
+    const uint32_t n = EXPECT_SLOTS + 4;
+    for (uint32_t lba = 100; lba < 100 + n; ++lba) c.expect(lba, imageWords(lba).data());
+    int reports = 0;
+    for (uint32_t lba = 100; lba < 100 + n; ++lba) {
+        reports += c.observe(o.status(), false) ? 1 : 0;
+        for (uint16_t v : imageWords(lba)) reports += c.observe(o.data(v), false) ? 1 : 0;
+    }
+    CHECK_EQ(reports, 0);
+    CHECK_EQ(c.sectorsBad(), 0u);
+    CHECK_EQ(c.sectorsSkipped(), 4u);
+    CHECK_EQ(c.sectorsChecked(), uint32_t(EXPECT_SLOTS));
+    c.expect(500, imageWords(500).data());
+    auto w = imageWords(500);
+    w[7] ^= 0x0100;
+    reports = c.observe(o.status(), false) ? 1 : 0;
+    for (uint16_t v : w) reports += c.observe(o.data(v), false) ? 1 : 0;
+    CHECK_EQ(reports, 1);
+    CHECK_EQ(c.sectorsBad(), 1u);
+    CHECK_EQ(c.mismatch().first_word, 7u);
+}
+
 TEST(test_sector_check_image_text_isnt_identify) {
     // A served sector that happens to hold the drive's IDENTIFY words (here
     // the whole block: the strongest case) is checked as data.
@@ -515,6 +544,7 @@ void runSectorCheckTests() {
     RUN(test_sector_check_image_bad_word);
     RUN(test_sector_check_image_nothing_expected);
     RUN(test_sector_check_image_ring_overflow);
+    RUN(test_sector_check_image_host_behind_the_copies);
     RUN(test_sector_check_image_text_isnt_identify);
 }
 

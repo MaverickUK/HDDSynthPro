@@ -50,6 +50,11 @@ struct Image {
     uint16_t instr[32];  // the block's instructions, relocated
     uint32_t clkdiv, execctrl, shiftctrl, pinctrl;  // the main state machine's
     uint8_t sm, start, wrap_top, idle_offset, offset;  // start: `idle`'s address
+    // Where the program waits between accesses with a chip select held and no
+    // strobe yet (its armed loop): as safe to switch from as `idle`, and where
+    // it always is on a host that leaves CS0# asserted between accesses (the
+    // Evesham's VIA controller, 17 Nov 2026). Two ranges, inclusive.
+    uint8_t armed_lo[2], armed_hi[2];
     const pio_program* program;
     const char* name;
 };
@@ -686,6 +691,17 @@ static void capture(Image& im) {
     im.offset = uint8_t(s_offset);
     im.program = s_program;
     im.name = s_bus_name;
+    if (s_program == &ide_bus_early_program) {  // armed .. read-1; not_read's four instructions
+        im.armed_lo[0] = uint8_t(s_offset + ide_bus_early_offset_armed);
+        im.armed_hi[0] = uint8_t(s_offset + ide_bus_early_offset_read - 1);
+        im.armed_lo[1] = uint8_t(s_offset + ide_bus_early_offset_not_read);
+        im.armed_hi[1] = uint8_t(s_offset + ide_bus_early_offset_not_read + 3);
+    } else {  // the lane: armed .. read-1; not_read .. write-1
+        im.armed_lo[0] = uint8_t(s_offset + ide_bus_data_offset_armed);
+        im.armed_hi[0] = uint8_t(s_offset + ide_bus_data_offset_read - 1);
+        im.armed_lo[1] = uint8_t(s_offset + ide_bus_data_offset_not_read);
+        im.armed_hi[1] = uint8_t(s_offset + ide_bus_data_offset_write - 1);
+    }
 }
 
 // Register writes only, from RAM: IORDY is held for about a microsecond. The
@@ -705,14 +721,19 @@ CORE1_RAM_RARE bool switchProgram(bool early) {
     sio_hw->gpio_oe_set = iordy;
     io_bank0_hw->io[cfg::PIN_IORDY].ctrl = GPIO_FUNC_SIO << IO_BANK0_GPIO0_CTRL_FUNCSEL_LSB;
     hw_clear_bits(&s_pio->ctrl, main_bit);  // the old program paused
-    // Only between accesses: the old program in its idle loop, nothing in its
-    // RX FIFO for core 1, no chip select. Otherwise it carries on, and the
-    // caller tries again once the bus is quiet.
+    // Only between accesses: the old program in its idle loop, or armed with a
+    // chip select held but no strobe, nothing in its RX FIFO for core 1, and
+    // neither strobe asserted (one the program has seen can't have ended:
+    // IORDY is held). Otherwise it carries on, and the caller tries again
+    // once the bus is quiet.
     const uint pc = s_pio->sm[s_sm].addr;
-    const bool idle = pc >= from.start && pc <= from.wrap_top;
+    const bool waiting = (pc >= from.start && pc <= from.wrap_top) ||
+                         (pc >= from.armed_lo[0] && pc <= from.armed_hi[0]) ||
+                         (pc >= from.armed_lo[1] && pc <= from.armed_hi[1]);
     const bool rx_empty = s_pio->fstat & (1u << (PIO_FSTAT_RXEMPTY_LSB + s_sm));
-    const bool selected = ~sio_hw->gpio_in & ((1u << cfg::PIN_CS0_N) | (1u << cfg::PIN_CS1_N));
-    if (!idle || !rx_empty || selected) {
+    const uint32_t strobes = (1u << cfg::PIN_DIOR_N) | (1u << cfg::PIN_DIOW_N);
+    const bool strobing = (sio_hw->gpio_in & strobes) != strobes;
+    if (!waiting || !rx_empty || strobing) {
         hw_set_bits(&s_pio->ctrl, main_bit);
         io_bank0_hw->io[cfg::PIN_IORDY].ctrl = pio_func;
         sio_hw->gpio_oe_clr = iordy;
@@ -758,12 +779,14 @@ CORE1_RAM_RARE bool switchProgram(bool early) {
     return true;
 }
 
-// bus = auto's quiet test (main.cpp's busAutoStep): a chip select asserted, or
-// a sample waiting for core 1. Looked at each time the test runs, not per
-// access: core 1's loop keeps its registers for the bus (0.35.0-dev.6).
+// bus = auto's quiet test (main.cpp's busAutoStep): a strobe asserted, or a
+// sample waiting for core 1. Not a chip select: some hosts leave CS0#
+// asserted between accesses (the Evesham), and the bus never looked quiet.
+// Looked at each time the test runs, not per access: core 1's loop keeps its
+// registers for the bus (0.35.0-dev.7).
 CORE1_RAM_RARE bool busActive() {
-    const bool selected = ~sio_hw->gpio_in & ((1u << cfg::PIN_CS0_N) | (1u << cfg::PIN_CS1_N));
-    return selected || !(s_pio->fstat & (1u << (PIO_FSTAT_RXEMPTY_LSB + s_sm)));
+    const uint32_t strobes = (1u << cfg::PIN_DIOR_N) | (1u << cfg::PIN_DIOW_N);
+    return (sio_hw->gpio_in & strobes) != strobes || !(s_pio->fstat & (1u << (PIO_FSTAT_RXEMPTY_LSB + s_sm)));
 }
 
 void requestProbe() { s_probe = 1; }

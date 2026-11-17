@@ -20,7 +20,9 @@
 // of the sectors served (expect()): the last EXPECT_SLOTS of them. A block
 // matching one is good, and older copies the host never read (a command
 // it abandoned, samples dropped) are let go; a block matching none is
-// reported against the closest. With no copies waiting, blocks are skipped.
+// reported against the closest. With no copies waiting, blocks are skipped,
+// and so is one matching none after a copy was let go unseen (core 0 more
+// than EXPECT_SLOTS ahead): it's most likely that sector.
 #pragma once
 
 #include <cstdint>
@@ -63,9 +65,9 @@ inline unsigned strobeNs(uint32_t word) {
 constexpr uint32_t IDENTIFY_LBA = 0xFFFFFFFFu;
 constexpr unsigned IDENTIFY_MIN_MATCHES = 4;
 
-// Copies of served sectors kept for checking image data (expect()). Core 1
-// presents one sector at a time, so the host is never more than a couple
-// behind core 0.
+// Copies of served sectors kept for checking image data (expect()). With
+// READ MULTIPLE's blocks of 8 and read-ahead, core 0 can be more than this
+// ahead of the host (checkExpected skips what it can't check then).
 constexpr unsigned EXPECT_SLOTS = 16;
 
 struct Mismatch {
@@ -177,6 +179,7 @@ private:
     Expected expected_[EXPECT_SLOTS];
     unsigned expect_first_ = 0, expect_count_ = 0;
     uint32_t expect_missed_ = 0;
+    bool dropped_unseen_ = false;  // a copy let go unseen since the last match
     uint32_t checked_ = 0, bad_ = 0, skipped_ = 0, gaps_ = 0;
 };
 

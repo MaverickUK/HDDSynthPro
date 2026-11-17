@@ -78,6 +78,7 @@ void Checker::expect(uint32_t lba, const uint16_t words[256]) {
         expect_first_ = (expect_first_ + 1) % EXPECT_SLOTS;
         --expect_count_;
         ++expect_missed_;
+        dropped_unseen_ = true;  // the host may yet read it: checkExpected
     }
     Expected& e = expected_[(expect_first_ + expect_count_) % EXPECT_SLOTS];
     e.lba = lba;
@@ -127,6 +128,7 @@ bool Checker::matchesExpected() {
         expect_first_ = (expect_first_ + k + 1) % EXPECT_SLOTS;
         expect_count_ -= k + 1;
         ++checked_;
+        dropped_unseen_ = false;  // back in step with the host
         return true;
     }
     return false;
@@ -151,11 +153,23 @@ bool Checker::checkExpected() {
         }
         if (m.bad_words == 0) break;
     }
+    // A copy was let go unseen since the last match: core 0 ran more than
+    // EXPECT_SLOTS sectors ahead (blocks of 8 with read-ahead, and the card in
+    // high-speed mode, 0.35.0-dev.8: 988 false BUSERRs in a run HDDBENCH
+    // passed). This block is most likely that sector, so it can't be checked:
+    // skipped, with the copies kept for the sectors after it.
+    if (best_m.bad_words != 0 && dropped_unseen_) {
+        ++skipped_;
+        return false;
+    }
     expect_missed_ += best;
     expect_first_ = (expect_first_ + best + 1) % EXPECT_SLOTS;
     expect_count_ -= best + 1;
     ++checked_;
-    if (best_m.bad_words == 0) return false;
+    if (best_m.bad_words == 0) {
+        dropped_unseen_ = false;
+        return false;
+    }
     ++bad_;
     noteStrobes(best_m);
     mismatch_ = best_m;

@@ -89,4 +89,4 @@ core0 block 20003400-200039f4 (1524 bytes)
 20003598   140 releaseHeld()
 20003624   400 serveFetches()
 200037b4   576 seek_timing::Scheduler::onSector(unsigned long long, unsigned long, unsigned long)
-bss 2000bf20
+bss 2000bf60
