@@ -93,4 +93,4 @@ core0 block 20003400-20003e2c (2604 bytes)
 20003930    56 seek_timing::Scheduler::flushIdle(unsigned long long, seek_timing::Release&)
 20003968   188 seek_timing::Scheduler::flushAll(unsigned long long, seek_timing::Release*)
 20003a24  1032 seek_timing::Scheduler::onSector(unsigned long long, unsigned long, unsigned long, bool, unsigned long)
-bss 2000c460
+bss 2000c480

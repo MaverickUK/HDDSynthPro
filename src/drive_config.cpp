@@ -171,9 +171,9 @@ void defaults(Config& out) {
     out.device1[0] = 0;
     std::snprintf(out.cdrom, sizeof out.cdrom, "%s", DEFAULT_CDROM);
     out.mode = Mode::Auto;
-    out.bus = Bus::Settings;
+    out.bus = DEFAULT_BUS;
     out.dma = DEFAULT_DMA;
-    out.dma_auto = false;
+    out.dma_auto = DEFAULT_DMA_AUTO;
     out.write_behind = DEFAULT_WRITE_BEHIND;
     out.read_ahead = DEFAULT_READ_AHEAD;
     out.activity_link = DEFAULT_ACTIVITY_LINK;
@@ -259,7 +259,7 @@ void parse(const char* text, size_t len, Config& out) {
     defaults(out);
     // `image` is device0's old name: device0 counts over it, whichever comes first.
     bool seen_device0 = false, seen_image = false, seen_device1 = false, seen_mode = false,
-         seen_seek_timing = false, seen_geometry = false, seen_cdrom = false, seen_dma = false;
+         seen_seek_timing = false, seen_geometry = false, seen_cdrom = false, seen_dma = false, seen_bus = false;
     auto setDevice0 = [&](int n, const Line& l) {
         if (!validImageName(l.value)) {
             warn(out, "line %d: device0 '%.*s' isn't a file name in the root folder; ignored%s", n, l.value);
@@ -330,10 +330,10 @@ void parse(const char* text, size_t len, Config& out) {
                     found = true;
                 }
             }
-            if (!found) {
+            if (!found)
                 warn(out, "line %d: bus '%.*s' isn't auto, early, lane or ide_bus; ignored%s", n, l.value);
-                out.bus = Bus::Settings;
-            }
+            else
+                seen_bus = true;
         } else if (equalsNoCase(l.key, "seek_timing")) {
             if (seen_seek_timing) warn(out, "line %d: '%.*s' is set again; this one counts%s", n, l.key);
             seen_seek_timing = true;
@@ -385,6 +385,14 @@ void parse(const char* text, size_t len, Config& out) {
             warn(out, "line %d: unknown key '%.*s'; ignored%s", n, l.key);
         }
     });
+    // bus = auto is the default, but a file that chooses a program the old
+    // way (early_answers or register_table, with no bus line) keeps it.
+    if (!seen_bus) {
+        for (size_t i = 0; i < SWITCH_COUNT; ++i)
+            if (seen_switch[i] && (std::strcmp(SWITCHES[i].key, "early_answers") == 0 ||
+                                   std::strcmp(SWITCHES[i].key, "register_table") == 0))
+                out.bus = Bus::Settings;
+    }
 }
 
 // A key's current name: `image` is device0's old one.
@@ -503,10 +511,11 @@ const char* defaultFile() {
            "# DMA needs DMARQ wired (IDE pin 21); without it the drive offers PIO.\r\n"
            "mode = auto\r\n"
            "\r\n"
-           "# Whether auto may offer multiword DMA, where DMARQ is wired: on, off, or\r\n"
-           "# auto (with bus = auto: offered once the drive has learned the PC isn't\r\n"
-           "# using an ISA card, to Windows' driver when it asks again).\r\n"
-           "dma = off\r\n"
+           "# Whether auto may offer multiword DMA, where DMARQ is wired: auto (with\r\n"
+           "# bus = auto: offered once the drive has learned the PC isn't using an ISA\r\n"
+           "# card, which takes a few seconds), on (from the start), or off. A CD-ROM\r\n"
+           "# drive needs on or off: with one, bus = auto doesn't run.\r\n"
+           "dma = auto\r\n"
            "\r\n"
            "# Acknowledge each written sector while it's being stored: about 50%\r\n"
            "# faster writes to the card; a power cut mid-store loses that sector.\r\n"
@@ -528,6 +537,12 @@ const char* defaultFile() {
            "# of IORDY if it has held it for 23 us, as these cards pass it to the\r\n"
            "# whole ISA bus. Leave off for USB adapters and later controllers.\r\n"
            "isa = off\r\n"
+           "\r\n"
+           "# Which way the drive answers the IDE bus: auto (it starts safe and learns\r\n"
+           "# the PC, docs/auto-bus.md), early, lane or ide_bus. isa = on, iordy = off\r\n"
+           "# and a CD-ROM drive each keep their own; with auto, early_answers and\r\n"
+           "# register_table below aren't used.\r\n"
+           "bus = auto\r\n"
            "\r\n"
            "# The drive has each register's value ready as soon as it's addressed,\r\n"
            "# for controllers that don't wait for IORDY (some PCI ones while the BIOS\r\n"

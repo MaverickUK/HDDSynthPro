@@ -8,8 +8,8 @@
 //   device1 = GAMES        # a second drive, device 1: an image or a folder (read-only), or cdrom
 //                          # (or an .ISO/.CUE) for a CD-ROM drive; none by default
 //   mode = auto           # auto, or a transfer mode such as pio0
-//   dma = off              # whether auto may offer multiword DMA (where DMARQ is wired); auto: once
-//                          # bus = auto has learned the host isn't an ISA card
+//   dma = auto             # whether auto may offer multiword DMA (where DMARQ is wired): on, off,
+//                          # or auto (the default): once bus = auto has learned the host isn't an ISA card
 //   write_behind = on      # acknowledge a write while it's stored (faster)
 //   read_ahead = on        # fetch the next sector while the host reads this one
 //   activity_link = on     # tell an HDD Synth what the drive is doing
@@ -17,7 +17,8 @@
 //   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
-//   bus = auto             # the bus program: auto, early, lane or ide_bus; none given: early_answers and isa decide
+//   bus = auto             # the bus program: auto (the default), early, lane or ide_bus; left out of a file
+//                          # that sets early_answers or register_table, those decide
 //   register_table = off   # on: every read answered by the PIO from a table core 1 keeps (docs/register-table.md)
 //   sd_high_speed = on     # the card's reads at 40 MHz over SDIO (the PCB), 20 if it can't (docs/performance.md, 3)
 //   geometry = auto        # from the image's partition table, else 16 x 63; or C/H/S, e.g. 756/13/51
@@ -70,6 +71,8 @@ const char* modeName(Mode m);  // "auto", "pio0", ... "udma6"
 // controller that waits for IORDY, switched live. Early, Lane, IdeBus: that
 // program (`isa = on` still keeps ide_bus with its watchdog).
 enum class Bus : uint8_t { Settings, Auto, Early, Lane, IdeBus };
+// The bus program by default: auto since 0.35.0 (docs/auto-bus.md).
+constexpr Bus DEFAULT_BUS = Bus::Auto;
 const char* busName(Bus b);  // "settings", "auto", "early", "lane", "ide_bus"
 
 // Can this firmware run `m`? Auto, PIO 0-3 and multiword DMA 0-2 so far.
@@ -96,6 +99,8 @@ constexpr uint8_t AUTO_PIO_MODE = 3;
 // The on/off settings' defaults. DMA stays off for `auto` until it has had a
 // long test (the DMA soak); `mode = mdma2` asks for it meanwhile.
 constexpr bool DEFAULT_DMA = false;
+// dma = auto by default since 0.35.0 (an explicit on or off still counts)
+constexpr bool DEFAULT_DMA_AUTO = true;
 constexpr bool DEFAULT_WRITE_BEHIND = true;
 constexpr bool DEFAULT_SD_HIGH_SPEED = true;  // it checks itself at every start and falls back (0.35.0)
 constexpr bool DEFAULT_READ_AHEAD = true;
@@ -136,9 +141,11 @@ struct Config {
     char device1[MAX_NAME + 1];
     char cdrom[MAX_NAME + 1];  // the CD-ROM drive's disc, for `device0` or `device1 = cdrom`
     Mode mode = Mode::Auto;
-    Bus bus = Bus::Settings;
+    // auto by default since 0.35.0; left out of a file that sets early_answers
+    // or register_table, those decide as before (parse)
+    Bus bus = DEFAULT_BUS;
     bool dma = DEFAULT_DMA;                    // `auto` may offer multiword DMA
-    bool dma_auto = false;                     // dma = auto: offered once bus = auto has learned the host
+    bool dma_auto = DEFAULT_DMA_AUTO;          // dma = auto: offered once bus = auto has learned the host
     bool write_behind = DEFAULT_WRITE_BEHIND;  // see Device::setWriteBehind
     bool read_ahead = DEFAULT_READ_AHEAD;      // see Device::setReadAhead
     bool activity_link = DEFAULT_ACTIVITY_LINK;

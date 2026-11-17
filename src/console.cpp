@@ -194,13 +194,23 @@ void printAutoBus() {
             // dma = auto: a host that earned the lane isn't an ISA card
             if (g_dma_when_learned.load() && g_auto_bus.why() == auto_bus::Why::Ok && offerDmaToLearnedHost())
                 g_dma_offered_ms = now;
-            if (g_auto_bus.why() == auto_bus::Why::NoProof && !ide_bus::dataLaneOn() && !ide_bus::probePending())
-                ide_bus::requestProbe();
+
         }
     }
     if (g_dma_offered_ms && printfLine("AUTODMA mdma%u offered %lu ms after reset: the PC learned; IDENTIFY says so from the next time it's read\n",
                                        unsigned(MAX_MDMA_MODE), (unsigned long)g_auto_bus.sinceResetMs(g_dma_offered_ms)))
         g_dma_offered_ms = 0;
+    // bus = auto: while there's no proof the host waits for IORDY, early
+    // answers hold a Status read now and then so there will be
+    // (ide_bus::requestProbe), every IORDY_PROBE_EVERY_MS: 20 long reads in
+    // a fraction of a second, so the PC is learned (and DMA offered) before
+    // Windows' driver reads IDENTIFY.
+    static uint32_t probe_ms = 0;
+    if (g_bus_auto.load() && !g_bus_flip && g_auto_bus.why() == auto_bus::Why::NoProof && !ide_bus::dataLaneOn() &&
+        !ide_bus::probePending() && now - probe_ms >= cfg::IORDY_PROBE_EVERY_MS) {
+        probe_ms = now;
+        ide_bus::requestProbe();
+    }
     if (!unprinted) return;
     if (printfLine("AUTOBUS %s (%s) %lu ms after reset: %lu sectors, %lu long reads waited; running %s\n",
                    g_auto_bus.choice() == auto_bus::Choice::Lane ? "lane" : "early",

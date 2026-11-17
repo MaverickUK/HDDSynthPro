@@ -4,6 +4,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0-dev.10] - 2026-11-17 (branch `auto-config`)
+
+### Changed
+- **`bus = auto` and `dma = auto` are the defaults** ([docs/settings.md](docs/settings.md), [docs/auto-bus.md](docs/auto-bus.md)): a card with no settings starts on early answers, learns the PC, moves to the data lane, and offers multiword DMA once it knows the PC isn't an ISA card. A file that chooses a program the old way (`early_answers` or `register_table`, with no `bus` line) keeps it, and an explicit `dma = on` or `off` still counts. `isa = on`, `iordy = off` and a CD-ROM drive still keep their own program (and so offer no automatic DMA: use `dma = on` with a CD-ROM). The sample `HDDSYNTH.INI` (console `C`, the welcome disk) says `bus = auto` and `dma = auto`. Not yet tried on the Pentium 200 (PIIX) or the ICL 386 (ISA): to do.
+
+### Fixed
+- **The first boot of Windows missed DMA:** learning the PC took 14-16 s on the Evesham, and Windows 98's driver reads IDENTIFY (and decides on DMA) about 15 s after the reset. The IORDY probe's hold now starts when DIOR# falls (core 1 waits up to 10 us for it, `cfg::IORDY_PROBE_WAIT_NS`): with a chip select held between accesses, early answers ask for the Status answer microseconds before the host reads it, so a hold from the request had passed unseen (72 probes for 20 long reads). And core 0 asks for one every 5 ms while proof is missing, not every 100 ms. On the Evesham: learned in 9.8 s (1,629 sectors, 23 long reads), DMA offered, and Windows used it on its first boot.
+
 ## [0.35.0-dev.9] - 2026-11-17 (branch `auto-config`)
 
 ### Added

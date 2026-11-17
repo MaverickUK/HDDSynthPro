@@ -53,6 +53,13 @@ constexpr uint32_t IORDY_STALL_US = 23;
 // long read the host waited through (or not), and well under the stall
 // release above.
 constexpr uint32_t IORDY_PROBE_NS = 1500;
+// ... counted from DIOR# falling: core 1 waits up to this long for the
+// host's strobe first (a host holding a chip select asks early), else tries
+// on a later Status read.
+constexpr uint32_t IORDY_PROBE_WAIT_NS = 10000;
+// How often core 0 asks for a probe while the advisor still lacks proof
+// (it had been every 100 ms: learning the Evesham took 14-16 s).
+constexpr uint32_t IORDY_PROBE_EVERY_MS = 5;
 // bus = auto: how long the host must have left the bus alone (no access, no
 // command running) before core 1 switches the bus program between commands.
 constexpr uint32_t BUS_SWITCH_QUIET_US = 10000;

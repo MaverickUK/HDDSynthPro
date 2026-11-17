@@ -67,6 +67,7 @@ static uint32_t s_set_lane_y = 0;  // `set y, LANE_DATA_ADDRESS`, for the lane
 // floating high (FFh: BSY), which only makes it poll again.
 static volatile uint8_t s_probe = 0;
 static uint32_t s_probe_cycles = 0;
+static uint32_t s_probe_wait_cycles = 0;  // the longest it waits for the strobe
 static volatile uint32_t s_probes = 0;
 static const char* s_bus_name = "ide_bus";  // which program serves the bus (busName)
 static uint s_idle_offset = 0;  // where the program's `idle` is, for restart()
@@ -589,6 +590,7 @@ static void loadProgram(bool isa, bool early, bool iordy, bool lane_allowed) {
 
 void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
     s_probe_cycles = uint32_t(uint64_t(cfg::IORDY_PROBE_NS) * clock_get_hz(clk_sys) / 1000000000ull);
+    s_probe_wait_cycles = uint32_t(uint64_t(cfg::IORDY_PROBE_WAIT_NS) * clock_get_hz(clk_sys) / 1000000000ull);
     for (unsigned i = 0; i < 32; ++i) {
         uint32_t sample = i << REG_INDEX_SHIFT;
         bus::Block block = bus::block(sample);
@@ -809,8 +811,18 @@ __attribute__((always_inline)) static inline void waitCycles(uint32_t cycles) {
 
 // bus = auto's IORDY probe, out of line and out of core 1's hot block: inlined,
 // it grew serve() for every access.
+// The hold starts when DIOR# falls, not at the answer request: a host that
+// keeps a chip select asserted between accesses (the Evesham) has early
+// answers ask for the Status answer as soon as its last access ends, often
+// microseconds before its next strobe, and a hold from then had passed by
+// the time the host read (0.35.0-dev.8: 72 probes for 20 long reads, so
+// learning the PC took 14-16 s). No strobe within s_probe_wait_cycles (10
+// us): no probe, tried again on a later Status read.
 CORE1_RAM_RARE __attribute__((noinline)) static void probeHold(ata::Reg reg) {
     if (reg != ata::Reg::StatusCommand && reg != ata::Reg::AltStatusDevCtrl) return;
+    const uint32_t start = m33_hw->dwt_cyccnt;
+    while (sio_hw->gpio_in & (1u << cfg::PIN_DIOR_N))
+        if (m33_hw->dwt_cyccnt - start > s_probe_wait_cycles) return;
     waitCycles(s_probe_cycles);  // IORDY stays low meanwhile: the probe
     s_probe = 0;
     s_probes = s_probes + 1;

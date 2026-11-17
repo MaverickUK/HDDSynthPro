@@ -294,20 +294,29 @@ TEST(test_config_isa) {
     CHECK(parsed(drive_config::defaultFile()).sd_high_speed);
     CHECK(drive_config::isKey("sd_high_speed"));
     // bus: the bus program (docs/auto-bus.md); left out, early_answers and isa decide
-    CHECK(parsed("").bus == drive_config::Bus::Settings);
+    CHECK(parsed("").bus == drive_config::Bus::Auto);  // the default since 0.35.0
+    // a file choosing the old way, with no bus line, keeps its choice
+    CHECK(parsed("early_answers = off\n").bus == drive_config::Bus::Settings);
+    CHECK(parsed("register_table = on\n").bus == drive_config::Bus::Settings);
+    CHECK(parsed("early_answers = on\nbus = lane\n").bus == drive_config::Bus::Lane);
+    CHECK(parsed("isa = on\n").bus == drive_config::Bus::Auto);  // isa = on overrides auto when the drive starts
+    CHECK(parsed(drive_config::defaultFile()).bus == drive_config::Bus::Auto);
     CHECK(parsed("bus = auto\n").bus == drive_config::Bus::Auto);
     CHECK(parsed("bus = LANE\n").bus == drive_config::Bus::Lane);
     CHECK(parsed("bus = ide_bus\n").bus == drive_config::Bus::IdeBus);
     CHECK(parsed("bus = early\n").bus == drive_config::Bus::Early);
     {
         Config c = parsed("bus = fast\n");
-        CHECK(c.bus == drive_config::Bus::Settings);
+        CHECK(c.bus == drive_config::Bus::Auto);  // ignored: the default
         CHECK(c.warning_count == 1);
     }
     CHECK(drive_config::isKey("bus"));
     CHECK(std::strcmp(drive_config::busName(drive_config::Bus::Auto), "auto") == 0);
     // dma = auto: offered once bus = auto has learned the host (0.35.0)
-    CHECK(!parsed("").dma_auto);
+    CHECK(parsed("").dma_auto);  // the default since 0.35.0
+    CHECK(parsed(drive_config::defaultFile()).dma_auto);
+    CHECK(!parsed("dma = off\n").dma_auto);
+    CHECK(!parsed("dma = on\n").dma_auto);
     {
         Config c = parsed("dma = auto\n");
         CHECK(c.dma_auto && !c.dma && c.warning_count == 0);
@@ -322,7 +331,7 @@ TEST(test_config_isa) {
     }
     {
         Config c = parsed("dma = sometimes\n");
-        CHECK(!c.dma_auto && !c.dma && c.warning_count == 1);
+        CHECK(c.dma_auto && !c.dma && c.warning_count == 1);  // ignored: the default
     }
     CHECK(parsed(drive_config::defaultFile()).warning_count == 0);
     {  // a last line ending in a bare CR: setKey finishes it with LF only, and the value has no CR

@@ -1,6 +1,6 @@
 # The drive choosing its own bus program: a design
 
-**Design, 4 Nov 2026 (0.30.0-dev.9). Step one built in 0.32.3-dev.1 (11 Nov): the advice (`AUTOBUS`). Step two built in 0.35.0 (17 Nov, branch `auto-config`): `bus = auto` switches early answers and the data lane live, and `dma = auto` adds multiword DMA once the PC is learned ([below](#step-two-switching-live-and-dma-035)). Proven through the USB adapter; the retro PCs are next.** How the drive picks the fastest safe bus program for the computer it's plugged into, so nobody has to know what an ISA card or a PIIX is. [What to record](#what-to-record-on-each-pc) on each PC is at the end, and in [bench-checklist.md](bench-checklist.md).
+**Design, 4 Nov 2026 (0.30.0-dev.9). Step one built in 0.32.3-dev.1 (11 Nov): the advice (`AUTOBUS`). Step two built in 0.35.0 (17 Nov, branch `auto-config`): `bus = auto` switches early answers and the data lane live, and `dma = auto` adds multiword DMA once the PC is learned ([below](#step-two-switching-live-and-dma-035)). Proven through the USB adapter and on the Evesham (Windows 98 gets DMA on its first boot since dev.10, the PC learned in about 10 s); **the default since 0.35.0-dev.10**. The Pentium 200 and the ICL 386 are still to be tried.** How the drive picks the fastest safe bus program for the computer it's plugged into, so nobody has to know what an ISA card or a PIIX is. [What to record](#what-to-record-on-each-pc) on each PC is at the end, and in [bench-checklist.md](bench-checklist.md).
 
 ## Today
 
