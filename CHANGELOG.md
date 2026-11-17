@@ -4,6 +4,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-17
+
+The drive sets itself up: `bus = auto` and `dma = auto` are the defaults (dev.2-dev.10). Every reset starts on early answers; the advisor learns the PC (ISA or not, waits for IORDY or not, with the IORDY probe); core 1 switches live to the data lane, from RAM, only between accesses; once the PC is learned, core 0 swaps the third PIO block for `ide_dma` and core 1 patches IDENTIFY, so Windows 98 on the Evesham gets DMA on its first boot. Also: `sd_high_speed` on by default (dev.1), seek timing with a drive cache and physical tracks (dev.9), the activity link run with the HDD Synth both ways (with HDDSynth_Native v0.24.1), false `BUSERR`s on images with READ MULTIPLE fixed (dev.8), the aligned DMA rings at the top of RAM (dev.5). Branch `auto-config` (dev.1-dev.10, below); release notes in [docs/release-notes/v0.35.0.md](docs/release-notes/v0.35.0.md).
+
+- **On the Evesham:** Windows 98 SE with the defaults (learned in 9.8 s, DMA from the first boot; `C:\WINDOWS` copied in 51 s), `DOSBENCH.IMG` PASS with the observer clean, the Doom CD with `dma = on`, the HDD Synth Mk5 link with `seek_timing = synth`.
+- **Through the JMicron (Mac):** the live switch stress (1,040, 1,019 and 703 switches under slices 3-4, none lost), learning and DMA after a replug (6.80 / 13.25 MB/s), `-m speed` on dev.5-dev.7.
+- **Owed:** the regression run through the USB adapter on this build (slices 3-4, `-m speed` per program and in DMA, the `Z` stress), the card soak for high-speed mode, and the new defaults on the Pentium 200 and the ICL 386.
+
 ## [0.35.0-dev.10] - 2026-11-17 (branch `auto-config`)
 
 ### Changed

@@ -41,14 +41,15 @@ I'm not yet sure if this will exist alongside the original HDD Synth or will sup
 
 ## Status
 
-A working IDE hard disk and CD-ROM drive, serving disk images and ISOs from a microSD card, on the Olimex BB48 and the IDE Synth Bay PCB. The latest release is [v0.34.0](https://github.com/MaverickUK/HDDSynthPro/releases) (tagged on `main`, with the firmware files).
+A working IDE hard disk and CD-ROM drive, serving disk images and ISOs from a microSD card, on the Olimex BB48 and the IDE Synth Bay PCB. The latest release is [v0.35.0](https://github.com/MaverickUK/HDDSynthPro/releases) (tagged on `main`, with the firmware files).
 
-- **Transfer modes:** PIO 0-3 and multiword DMA 2, with block mode (READ/WRITE MULTIPLE, 8 sectors). Windows 98 runs on it with DMA.
+- **It sets itself up:** by default the drive starts in its safest way of answering the bus, learns the PC it's in (an ISA card or not, a controller that waits for IORDY or not), and moves to the fastest way that PC can take, offering DMA once it knows the PC can use it. On the Athlon XP test PC, Windows 98 gets DMA on its first boot with no settings at all ([docs/auto-bus.md](docs/auto-bus.md)).
+- **Transfer modes:** PIO 0-3 and multiword DMA 2, with block mode (READ/WRITE MULTIPLE, 8 sectors).
 - **Settings:** few. `HDDSYNTH.INI` names the images ([docs/settings.md](docs/settings.md)); the geometry comes from the image's own partition table, so an image of an old drive boots with the BIOS on auto. Without a card it serves a small welcome disk.
-- **Bus programs:** early answers by default (every register ready the moment it's addressed, so controllers that ignore IORDY work); the data lane (`early_answers = off`), fastest on a PCI controller; the register table (experimental, `register_table = on`).
+- **The HDD Synth link:** the drive tells an HDD Synth what it's doing and where the head goes, so the synth's seeks match the PC's. With `seek_timing = synth` the drive also runs at the pace of the drive the synth is playing, from a 1985 stepper to a 2005 7,200 rpm drive with its cache ([docs/activity-link.md](docs/activity-link.md)).
 - **Checked on the cable:** the drive watches its own bus and checks every data word the host takes off it.
-- **The SD card's high-speed mode** (experimental, `sd_high_speed = on`, the PCB): reads from the card twice as fast.
-- **Next:** a card soak so high-speed mode can be on by default, PCB rev 0.4 (ordered), the activity link to the HDD Synth ([docs/activity-link.md](docs/activity-link.md)).
+- **The SD card's high-speed mode** (the PCB): reads from the card twice as fast, on by default; it checks itself at every start and falls back by itself.
+- **Next:** the Pentium 200 and the ICL 386 with the new defaults, a long card soak, PCB rev 0.4 (ordered).
 
 The listen-only build (`pio run -e bb48`) records every IDE register access it sees without driving any pin, for studying what a host does.
 
@@ -61,7 +62,7 @@ The listen-only build (`pio run -e bb48`) records every IDE register access it s
 | USB-IDE adapters (JMicron; Innostor), from macOS and Windows | The adapter's | The rig's tests, partitioning and formatting, standby and wake; 10-hour soaks in PIO and DMA | Clean: 138 million sectors checked on the cable in the soaks, none bad |
 | ICL HRA 386 (1992) | 16-bit ISA card, PIO 0 | MS-DOS 5 from a copy of its own disk; the benchmark and a soak | Works, with `isa = on` and the IOCS16# wire |
 | Pentium 200 | Intel PIIX, PIO 3 | Windows 95 from a copy of its own disk, with Windows' own disk driver | Works, with early answers (the PIIX ignores IORDY) |
-| Evesham, Athlon XP 2000+ | On the motherboard, PIO 3 and DMA | MS-DOS and the benchmark; Doom from the CD-ROM; Windows 98 SE installed from its CD and run with DMA | Works (Windows 98 needs `MaxPhysPage` with more than 512 MB of RAM) |
+| Evesham, Athlon XP 2000+ | On the motherboard, PIO 3 and DMA | MS-DOS and the benchmark; Doom from the CD-ROM; Windows 98 SE installed from its CD and run with DMA; the default settings learning the PC; the HDD Synth link | Works (Windows 98 needs `MaxPhysPage` with more than 512 MB of RAM) |
 | Amiga 1200 | Gayle | | Doesn't boot yet |
 
 What each machine needed, and the dead ends: [docs/retro-test.md](docs/retro-test.md).
@@ -86,6 +87,8 @@ Windows 98 SE on the Evesham, copying 200 MB from the CD-ROM to the hard disk:
 | PIO 3 | 4 min 20 s | 0.79 MB/s |
 | Multiword DMA 2 | 1 min 16 s | 2.4 MB/s |
 | Multiword DMA 2, the card in high-speed mode | **1 min 1 s** | **3.0 MB/s** |
+
+Copying the `C:\WINDOWS` folder within C: (184 MB read and written), with the default settings (the drive learned the PC and offered DMA): 51 s, about 3.6 MB/s each way. With the HDD Synth's 2005 drive setting the pace (`seek_timing = synth`): 55 s, as that drive's cache allowed.
 
 The SD card on its own (the PCB, 4-bit SDIO) reads 9.2 MB/s, or 17.7 in high-speed mode.
 
