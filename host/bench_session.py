@@ -7,12 +7,21 @@ were last time. At the end it puts the settings it changed back.
 
 Windows rig, from an administrator Git Bash in host/:
 
-    export PYTHONUTF8=1 HDDPRO_DISK=PhysicalDrive1
-    python bench_session.py --list               # the steps
-    python bench_session.py                      # the default steps, in order
-    python bench_session.py --only hdcd-speed,hdcd-cdrom
-    python bench_session.py --from hdcd-speed    # carry on after a stop
+    export PYTHONUTF8=1 HDDPRO_DISK=PhysicalDrive1 HDDPRO_PORT=COM4
+    python bench_session.py --list               # the steps, by group
+    python bench_session.py                      # the newest group's default steps, in order
+    python bench_session.py --group nov10        # an older session's steps
+    python bench_session.py --only a1-lane,b-lane
+    python bench_session.py --from b-early       # carry on after a stop
+    python bench_session.py --leave-on b         # end on a normal build of tree b
     python bench_session.py --dry-run            # what it would do
+
+Steps can build from other checkouts (git worktrees), named by a label:
+`a`, `b` and `c` default to the sibling worktrees HDDSynthPro-v035 (0.35.0),
+HDDSynthPro-synthminder and HDDSynthPro-rev04; `--tree a=PATH` changes one.
+Steps that share a `compare` key (the same test on different builds, in
+A-B-A order) are set side by side at the end of the summary. The tests
+themselves always run from this checkout's host/.
 
 Results go to runs/bench-<time>/: each step's pytest output, the drive's
 stats, the serial log, and summary.md (also printed at the end).
@@ -66,6 +75,12 @@ class Step:
     expect: dict[str, float] = field(default_factory=dict)  # last time's figures
     note: str = ""
     default: bool = True
+    group: str = "nov10"  # which session it belongs to (--group; the newest by default)
+    tree: str = "self"  # the checkout to build from: a label of TREES (--tree)
+    flip: bool = False  # console Z meanwhile: bus = auto flips the program every second
+    test_env: dict[str, str] = field(default_factory=dict)  # extra environment for pytest
+    board_check: bool = False  # rev04-firmware on rev 0.3: board=rev0.3/bb48, nothing new touched
+    compare: str | None = None  # steps with the same key are compared (A-B-A)
 
 
 HDCD = {"device1": "cdrom", "mode": "mdma2"}  # a hard disk, and a CD-ROM as device 1
@@ -97,8 +112,54 @@ STEPS = [
     Step("hdcd-soak", "A 60-minute soak while the CD-ROM (device 1) is read", "bb48_drive", settings=HDCD,
          marker="slice6", interleave=True, note="checklist 3 (not in the default run: --only hdcd-soak)", default=False),
 ]
+
+# 18 Nov 2026 (docs/bench-checklist.md): 0.35.0's regression run through the
+# adapter, the synthminder branch's core 1 layout benchmarked A-B-A against
+# 0.35.0, and rev04-firmware checked on rev 0.3. All pcb_drive: bb48_drive
+# would leave the PCB's card in SPI mode until it's taken out.
+PCB = "pcb_drive"
+TREES = {"self": REPO, "a": REPO.parent / "HDDSynthPro-v035", "b": REPO.parent / "HDDSynthPro-synthminder",
+         "c": REPO.parent / "HDDSynthPro-rev04"}
+TREE_NAMES = {"self": "this checkout", "a": "0.35.0", "b": "synthminder", "c": "rev04-firmware"}
+REDETECT = {"HDDPRO_REPLUG": "redetect"}
+
+
+def speed_round(prefix: str, tree: str) -> list[Step]:
+    """-m speed on each bus program and in multiword DMA, on one build."""
+    name = TREE_NAMES[tree]
+    return [
+        Step(f"{prefix}-early", f"{name}: speed on early answers", PCB, tree=tree, program="e", marker="speed",
+             compare="early answers", group="nov18"),
+        Step(f"{prefix}-lane", f"{name}: speed on the data lane", PCB, tree=tree, program="l", marker="speed",
+             compare="data lane", group="nov18"),
+        Step(f"{prefix}-table", f"{name}: speed on the register table", PCB, tree=tree, program="t",
+             marker="speed", compare="register table", group="nov18"),
+        Step(f"{prefix}-dma", f"{name}: speed in multiword DMA (dma = on)", PCB, tree=tree, settings={"dma": "on"},
+             marker="speed", compare="MDMA 2", group="nov18"),
+    ]
+
+
+STEPS += [
+    *speed_round("a1", "a"),
+    Step("a1-slices", "0.35.0: slices 3-4 with the defaults (bus = auto)", PCB, tree="a", marker="slice3 or slice4",
+         group="nov18"),
+    Step("a1-switch", "0.35.0: slices 3-4 with the program flipped every second (console Z)", PCB, tree="a",
+         marker="slice3 or slice4", flip=True, group="nov18", note="none lost: the slices pass, bus_switches counts"),
+    Step("a1-table12", "0.35.0: slices 1-2 by re-detection on the register table", PCB, tree="a", program="t",
+         marker="slice1 or slice2", test_env=REDETECT, group="nov18",
+         note="owed since 0.33.0; slice 1's IORDY check fails on every build since 0.28.0 (known)"),
+    *speed_round("b", "b"),
+    Step("b-slices", "synthminder: slices 3-4 with the defaults", PCB, tree="b", marker="slice3 or slice4",
+         group="nov18"),
+    *speed_round("a2", "a"),
+    Step("c-rev04", "rev04-firmware on rev 0.3: slices 3-4, and nothing of rev 0.4's touched", PCB, tree="c",
+         marker="slice3 or slice4", board_check=True, group="nov18",
+         note="expects board=rev0.3/bb48, card_power_cycles=0, no PINS DASP# line"),
+]
+GROUPS = list(dict.fromkeys(s.group for s in STEPS))  # oldest first
 STATS_KEPT = ("bus", "iordy_max_ns", "iordy_max_reg", "iordy_slow", "iordy_ignored", "bus_sectors", "bus_bad",
-              "bus_gaps", "dior_no_cs", "cmd_run_max_ns", "cmd_run_max", "commands")
+              "bus_gaps", "dior_no_cs", "cmd_run_max_ns", "cmd_run_max", "commands", "autobus", "bus_switches",
+              "dma_auto", "board", "card_power_cycles")
 SOAK_ENV = {"HDDPRO_SOAK_MINUTES": "60", "HDDPRO_SOAK_TOLERATE_RESETS": "1", "HDDPRO_SOAK_IORDY_MAX_NS": "2000"}
 
 
@@ -161,21 +222,25 @@ class Session:
 
     # ---- setting a step up ----
 
-    def flash(self, env: str, flags: str):
-        build_flags = f"{RIG_FLAGS} {flags}".strip()
-        self.log(f"flash {env} ({build_flags})")
+    def flash(self, env: str, flags: str, tree: str = "self", rig: bool = True):
+        """Builds `env` in tree `tree` and flashes it; `rig`: with the rig-only
+        watchdog (a normal build, for leaving the board, without)."""
+        build_flags = f"{RIG_FLAGS if rig else ''} {flags}".strip()
+        where = TREES[tree]
+        self.log(f"flash {env} from {TREE_NAMES[tree]} ({where.name}) ({build_flags or 'normal build'})")
         if self.dry:
             return
         self.close()
         e = dict(os.environ, PLATFORMIO_BUILD_FLAGS=build_flags)
-        with open(self.out / f"flash-{env}.log", "w", encoding="utf-8") as f:
-            r = subprocess.run([find_pio(), "run", "-e", env, "-t", "upload"], cwd=REPO, env=e,
+        name = f"flash-{tree}-{env}.log"
+        with open(self.out / name, "a", encoding="utf-8") as f:
+            r = subprocess.run([find_pio(), "run", "-e", env, "-t", "upload"], cwd=where, env=e,
                                stdout=f, stderr=subprocess.STDOUT)
         if r.returncode:
-            raise RuntimeError(f"flashing {env} failed: see flash-{env}.log")
+            raise RuntimeError(f"flashing {env} from {where} failed: see {name}")
         time.sleep(3)
         self.open(timeout=60)
-        self.program = None  # a flash is a power-on: P and T are cleared
+        self.program = None  # unknown: a flash isn't a power cycle, so P (and T, J) can survive it
         self.log(f"  {self.drive.ready}")
 
     def set_settings(self, wanted: dict[str, str]):
@@ -198,7 +263,7 @@ class Session:
             self.restart_with("!")
 
     def read_settings(self):
-        """device0, device1 and mode as HDDSYNTH.INI has them now (console S)."""
+        """device0, device1, mode and dma as HDDSYNTH.INI has them now (console S)."""
         if self.dry:
             return
         for line in self.config():
@@ -207,6 +272,8 @@ class Session:
                 self.settings["mode"] = m.group(2)
             if m := re.match(r"CONFIG device1=(\S+)", line):
                 self.settings["device1"] = m.group(1)
+            if m := re.match(r"CONFIG dmarq=\S+ dma=(\S+)", line):
+                self.settings["dma"] = m.group(1)
         self.settings.setdefault("device1", "none")
         self.log(f"settings now: {self.settings}")
 
@@ -284,6 +351,7 @@ class Session:
             env["HDDPRO_CDROM_DEV"] = self.cd_dev
         if step.marker == "slice6":
             env.update(SOAK_ENV)
+        env.update(step.test_env)
         cmd = [sys.executable, "-m", "pytest", "-s", "-m", step.marker]
         self.log(f"pytest -m '{step.marker}'")
         if self.dry:
@@ -318,6 +386,43 @@ class Session:
         summary = next((l.strip("= \n") for l in reversed(lines) if re.search(r"passed|failed|skipped|error", l)),
                        "no pytest summary")
         return text, summary
+
+    def flip(self, on: bool) -> str:
+        """Console Z until it says what's wanted (it toggles): BUSFLIP on|off."""
+        reply = ""
+        for _ in range(2):
+            reply = self.drive.command("Z", "BUSFLIP", timeout=3)
+            if reply.split()[1:2] == ["on" if on else "off"]:
+                break
+        return reply
+
+    def board_check(self) -> list[str]:
+        """rev04-firmware on rev 0.3: it must see rev 0.3 and leave rev 0.4's lines alone."""
+        stats = self.stats()
+        mark = self.drive.mark()
+        self.drive.send("p")
+        time.sleep(1)
+        pins = [l for l in self.drive.lines_since(mark) if l.startswith("PINS")]
+        dasp = any("DASP#" in l for l in pins)
+        ok = stats.get("board") == "rev0.3/bb48" and stats.get("card_power_cycles") == "0" and not dasp
+        return [f"board={stats.get('board')} card_power_cycles={stats.get('card_power_cycles')}, "
+                f"{'a' if dasp else 'no'} PINS DASP# line: {'as expected' if ok else 'NOT AS EXPECTED'}"]
+
+    def leave(self, tree: str | None):
+        """The board as found: the test disk and console P cleared, and with
+        --leave-on, a normal build of that tree."""
+        if self.dry:
+            self.log(f"leave: T and P cleared{f', a normal build of {tree}' if tree else ''}")
+            return
+        if self.drive is None:
+            self.open()
+        if self.stats().get("disk") == "generated":
+            self.log("T (back to the image)")
+            self.restart_with("T")
+        self.set_program(None)
+        if tree:
+            self.flash(PCB, "", tree, rig=False)
+            self.log(f"left on {self.drive.ready}; serving {self.stats().get('image_name')}")
 
     def discs(self) -> list[str]:
         """Eject, the ISO the settings name, the test disc; Windows's view after each."""
@@ -428,6 +533,20 @@ def report(step: Step, summary: str, found: dict[str, float], stats: dict[str, s
     return "\n".join(l for l in out if l is not None) + "\n"
 
 
+def compare_table(results: dict[str, list[tuple[str, dict[str, float]]]]) -> str:
+    """Each compared test on each build, in the order run: reads MB/s / random
+    4 KB IOPS / writes MB/s."""
+    if not results:
+        return ""
+    width = max(len(runs) for runs in results.values())
+    out = ["## A-B-A", "", "Reads MB/s / random 4 KB IOPS / writes MB/s, in the order run.", "",
+           "| Test | " + " | ".join(f"run {i + 1}" for i in range(width)) + " |", "|---|" + "---|" * width]
+    for test, runs in results.items():
+        cells = [f"{key}: {f.get('read_mbs', '-')} / {f.get('iops', '-')} / {f.get('write_mbs', '-')}" for key, f in runs]
+        out.append(f"| {test} | " + " | ".join(cells + [""] * (width - len(cells))) + " |")
+    return "\n".join(out) + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--list", action="store_true", help="list the steps and stop")
@@ -436,17 +555,33 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="say what it would do, touching nothing")
     ap.add_argument("--cd-dev", default="//./CdRom0", help="the CD-ROM's raw device (default //./CdRom0)")
     ap.add_argument("--keep-settings", action="store_true", help="don't restore HDDSYNTH.INI at the end")
+    ap.add_argument("--group", default=None, help=f"the session's steps (default the newest: {GROUPS[-1]})")
+    ap.add_argument("--tree", action="append", default=[], metavar="LABEL=PATH",
+                    help="the checkout a label builds from (default: " +
+                         ", ".join(f"{k}={v.name}" for k, v in TREES.items() if k != "self") + ")")
+    ap.add_argument("--leave-on", metavar="LABEL", help="at the end, flash a normal build of this tree's pcb_drive")
     ap.add_argument("--as-is", action="store_true",
                     help="run the tests on the board as it is set up, and the adapter as it was plugged in: no "
                          "flash, console set-up or re-detection, each of which takes the drive off the bus "
                          "(the USB adapter hangs when a CD-ROM vanishes under it)")
     a = ap.parse_args()
 
+    for t in a.tree:
+        label, _, path = t.partition("=")
+        if not path:
+            sys.exit(f"--tree {t}: give LABEL=PATH")
+        TREES[label] = Path(path).resolve()
+        TREE_NAMES.setdefault(label, label)
     if a.list:
-        for s in STEPS:
-            print(f"{s.key:18} {'' if s.default else '(optional) '}{s.title}")
+        for g in GROUPS:
+            print(f"{g}{' (the default)' if g == GROUPS[-1] else ''}:")
+            for s in (s for s in STEPS if s.group == g):
+                print(f"  {s.key:18} {'' if s.default else '(optional) '}{s.title}")
         return
-    steps = [s for s in STEPS if s.default]
+    group = a.group or GROUPS[-1]
+    if group not in GROUPS:
+        sys.exit(f"no such group: {group} ({', '.join(GROUPS)})")
+    steps = [s for s in STEPS if s.default and s.group == group]
     if a.only:
         wanted = a.only.split(",")
         unknown = set(wanted) - {s.key for s in STEPS}
@@ -459,6 +594,11 @@ def main():
             sys.exit(f"no such default step: {a.start} (--list)")
         steps = steps[keys.index(a.start):]
 
+    needed = {s.tree for s in steps} | ({a.leave_on} if a.leave_on else set())
+    missing = [f"{k} ({TREES.get(k, '?')})" for k in needed if k not in TREES or not (TREES[k] / "platformio.ini").exists()]
+    if missing and not a.as_is:
+        sys.exit("no checkout for: " + ", ".join(missing) + " (git worktree add, or --tree LABEL=PATH)")
+
     out = HOST / "runs" / f"bench-{datetime.now():%Y%m%d-%H%M%S}"
     out.mkdir(parents=True, exist_ok=True)
     log_file = open(out / "session.log", "a", encoding="utf-8")
@@ -470,6 +610,7 @@ def main():
         log_file.flush()
 
     session = Session(out, a.cd_dev, a.dry_run, log)
+    compared: dict[str, list[tuple[str, dict[str, float]]]] = {}
     sections = [f"# Bench session {datetime.now():%d %b %Y %H:%M}", ""]
     if not a.dry_run:
         session.open()
@@ -483,24 +624,38 @@ def main():
                 if a.as_is:
                     log("as it is: no flash, settings, test disk, bus program or re-detection")
                 else:
-                    if session.flashed != (step.env, step.flags):
-                        session.flash(step.env, step.flags)
-                        session.flashed = (step.env, step.flags)
+                    if session.flashed != (step.tree, step.env, step.flags):
+                        session.flash(step.env, step.flags, step.tree)
+                        session.flashed = (step.tree, step.env, step.flags)
                         session.read_settings()
                     # The settings as they were before the session, plus the step's own
                     session.set_settings({**{k: v or "none" for k, v in session.changed.items()}, **step.settings})
                     session.ensure_test_disk()
                     session.set_program(step.program)
                     session.redetect(cdrom_only=step.settings.get("device0") == "cdrom")
+                extra = []
                 if not a.dry_run:
                     session.drive.send("r")  # read timings from here
+                    if step.flip:
+                        before = session.stats().get("bus_switches", "0")
+                        log("  " + session.flip(True))
                 text, summary = session.pytest(step) if step.marker else ("", "")
-                extra = session.discs() if step.discs and not a.dry_run else []
+                if step.flip and not a.dry_run:
+                    log("  " + session.flip(False))
+                    switches = int(session.stats().get("bus_switches", "0")) - int(before)
+                    extra.append(f"{switches} live program switches during the tests")
+                if step.board_check and not a.dry_run:
+                    extra += session.board_check()
+                if step.discs and not a.dry_run:
+                    extra += session.discs()
                 if m := re.search(r"cd reader: (.*)", text):
                     extra.append("CD-ROM read meanwhile: " + m.group(1))
                 stats = {} if a.dry_run else session.stats()
                 (out / f"{step.key}-stats.txt").write_text(json.dumps(stats, indent=1))
-                section = report(step, summary, figures(text), stats, extra)
+                found = figures(text)
+                section = report(step, summary, found, stats, extra)
+                if step.compare and found:
+                    compared.setdefault(step.compare, []).append((step.key, found))
             except Exception as e:  # one step's failure doesn't stop the rest
                 log(f"  step failed: {e}")
                 section = f"## {step.key}: {step.title}\n\n**Didn't finish:** {e}\n"
@@ -513,7 +668,7 @@ def main():
                         break
             section += f"\n({(time.monotonic() - started) / 60:.0f} min)\n"
             sections.append(section)
-            (out / "summary.md").write_text("\n".join(sections), encoding="utf-8")
+            (out / "summary.md").write_text("\n".join(sections + [compare_table(compared)]), encoding="utf-8")
     finally:
         if session.changed and not a.keep_settings and not a.dry_run:
             log(f"restoring HDDSYNTH.INI: {session.changed}")
@@ -523,9 +678,16 @@ def main():
                 session.set_settings({k: v or "none" for k, v in session.changed.items()})
             except Exception as e:
                 log(f"  couldn't restore ({e}): set them with console E; they're in {session.originals_path}")
+        if not a.as_is:
+            try:
+                session.leave(a.leave_on)
+            except Exception as e:
+                log(f"  couldn't leave the board as found ({e}): check T and P, and flash a normal build")
         session.close()
-    sections.append("Afterwards: power-cycle the board to clear the console's T and P, and flash a normal build "
-                    "(without RIG_WATCHDOG_MS) before it goes anywhere else.\n")
+    sections.append(compare_table(compared))
+    if not a.leave_on:
+        sections.append("Afterwards: flash a normal build (without RIG_WATCHDOG_MS) before the board goes anywhere "
+                        "else (or next time, --leave-on LABEL).\n")
     (out / "summary.md").write_text("\n".join(sections), encoding="utf-8")
     print("\n" + "\n".join(sections))
     log(f"results in {out}")
