@@ -56,8 +56,11 @@ const char* drivePresetId(size_t i);
 
 enum class ParamResult : uint8_t { Ok, UnknownKey, BadValue };
 
-// Set one parameter by its drive.json key. Numbers are clamped to the
-// parameter's range; a bool key (zoned) takes 0 or 1. setDriveChoice() sets
-// the choice keys (size, bearing, actuator, park, mount), e.g. "stepper".
-ParamResult setDriveParam(DriveParams& p, const char* key, float value);
-ParamResult setDriveChoice(DriveParams& p, const char* key, const char* value);
+// Set one parameter by its drive.json group and key, e.g. ("spindle",
+// "rpm"). The groups are the Drive Lab's cards: spindle, platters, bearing,
+// actuator, resonance, heads, enclosure and mixer. Numbers are clamped to the
+// parameter's range; a bool key (platters.zoned) takes 0 or 1.
+// setDriveChoice() sets the choice keys (platters.size, bearing.type,
+// actuator.type, heads.parking, enclosure.mount), e.g. "stepper".
+ParamResult setDriveParam(DriveParams& p, const char* group, const char* key, float value);
+ParamResult setDriveChoice(DriveParams& p, const char* group, const char* key, const char* value);
