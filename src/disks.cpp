@@ -227,7 +227,9 @@ static BlockSource* openCdDisc(const char* name, const char*& why, uint8_t unit)
 // The geometry an image's partition table was made with, packed as
 // g_geometry is, or 0 (then 16 x 63).
 static uint32_t partitionGeometry(BlockSource& disk) {
-    static uint16_t sector0[256];  // bus order: as bytes, as on disk
+    // Bus order: as bytes, as on disk. scratch::b, not a: a read that fails
+    // restarts the card, and the image's map check (sd_card.cpp) uses a.
+    uint16_t* const sector0 = reinterpret_cast<uint16_t*>(scratch::b);
     if (!disk.read(0, sector0)) return 0;
     Geometry geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), disk.sectors());
     if (!geo.cylinders) return 0;
@@ -431,7 +433,7 @@ void chooseDisk() {
     Geometry geo = image ? g_config.geometry : Geometry{};
     g_geometry_from = geo.cylinders ? "set" : "auto";
     if (image && !geo.cylinders) {  // auto: the geometry the image's partition table was made with
-        static uint16_t sector0[256];  // bus order: as bytes, as on disk
+        uint16_t* const sector0 = reinterpret_cast<uint16_t*>(scratch::b);  // as partitionGeometry()'s
         if (g_disk->read(0, sector0)) {
             geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), g_disk->sectors());
             if (geo.cylinders) g_geometry_from = "partition table";
