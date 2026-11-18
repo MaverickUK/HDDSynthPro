@@ -119,8 +119,9 @@ STEPS = [
 # would leave the PCB's card in SPI mode until it's taken out.
 PCB = "pcb_drive"
 TREES = {"self": REPO, "a": REPO.parent / "HDDSynthPro-v035", "b": REPO.parent / "HDDSynthPro-synthminder",
-         "c": REPO.parent / "HDDSynthPro-rev04"}
-TREE_NAMES = {"self": "this checkout", "a": "0.35.0", "b": "synthminder", "c": "rev04-firmware"}
+         "c": REPO.parent / "HDDSynthPro-rev04", "d": REPO.parent / "HDDSynthPro-ram"}
+TREE_NAMES = {"self": "this checkout", "a": "0.35.0", "b": "synthminder", "c": "rev04-firmware",
+              "d": "ram-overlay-heap"}
 REDETECT = {"HDDPRO_REPLUG": "redetect"}
 
 
@@ -152,6 +153,11 @@ STEPS += [
     Step("b-slices", "synthminder: slices 3-4 with the defaults", PCB, tree="b", marker="slice3 or slice4",
          group="nov18"),
     *speed_round("a2", "a"),
+    *speed_round("d", "d"),
+    Step("d-slices", "ram-overlay-heap: slices 3-4, on the overlay's heap storage", PCB, tree="d",
+         marker="slice3 or slice4", group="nov18",
+         note="the tests write 256 sectors of the overlay's 512: s shows overlay=256/512 after"),
+    *speed_round("a3", "a"),
     Step("c-rev04", "rev04-firmware on rev 0.3: slices 3-4, and nothing of rev 0.4's touched", PCB, tree="c",
          marker="slice3 or slice4", board_check=True, group="nov18",
          note="expects board=rev0.3/bb48, card_power_cycles=0, no PINS DASP# line"),
@@ -159,7 +165,7 @@ STEPS += [
 GROUPS = list(dict.fromkeys(s.group for s in STEPS))  # oldest first
 STATS_KEPT = ("bus", "iordy_max_ns", "iordy_max_reg", "iordy_slow", "iordy_ignored", "bus_sectors", "bus_bad",
               "bus_gaps", "dior_no_cs", "cmd_run_max_ns", "cmd_run_max", "commands", "autobus", "bus_switches",
-              "dma_auto", "board", "card_power_cycles")
+              "dma_auto", "board", "card_power_cycles", "overlay", "heap_free", "ring_max", "dropped")
 SOAK_ENV = {"HDDPRO_SOAK_MINUTES": "60", "HDDPRO_SOAK_TOLERATE_RESETS": "1", "HDDPRO_SOAK_IORDY_MAX_NS": "2000"}
 
 
