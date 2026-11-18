@@ -32,10 +32,6 @@ jobs:
         run: |
           python3 scripts/check_core1_ram.py
           python3 scripts/check_core1_ram.py .pio/build/pcb_drive/firmware.elf
-      # Core 1's speed depends on where its code sits: a move needs a benchmark
-      # on the rig, then `scripts/check_core1_layout.py --update`.
-      - name: Core 1's hard disk code hasn't moved
-        run: python3 scripts/check_core1_layout.py
       - name: C++ unit tests
         run: test/run_native_tests.sh
       - name: Folder drive image, checked by fsck.fat, mtools and pyfatfs
@@ -72,6 +68,13 @@ jobs:
       - name: Simulator and parser tests
         working-directory: host
         run: pytest -m sim
+      # Core 1's speed depends on where its code sits: a move needs a benchmark
+      # on the rig, then `scripts/check_core1_layout.py --update`. After the
+      # tests, so a moved layout (expected on a branch until it's benchmarked)
+      # doesn't hide their results, and run even if one failed.
+      - name: Core 1's hard disk code hasn't moved
+        if: ${{ !cancelled() }}
+        run: python3 scripts/check_core1_layout.py
 
       - name: Read the firmware version
         id: version
