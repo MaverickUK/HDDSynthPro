@@ -257,6 +257,21 @@ The PCB through the JMicron (Windows rig), `HDDBENCH.IMG` over SDIO in high-spee
 
 0.31.0's 10-hour soak at default speed: writes 1.42-1.97 MB/s, reads 2.15-2.73, about 15% slower after the first hour (read-backs 11.1 s, then 13.5-13.8). High-speed mode lifts the reads a little in this mix; the slowdown after about 70 minutes is the same, and the second run was slow from its start, so it is the card's state, not the drive's. 0 wrong in 57.2 GB written and 86.9 GB read.
 
+## SynthMinder's 8Dh: A-B-A on the Mac (0.36.0-dev.2, 18 Nov 2026), layout not yet recorded
+
+The JMicron on the Mac, the PCB, the generated disk (`T`), `-m speed`, two runs each; the rig watchdog build (`-DRIG_WATCHDOG_MS=8000`) of each. A is `v0.35.0`, B branch `synthminder` at 0.36.0-dev.2 (core 1's block 224 bytes longer). Seek timing inactive (`seek_active=0`: the synth's pack has no model).
+
+| | A1 (0.35.0) | B (`synthminder`) | A2 (0.35.0) |
+|---|---|---|---|
+| Lane: sequential read | 1.20, 1.16 MB/s | 1.14, 1.14 | 1.22, 1.17 |
+| Lane: random 4 KB | 78.4, 78.2 IOPS | 77.7, 77.4 | 78.6, 78.2 |
+| Lane: a 64 KB write in the drive | 40.1, 40.1 ms | 40.2, 40.2 | 40.1, 40.1 |
+| Early answers: sequential read | 1.16, 1.15 MB/s | 1.15, 1.14 | 1.16, 1.16 |
+| Early answers: random 4 KB | 74.2, 73.8 IOPS | 74.0, 73.9 | 74.1, 73.9 |
+| Early answers: a 64 KB write in the drive | 59.2, 59.2 ms | 59.6, 59.6 | 59.2, 59.2 |
+
+A1 and A2 agree, so the rig didn't drift. **B is slower than both** on the lane (random reads about 1%, writes 0.1 ms) and on early answers' writes (0.4 ms, 0.7%), so, as the checklist says, the layout isn't recorded yet. What grew in core 1's block: the per-sector `pendingFetch` (+18 bytes) and `postFetch` (+8), for the fetch's new kind (SynthMinder's SEND and RECEIVE), and `serveDataIn` (+12), `serveBusEarly` (+8), `serveLane` and `serveDataInEarly` (+4 each). Next: compare their compiled code with 0.35.0's, as 0.35.0-dev.7 did, to see whether the cost is the new check per sector (then keep it off the per-sector path) or placement.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:
