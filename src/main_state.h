@@ -8,6 +8,7 @@
 extern SpscRing<TraceEvent, cfg::TRACE_RING_EVENTS> g_trace;
 extern std::atomic<uint32_t> g_events;   // recorded by core 1
 extern std::atomic<uint32_t> g_dropped;  // lost because the ring was full
+extern size_t g_trace_max;               // the most events ever waiting in it (core 0's)
 extern std::atomic<uint32_t> g_stalls;   // PIO FIFO filled: accesses missed
 
 // console.cpp
@@ -126,6 +127,8 @@ __attribute__((always_inline)) static inline IdentifyInfo device1Identity() {
 // disks.cpp
 extern bool g_test_disk;    // the generated disk: the bus observer can check its data
 void chooseDisk();          // at boot, before core 1 is told (g_disk_chosen)
+size_t overlayUsed();       // the RAM overlay's sectors written, and
+size_t overlaySlots();      // how many it holds (0: none taken, an image is served)
 void serviceDiscChange();   // each pass of loop()
 
 // link.cpp

@@ -71,14 +71,16 @@
 // Core 0's share of the drive: move the sectors core 1 asks for. The disk is
 // an image on the SD card (slice 5) if there is one to serve (chooseDisk()),
 // else the welcome disk, or the generated test disk with `device0 = none` or
-// console `T`. Both keep writes in the one RAM overlay, until a restart.
+// console `T`. Both keep writes in the one RAM overlay, until a restart:
+// its storage on the heap, taken only when one of them is served
+// (reserveOverlay()), so an image leaves that RAM free.
 static const welcome_disk::File WELCOME_FILES[] = {
     {"README.TXT", welcome_text::README, welcome_text::README_SIZE},
     {drive_config::FILE_NAME, drive_config::defaultFile(), uint32_t(strlen(drive_config::defaultFile()))},
 };
 static WelcomeDisk g_welcome(WELCOME_FILES, 2, welcome_text::FAT_DATE);
 static GeneratedDisk g_generated;
-static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_overlay(g_welcome);
+static RamOverlayDisk g_overlay(g_welcome);
 BlockSource* g_disk = &g_overlay;
 const char* g_disk_name = "welcome";
 bool g_test_disk = false;  // the generated disk: the bus observer can check its data
@@ -118,6 +120,25 @@ static char busRequested() {
     uint32_t v = watchdog_hw->scratch[1];
     char c = char(v & 0xff);
     return (v & 0xffffff00) == BUS_MAGIC && (c == 'e' || c == 'l' || c == 'i' || c == 't' || c == 'a') ? c : 0;
+}
+
+size_t overlayUsed() { return g_overlay.used(); }
+size_t overlaySlots() { return g_overlay.slots(); }
+
+// The overlay's storage, when the hard disk is the welcome disk or the test
+// disk: cfg::RAM_DISK_SECTORS sectors (264 KB), or as many as the heap holds,
+// halved until it fits, down to cfg::RAM_DISK_MIN_SECTORS. Never freed (the
+// disk is served until a restart). With none the disk is read-only: writes
+// get an error, nothing is lost. malloc, not new: see chooseDevice1().
+static void reserveOverlay() {
+    if (g_disk != &g_overlay || g_device0_cdrom) return;  // the CD-ROM's test disc is read-only
+    for (size_t slots = cfg::RAM_DISK_SECTORS; slots >= cfg::RAM_DISK_MIN_SECTORS; slots /= 2) {
+        size_t bytes = slots * RamOverlayDisk::SLOT_BYTES;
+        if (void* storage = std::malloc(bytes)) {
+            g_overlay.setStorage(storage, bytes);
+            return;
+        }
+    }
 }
 
 // The generated test disk instead of the welcome disk, under the RAM overlay.
@@ -428,6 +449,7 @@ void chooseDisk() {
     // `isa = on`: the ISA card that needs it strobes DIOR# with no chip select,
     // which the observer takes for data.
     bus_observer::setImageChecks(!g_isa.load() && !g_test_disk);
+    reserveOverlay();  // before device 1's folder list, which takes what RAM is left
     if (!g_device0_cdrom) chooseDevice1();  // a CD-ROM as device 0 is alone on the cable
     // Core 1 shares out the PIO blocks next, by whether the card holds one: so
     // after device 1's image, folder or disc is open (with device 0 on the

@@ -174,9 +174,13 @@ constexpr uint32_t DATA_OUT_BSY_US = 10;
 // for at least this long, so a command of a few microseconds still shows.
 constexpr uint32_t LED_MIN_MS = 25;
 
-// The RAM overlay on the generated disk (block_source.h): how many distinct
-// sectors can be written, at 512 bytes each.
+// The RAM overlay on the welcome and generated disks (block_source.h): how
+// many distinct sectors can be written, at 516 bytes each (264 KB), on the
+// heap and only while one of those disks is served (disks.cpp). Fewer if the
+// heap is short, down to the minimum: the rig tests write 256 (host/tests,
+// WINDOW), so below that slices 4 and the soak fail with write errors.
 constexpr size_t RAM_DISK_SECTORS = 512;
+constexpr size_t RAM_DISK_MIN_SECTORS = 64;
 
 // A folder served as device 1 (docs/two-drives.md): the most files and
 // folders its list holds, 32 bytes each, on the heap. Fewer if RAM is short

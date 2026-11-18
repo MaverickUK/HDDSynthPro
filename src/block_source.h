@@ -47,15 +47,30 @@ private:
 
 // Slice 4: writes kept in RAM on top of another disk (the welcome disk or
 // the generated one), so the disk keeps its size and contents and every
-// written sector reads back. Holds up to SLOTS distinct sectors; a write to a
-// new sector when all are in use fails (the host sees a write error) rather
-// than losing data.
-template <size_t SLOTS>
+// written sector reads back. Holds as many distinct sectors as the storage
+// given to it (setStorage()); a write to a new sector when all are in use
+// fails (the host sees a write error) rather than losing data. With none it
+// is read-only, as the CD-ROM's test disc uses it.
+//
+// The storage comes from the caller, not from a member array: the drive
+// takes it from the heap at boot, and only when this disk is served, so an
+// SD image leaves its 264 KB free (cfg::RAM_DISK_SECTORS, disks.cpp).
 class RamOverlayDisk : public BlockSource {
 public:
+    // Bytes of storage per sector held: its LBA and its 256 words.
+    static constexpr size_t SLOT_BYTES = sizeof(uint32_t) + 256 * sizeof(uint16_t);
+
     explicit RamOverlayDisk(BlockSource& base) : base_(&base) {}
     // The disk underneath, chosen at boot: only before anything is written.
     void setBase(BlockSource& base) { base_ = &base; }
+    // Storage for `bytes / SLOT_BYTES` sectors, 4-byte aligned (malloc's is),
+    // kept for good: only before anything is written.
+    void setStorage(void* storage, size_t bytes) {
+        slots_ = storage ? bytes / SLOT_BYTES : 0;
+        lbas_ = static_cast<uint32_t*>(storage);
+        data_ = reinterpret_cast<uint16_t(*)[256]>(lbas_ + slots_);
+        used_ = 0;
+    }
     uint32_t sectors() const override { return base_->sectors(); }
 
     CORE0_RAM bool read(uint32_t lba, uint16_t words[256]) override {
@@ -69,7 +84,7 @@ public:
         if (lba >= sectors()) return false;
         int slot = find(lba);
         if (slot < 0) {
-            if (used_ == SLOTS) return false;  // full
+            if (used_ == slots_) return false;  // full, or no storage
             slot = int(used_++);
             lbas_[slot] = lba;
         }
@@ -78,6 +93,7 @@ public:
     }
 
     size_t used() const { return used_; }
+    size_t slots() const { return slots_; }
 
 private:
     CORE0_RAM int find(uint32_t lba) const {
@@ -87,9 +103,21 @@ private:
     }
 
     BlockSource* base_;
-    uint32_t lbas_[SLOTS];
-    uint16_t data_[SLOTS][256];
+    uint32_t* lbas_ = nullptr;         // slots_ LBAs, then
+    uint16_t (*data_)[256] = nullptr;  // slots_ sectors
+    size_t slots_ = 0;
     size_t used_ = 0;
+};
+
+// An overlay with room for SLOTS sectors inside it: for the host tests (the
+// drive's own takes its storage from the heap).
+template <size_t SLOTS>
+class FixedRamOverlayDisk : public RamOverlayDisk {
+public:
+    explicit FixedRamOverlayDisk(BlockSource& base) : RamOverlayDisk(base) { setStorage(storage_, sizeof storage_); }
+
+private:
+    alignas(4) uint8_t storage_[SLOTS * SLOT_BYTES];
 };
 
 // A disk image file, as ImageDisk sees it: byte-addressed reads and writes

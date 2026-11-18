@@ -10,6 +10,7 @@
 #include <thread>
 
 
+#include "block_source.h"
 #include "bus_sample.h"
 #include "config.h"
 #include "gen_disk.h"
@@ -413,6 +414,40 @@ TEST(test_gen_disk_sectors_differ) {
     CHECK(same < 16);  // about 2 of 504 bytes match by chance
 }
 
+// The RAM overlay (block_source.h): written sectors read back, the rest from
+// the disk underneath; with no storage it is read-only, and when full a new
+// sector's write fails while rewrites still work.
+TEST(test_ram_overlay) {
+    GeneratedDisk base(1000);
+    RamOverlayDisk overlay(base);
+    uint16_t want[256], got[256], mine[256];
+    for (int i = 0; i < 256; ++i) mine[i] = uint16_t(0xA500 + i);
+
+    CHECK_EQ(overlay.slots(), size_t(0));
+    CHECK(!overlay.write(5, mine));  // no storage: read-only
+    CHECK(overlay.read(5, got));
+    base.read(5, want);
+    CHECK(std::memcmp(got, want, sizeof got) == 0);
+
+    alignas(4) static uint8_t storage[2 * RamOverlayDisk::SLOT_BYTES + 100];  // two slots, and some over
+    overlay.setStorage(storage, sizeof storage);
+    CHECK_EQ(overlay.slots(), size_t(2));
+    CHECK(overlay.write(5, mine));
+    CHECK(overlay.read(5, got));
+    CHECK(std::memcmp(got, mine, sizeof got) == 0);
+    mine[0] = 1;
+    CHECK(overlay.write(5, mine));  // a rewrite takes no new slot
+    CHECK_EQ(overlay.used(), size_t(1));
+    CHECK(overlay.write(7, mine));
+    CHECK(!overlay.write(9, mine));  // full
+    CHECK(!overlay.write(1000, mine));  // past the end
+    CHECK(overlay.read(5, got));
+    CHECK_EQ(got[0], uint16_t(1));
+    CHECK(overlay.read(6, got));  // never written: the disk's own
+    base.read(6, want);
+    CHECK(std::memcmp(got, want, sizeof got) == 0);
+}
+
 void runAtaDeviceTests();
 void runShortTestTests();
 void runActivityTests();
@@ -457,6 +492,7 @@ int main() {
     RUN(test_identify_checksum_after_geometry_change);
     RUN(test_gen_disk_known_answers);
     RUN(test_gen_disk_sectors_differ);
+    RUN(test_ram_overlay);
     runAtaDeviceTests();
     runShortTestTests();
     runActivityTests();
