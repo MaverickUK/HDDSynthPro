@@ -5,7 +5,7 @@ What's left needs the rig: the Windows PC (an administrator Git Bash), the USB a
 Four things are owed, and `bench_session.py`'s `nov18` steps run them all:
 - **0.35.0's regression run through the adapter** (*Next*, 0): `-m speed` on early answers, the data lane, the register table and in multiword DMA; slices 3-4 with the defaults; slices 3-4 with the program flipped every second (console `Z`); and slices 1-2 by re-detection on the register table (owed since 0.33.0).
 - **Branch `synthminder`'s core 1 layout** (`check_core1_layout.py` fails there: the block is 224 bytes longer, for SynthMinder's 8Dh): the same speeds on 0.35.0, then `synthminder`, then 0.35.0 again (A-B-A), so the adapter's drift shows.
-- **Branch `ram-overlay-heap`** (0.35.1-ram.1: the RAM overlay on the heap, static RAM 93.8% to 43.4%; its core 0 block moved 20 bytes): the same speeds and slices 3-4, between 0.35.0's second and third rounds (`d`, then `a3`).
+- **Branch `ram-overlay-heap`** (0.35.1-ram.1: the RAM overlay on the heap, static RAM 93.8% to 42.9%; its core 0 block moved 20 bytes): the same speeds and slices 3-4, between 0.35.0's second and third rounds (`d`, then `a3`).
 - **Branch `rev04-firmware` on rev 0.3:** slices 3-4, and `board=rev0.3/bb48`, `card_power_cycles=0` and no `PINS DASP#` line: the new code sees rev 0.3 and touches nothing.
 
 ## 1. Bring the rig back
