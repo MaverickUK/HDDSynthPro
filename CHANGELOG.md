@@ -7,6 +7,12 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.3] - 2026-11-18 (branch `synthminder`)
+
+### Changed
+- **SynthMinder's 8Dh off the per-sector paths:** the A-B-A on the Mac (docs/speed-log.md) found dev.2 about 1% slower than 0.35.0 on the data lane and 0.7% on early answers' writes. Its fetch is now marked by its `command_lba` (`SM_MESSAGE_LBA`, `ata::isMessage`), not a field of its own, so `Fetch`, `pendingFetch` and every copy of a fetch in core 1's bus loops are 0.35.0's code again; `synthMinder()` is in core 1's rare code (`CORE1_RAM_RARE`) and `beginRead`/`beginWrite` are inlined, so core 1's block differs from 0.35.0's only by `startCommand`'s 20 bytes for the 8Dh case. On core 0, `serveFetches` hands a message and a waiting RECEIVE to two cold functions in flash, passing the message's fields as values (taking the fetch's address had kept it in memory all through the loop): 556 bytes against 0.35.0's 516 (dev.2: 680). To benchmark (A-B) before the layout is recorded.
+- A SynthMinder command's `CMD` trace line shows that LBA (4294967041 for SEND, 4294967042 for RECEIVE) where it showed 1 or 2.
+
 ## [0.36.0-dev.2] - 2026-11-18 (branch `synthminder`)
 
 ### Added

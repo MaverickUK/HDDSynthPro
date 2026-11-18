@@ -1250,22 +1250,41 @@ CORE0_RAM static void releaseHeld() {
     }
 }
 
-CORE0_RAM static void serveFetches() {
-    uint32_t waited;  // SynthMinder's RECEIVE, once the synth has answered (bay_service.cpp; its code is in flash)
-    if (g_synthminder_waiting && g_held_count < HELD_MAX && synthMinderReady(waited)) {
+// SynthMinder's 8Dh (bay_service.cpp), out of serveFetches and in flash: rare,
+// and serveFetches runs for every sector (CORE0_RAM; its size moves what
+// follows it in RAM).
+__attribute__((noinline, cold)) static void collectSynthMinderReply() {
+    uint32_t waited;  // its RECEIVE, once the synth has answered
+    if (g_held_count < HELD_MAX && synthMinderReady(waited)) {
         g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{waited, true, 0}, 0};
         ++g_held_count;
     }
+}
+
+// Its fields as values, not the fetch by reference: taking the fetch's address
+// kept it in memory all through serveFetches' loop, 64 bytes more code.
+__attribute__((noinline, cold)) static void serveSynthMinderFetch(uint32_t id, uint16_t* buffer, bool store,
+                                                                  uint32_t command_lba) {
+    ata::Fetch fetch{};
+    fetch.id = id;
+    fetch.buffer = buffer;
+    fetch.store = store;
+    fetch.command_lba = command_lba;
+    bool ok;
+    if (synthMinderFetch(fetch, ok)) {
+        g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok, 0}, 0};
+        ++g_held_count;
+        releaseHeld();
+    }
+}
+
+CORE0_RAM static void serveFetches() {
+    if (__builtin_expect(g_synthminder_waiting, 0)) collectSynthMinderReply();
     releaseHeld();
     ata::Fetch fetch;
     while (g_held_count < HELD_MAX && g_mailbox.takeRequest(fetch)) {
-        if (fetch.message) {  // SynthMinder's 8Dh: no disk, no seek timing (bay_service.cpp)
-            bool ok;
-            if (synthMinderFetch(fetch, ok)) {
-                g_held[(g_held_first + g_held_count) % HELD_MAX] = HeldResult{FetchResult{fetch.id, ok, 0}, 0};
-                ++g_held_count;
-                releaseHeld();
-            }
+        if (__builtin_expect(ata::isMessage(fetch), 0)) {  // SynthMinder's: no disk, no seek timing
+            serveSynthMinderFetch(fetch.id, fetch.buffer, fetch.store, fetch.command_lba);
             continue;
         }
         uint64_t now = time_us_64();  // the command's time starts before the card's

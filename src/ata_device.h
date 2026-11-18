@@ -101,7 +101,7 @@ constexpr uint8_t CMD_SET_FEATURES = 0xEF;
 // one-sector PIO data-in: the reply), Sector Count 1, LBA Low 'S', LBA Mid 'M'
 // and LBA High the protocol version. Anything else is aborted, so a stray 8Dh
 // from another program does nothing. The sectors go to and from core 0 as a
-// Fetch with `message` set (synthminder.h answers them).
+// Fetch marked by its command_lba (isMessage, below; synthminder.h answers them).
 constexpr uint8_t CMD_SYNTHMINDER = 0x8D;
 constexpr uint8_t SM_SEND = 0x01;
 constexpr uint8_t SM_RECEIVE = 0x02;
@@ -148,8 +148,15 @@ struct Fetch {
     uint32_t command_lba;      // seek timing and the activity link (seek_timing.h)
     uint8_t unit;              // 0: device 0's disk, 1: device 1's
     uint8_t sectors = 1;       // how many, from `lba` on (READ/WRITE MULTIPLE: a block's)
-    bool message = false;      // SynthMinder's 8Dh: `store` is a request, a read its reply (no disk, no LBA)
 };
+
+// SynthMinder's 8Dh marks its fetch by its command_lba: SM_MESSAGE_LBA, with
+// SEND or RECEIVE in the low byte, an address no disk on a card reaches. A
+// field of its own made Fetch bigger, and every copy of one in core 1's bus
+// loops longer: about 1% on the data lane's reads (docs/speed-log.md).
+// `store` is then a request, a read its reply; no disk, no seek timing.
+constexpr uint32_t SM_MESSAGE_LBA = 0xFFFFFF00;
+inline bool isMessage(const Fetch& f) { return (f.command_lba & 0xFFFFFF00u) == SM_MESSAGE_LBA; }
 
 // A DMA burst for core 1 to run (READ DMA or WRITE DMA): the rest of a
 // sector, sent from `from` (read) or received into `to` (write).
@@ -428,7 +435,6 @@ private:
     bool ahead_ok_ = false;
     bool ahead_failed_ = false;
     bool flushing_ = false;  // FLUSH CACHE: its fetch is a flush
-    bool message_ = false;   // CMD_SYNTHMINDER: its fetch carries a message, not a sector
     bool read_ahead_ = true;
     bool write_behind_ = true;  // SET FEATURES 02h/82h; off: each sector synced as it's stored
 

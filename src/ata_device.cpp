@@ -190,7 +190,6 @@ CORE1_RAM void Device::hardReset(bool asserted) {
         receiving_ = false;
         out_hold_ = false;
         flushing_ = false;
-        message_ = false;
         fetch_pending_ = false;
         if (++fetch_id_ == 0) ++fetch_id_;
         // A hardware reset (not a soft one) restores both units' power-on
@@ -238,7 +237,6 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
         }
     }
     last_ = CommandInfo{command, 0, 0, unit_};
-    message_ = false;
     ++commands_started_;
     irq_pending_ = false;  // writing Command clears a pending interrupt
     error_ = 0;
@@ -483,14 +481,9 @@ CORE1_RAM bool Device::decodeAddress(uint32_t& lba) const {
     return true;
 }
 
-CORE1_RAM void Device::startRead(uint8_t block) {
-    uint32_t count = sector_count_ ? sector_count_ : 256;
-    uint32_t lba = 0;
-    if (!checkRange(count, lba)) return;
-    beginRead(lba, count, block);
-}
-
-CORE1_RAM void Device::beginRead(uint32_t lba, uint32_t count, uint8_t block) {
+// After the range check: inlined into startRead and synthMinder, so startRead
+// is the code it was before SynthMinder (core 1's layout, CLAUDE.md).
+__attribute__((always_inline)) inline void Device::beginRead(uint32_t lba, uint32_t count, uint8_t block) {
     block_ = block;
     reading_ = true;
     read_lba_ = lba;
@@ -499,14 +492,14 @@ CORE1_RAM void Device::beginRead(uint32_t lba, uint32_t count, uint8_t block) {
     requestFetch();
 }
 
-CORE1_RAM void Device::startWrite(uint8_t block) {
+CORE1_RAM void Device::startRead(uint8_t block) {
     uint32_t count = sector_count_ ? sector_count_ : 256;
     uint32_t lba = 0;
     if (!checkRange(count, lba)) return;
-    beginWrite(lba, count, block);
+    beginRead(lba, count, block);
 }
 
-CORE1_RAM void Device::beginWrite(uint32_t lba, uint32_t count, uint8_t block) {
+__attribute__((always_inline)) inline void Device::beginWrite(uint32_t lba, uint32_t count, uint8_t block) {
     block_ = block;
     writing_ = true;
     write_lba_ = lba;
@@ -519,11 +512,20 @@ CORE1_RAM void Device::beginWrite(uint32_t lba, uint32_t count, uint8_t block) {
     startDataOut();  // no interrupt before the first block
 }
 
+CORE1_RAM void Device::startWrite(uint8_t block) {
+    uint32_t count = sector_count_ ? sector_count_ : 256;
+    uint32_t lba = 0;
+    if (!checkRange(count, lba)) return;
+    beginWrite(lba, count, block);
+}
+
 // SynthMinder's 8Dh: one sector each way, through the same fetches as a
 // one-sector WRITE or READ SECTORS, so the host sees what it would for them
 // (DRQ, then BSY while core 0 takes the request; BSY until the reply is
-// ready, then DRQ). No disk is touched: `message` tells core 0.
-CORE1_RAM void Device::synthMinder() {
+// ready, then DRQ). No disk is touched: the fetch's command_lba is
+// SM_MESSAGE_LBA, which tells core 0 (isMessage). In core 1's rare code, out of
+// the per-access block, so the bus loops sit where they did before it.
+CORE1_RAM_RARE void Device::synthMinder() {
     last_.lba = features_;  // for the trace: SEND or RECEIVE
     last_.count = sector_count_;
     if ((features_ != SM_SEND && features_ != SM_RECEIVE) || sector_count_ != 1 || lba_low_ != SM_LBA_LOW ||
@@ -531,7 +533,7 @@ CORE1_RAM void Device::synthMinder() {
         fail(ER_ABRT);  // not SynthMinder's
         return;
     }
-    message_ = true;
+    last_.lba = SM_MESSAGE_LBA | features_;  // the fetch's command_lba: SynthMinder's, not a disk's
     if (features_ == SM_SEND)
         beginWrite(0, 1, 1);
     else
@@ -639,9 +641,8 @@ CORE1_RAM void Device::deliverSector(bool ok) {
 
 CORE1_RAM bool Device::pendingFetch(Fetch& fetch) {
     if (!fetch_pending_) return false;
-    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_,
-                  !message_ && (flushing_ || (writing_ && !u().write_cache)),
-                  last_.count, last_.lba, unit_, fetch_count_, message_};
+    fetch = Fetch{fetch_id_, fetch_lba_, sectors_[fetch_buf_], writing_, flushing_ || (writing_ && !u().write_cache),
+                  last_.count, last_.lba, unit_, fetch_count_};
     return true;
 }
 

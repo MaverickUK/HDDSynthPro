@@ -272,6 +272,8 @@ The JMicron on the Mac, the PCB, the generated disk (`T`), `-m speed`, two runs 
 
 A1 and A2 agree, so the rig didn't drift. **B is slower than both** on the lane (random reads about 1%, writes 0.1 ms) and on early answers' writes (0.4 ms, 0.7%), so, as the checklist says, the layout isn't recorded yet. What grew in core 1's block: the per-sector `pendingFetch` (+18 bytes) and `postFetch` (+8), for the fetch's new kind (SynthMinder's SEND and RECEIVE), and `serveDataIn` (+12), `serveBusEarly` (+8), `serveLane` and `serveDataInEarly` (+4 each). Next: compare their compiled code with 0.35.0's, as 0.35.0-dev.7 did, to see whether the cost is the new check per sector (then keep it off the per-sector path) or placement.
 
+**Done in 0.36.0-dev.3:** the new `Fetch` field had grown every copy of a fetch in core 1's loops, and `serveFetches` (core 0, per sector) had grown 164 bytes. Now core 1's per-access code is 0.35.0's again (only `startCommand`, 20 bytes longer, moves what follows), and `serveFetches` is 40 bytes longer, for its two checks. Owed: an A-B of 0.35.0 against dev.3 on the lane and early answers, then `check_core1_layout.py --update`.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

@@ -110,7 +110,7 @@ TEST(sm_send_is_a_one_sector_data_out) {
     st = h.status();
     CHECK(!(st & (ST_ERR | ST_DRQ)));
     CHECK_EQ(h.fetches.size(), 1u);
-    CHECK(h.fetches[0].message && h.fetches[0].store && !h.fetches[0].flush);
+    CHECK(ata::isMessage(h.fetches[0]) && h.fetches[0].store);
     CHECK_EQ(int(h.fetches[0].sectors), 1);
     CHECK_EQ(h.request.size(), 256u);
     CHECK_EQ(h.request[0], 0x4D53);
@@ -135,7 +135,7 @@ TEST(sm_receive_is_busy_until_the_reply_is_ready) {
     CHECK(h.waitNotBusy());
     CHECK(!(h.altStatus() & (ST_DRQ | ST_ERR)));
     CHECK_EQ(h.fetches.size(), 1u);
-    CHECK(h.fetches[0].message && !h.fetches[0].store);
+    CHECK(ata::isMessage(h.fetches[0]) && !h.fetches[0].store);
 }
 
 TEST(sm_aborts_anything_not_synthminders) {
@@ -160,6 +160,9 @@ TEST(sm_aborts_anything_not_synthminders) {
     CHECK(h.fetches.empty());
 }
 
+// With the write cache off a write's fetch carries `flush`, a message's too
+// (pendingFetch doesn't tell them apart, so it stays 0.35.0's code); core 0
+// takes a message aside before any disk work, so it never flushes the card.
 TEST(sm_never_flushes_with_the_write_cache_off) {
     Device dev(INFO);
     Host h{dev};
@@ -171,7 +174,7 @@ TEST(sm_never_flushes_with_the_write_cache_off) {
     for (int i = 0; i < 256; ++i) dev.write(Reg::Data, 0);
     CHECK(h.waitNotBusy());
     CHECK_EQ(h.fetches.size(), 1u);
-    CHECK(!h.fetches[0].flush);
+    CHECK(ata::isMessage(h.fetches[0]));  // so serveFetches sends it to synthMinderFetch, not the disk
 }
 
 TEST(sm_a_reset_ends_a_waiting_receive) {
