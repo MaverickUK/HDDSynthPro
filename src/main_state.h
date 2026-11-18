@@ -184,6 +184,7 @@ namespace synthminder { class Reply; }
 void bayStatus(synthminder::Reply& reply);
 const char* bayChangeDisc(const char* name);              // "" or why not
 const char* baySet(const char* key, const char* value);  // "" or why not
+void baySettings(synthminder::Reply& reply);           // $SBQ,1,SETTINGS
 
 // The activity classifier, the link and seek timing (core 0)
 extern activity::Classifier g_activity;

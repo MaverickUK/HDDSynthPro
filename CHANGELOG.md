@@ -28,6 +28,10 @@ SynthMinder, the DOS program, talks to the drive: [docs/synthminder-protocol.md]
 - Everything here is host-tested only: no PC has sent 8Dh to the drive yet, and no synth has answered over the link.
 - **Core 1's layout changed** (8Dh in `ata_device`: the block is 224 bytes longer, and core 0's 164), so `check_core1_layout.py` fails until reads are benchmarked on the rig (`-m speed`) and the new layout is recorded (`--update`).
 
+### Added (18 Nov 2026)
+- **`$SBQ,1,SETTINGS`**: one `$SBS,1,<key>,<next>,<now>` per setting SynthMinder's Settings tab shows (`device1`, `cdrom`, `seek_timing`, `activity_link`, `write_behind`, `read_ahead`, `sd_high_speed`): `next` from `HDDSYNTH.INI` read afresh, `now` as the drive runs ([docs/synthminder-protocol.md](docs/synthminder-protocol.md)).
+- **`$SBC,1,SET` takes those keys too**, not only `device0`. `synthminder::checkSetting` (pure, host-tested) says which values each takes and what the drive must find on the card (an image, a disc); a new reason, `value`, for one it doesn't take.
+
 ### Fixed (on the Evesham, 17 Nov 2026)
 - **The synth's pack list never reached SynthMinder:** the synth takes about 900 ms to answer `$HDQ,1,PACKS` (it reads each pack's `pack.json` and looks for its `drive.json`), and the relay gave up at 500 ms (`RELAY,ERR,nosynth`). `RELAY_TIMEOUT_MS` is 1.5 s, inside SynthMinder's own 2 s wait.
 - `hdm_rejected` rose with every relayed answer (`$HDS`, `$HDP`, `$HDK` went to the `$HDM` parser too). Only `$HDM` lines go to it now; every line still goes to SynthMinder.

@@ -91,9 +91,23 @@ One `$SBF,1,<index>,<count>,<name>,<sizeKB>,<kind>` per file in the card's root 
 
 As console `M`: the drive reports the disc changing (removal, new media, unit attention), as if the disc had been swapped. `-` ejects. Reply `$SBK,1,DISC,OK,` or `ERR,` with `nocdrom` (no CD-ROM drive set up), `notfound`, `busy`.
 
+### `$SBQ,1,SETTINGS`: the settings SET can change (since 0.36.0)
+
+One `$SBS,1,<key>,<next>,<now>` per setting, in this order: `<next>` is what `HDDSYNTH.INI` says (read afresh, so it shows a change saved with SET), used from the next start; `<now>` is what the drive runs with. They differ after a SET, or after the console changed one until a restart. Firmware without it answers `$SBK,1,SETTINGS,ERR,unknown`.
+
+| Key | Values |
+|---|---|
+| `device1` | `none`, `cdrom` (a CD-ROM drive, with `cdrom`'s disc), or an image (`.IMG`) or disc (`.ISO`, `.CUE`) on the card |
+| `cdrom` | the CD-ROM's disc at the start: an `.ISO` or `.CUE` on the card |
+| `seek_timing` | `off`, `synth`, or a preset: `stepper85`, `voice91`, `voice97`, `fdb05` |
+| `activity_link` | `on`, `off` |
+| `write_behind` | `on`, `off` |
+| `read_ahead` | `on`, `off` |
+| `sd_high_speed` | `on`, `off` |
+
 ### `$SBC,1,SET,<key>,<value>`: change a setting in `HDDSYNTH.INI`
 
-As console `E`: the file is rewritten with that one setting changed, and it takes effect at the next start, never at once (the PC is running from the disk). Version 1 allows `device0` only, to an image on the card; reply `$SBK,1,SET,OK,` or `ERR,` with `key` (not allowed), `notfound`.
+As console `E`: the file is rewritten with that one setting changed, and it takes effect at the next start, never at once (the PC is running from the disk). `device0`, to an image on the card, and since 0.36.0 every key SETTINGS lists, with the values above. Reply `$SBK,1,SET,OK,` or `ERR,` with `key` (not one SET may change), `value` (not a value it takes), `notfound` (no such image or disc on the card) or `card` (the card or `HDDSYNTH.INI` couldn't be read or written).
 
 ### Errors
 

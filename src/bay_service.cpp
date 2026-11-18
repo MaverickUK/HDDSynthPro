@@ -132,6 +132,7 @@ public:
             case synthminder::BayQuery::Files: listFiles(reply); break;
             case synthminder::BayQuery::Disc: synthminder::addAck(reply, "DISC", bayChangeDisc(r.key)); break;
             case synthminder::BayQuery::Set: synthminder::addAck(reply, "SET", baySet(r.key, r.value)); break;
+            case synthminder::BayQuery::Settings: baySettings(reply); break;
         }
     }
     bool relay(const char* line, size_t len) override { return relayToSynth(line, len); }

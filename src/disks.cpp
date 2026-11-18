@@ -669,19 +669,48 @@ const char* bayChangeDisc(const char* name) {
     return why;
 }
 
-// $SBC,1,SET,<key>,<value>: as console `E`, from the next start. Version 1
-// allows device0 only, to an image on the card. "" when saved, or why not:
-// "key", "notfound" or "card".
+// $SBC,1,SET,<key>,<value>: as console `E`, from the next start: device0, and
+// since 0.36.0 the settings $SBQ,1,SETTINGS lists (synthminder::checkSetting
+// says which values each takes). "" when saved, or why not: "key", "value",
+// "notfound" (no such image or disc on the card) or "card".
 const char* baySet(const char* key, const char* value) {
-    if (strcasecmp(key, "device0") != 0) return "key";
-    if (!hasExtension(value, ".IMG") || !sd_card::fileExists(value)) return "notfound";
+    const synthminder::SettingCheck check = synthminder::checkSetting(key, value);
+    if (check.needs == synthminder::SettingNeeds::Bad) return check.why;
+    if (check.needs != synthminder::SettingNeeds::Nothing && !sd_card::fileExists(value)) return "notfound";
+    char k[16];
+    std::snprintf(k, sizeof k, "%s", key);
+    for (char* p = k; *p; ++p) *p = char(tolower(*p));
     Quiet quiet;
-    const char* why = setConfig("device0", value, quiet);
+    const char* why = setConfig(k, value, quiet);
     if (!why[0]) {
-        std::snprintf(g_device0_next, sizeof g_device0_next, "%s", value);
-        printfLine("SYNTHMINDER set device0 = %s (from the next start)\n", value);
+        if (strcmp(k, "device0") == 0) std::snprintf(g_device0_next, sizeof g_device0_next, "%s", value);
+        printfLine("SYNTHMINDER set %s = %s (from the next start)\n", k, value);
     }
     return why;
+}
+
+// $SBQ,1,SETTINGS: one $SBS per setting SET may change, as HDDSYNTH.INI has it
+// now (read afresh: from the next start) and as the drive runs.
+void baySettings(synthminder::Reply& reply) {
+    drive_config::Config file;
+    drive_config::defaults(file);
+    char* const text = scratch::a;
+    size_t len = 0;
+    bool truncated = false;
+    Quiet quiet;
+    if (sd_card::readConfig(text, drive_config::MAX_FILE, len, truncated, quiet) && !truncated)
+        drive_config::parse(text, len, file);
+    auto onOff = [](bool on) { return on ? "on" : "off"; };
+    auto orNone = [](const char* s) { return s[0] ? s : "none"; };
+    using synthminder::addSetting;
+    addSetting(reply, "device1", orNone(file.device1), orNone(g_config.device1));
+    addSetting(reply, "cdrom", orNone(file.cdrom), orNone(g_config.cdrom));
+    addSetting(reply, "seek_timing", seek_timing::settingName(file.seek_timing),
+               g_seek_on ? seek_timing::settingName(g_config.seek_timing) : "off");
+    addSetting(reply, "activity_link", onOff(file.activity_link), onOff(g_link_on));
+    addSetting(reply, "write_behind", onOff(file.write_behind), onOff(g_write_behind.load()));
+    addSetting(reply, "read_ahead", onOff(file.read_ahead), onOff(g_read_ahead.load()));
+    addSetting(reply, "sd_high_speed", onOff(file.sd_high_speed), onOff(g_config.sd_high_speed));
 }
 
 

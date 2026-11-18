@@ -80,9 +80,33 @@ void sanitise(const char* in, char* out, size_t out_len);
 bool addValue(Reply& reply, const char* key, const char* value);
 bool addFile(Reply& reply, unsigned index, unsigned count, const char* name, uint32_t size_kb, char kind);
 bool addAck(Reply& reply, const char* what, const char* reason);
+// $SBS,1,<key>,<next>,<now>: one of the settings SynthMinder can change, as
+// HDDSYNTH.INI has it (from the next start) and as the drive runs now.
+bool addSetting(Reply& reply, const char* key, const char* next, const char* now);
+
+// The settings SET may change (protocol 1: device0 first, the rest since
+// IDE Synth Bay 0.36.0), and what their values must be. checkSetting says
+// whether `value` can be right for `key` without looking at the card: Bad
+// with the reason ("key": not one of these; "value": not a value it takes),
+// or what the drive must still find on the card.
+enum class SettingNeeds : uint8_t {
+    Bad,           // why() says which
+    Nothing,       // on/off, a seek timing: nothing to find
+    Image,         // device0: an .IMG on the card
+    Disc,          // cdrom: an .ISO or .CUE on the card
+    ImageOrDisc,   // device1: an .IMG, an .ISO or .CUE (a CD-ROM with that disc), or none/cdrom (Nothing)
+};
+struct SettingCheck {
+    SettingNeeds needs = SettingNeeds::Bad;
+    const char* why = "key";
+};
+SettingCheck checkSetting(const char* key, const char* value);
+// The keys of SETTINGS' answer, in the order it gives them.
+extern const char* const SETTING_KEYS[];
+extern const size_t SETTING_COUNT;
 
 // A request for the drive itself.
-enum class BayQuery : uint8_t { Status, Files, Disc, Set };
+enum class BayQuery : uint8_t { Status, Files, Disc, Set, Settings };
 struct BayRequest {
     BayQuery query = BayQuery::Status;
     char key[VALUE_MAX + 1] = "";    // Disc: the disc's name ("-" ejects); Set: the setting

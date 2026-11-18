@@ -1,7 +1,10 @@
 #include "synthminder.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstring>
+
+#include "seek_timing.h"
 
 #include "sentence.h"
 
@@ -96,6 +99,63 @@ bool addValue(Reply& reply, const char* key, const char* value) {
     return reply.addSentence(body);
 }
 
+bool addSetting(Reply& reply, const char* key, const char* next, const char* now) {
+    char k[VALUE_MAX + 1], n[VALUE_MAX + 1], v[VALUE_MAX + 1], body[SENTENCE_MAX_LINE];
+    sanitise(key, k, sizeof k);
+    sanitise(next, n, sizeof n);
+    sanitise(now, v, sizeof v);
+    if (std::snprintf(body, sizeof body, "SBS,1,%s,%s,%s", k, n, v) >= int(sizeof body)) return false;
+    return reply.addSentence(body);
+}
+
+const char* const SETTING_KEYS[] = {"device1", "cdrom", "seek_timing", "activity_link",
+                                    "write_behind", "read_ahead", "sd_high_speed"};
+const size_t SETTING_COUNT = sizeof(SETTING_KEYS) / sizeof(SETTING_KEYS[0]);
+
+namespace {
+bool sameNoCase(const char* a, const char* b) {
+    for (; *a && *b; ++a, ++b)
+        if (std::tolower(static_cast<unsigned char>(*a)) != std::tolower(static_cast<unsigned char>(*b))) return false;
+    return *a == *b;
+}
+bool endsWithNoCase(const char* s, const char* end) {
+    size_t n = std::strlen(s), m = std::strlen(end);
+    return n > m && sameNoCase(s + n - m, end);
+}
+SettingCheck ok(SettingNeeds needs) {
+    SettingCheck c;
+    c.needs = needs;
+    c.why = "";
+    return c;
+}
+SettingCheck bad(const char* why) {
+    SettingCheck c;
+    c.why = why;
+    return c;
+}
+}  // namespace
+
+SettingCheck checkSetting(const char* key, const char* value) {
+    if (!value[0]) return bad("value");
+    if (sameNoCase(key, "device0")) return endsWithNoCase(value, ".IMG") ? ok(SettingNeeds::Image) : bad("value");
+    if (sameNoCase(key, "device1")) {
+        if (sameNoCase(value, "none") || sameNoCase(value, "cdrom")) return ok(SettingNeeds::Nothing);
+        return endsWithNoCase(value, ".IMG") || endsWithNoCase(value, ".ISO") || endsWithNoCase(value, ".CUE")
+                   ? ok(SettingNeeds::ImageOrDisc)
+                   : bad("value");
+    }
+    if (sameNoCase(key, "cdrom"))
+        return endsWithNoCase(value, ".ISO") || endsWithNoCase(value, ".CUE") ? ok(SettingNeeds::Disc) : bad("value");
+    if (sameNoCase(key, "seek_timing")) {
+        seek_timing::Setting s;
+        return seek_timing::parseSetting(value, std::strlen(value), s) ? ok(SettingNeeds::Nothing) : bad("value");
+    }
+    if (sameNoCase(key, "activity_link") || sameNoCase(key, "write_behind") || sameNoCase(key, "read_ahead") ||
+        sameNoCase(key, "sd_high_speed"))
+        return sameNoCase(value, "on") || sameNoCase(value, "off") ? ok(SettingNeeds::Nothing) : bad("value");
+    return bad("key");
+}
+
 bool addFile(Reply& reply, unsigned index, unsigned count, const char* name, uint32_t size_kb, char kind) {
     char n[VALUE_MAX + 1], body[SENTENCE_MAX_LINE];
     sanitise(name, n, sizeof n);
@@ -158,6 +218,8 @@ void Service::onSend(const uint8_t* sector, uint32_t now_ms) {
         bay.query = BayQuery::Status;
     } else if (known && f[0].is("SBQ") && f[2].is("FILES")) {
         bay.query = BayQuery::Files;
+    } else if (known && f[0].is("SBQ") && f[2].is("SETTINGS")) {
+        bay.query = BayQuery::Settings;
     } else if (known && f[0].is("SBC") && f[2].is("DISC") && fields == 4 && f[3].n) {
         bay.query = BayQuery::Disc;
         copyField(f[3], bay.key, sizeof bay.key);

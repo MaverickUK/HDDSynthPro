@@ -218,6 +218,10 @@ struct FakePlatform : synthminder::Platform {
                 break;
             case synthminder::BayQuery::Disc: synthminder::addAck(reply, "DISC", ""); break;
             case synthminder::BayQuery::Set: synthminder::addAck(reply, "SET", "key"); break;
+            case synthminder::BayQuery::Settings:
+                synthminder::addSetting(reply, "seek_timing", "synth", "off");
+                synthminder::addSetting(reply, "write_behind", "on", "on");
+                break;
         }
     }
     bool relay(const char* line, size_t len) override {
@@ -393,6 +397,47 @@ TEST(sm_reply_never_splits_or_overflows) {
 
 }  // namespace
 
+TEST(sm_bay_settings) {
+    // $SBQ,1,SETTINGS: one $SBS,1,<key>,<next>,<now> per setting.
+    FakePlatform p;
+    synthminder::Service s(p);
+    auto r = roundTrip(s, sentence("SBQ,1,SETTINGS"));
+    CHECK_EQ(r.size(), 1u);
+    CHECK(p.asked.size() == 1 && p.asked[0] == synthminder::BayQuery::Settings);
+    CHECK_STR(r[0].text, sentence("SBS,1,seek_timing,synth,off") + "\n" + sentence("SBS,1,write_behind,on,on") + "\n");
+    CHECK_EQ(synthminder::SETTING_COUNT, 7u);
+}
+
+TEST(sm_setting_values_are_checked) {
+    using synthminder::SettingNeeds;
+    using synthminder::checkSetting;
+    // The card's files: the drive still has to find them.
+    CHECK(checkSetting("device0", "WIN98.IMG").needs == SettingNeeds::Image);
+    CHECK(checkSetting("device0", "doom.iso").needs == SettingNeeds::Bad);
+    CHECK(checkSetting("device1", "none").needs == SettingNeeds::Nothing);
+    CHECK(checkSetting("device1", "CDROM").needs == SettingNeeds::Nothing);
+    CHECK(checkSetting("device1", "GAMES.IMG").needs == SettingNeeds::ImageOrDisc);
+    CHECK(checkSetting("device1", "QUAKE.ISO").needs == SettingNeeds::ImageOrDisc);
+    CHECK(checkSetting("cdrom", "DOOMBIN.CUE").needs == SettingNeeds::Disc);
+    CHECK(checkSetting("cdrom", "GAMES.IMG").needs == SettingNeeds::Bad);
+    // Values the drive knows without the card.
+    CHECK(checkSetting("seek_timing", "synth").needs == SettingNeeds::Nothing);
+    CHECK(checkSetting("seek_timing", "fdb05").needs == SettingNeeds::Nothing);
+    CHECK(checkSetting("seek_timing", "warp9").needs == SettingNeeds::Bad);
+    for (const char* key : {"activity_link", "write_behind", "read_ahead", "sd_high_speed"}) {
+        CHECK(checkSetting(key, "on").needs == SettingNeeds::Nothing);
+        CHECK(checkSetting(key, "OFF").needs == SettingNeeds::Nothing);
+        CHECK_STR(checkSetting(key, "maybe").why, std::string("value"));
+    }
+    // Not one SET may change, or nothing at all.
+    CHECK_STR(checkSetting("bus", "lane").why, std::string("key"));
+    CHECK_STR(checkSetting("geometry", "auto").why, std::string("key"));
+    CHECK_STR(checkSetting("device1", "").why, std::string("value"));
+    // Every setting SETTINGS lists can be set.
+    for (size_t i = 0; i < synthminder::SETTING_COUNT; ++i)
+        CHECK(std::string(checkSetting(synthminder::SETTING_KEYS[i], "x").why) != "key");
+}
+
 void runSynthMinderTests() {
     RUN(sm_send_is_a_one_sector_data_out);
     RUN(sm_receive_is_busy_until_the_reply_is_ready);
@@ -407,4 +452,6 @@ void runSynthMinderTests() {
     RUN(sm_relay_errors);
     RUN(sm_values_are_sanitised);
     RUN(sm_reply_never_splits_or_overflows);
+    RUN(sm_bay_settings);
+    RUN(sm_setting_values_are_checked);
 }
