@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "board.h"
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"
@@ -1106,7 +1107,8 @@ CORE1_RAM void loop1() {
 
 // The BB48's LED as the drive's activity light, like a hard disk's: lit while
 // a command runs, and for at least LED_MIN_MS after any command starts. The
-// activity link sends the same busy flag.
+// activity link sends the same busy flag, and PCB rev 0.4 lights the PC
+// case's disk light by DASP# with it.
 bool g_busy = false;
 
 static void updateLed() {
@@ -1120,6 +1122,7 @@ static void updateLed() {
     }
     g_busy = int32_t(off_ms - now) > 0;
     gpio_put(cfg::PIN_BOARD_LED, g_busy);
+    board::setActivity(g_busy);
 }
 
 // Console `V`: the drive goes silent (core 1's stayAbsent) until the adapter,
@@ -1351,6 +1354,7 @@ void setup() {
     stack_watch::paint(0);  // core 0's stack, for `s`
     peripheralClockFromSystem();  // before SPI and the UART work out their dividers
     Serial.begin(115200);
+    board::begin();  // which board: rev 0.4's lines are touched only on rev 0.4
     // The PCB's card detect, readable for `p` (not used yet): an input with no
     // internal pulls (erratum E9; the PCB pulls it up).
     gpio_init(cfg::PIN_SD_CD);

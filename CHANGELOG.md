@@ -4,6 +4,19 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [Unreleased]
 
+## [0.35.1-dev.1] - 2026-11-18 (branch `rev04-firmware`)
+
+Firmware for PCB rev 0.4's new lines, written before the boards arrive ([docs/pcb-rev04.md](docs/pcb-rev04.md#firmware-for-rev-04)); the first day with the board: [docs/pcb-bringup-rev04.md](docs/pcb-bringup-rev04.md). The version is a placeholder: 0.36.0 is branch `synthminder`'s, and this one's number is chosen when it merges.
+
+### Added
+- **`board.*`** (core 0): tells rev 0.4 from rev 0.3 and the BB48 at start-up by SD_PWR# (GPIO 43), which only rev 0.4 pulls down, read with the internal pull-up for 100 µs. Elsewhere nothing new is touched, so one `pcb_drive` serves both boards. `s`: `board=rev0.4` or `rev0.3/bb48`.
+- **The card's power switch (rev 0.4):** a card that's in but won't start over SDIO (left in SPI mode by other firmware, or stuck after a warm restart, both ended only by a power cycle) has its six lines released, its power cut for 250 ms (`board::CARD_OFF_MS`, to be measured on the board) and restored, and one more try before the SPI fallback. `s`: `card_power_cycles`.
+- **DASP# (rev 0.4)** lights with the activity LED: the PC case's disk light. Open drain, 12 mA, never driven high.
+- **`p` (rev 0.4):** `PINS DASP#= PDIAG#= CSEL= SD_PWR#=`. PDIAG# and CSEL are only read: sharing the cable with a real drive needs the drive to answer as one device only.
+
+### Tested
+- Builds (`bb48`, `bb48_drive`, `pcb_drive`); core 1's code is unchanged (`check_core1_ram.py`, `check_core1_layout.py`: none moved). Not run on a board: rev 0.4 hasn't arrived, and on rev 0.3 the new code reads `board=rev0.3/bb48` and does nothing else (to be checked on the rig).
+
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 

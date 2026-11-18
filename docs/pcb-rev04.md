@@ -136,6 +136,16 @@ What the retro PCs taught that firmware covers: IORDY on ISA cards that assert c
 
 Done in 0.16.6: the firmware drives **BUS_EN# (GPIO 41) low** once the bus pins are set up, so JP1 can stay open, and `p` reads **SD_CD (GPIO 40)**. The first day with the board: [pcb-bringup.md](pcb-bringup.md).
 
+## Firmware for rev 0.4
+
+Branch `rev04-firmware` (0.35.1-dev.1, written before the boards arrived; built, not yet run on one): `src/board.*`, on core 0. It tells rev 0.4 from rev 0.3 at start-up by SD_PWR# (GPIO 43: rev 0.4's 4.7 kΩ pull-down holds it low against the internal pull-up; unconnected elsewhere, it reads high), so one `pcb_drive` serves both, and touches the new lines only on rev 0.4:
+- **SD_PWR# (3):** a card that's in but won't start over SDIO has its lines released (inputs, no pulls), its power cut for 250 ms and restored, and one more try, before the SPI fallback. `s`: `card_power_cycles`.
+- **DASP# (5):** the case's disk light, with the activity LED: open drain, 12 mA, never driven high.
+- **PDIAG# and CSEL (5):** read only, shown by `p`. Sharing the cable with a real drive needs the drive to answer as one device only: later.
+- Not yet: CD audio (6), the PSRAM (7).
+
+The first day with the board: [pcb-bringup-rev04.md](pcb-bringup-rev04.md).
+
 ## The design files (8 Nov, started)
 
 Rev 0.4 is generated as rev 0.3 was: `hardware/tools/gen_schematic.py` writes the schematic, `layout_pcb.py` places the parts, `autoroute.py` routes them with Freerouting, and `check_netlist.py` checks the result against `src/config.h`. Progress and what's left: [hardware/README.md](../hardware/README.md).

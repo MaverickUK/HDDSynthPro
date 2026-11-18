@@ -97,6 +97,8 @@ const media_watch::Watch& media();
 // Times the card was started again after it stopped answering (device 0's or
 // device 1's reads, or `S` and `M` finding it silent): CARD lines and `s`.
 uint32_t restarts();
+// PCB rev 0.4: times the card's power was cut because it wouldn't start (board.h).
+uint32_t powerCycles();
 // Device 1's disk (docs/two-drives.md), kept apart from the image above so
 // device 0's proven path is untouched: a second image through SdFat's
 // file layer only (no extent map), or a folder, read-only. An image read or

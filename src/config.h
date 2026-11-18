@@ -72,8 +72,10 @@ constexpr uint32_t BUS_SWITCH_QUIET_US = 10000;
 constexpr unsigned PIN_SD_CD = 40;
 constexpr unsigned PIN_BUS_EN_N = 41;
 
-// PCB rev 0.4 (docs/pcb-rev04.md; not used by the firmware yet, unconnected
-// on rev 0.3 and the BB48). DASP#, PDIAG# and CSEL go through the bus
+// PCB rev 0.4 (docs/pcb-rev04.md; unconnected on rev 0.3 and the BB48).
+// board.cpp tells the boards apart by SD_PWR# and touches these only on
+// rev 0.4: SD_PWR#, DASP# (the case light) and reads of PDIAG# and CSEL;
+// audio and the PSRAM aren't used yet. DASP#, PDIAG# and CSEL go through the bus
 // switches like the rest of the bus, with 10k pull-ups on the RP2350's side:
 // DASP# and PDIAG# open drain, CSEL read at reset (low = device 0). SD_PWR#
 // is the microSD's power switch, pulled down on the board, so the card is

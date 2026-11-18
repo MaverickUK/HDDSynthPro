@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "board.h"
 #include "bus_sample.h"
 #include "config.h"
 #include "core1_ram.h"
@@ -346,6 +347,10 @@ static void printPins() {
     Serial.printf("PINS DMARQ=%d DMACK#=%d SD_CD=%d BUS_EN#=%d\n", (int)gpio_get(cfg::PIN_DMARQ),
                   (int)gpio_get(cfg::PIN_DMACK_N), (int)gpio_get(cfg::PIN_SD_CD), (int)gpio_get(cfg::PIN_BUS_EN_N));
 #endif
+    // PCB rev 0.4's lines (board.h): CSEL low means the cable says device 0.
+    if (board::rev04())
+        Serial.printf("PINS DASP#=%d PDIAG#=%d CSEL=%d SD_PWR#=%d\n", board::daspLevel(), board::pdiagLevel(),
+                      board::cselLevel(), (int)gpio_get(cfg::PIN_SD_PWR_N));
 }
 
 static void printStats() {
@@ -459,6 +464,7 @@ static void printStats() {
     const media_watch::Watch& card = sd_card::media();
     Serial.printf(" card=%s card_lost=%lu card_back=%lu card_restarts=%lu", media_watch::stateName(card.state()),
                   (unsigned long)card.losses(), (unsigned long)card.returns(), (unsigned long)sd_card::restarts());
+    Serial.printf(" board=%s card_power_cycles=%lu", board::name(), (unsigned long)sd_card::powerCycles());
     Serial.printf(" bus_trace=%d seq=%lu rand=%lu activity=%s",
                   (int)g_trace_bus.load(), (unsigned long)g_activity.sequentialCommands(),
                   (unsigned long)g_activity.randomCommands(), activity::stateName(g_activity.state()));

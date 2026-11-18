@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <SdFat.h>
 
+#include "board.h"
 #include "card_retry.h"
 #include "config.h"
 #include "drive_config.h"
@@ -124,19 +125,39 @@ static void applyHighSpeed() {
 #endif
 }
 
+// Times rev 0.4 cut the card's power because it wouldn't start (`s`'s
+// card_power_cycles).
+static uint32_t s_power_cycles = 0;
+
+#if SD_SDIO
+static bool beginSdio() {
+    if (!s_sd.begin(SdioConfig(cfg::PIN_SD_CLK, cfg::PIN_SD_CMD, cfg::PIN_SD_DAT0, cfg::SD_SDIO_CLKDIV))) {
+        s_sd.end();  // frees the PIO block SdFat's driver claimed, even when it failed
+        return false;
+    }
+    return true;
+}
+#endif
+
 // Starts the card and mounts its volume (a fresh volume: whatever SdFat had
-// cached from a card before is dropped). The PCB build starts it over SDIO;
-// a card that's in but won't (most likely left in SPI mode, which only a
-// power cycle ends) runs over SPI instead, if that happens at boot.
+// cached from a card before is dropped). The PCB build starts it over SDIO.
+// On rev 0.4 a card that's in but won't (left in SPI mode, or stuck after a
+// warm restart: both end only with a power cycle) has its power cut and gets
+// one more try. If it still won't, or on rev 0.3, it runs over SPI instead,
+// if that happens at boot.
 static bool startCard() {
 #if SD_SDIO
     if (s_sdio_allowed) {
-        if (s_sd.begin(SdioConfig(cfg::PIN_SD_CLK, cfg::PIN_SD_CMD, cfg::PIN_SD_DAT0, cfg::SD_SDIO_CLKDIV))) {
+        bool started = beginSdio();
+        if (!started && cardDetected() && board::cycleCardPower()) {
+            ++s_power_cycles;
+            started = beginSdio();
+        }
+        if (started) {
             s_on_sdio = true;
             applyHighSpeed();
             return true;
         }
-        s_sd.end();  // frees the PIO block SdFat's driver claimed, even when it failed
         s_on_sdio = false;
         if (!s_booting || !cardDetected()) return false;  // later: try SDIO again next time
         s_sdio_allowed = false;
@@ -456,6 +477,8 @@ static bool wakeIfSilent(Print& out) {
 }
 
 uint32_t restarts() { return s_restarts; }
+
+uint32_t powerCycles() { return s_power_cycles; }
 
 const media_watch::Watch& media() { return s_watch; }
 
