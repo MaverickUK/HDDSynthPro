@@ -245,6 +245,18 @@ The JMicron (Mac), the generated disk, `-m speed`, the data lane (`P l`) unless 
 
 Early answers on dev.6: 1.15 / 73.9 / 1.08 (as 0.34.0). Multiword DMA 2 offered by `dma = auto`, after a replug: 6.80 MB/s reads, 801.4 IOPS, 13.19 writes (0.34.0 with `dma = on`: 6.83 and 12.29). The lane's reads on this rig have ranged 1.20-1.36 run to run since 0.32.3, so the read figures are within noise; the writes are steady to 0.1 ms. **dev.7 found the cause by comparing the compiled code with 0.34.0's:** register allocation, not work. The probe's call in `serve()` (inlined into `serviceOnce` and `serveOther`, which every lane write goes through) kept `s_early` in r8 and made 16-bit instructions 32-bit, and `bus = auto`'s per-access flag pushed `runDrive`'s `early` flag onto the stack. With both gone those three functions are 0.34.0's instruction for instruction, and `runDrive`'s loop is too, but for two registers' names: about 30 ns a written word, 6 cycles. The last 0.2 ms (0.5%) is within what the hot functions' placement can do (early answers' loop is 16 bytes larger, moving what follows it). With DMA after a replug: 6.78 / 809.9 / 13.13.
 
+## The card soak in high-speed mode (0.35.0, 17-18 Nov 2026)
+
+The PCB through the JMicron (Windows rig), `HDDBENCH.IMG` over SDIO in high-speed mode, multiword DMA 2, `-m cardsoak` (random runs of 1-128 sectors, 40% writes, every sector checked; a full read-back every 30 minutes). Throughput of that mix, per 5-minute report:
+
+| Run | Length | Writes | Reads | Full read-back (64 MB) |
+|---|---|---|---|---|
+| 1, first 70 minutes | 70 min | 1.87-2.14 MB/s | 2.79-3.11 MB/s | 7.7 s |
+| 1, after | 128 min, then the adapter declined | 1.49-1.57 MB/s | 2.32-2.48 MB/s | 10.8-11.1 s |
+| 2 | 6 h 40 min | 1.52-1.81 MB/s (1.56 steady) | 2.32-2.50 MB/s | 10.7-11.0 s |
+
+0.31.0's 10-hour soak at default speed: writes 1.42-1.97 MB/s, reads 2.15-2.73, about 15% slower after the first hour (read-backs 11.1 s, then 13.5-13.8). High-speed mode lifts the reads a little in this mix; the slowdown after about 70 minutes is the same, and the second run was slow from its start, so it is the card's state, not the drive's. 0 wrong in 57.2 GB written and 86.9 GB read.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:
