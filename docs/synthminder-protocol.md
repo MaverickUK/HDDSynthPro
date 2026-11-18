@@ -105,6 +105,15 @@ One `$SBS,1,<key>,<next>,<now>` per setting, in this order: `<next>` is what `HD
 | `read_ahead` | `on`, `off` |
 | `sd_high_speed` | `on`, `off` |
 
+Then, since 0.36.0-dev.2, four the PC must be right for, **shown only**: SET refuses them (`key`), and they're changed in `HDDSYNTH.INI` by hand.
+
+| Key | `<next>` (the file) | `<now>` (running) |
+|---|---|---|
+| `bus` | `auto`, `early`, `lane`, `ide_bus` or `table` (`register_table = on`) | the bus program: `early`, `lane`, `ide_bus`, `noiordy` or `table` |
+| `dma` | `auto`, `on`, `off` | the multiword DMA mode offered (`mdma2`), or `off` |
+| `mode` | `auto`, `pio0`-`pio4`, `mdma0`-`mdma2`, `udma0`-`udma6` | the PIO mode offered (`pio3`) |
+| `geometry` | `auto` or `C/H/S` | the CHS geometry IDENTIFY reports, e.g. `1024/16/63` |
+
 ### `$SBC,1,SET,<key>,<value>`: change a setting in `HDDSYNTH.INI`
 
 As console `E`: the file is rewritten with that one setting changed, and it takes effect at the next start, never at once (the PC is running from the disk). `device0`, to an image on the card, and since 0.36.0 every key SETTINGS lists, with the values above. Reply `$SBK,1,SET,OK,` or `ERR,` with `key` (not one SET may change), `value` (not a value it takes), `notfound` (no such image or disc on the card) or `card` (the card or `HDDSYNTH.INI` couldn't be read or written).

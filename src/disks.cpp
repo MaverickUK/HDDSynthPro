@@ -690,7 +690,8 @@ const char* baySet(const char* key, const char* value) {
 }
 
 // $SBQ,1,SETTINGS: one $SBS per setting SET may change, as HDDSYNTH.INI has it
-// now (read afresh: from the next start) and as the drive runs.
+// now (read afresh: from the next start) and as the drive runs; then, shown
+// only, bus, dma, mode and geometry (since 0.36.0-dev.2).
 void baySettings(synthminder::Reply& reply) {
     drive_config::Config file;
     drive_config::defaults(file);
@@ -711,6 +712,37 @@ void baySettings(synthminder::Reply& reply) {
     addSetting(reply, "write_behind", onOff(file.write_behind), onOff(g_write_behind.load()));
     addSetting(reply, "read_ahead", onOff(file.read_ahead), onOff(g_read_ahead.load()));
     addSetting(reply, "sd_high_speed", onOff(file.sd_high_speed), onOff(g_config.sd_high_speed));
+
+    // Shown only (SET refuses them): the PC must be right for each, so they're
+    // changed in HDDSYNTH.INI, by hand. As the file has them, and as running.
+    const char* bus_next = file.register_table          ? "table"
+                           : file.bus != drive_config::Bus::Settings ? drive_config::busName(file.bus)
+                           : file.early_answers         ? "early"
+                                                        : "ide_bus";
+    const char* bus_now = ide_table::running() ? "table" : ide_bus::busName();
+    addSetting(reply, "bus", bus_next, bus_now);
+    char now[16];
+    uint8_t mdma = g_mdma_mode.load();
+    if (mdma != NO_DMA)
+        std::snprintf(now, sizeof now, "mdma%u", unsigned(mdma));
+    else
+        std::snprintf(now, sizeof now, "off");
+    addSetting(reply, "dma", file.dma_auto ? "auto" : onOff(file.dma), now);
+    std::snprintf(now, sizeof now, "pio%u", unsigned(g_pio_mode.load()));
+    addSetting(reply, "mode", drive_config::modeName(file.mode), now);
+    char next[20];
+    if (file.geometry.cylinders)
+        std::snprintf(next, sizeof next, "%u/%u/%u", unsigned(file.geometry.cylinders), unsigned(file.geometry.heads),
+                      unsigned(file.geometry.sectors_per_track));
+    else
+        std::snprintf(next, sizeof next, "auto");
+    uint32_t g = g_geometry.load(std::memory_order_relaxed);
+    Geometry geo = g ? Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}
+                     : defaultGeometry(g_disk_sectors.load(std::memory_order_relaxed));
+    char used[20];
+    std::snprintf(used, sizeof used, "%u/%u/%u", unsigned(geo.cylinders), unsigned(geo.heads),
+                  unsigned(geo.sectors_per_track));
+    addSetting(reply, "geometry", next, used);
 }
 
 
