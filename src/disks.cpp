@@ -59,6 +59,7 @@
 #include "iordy_timer.h"
 #include "sd_card.h"
 #include "scratch.h"
+#include "synthminder.h"
 #include "welcome_disk.h"
 #include "welcome_text.h"
 #endif
@@ -354,6 +355,29 @@ static void chooseDevice1() {
 // The disk: the test disk after console `T`, or HDDBENCH.IMG after `J`; else
 // the image HDDSYNTH.INI names (HDDSYNTH.IMG by default), or the test disk
 // for `device0 = none`; else HDDSYNTH.IMG; else the welcome disk.
+// The geometry setting, for the image only (the welcome and generated disks
+// lay theirs out for the default), its cylinders cut to fit if it's bigger.
+// At start, and for a new disk at the host's reset (serviceResetSwap).
+static void chooseGeometry() {
+    const bool image = strcmp(g_disk_name, "image") == 0;
+    Geometry geo = image ? g_config.geometry : Geometry{};
+    g_geometry_from = geo.cylinders ? "set" : "auto";
+    if (image && !geo.cylinders) {  // auto: the geometry the image's partition table was made with
+        uint16_t* const sector0 = reinterpret_cast<uint16_t*>(scratch::b);  // as partitionGeometry()'s
+        if (g_disk->read(0, sector0)) {
+            geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), g_disk->sectors());
+            if (geo.cylinders) g_geometry_from = "partition table";
+        }
+    }
+    g_geometry_trimmed = false;
+    if (geo.cylinders && geo.sectors() > g_disk->sectors()) {
+        geo.cylinders = uint16_t(g_disk->sectors() / (uint32_t(geo.heads) * geo.sectors_per_track));
+        g_geometry_trimmed = true;
+    }
+    g_geometry.store(geo.cylinders ? uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track : 0,
+                     std::memory_order_relaxed);
+}
+
 void chooseDisk() {
     uint32_t start = millis();
     drive_config::defaults(g_config);
@@ -427,25 +451,7 @@ void chooseDisk() {
         default: break;
     }
     g_iordy.store(g_config.iordy);
-    // The geometry setting, for the image only (the welcome and generated disks
-    // lay theirs out for the default), its cylinders cut to fit if it's bigger
-    const bool image = strcmp(g_disk_name, "image") == 0;
-    Geometry geo = image ? g_config.geometry : Geometry{};
-    g_geometry_from = geo.cylinders ? "set" : "auto";
-    if (image && !geo.cylinders) {  // auto: the geometry the image's partition table was made with
-        uint16_t* const sector0 = reinterpret_cast<uint16_t*>(scratch::b);  // as partitionGeometry()'s
-        if (g_disk->read(0, sector0)) {
-            geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), g_disk->sectors());
-            if (geo.cylinders) g_geometry_from = "partition table";
-        }
-    }
-    g_geometry_trimmed = false;
-    if (geo.cylinders && geo.sectors() > g_disk->sectors()) {
-        geo.cylinders = uint16_t(g_disk->sectors() / (uint32_t(geo.heads) * geo.sectors_per_track));
-        g_geometry_trimmed = true;
-    }
-    g_geometry.store(geo.cylinders ? uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track : 0,
-                     std::memory_order_relaxed);
+    chooseGeometry();
     // A host that ignores IORDY reads whatever is on the bus: check image data
     // on the cable too, with early answers and on the data lane. Not with
     // `isa = on`: the ISA card that needs it strobes DIOR# with no chip select,
@@ -527,19 +533,22 @@ static uint32_t openDisc(const char* name) {
     return sectors;
 }
 
-void startDiscChange(const char* name) {
+// Returns "" once the change has started, or why not: "nocdrom" or "busy"
+// (SynthMinder's $SBC,1,DISC replies; the console prints them in words).
+const char* startDiscChange(const char* name, Print& out) {
     if (!g_device0_cdrom && !g_device1_cdrom) {
-        Serial.println("# DISC: no CD-ROM drive (device0 = cdrom or device1 = cdrom gives one)");
-        return;
+        out.println("# DISC: no CD-ROM drive (device0 = cdrom or device1 = cdrom gives one)");
+        return "nocdrom";
     }
     if (g_disc_step != DiscStep::None) {
-        Serial.println("# DISC: a change is already under way");
-        return;
+        out.println("# DISC: a change is already under way");
+        return "busy";
     }
     std::snprintf(g_disc_next, sizeof g_disc_next, "%s", name);
     requestDisc(0);  // out first: core 1 confirms once nothing for the old disc is under way
     g_disc_step = DiscStep::Ejecting;
-    Serial.printf("# DISC ejecting, then %s\n", g_disc_next);
+    out.printf("# DISC ejecting, then %s\n", g_disc_next);
+    return "";
 }
 
 void serviceDiscChange() {
@@ -560,8 +569,90 @@ void serviceDiscChange() {
     g_disc_step = DiscStep::None;
 }
 
-// Console `E`: sets one setting in HDDSYNTH.INI from "key = value", keeping
-// the rest of the file and its comments (the defaults if there is no file).
+// Sets `key` (lower case) to `value` in HDDSYNTH.INI, keeping the rest of the
+// file and its comments (the defaults if there is no file). Returns "" when
+// saved, or why not: "card" (no card, or the file can't be read or written)
+// or "key" (not a setting, or the file would be too long).
+// HDDSYNTH.INI's device0 as SynthMinder or the console last set it, else as
+// read at boot: it's served from the host's next hardware reset (armResetSwap),
+// or the next start.
+static char g_device0_next[drive_config::MAX_NAME + 1] = "";
+
+// With device0 set to another image than the one served, the host's next
+// RESET# brings it in (main_state.h, ResetSwap). Not for a CD-ROM, the test or
+// bench disk, or the welcome disk: those wait for a restart, as before.
+static void armResetSwap() {
+    const uint8_t state = g_reset_swap.load(std::memory_order_acquire);
+    if (state == RESET_SWAP_REQUESTED || state == RESET_SWAP_DONE) return;  // one under way
+    const bool image = strcmp(g_disk_name, "image") == 0 && !g_device0_cdrom;
+    const size_t n = strlen(g_device0_next);
+    const bool img = n > 4 && strcasecmp(g_device0_next + n - 4, ".IMG") == 0;
+    const bool other = img && strcasecmp(g_device0_next, g_image_name) != 0;
+    g_reset_swap.store(image && other ? RESET_SWAP_ARMED : RESET_SWAP_NONE, std::memory_order_release);
+}
+
+// Core 0's part of a new disk at the host's reset: what's held for the old
+// image written out, the new one opened (the old again if it can't be), its
+// geometry, and its IDENTIFY built for core 1. The host waits: BSY.
+void serviceResetSwap() {
+    if (g_reset_swap.load(std::memory_order_acquire) != RESET_SWAP_REQUESTED) return;
+    char old[drive_config::MAX_NAME + 1];
+    std::snprintf(old, sizeof old, "%s", g_image_name);
+    g_disk->flush();
+    std::snprintf(g_config.device0, sizeof g_config.device0, "%s", g_device0_next);
+    const char* why = "";
+    if (useImage(g_config.device0, why)) {
+        g_disk_name = "image";
+        printfLine("DISK %s at the host's reset\n", g_config.device0);
+    } else {
+        printfLine("DISK %s can't be used (%s): %s again\n", g_config.device0, why, old);
+        std::snprintf(g_config.device0, sizeof g_config.device0, "%s", old);
+        useImage(g_config.device0, why);
+    }
+    g_device0_next[0] = 0;
+    chooseGeometry();
+    g_disk_sectors.store(g_disk->sectors(), std::memory_order_relaxed);
+    const IdentifyInfo info = driveIdentity();
+    ata::Device::identifyFor(info, g_reset_swap_identify);
+    g_reset_swap_info = info;
+    bus_observer::setIdentity(info);  // its IDENTIFY check, against the new disk's
+    g_reset_swap.store(RESET_SWAP_DONE, std::memory_order_release);
+}
+
+static const char* setConfig(const char* key, const char* value, Print& out) {
+    char* const text = scratch::a;
+    char* const edited = scratch::b;
+    size_t len = 0;
+    bool truncated = false;
+    if (!sd_card::readConfig(text, drive_config::MAX_FILE, len, truncated, out)) {
+        if (!sd_card::mounted()) return "card";  // no card: readConfig said so
+        if (sd_card::configExists()) {  // there, but unreadable: never overwrite it with the defaults
+            out.printf("# E: can't read %s; nothing changed\n", drive_config::FILE_NAME);
+            return "card";
+        }
+        len = strlen(drive_config::defaultFile());  // no file yet: start from the defaults
+        memcpy(text, drive_config::defaultFile(), len);
+    } else if (truncated) {
+        out.printf("# E: %s is longer than %u bytes: edit it on a computer\n", drive_config::FILE_NAME,
+                   unsigned(drive_config::MAX_FILE));
+        return "card";
+    }
+    size_t n = drive_config::setKey(text, len, key, value, edited, drive_config::MAX_FILE);
+    if (n == 0) {
+        out.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy, register_table, sd_high_speed, geometry), "
+                   "or the file would be too long\n", key);
+        return "key";
+    }
+    if (!sd_card::writeConfig(edited, n, out)) return "card";
+    drive_config::Config check;
+    drive_config::parse(edited, n, check);
+    out.printf("# saved %s = %s in %s; restart (!) to use it\n", key, value, drive_config::FILE_NAME);
+    size_t shown = check.warning_count < drive_config::MAX_WARNINGS ? check.warning_count : drive_config::MAX_WARNINGS;
+    for (size_t i = 0; i < shown; ++i) out.printf("CONFIG warning: %s\n", check.warnings[i]);
+    return "";
+}
+
+// Console `E`: sets one setting in HDDSYNTH.INI from "key = value".
 void editConfig(const char* line) {
     const char* eq = strchr(line, '=');
     char key[16] = "", value[drive_config::MAX_NAME + 1] = "";
@@ -575,35 +666,164 @@ void editConfig(const char* line) {
         Serial.println("# E: nothing changed; type key = value, e.g. device0 = GAMES.IMG");
         return;
     }
+    if (!setConfig(key, value, Serial)[0] && strcmp(key, "device0") == 0) {
+        std::snprintf(g_device0_next, sizeof g_device0_next, "%s", value);
+        armResetSwap();
+        if (g_reset_swap.load() == RESET_SWAP_ARMED) Serial.println("# device0: from the host's next reset (RESET#), or a restart");
+    }
+}
+
+// ---- SynthMinder's requests for the drive (synthminder.h, bay_service.cpp) ----
+
+// Prints nothing: what SynthMinder changes is reported by one SYNTHMINDER
+// line, written only if USB serial has room (no PC may be reading it).
+class Quiet : public Print {
+public:
+    size_t write(uint8_t) override { return 1; }
+};
+
+
+static bool hasExtension(const char* name, const char* ext) {
+    size_t n = strlen(name), e = strlen(ext);
+    return n > e && strcasecmp(name + n - e, ext) == 0;
+}
+
+// $SBQ,1,STATUS: one $SBV per value (docs/synthminder-protocol.md).
+void bayStatus(synthminder::Reply& reply) {
+    using synthminder::addValue;
+    char text[64];
+    addValue(reply, "firmware", FIRMWARE_VERSION);
+#ifdef HDDPRO_PCB
+    addValue(reply, "build", "pcb_drive");
+#else
+    addValue(reply, "build", "bb48_drive");
+#endif
+    // Device 0: what's served now, and what HDDSYNTH.INI names for the next start.
+    const char* served = g_device0_cdrom                                          ? "cdrom"
+                         : strcmp(g_disk_name, "image") == 0 || strcmp(g_disk_name, "bench") == 0 ? g_image_name
+                                                                                    : g_disk_name;  // generated, welcome
+    addValue(reply, "device0", served);
+    const char* next = g_device0_next[0] ? g_device0_next : g_config.device0;
+    if (!g_device0_cdrom && next[0] && strcasecmp(next, served) != 0) addValue(reply, "device0_next", next);
+    addValue(reply, "device1", g_device1_cdrom ? "cdrom" : g_device1_disk ? g_config.device1 : "none");
+    // The CD-ROM's disc: "-" for none.
+    const char* disc = "-";
+    if (g_device1_cdrom)
+        disc = strcmp(g_device1_disc, "no disc") == 0 ? "-" : strcmp(g_device1_disc, "test disc") == 0 ? "test" : g_device1_disc;
+    else if (g_device0_cdrom)
+        disc = strcmp(g_disk_name, "no disc") == 0 ? "-" : strcmp(g_disk_name, "generated") == 0 ? "test" : g_image_name;
+    addValue(reply, "disc", disc);
+    // The bus program, and the fastest modes offered.
+    const char* bus = ide_bus::busName();
+    const char* program = ide_table::running()             ? "register table"
+                          : strcmp(bus, "early") == 0      ? "early answers"
+                          : strcmp(bus, "lane") == 0       ? "data lane"
+                          : strcmp(bus, "noiordy") == 0    ? "no IORDY"
+                                                           : "ide_bus";
+    uint8_t mdma = g_mdma_mode.load();
+    if (mdma != NO_DMA)
+        std::snprintf(text, sizeof text, "PIO %u MDMA %u %s", unsigned(g_pio_mode.load()), unsigned(mdma), program);
+    else
+        std::snprintf(text, sizeof text, "PIO %u %s", unsigned(g_pio_mode.load()), program);
+    addValue(reply, "bus", text);
+    seekTimingSummary(text, sizeof text);
+    addValue(reply, "seek_timing", text);
+    std::snprintf(text, sizeof text, "%s %s", sd_card::busName(), sd_card::clockName());
+    addValue(reply, "card", text);
+    addValue(reply, "link", linkState());
+}
+
+// $SBC,1,DISC,<name>: as console `M`. "" once the change has started, or why
+// not: "nocdrom", "busy" or "notfound" (not an ISO or CUE on the card).
+const char* bayChangeDisc(const char* name) {
+    if (!g_device0_cdrom && !g_device1_cdrom) return "nocdrom";
+    bool none = strcmp(name, "-") == 0 || strcasecmp(name, "none") == 0;
+    if (!none && strcasecmp(name, "test") != 0 &&
+        (!(hasExtension(name, ".ISO") || hasExtension(name, ".CUE")) || !sd_card::fileExists(name)))
+        return "notfound";
+    Quiet quiet;
+    const char* why = startDiscChange(none ? "none" : name, quiet);
+    if (!why[0]) printfLine("SYNTHMINDER disc %s\n", none ? "none" : name);
+    return why;
+}
+
+// $SBC,1,SET,<key>,<value>: as console `E`, from the next start: device0, and
+// since 0.36.0 the settings $SBQ,1,SETTINGS lists (synthminder::checkSetting
+// says which values each takes). "" when saved, or why not: "key", "value",
+// "notfound" (no such image or disc on the card) or "card".
+const char* baySet(const char* key, const char* value) {
+    const synthminder::SettingCheck check = synthminder::checkSetting(key, value);
+    if (check.needs == synthminder::SettingNeeds::Bad) return check.why;
+    if (check.needs != synthminder::SettingNeeds::Nothing && !sd_card::fileExists(value)) return "notfound";
+    char k[16];
+    std::snprintf(k, sizeof k, "%s", key);
+    for (char* p = k; *p; ++p) *p = char(tolower(*p));
+    Quiet quiet;
+    const char* why = setConfig(k, value, quiet);
+    if (!why[0]) {
+        if (strcmp(k, "device0") == 0) {
+            std::snprintf(g_device0_next, sizeof g_device0_next, "%s", value);
+            armResetSwap();  // from the host's next reset
+        }
+        printfLine("SYNTHMINDER set %s = %s (from the next start)\n", k, value);
+    }
+    return why;
+}
+
+// $SBQ,1,SETTINGS: one $SBS per setting SET may change, as HDDSYNTH.INI has it
+// now (read afresh: from the next start) and as the drive runs; then, shown
+// only, bus, dma, mode and geometry (since 0.36.0-dev.2).
+void baySettings(synthminder::Reply& reply) {
+    drive_config::Config file;
+    drive_config::defaults(file);
     char* const text = scratch::a;
-    char* const edited = scratch::b;
     size_t len = 0;
     bool truncated = false;
-    if (!sd_card::readConfig(text, drive_config::MAX_FILE, len, truncated, Serial)) {
-        if (!sd_card::mounted()) return;  // no card: readConfig said so
-        if (sd_card::configExists()) {  // there, but unreadable: never overwrite it with the defaults
-            Serial.printf("# E: can't read %s; nothing changed\n", drive_config::FILE_NAME);
-            return;
-        }
-        len = strlen(drive_config::defaultFile());  // no file yet: start from the defaults
-        memcpy(text, drive_config::defaultFile(), len);
-    } else if (truncated) {
-        Serial.printf("# E: %s is longer than %u bytes: edit it on a computer\n", drive_config::FILE_NAME,
-                      unsigned(drive_config::MAX_FILE));
-        return;
-    }
-    size_t n = drive_config::setKey(text, len, key, value, edited, drive_config::MAX_FILE);
-    if (n == 0) {
-        Serial.printf("# E: '%s' isn't a setting (image, mode, dma, write_behind, read_ahead, activity_link, seek_timing, isa, early_answers, iordy, register_table, sd_high_speed, geometry), "
-                      "or the file would be too long\n", key);
-        return;
-    }
-    if (!sd_card::writeConfig(edited, n, Serial)) return;
-    drive_config::Config check;
-    drive_config::parse(edited, n, check);
-    Serial.printf("# saved %s = %s in %s; restart (!) to use it\n", key, value, drive_config::FILE_NAME);
-    size_t shown = check.warning_count < drive_config::MAX_WARNINGS ? check.warning_count : drive_config::MAX_WARNINGS;
-    for (size_t i = 0; i < shown; ++i) Serial.printf("CONFIG warning: %s\n", check.warnings[i]);
+    Quiet quiet;
+    if (sd_card::readConfig(text, drive_config::MAX_FILE, len, truncated, quiet) && !truncated)
+        drive_config::parse(text, len, file);
+    auto onOff = [](bool on) { return on ? "on" : "off"; };
+    auto orNone = [](const char* s) { return s[0] ? s : "none"; };
+    using synthminder::addSetting;
+    addSetting(reply, "device1", orNone(file.device1), orNone(g_config.device1));
+    addSetting(reply, "cdrom", orNone(file.cdrom), orNone(g_config.cdrom));
+    addSetting(reply, "seek_timing", seek_timing::settingName(file.seek_timing),
+               g_seek_on ? seek_timing::settingName(g_config.seek_timing) : "off");
+    addSetting(reply, "activity_link", onOff(file.activity_link), onOff(g_link_on));
+    addSetting(reply, "write_behind", onOff(file.write_behind), onOff(g_write_behind.load()));
+    addSetting(reply, "read_ahead", onOff(file.read_ahead), onOff(g_read_ahead.load()));
+    addSetting(reply, "sd_high_speed", onOff(file.sd_high_speed), onOff(g_config.sd_high_speed));
+
+    // Shown only (SET refuses them): the PC must be right for each, so they're
+    // changed in HDDSYNTH.INI, by hand. As the file has them, and as running.
+    const char* bus_next = file.register_table          ? "table"
+                           : file.bus != drive_config::Bus::Settings ? drive_config::busName(file.bus)
+                           : file.early_answers         ? "early"
+                                                        : "ide_bus";
+    const char* bus_now = ide_table::running() ? "table" : ide_bus::busName();
+    addSetting(reply, "bus", bus_next, bus_now);
+    char now[16];
+    uint8_t mdma = g_mdma_mode.load();
+    if (mdma != NO_DMA)
+        std::snprintf(now, sizeof now, "mdma%u", unsigned(mdma));
+    else
+        std::snprintf(now, sizeof now, "off");
+    addSetting(reply, "dma", file.dma_auto ? "auto" : onOff(file.dma), now);
+    std::snprintf(now, sizeof now, "pio%u", unsigned(g_pio_mode.load()));
+    addSetting(reply, "mode", drive_config::modeName(file.mode), now);
+    char next[20];
+    if (file.geometry.cylinders)
+        std::snprintf(next, sizeof next, "%u/%u/%u", unsigned(file.geometry.cylinders), unsigned(file.geometry.heads),
+                      unsigned(file.geometry.sectors_per_track));
+    else
+        std::snprintf(next, sizeof next, "auto");
+    uint32_t g = g_geometry.load(std::memory_order_relaxed);
+    Geometry geo = g ? Geometry{uint16_t(g >> 16), uint16_t((g >> 8) & 0xFF), uint16_t(g & 0xFF)}
+                     : defaultGeometry(g_disk_sectors.load(std::memory_order_relaxed));
+    char used[20];
+    std::snprintf(used, sizeof used, "%u/%u/%u", unsigned(geo.cylinders), unsigned(geo.heads),
+                  unsigned(geo.sectors_per_track));
+    addSetting(reply, "geometry", next, used);
 }
 
 

@@ -7,6 +7,85 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.8] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **Merged `main` (0.35.2): the RAM overlay on the heap, only when it's used.** It replaces dev.7's loan of the overlay's store: a folder as device 1 takes its list from the heap again (with an image as device 0 the overlay takes nothing, so the list gets its full 1,024 entries), and `RamOverlayDisk::lend` is gone. `chooseGeometry()`'s sector 0 is in `scratch::b`, as 0.35.2's.
+
+### Tested
+- The JMicron on the Mac, the test disk on the data lane (rig build): reads 42.7 ms per 64 KB, random 78.9 IOPS, writes 40.2 ms, as dev.7; slices 3 and 4 passed (7 tests); `overlay=0/512 heap_free=69944` after boot.
+
+## [0.36.0-dev.7] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **A folder as device 1 lists up to 1,024 entries again, in the RAM overlay's store** (`RamOverlayDisk::lend`): the overlay is only written on the test disk, so its first 64 sectors' store holds the list for good, and the test disk then takes 448 sectors of writes, not 512. On dev.6 the 2 KB heap couldn't hold even 64 entries; on 0.35.0 the list was on the heap, partly over the DMA rings. The lent slots are held for an LBA no disk has, so the overlay's `read()`, `write()` and `find()` are unchanged, and core 0's RAM code keeps its place, byte for byte.
+- **The drive builds' trace ring is 4,096 events, not 8,192** (64 KB, not 128): they record commands unless the raw trace (`t`) is on. The listen build keeps 8,192 for its capture window. The 64 KB is heap now: about 66 KB, against 2.1, for `Print::printf` and whatever SynthMinder needs next. RAM 83.1% used, from 95.6%.
+- Not one object below the USB buffers changed RAM bank (the overlay grew 32 bytes, the ring shrank 64 KB); core 1's and core 0's RAM code unchanged.
+
+## [0.36.0-dev.6] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **Merged `main` (0.35.1):** the heap stops under the DMA rings (`heap_limit.c`, `heapFree()`), the folder disk keeps 4 KB free, and `drive_params.*` from HDDSynth_Native v0.24.1. Core 0's loop change was already here (dev.5). The heap is 2.1 KB on this branch, so a folder as device 1 gets no list (`S` says no RAM for it) until RAM is freed. Core 1's and core 0's RAM blocks are dev.5's, byte for byte, and no object changed bank.
+
+## [0.36.0-dev.5] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **Core 0's loop in RAM; its housekeeping once a millisecond.** `loop()`, the IORDY timer's and bus timing's checks for reports (their handling, rare, stays in flash), `bus_observer::poll` and the sector checker it runs are `CORE0_RAM` (2.9 KB). The console, the lines core 0 prints, the link, the card, the LED, the reset swap and the disc change run from `housekeeping()`, in flash, once a millisecond, as the activity check already did. Core 0's pass went from 31 us (0.35.0) and 42 (dev.4) to about 6, and the data lane's reads no longer move with unrelated flash code: dev.4 read 47 ms per 64 KB in the morning and 58.7 in the afternoon; dev.5 reads 42.7, the best on this rig (0.35.0: 43.8-45.3). Writes and early answers as 0.35.0's. docs/speed-log.md.
+- `SLOWREAD` and `EARLYDATA` lines go one at a time with the fetches served between: the data lane causes one a sector on writes, and a millisecond's worth printed together slowed writes 6%.
+- The flush of a held trace line, and the end of the IDENTIFY check after a reset, once a millisecond too.
+- **The layout recorded** (`scripts/core1_layout/*.txt`) after the benchmark: core 1's block is dev.4's, byte for byte, which this branch's commits since 0.35.0 had changed and the A-B-A runs (dev.3-dev.5) covered.
+
+## [0.36.0-dev.4] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **RAM banks as 0.35.0's:** every variable this branch added or grew is padded to whole 32-byte steps, and `startCommand` (8Dh now goes through `otherCommand()`), `runDrive` and `serveFetches` to 0.35.0's sizes plus whole 32-byte steps, so every function and every object below the USB buffers keeps 0.35.0's bank (`scripts/check_ram_banks.py`, new; `check_core1_layout.py`). Writes on the data lane are back to 0.35.0's; reads are still about 3% slower (docs/speed-log.md): probably core 0's loop, in flash. Layout not recorded yet.
+
+### Added
+- **A new hard disk at the host's next reset:** with `device0` changed to another image (console `E`, or SynthMinder's Bay tab), the host's next hardware reset (RESET#) brings it in, not only the drive's next start. On the Evesham the Bay is powered by USB, so restarting the PC kept the old disk (18 Nov). At RESET# asserted, core 1 asks core 0 for the swap (`ResetSwap`, main_state.h); core 0 writes out what's held for the old image, opens the new one (the old again if it can't be), works out its geometry (`chooseGeometry`, as at start) and builds its IDENTIFY; core 1 takes it (`Device::setDisk`, no flash), holding the device in reset (BSY) after RESET#'s release if core 0 isn't done, as a drive spinning up. Never at a software reset (SRST), which drivers send mid-session; a CD-ROM, the test, bench and welcome disks wait for a restart as before. Core 1's rare code holds it all but one test of a flag in `runDrive`'s idle step (24 bytes). Through the JMicron on the Mac: `device0 = HDDBENCH.IMG` set on the console, the adapter plugged in, and the Mac saw HDDBENCH.IMG's 64 MB at its first detection.
+
+## [0.36.0-dev.3] - 2026-11-18 (branch `synthminder`)
+
+### Changed
+- **SynthMinder's 8Dh off the per-sector paths:** the A-B-A on the Mac (docs/speed-log.md) found dev.2 about 1% slower than 0.35.0 on the data lane and 0.7% on early answers' writes. Its fetch is now marked by its `command_lba` (`SM_MESSAGE_LBA`, `ata::isMessage`), not a field of its own, so `Fetch`, `pendingFetch` and every copy of a fetch in core 1's bus loops are 0.35.0's code again; `synthMinder()` is in core 1's rare code (`CORE1_RAM_RARE`) and `beginRead`/`beginWrite` are inlined, so core 1's block differs from 0.35.0's only by `startCommand`'s 20 bytes for the 8Dh case. On core 0, `serveFetches` hands a message and a waiting RECEIVE to two cold functions in flash, passing the message's fields as values (taking the fetch's address had kept it in memory all through the loop): 556 bytes against 0.35.0's 516 (dev.2: 680). To benchmark (A-B) before the layout is recorded.
+- A SynthMinder command's `CMD` trace line shows that LBA (4294967041 for SEND, 4294967042 for RECEIVE) where it showed 1 or 2.
+
+## [0.36.0-dev.2] - 2026-11-18 (branch `synthminder`)
+
+### Added
+- `$SBQ,1,SETTINGS` also lists `bus`, `dma`, `mode` and `geometry`, **shown only**: as `HDDSYNTH.INI` has them and as the drive runs (the bus program, the DMA and PIO modes offered, the CHS geometry IDENTIFY reports). SET still refuses them (`key`): the PC must be right for each, so they're changed in the file by hand. SynthMinder's Settings tab shows them.
+
+## [0.36.0-dev.1] - 2026-11-17 (branch `synthminder`)
+
+SynthMinder, the DOS program, talks to the drive: [docs/synthminder-protocol.md](docs/synthminder-protocol.md) (moved here from SynthMinder's `docs/protocol.md`, now that the drive implements it). With HDDSynth_Native 0.25.0 on the synth, its Synth tab works through the drive too.
+
+### Added
+- **ATA command 8Dh** (`ata_device`): SynthMinder's SEND (a one-sector PIO data-out) and RECEIVE (a one-sector PIO data-in), checked by Features, Sector Count 1, `S` `M` in LBA Low and Mid and the protocol version in LBA High; anything else is aborted. The sectors go to core 0 as a `Fetch` with `message` set, through the same path as a one-sector WRITE or READ SECTORS (`beginWrite`/`beginRead`, split from `startWrite`/`startRead` after the range check), so the host sees DRQ and BSY as it would for them, never IORDY. On the hard disk (device 0, or device 1 as a second disk); a CD-ROM alone (`device0 = cdrom`) aborts it, so SynthMinder says the firmware can't talk.
+- **`synthminder.*`** (pure, host-tested in `test_synthminder.cpp`): the sector format, replies of up to 16 sectors with no sentence split between two, `$SBQ,1,STATUS`, `$SBQ,1,FILES`, `$SBC,1,DISC`, `$SBC,1,SET,device0` and the errors; `$HDQ`/`$HDC` relayed to the synth and its answer collected (`$HDS`, `$HDP` by their count, `$HDK`, `$HDM`), or `$SBK,1,RELAY,ERR,nosynth` after 500 ms or with the link off.
+- **`bay_service.cpp`** (core 0): the requests from `serveFetches()`; a RECEIVE waiting for the synth is held (BSY) and answered from `loop()`, unless another command has started since (then its buffer is left alone). `STATUS` from what `S` shows; `FILES` lists the card's root afresh each time (8.3 `.IMG`, `.ISO`, `.CUE`; up to 32); `DISC` as console `M`; `SET` as console `E`. What SynthMinder changes prints one `SYNTHMINDER` line, only if USB serial has room.
+- `s`: `sm_requests`, `sm_relays`, `sm_timeouts` and `link_rx_lost`.
+
+### Changed
+- **The link's RX is read by an interrupt** (core 0) into a 1 KB ring, which `serviceLinkRx()` and the loopback test read: a relayed pack list is a few KB in one burst, more than the 32-byte FIFO holds between loop passes.
+- The link sends SynthMinder's sentence for the synth first, when the TX FIFO is empty, between `$HDA` and `$HDE`.
+- `sentence.*` copied again from HDDSynth_Native (its 0.25.0): lines of up to 96 characters, so the longest `$HDP` can be relayed.
+- `startDiscChange()` returns why it didn't start (`nocdrom`, `busy`), and console `E`'s work is `setConfig()`, shared with SynthMinder's `SET`; both print to a `Print` they're given.
+- RAM: 94.9% used (93.8% before): the reply (3 KB), the RX ring (1 KB), the file list. A folder as device 1 takes its list from what's left, so it can hold fewer entries.
+
+### Not yet tested
+- Everything here is host-tested only: no PC has sent 8Dh to the drive yet, and no synth has answered over the link.
+- **Core 1's layout changed** (8Dh in `ata_device`: the block is 224 bytes longer, and core 0's 164), so `check_core1_layout.py` fails until reads are benchmarked on the rig (`-m speed`) and the new layout is recorded (`--update`).
+
+### Added (18 Nov 2026)
+- **`$SBQ,1,SETTINGS`**: one `$SBS,1,<key>,<next>,<now>` per setting SynthMinder's Settings tab shows (`device1`, `cdrom`, `seek_timing`, `activity_link`, `write_behind`, `read_ahead`, `sd_high_speed`): `next` from `HDDSYNTH.INI` read afresh, `now` as the drive runs ([docs/synthminder-protocol.md](docs/synthminder-protocol.md)).
+- **`$SBC,1,SET` takes those keys too**, not only `device0`. `synthminder::checkSetting` (pure, host-tested) says which values each takes and what the drive must find on the card (an image, a disc); a new reason, `value`, for one it doesn't take.
+
+### Fixed (on the Evesham, 17 Nov 2026)
+- **The synth's pack list never reached SynthMinder:** the synth takes about 900 ms to answer `$HDQ,1,PACKS` (it reads each pack's `pack.json` and looks for its `drive.json`), and the relay gave up at 500 ms (`RELAY,ERR,nosynth`). `RELAY_TIMEOUT_MS` is 1.5 s, inside SynthMinder's own 2 s wait.
+- `hdm_rejected` rose with every relayed answer (`$HDS`, `$HDP`, `$HDK` went to the `$HDM` parser too). Only `$HDM` lines go to it now; every line still goes to SynthMinder.
+- `test_synthminder.cpp` didn't compile with libc++ (macOS): its helper `exchange(Service&, const std::string&)` lost to `std::exchange` by argument-dependent lookup. Renamed `roundTrip`.
+
+### Tested
+- **The Evesham, FreeDOS (`SYNTHMIN.IMG`), SynthMinder from its `firmware-protocol` branch, the HDD Synth Mk5 on 0.25.0:** the Bay's status and its disk and ISO lists, the synth's volume changed, and (with the longer relay timeout) its pack list. Exchanges take 0.2-6 ms; in the first minutes after a restart some took 50-109 ms, with the SEND ending still BSY (`d0`): not yet explained.
 ## [0.35.2] - 2026-11-19
 
 ### Changed

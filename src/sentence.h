@@ -10,7 +10,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-constexpr size_t SENTENCE_MAX_LINE = 80;  // longest line accepted, without its line ending
+// The longest line accepted, without its line ending. The longest sentence
+// sent is $HDP with two 32-character names (about 85); HDDSynthPro relays it
+// to SynthMinder, so its copy of this file must accept it too.
+constexpr size_t SENTENCE_MAX_LINE = 96;
 
 uint8_t sentenceChecksum(const char* body, size_t len);
 

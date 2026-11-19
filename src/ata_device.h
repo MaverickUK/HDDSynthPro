@@ -96,6 +96,18 @@ constexpr uint8_t CMD_CHECK_POWER_MODE = 0xE5;
 constexpr uint8_t CMD_FLUSH_CACHE = 0xE7;  // BSY while core 0 flushes the storage
 constexpr uint8_t CMD_IDENTIFY_DEVICE = 0xEC;
 constexpr uint8_t CMD_SET_FEATURES = 0xEF;
+// SynthMinder's command (docs/synthminder-protocol.md), in ATA's vendor-specific
+// range: Features SEND (a one-sector PIO data-out: the request) or RECEIVE (a
+// one-sector PIO data-in: the reply), Sector Count 1, LBA Low 'S', LBA Mid 'M'
+// and LBA High the protocol version. Anything else is aborted, so a stray 8Dh
+// from another program does nothing. The sectors go to and from core 0 as a
+// Fetch marked by its command_lba (isMessage, below; synthminder.h answers them).
+constexpr uint8_t CMD_SYNTHMINDER = 0x8D;
+constexpr uint8_t SM_SEND = 0x01;
+constexpr uint8_t SM_RECEIVE = 0x02;
+constexpr uint8_t SM_LBA_LOW = 'S';
+constexpr uint8_t SM_LBA_MID = 'M';
+constexpr uint8_t SM_VERSION = 1;
 // The ATA-1 era opcodes for the power commands (94h-98h), still sent by some hosts.
 constexpr uint8_t CMD_STANDBY_IMMEDIATE_OLD = 0x94;
 constexpr uint8_t CMD_IDLE_IMMEDIATE_OLD = 0x95;
@@ -138,6 +150,14 @@ struct Fetch {
     uint8_t sectors = 1;       // how many, from `lba` on (READ/WRITE MULTIPLE: a block's)
 };
 
+// SynthMinder's 8Dh marks its fetch by its command_lba: SM_MESSAGE_LBA, with
+// SEND or RECEIVE in the low byte, an address no disk on a card reaches. A
+// field of its own made Fetch bigger, and every copy of one in core 1's bus
+// loops longer: about 1% on the data lane's reads (docs/speed-log.md).
+// `store` is then a request, a read its reply; no disk, no seek timing.
+constexpr uint32_t SM_MESSAGE_LBA = 0xFFFFFF00;
+inline bool isMessage(const Fetch& f) { return (f.command_lba & 0xFFFFFF00u) == SM_MESSAGE_LBA; }
+
 // A DMA burst for core 1 to run (READ DMA or WRITE DMA): the rest of a
 // sector, sent from `from` (read) or received into `to` (write).
 struct DmaBurst {
@@ -164,6 +184,12 @@ public:
     // unit's patch from identifyDiff, worked out on core 0). Run once, from
     // flash.
     void offerDma(uint8_t mdma_mode, const IdentifyPatch& unit0, const IdentifyPatch& unit1);
+    // A new disk as device 0, at a hardware reset (main.cpp, resetSwapTake):
+    // its size and geometry, and the IDENTIFY core 0 built for it
+    // (identifyFor), copied in. Core 1's rare code: no flash.
+    void setDisk(const IdentifyInfo& info, const uint16_t identify[256]);
+    // Device 0's IDENTIFY for `info`, as the constructor builds it: for core 0.
+    static void identifyFor(const IdentifyInfo& info, uint16_t out[256]);
     // `device1`: device 1's identity, or nullptr for device 0 alone.
     explicit Device(const IdentifyInfo& info, const IdentifyInfo* device1 = nullptr);
     bool hasDevice1() const { return has_device1_; }
@@ -333,6 +359,10 @@ private:
     void startCommand(uint8_t command);
     void startRead(uint8_t block = 1);   // `block`: sectors per DRQ block
     void startWrite(uint8_t block = 1);
+    void beginRead(uint32_t lba, uint32_t count, uint8_t block);   // after the range check
+    void beginWrite(uint32_t lba, uint32_t count, uint8_t block);
+    void synthMinder();  // CMD_SYNTHMINDER
+    void otherCommand();  // one startCommand's switch doesn't name
     void setMultipleMode();
     void readVerify();
     void seek();

@@ -109,6 +109,12 @@ bool readFileStart(const char* name, char* buf, size_t size, size_t& len, bool& 
                    Print& log);
 // Whether `name`, in the card's root folder, is a folder.
 bool isFolder(const char* name);
+// SynthMinder (bay_service.cpp): whether `name` is a file in the card's root
+// folder, and the root folder's files (not folders, hidden or system files),
+// in the card's own order: `each` for each. Only read; mount the card if it
+// isn't, and print nothing. False if there is no card.
+bool fileExists(const char* name);
+bool listRoot(void (*each)(const char* name, uint64_t size, void* context), void* context);
 // Opens image `name` for device 1, or returns nullptr (with openError()).
 // `read_only` as for openImage: a CD-ROM's disc (bb48_hdcd).
 ImageFile* openDevice1Image(const char* name, Print& log, bool read_only = false);

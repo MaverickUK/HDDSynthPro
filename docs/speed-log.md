@@ -257,6 +257,58 @@ The PCB through the JMicron (Windows rig), `HDDBENCH.IMG` over SDIO in high-spee
 
 0.31.0's 10-hour soak at default speed: writes 1.42-1.97 MB/s, reads 2.15-2.73, about 15% slower after the first hour (read-backs 11.1 s, then 13.5-13.8). High-speed mode lifts the reads a little in this mix; the slowdown after about 70 minutes is the same, and the second run was slow from its start, so it is the card's state, not the drive's. 0 wrong in 57.2 GB written and 86.9 GB read.
 
+## SynthMinder's 8Dh: A-B-A on the Mac (0.36.0-dev.2, 18 Nov 2026), layout not yet recorded
+
+The JMicron on the Mac, the PCB, the generated disk (`T`), `-m speed`, two runs each; the rig watchdog build (`-DRIG_WATCHDOG_MS=8000`) of each. A is `v0.35.0`, B branch `synthminder` at 0.36.0-dev.2 (core 1's block 224 bytes longer). Seek timing inactive (`seek_active=0`: the synth's pack has no model).
+
+| | A1 (0.35.0) | B (`synthminder`) | A2 (0.35.0) |
+|---|---|---|---|
+| Lane: sequential read | 1.20, 1.16 MB/s | 1.14, 1.14 | 1.22, 1.17 |
+| Lane: random 4 KB | 78.4, 78.2 IOPS | 77.7, 77.4 | 78.6, 78.2 |
+| Lane: a 64 KB write in the drive | 40.1, 40.1 ms | 40.2, 40.2 | 40.1, 40.1 |
+| Early answers: sequential read | 1.16, 1.15 MB/s | 1.15, 1.14 | 1.16, 1.16 |
+| Early answers: random 4 KB | 74.2, 73.8 IOPS | 74.0, 73.9 | 74.1, 73.9 |
+| Early answers: a 64 KB write in the drive | 59.2, 59.2 ms | 59.6, 59.6 | 59.2, 59.2 |
+
+A1 and A2 agree, so the rig didn't drift. **B is slower than both** on the lane (random reads about 1%, writes 0.1 ms) and on early answers' writes (0.4 ms, 0.7%), so, as the checklist says, the layout isn't recorded yet. What grew in core 1's block: the per-sector `pendingFetch` (+18 bytes) and `postFetch` (+8), for the fetch's new kind (SynthMinder's SEND and RECEIVE), and `serveDataIn` (+12), `serveBusEarly` (+8), `serveLane` and `serveDataInEarly` (+4 each). Next: compare their compiled code with 0.35.0's, as 0.35.0-dev.7 did, to see whether the cost is the new check per sector (then keep it off the per-sector path) or placement.
+
+**Done in 0.36.0-dev.3:** the new `Fetch` field had grown every copy of a fetch in core 1's loops, and `serveFetches` (core 0, per sector) had grown 164 bytes. Now core 1's per-access code is 0.35.0's again (only `startCommand`, 20 bytes longer, moves what follows), and `serveFetches` is 40 bytes longer, for its two checks. Owed: an A-B of 0.35.0 against dev.3 on the lane and early answers, then `check_core1_layout.py --update`.
+
+## 0.36.0-dev.4 against 0.35.0: RAM banks (19 Nov 2026)
+
+The JMicron on the Mac, the PCB, the generated disk, `-m speed`, two runs each, rig builds (`-DRIG_WATCHDOG_MS=8000`). A is `v0.35.0`, run first and last (A1, A2).
+
+| | A1 | dev.4 | dev.4, link RX polled | dev.4, banks matched | A2 |
+|---|---|---|---|---|---|
+| Lane: per sector in the drive (reads) | 342, 354 us | 374, 378 | 376, 363 | 368, 363 | 342, 354 |
+| Lane: random 4 KB | 78.7, 78.4 IOPS | 77.6, 77.3 | 77.6, 77.3 | 77.8, 77.5 | 78.7, 78.4 |
+| Lane: a 64 KB write in the drive | 40.1 ms | 40.3 | 40.3 | **40.0** | 40.1 |
+| Early answers: a 64 KB write | 59.2 ms | 59.5 | | | 59.2 |
+| Early answers: random 4 KB | 74.2 IOPS | 74.1, 74.0 | | | 74.3, 74.2 |
+
+- **dev.3's per-sector fix to core 1 wasn't the cause:** dev.4 was slower than dev.2.
+- **Not the link's new RX interrupt:** polled instead, the same (and the synth sent nothing during the runs).
+- **RAM banks, half of it:** `SENTENCE_MAX_LINE` 80 -> 96 grew every `LineAssembler` by 16 bytes, `g_loopback` gained `errors_before`, and the relay and RX ring were new: 40 bytes ahead of `g_device_mem` moved the device's sector buffers from bank 12 to bank 20 (`scripts/check_ram_banks.py`). Padding each new or grown object to whole 32-byte steps (`bank_pad`) put every object below the USB buffers back on 0.35.0's bank; aligning the device itself to 32 made it worse (the linker sorts `.bss` by alignment, then name: dozens of objects moved). In code: `startCommand` (the 8Dh case, then `otherCommand()` taking no argument, 10 bytes left), `runDrive` (the reset swap's test) and `serveFetches` padded with no-ops on rare paths to 0.35.0's size plus whole 32-byte steps, so `check_core1_layout.py` shows every function on its old bank. Writes came back (40.0 ms); reads half: about 3% slower per sector, against 8%.
+- **What's left on reads** isn't placement in RAM. Probably core 0's loop, in flash, where the branch's 5 KB more code changes what the flash cache holds (as on 16 Nov, before CORE0_RAM): the data lane's reads wait for core 0. Next: time core 0's loop pass on both builds, and put what it runs on every pass in RAM. Layout not recorded yet.
+
+## 0.36.0-dev.5: core 0's loop in RAM (19 Nov 2026)
+
+The JMicron on the Mac, the PCB, the generated disk, `-m speed`, rig builds (`-DRIG_WATCHDOG_MS=8000`), two runs each unless shown. Experiment builds counted the flash cache's accesses and hits (`xip_ctrl_hw->ctr_acc`, `ctr_hit`) and timed core 0's loop pass, with their counters in one 32-byte object so no other object changed RAM bank (20 bytes of separate counters moved 287).
+
+| | 0.35.0 | dev.4 (c226598), morning | dev.4, afternoon | dev.5 |
+|---|---|---|---|---|
+| Lane: 64 KB read in the drive | 43.8-45.3 ms | 46.5-47.1 | **58.7, 58.8** | **42.7, 42.7** |
+| Lane: random 4 KB | 78.4-78.7 IOPS | 77.5-77.8 | 77.3, 77.3 | 78.9, 78.9 |
+| Lane: 64 KB write in the drive | 40.1 ms | 40.0 | 40.1, 40.1 | 40.2, 40.2 |
+| Early answers: 64 KB write | 59.2 ms | 59.5 | | 59.4, 59.4 |
+| Early answers: random 4 KB | 74.2-74.3 IOPS | 74.0-74.1 | | 74.1, 74.2 |
+| Core 0's loop pass, mean (experiment builds) | 31.0 us | 42.1 | | 5.6-5.8 |
+| Flash cache misses, a lane run (experiment builds) | 0.53% | 0.92% | | 0.52-0.64% |
+
+- **The 3% read gap was core 0's loop in flash.** Its pass ran 31 us on 0.35.0 and 42 on dev.4 with the same work, from twice the flash cache misses: dev.4's extra flash code changed which of the loop's lines evicted each other. Adding the 30 lines of timing code moved dev.4's reads level with 0.35.0, and the same dev.4 read 25% slower in the afternoon than in the morning (58.7 ms against 47): whatever shifts flash code shifts the lane's reads, which wait on core 0.
+- **dev.5:** what must keep up with the bus runs every pass from RAM (`loop()`, the IORDY timer's and bus timing's checks for a report, `bus_observer::poll`, the sector checker: 2.9 KB more `CORE0_RAM`); the rest (`housekeeping()`) from flash once a millisecond. The pass is 5.7 us, and making it 23 or 57 us with a spin from the flash cache changed neither reads nor writes.
+- **Writes first came out 6% slower (42.4 ms):** the data lane holds a Status read past 1,250 ns for every sector written, so core 0 prints a `SLOWREAD` line a sector, about three a millisecond. Printed in one go once a millisecond, they kept the next sector's store waiting. Found by running each group of housekeeping on every pass again (a console knob in the experiment build): only the prints' group brought writes back. Now one line at a time with `serveFetches()` between: 40.1-40.2 ms whether housekeeping runs every pass or once a millisecond.
+- **RAM:** 2.1 KB of heap left on `pcb_drive` (0x2007a784 to 0x2007b000), from 5.3 KB. Not one object below the USB buffers changed bank against dev.4 (`check_ram_banks.py`); core 1's block is byte-identical.
 ## 0.35.1: core 0's loop in RAM (19 Nov 2026)
 
 The JMicron on the Mac, the PCB, the generated disk, the data lane, `-m speed`, rig builds. Why and how: branch `synthminder`'s 0.36.0-dev.5 (its speed log), whose loop change 0.35.1 takes.

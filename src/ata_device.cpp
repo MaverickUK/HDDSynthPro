@@ -38,6 +38,21 @@ void Device::offerDma(uint8_t mdma_mode, const IdentifyPatch& unit0, const Ident
     }
 }
 
+CORE1_RAM_RARE void Device::setDisk(const IdentifyInfo& info, const uint16_t identify[256]) {
+    Unit& unit = units_[0];
+    unit.info = info;
+    unit.geometry = startGeometry(unit.info);
+    for (unsigned i = 0; i < 256; ++i) {
+        unit.identify[i] = identify[i];
+        __asm__ volatile("" ::: "memory");  // a plain copy, not a call to memcpy (in flash)
+    }
+}
+
+void Device::identifyFor(const IdentifyInfo& info, uint16_t out[256]) {
+    buildIdentify(info, out);
+    if (s_no_multiple) offerNoMultiple(out);
+}
+
 // The host changed the Device register: which unit answers from now on.
 CORE1_RAM void Device::deviceWritten() {
     uint8_t unit = (device_ & DEV_DEV) ? 1 : 0;
@@ -348,7 +363,12 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
                 u().standby = false;
                 seek();
             } else {
-                fail(ER_ABRT);
+                otherCommand();  // SynthMinder's, or ABRT
+                // 0.35.0's size plus 32 bytes, a whole RAM bank period, so the
+                // per-sector code after this function keeps its banks (the
+                // compiler leaves it 10 bytes over without these 12 no-ops, on
+                // a path almost never taken). Check with check_core1_layout.py.
+                __asm__ volatile("nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop");
             }
             break;
     }
@@ -478,10 +498,9 @@ CORE1_RAM bool Device::decodeAddress(uint32_t& lba) const {
     return true;
 }
 
-CORE1_RAM void Device::startRead(uint8_t block) {
-    uint32_t count = sector_count_ ? sector_count_ : 256;
-    uint32_t lba = 0;
-    if (!checkRange(count, lba)) return;
+// After the range check: inlined into startRead and synthMinder, so startRead
+// is the code it was before SynthMinder (core 1's layout, CLAUDE.md).
+__attribute__((always_inline)) inline void Device::beginRead(uint32_t lba, uint32_t count, uint8_t block) {
     block_ = block;
     reading_ = true;
     read_lba_ = lba;
@@ -490,10 +509,14 @@ CORE1_RAM void Device::startRead(uint8_t block) {
     requestFetch();
 }
 
-CORE1_RAM void Device::startWrite(uint8_t block) {
+CORE1_RAM void Device::startRead(uint8_t block) {
     uint32_t count = sector_count_ ? sector_count_ : 256;
     uint32_t lba = 0;
     if (!checkRange(count, lba)) return;
+    beginRead(lba, count, block);
+}
+
+__attribute__((always_inline)) inline void Device::beginWrite(uint32_t lba, uint32_t count, uint8_t block) {
     block_ = block;
     writing_ = true;
     write_lba_ = lba;
@@ -504,6 +527,46 @@ CORE1_RAM void Device::startWrite(uint8_t block) {
     out_hold_ = false;
     recv_buf_ = 0;
     startDataOut();  // no interrupt before the first block
+}
+
+CORE1_RAM void Device::startWrite(uint8_t block) {
+    uint32_t count = sector_count_ ? sector_count_ : 256;
+    uint32_t lba = 0;
+    if (!checkRange(count, lba)) return;
+    beginWrite(lba, count, block);
+}
+
+// A command startCommand's switch doesn't name: SynthMinder's 8Dh, else
+// ABRT. Out here, in core 1's rare code, so startCommand is 0.35.0's size and
+// the per-sector code after it in core 1's block sits where it did: a case of
+// its own made startCommand 20 bytes longer, which moved them to other RAM
+// banks (docs/speed-log.md, 19 Nov 2026).
+CORE1_RAM_RARE void Device::otherCommand() {
+    if (last_.command == CMD_SYNTHMINDER)  // the command startCommand recorded: no argument to pass
+        synthMinder();
+    else
+        fail(ER_ABRT);
+}
+
+// SynthMinder's 8Dh: one sector each way, through the same fetches as a
+// one-sector WRITE or READ SECTORS, so the host sees what it would for them
+// (DRQ, then BSY while core 0 takes the request; BSY until the reply is
+// ready, then DRQ). No disk is touched: the fetch's command_lba is
+// SM_MESSAGE_LBA, which tells core 0 (isMessage). In core 1's rare code, out of
+// the per-access block, so the bus loops sit where they did before it.
+CORE1_RAM_RARE void Device::synthMinder() {
+    last_.lba = features_;  // for the trace: SEND or RECEIVE
+    last_.count = sector_count_;
+    if ((features_ != SM_SEND && features_ != SM_RECEIVE) || sector_count_ != 1 || lba_low_ != SM_LBA_LOW ||
+        lba_mid_ != SM_LBA_MID || lba_high_ != SM_VERSION) {
+        fail(ER_ABRT);  // not SynthMinder's
+        return;
+    }
+    last_.lba = SM_MESSAGE_LBA | features_;  // the fetch's command_lba: SynthMinder's, not a disk's
+    if (features_ == SM_SEND)
+        beginWrite(0, 1, 1);
+    else
+        beginRead(0, 1, 1);
 }
 
 CORE1_RAM void Device::startDataOut() {
