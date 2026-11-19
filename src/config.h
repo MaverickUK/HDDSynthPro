@@ -182,7 +182,10 @@ constexpr size_t RAM_DISK_SECTORS = 512;
 // folders its list holds, 32 bytes each, on the heap. Fewer if RAM is short
 // (halved until it fits); a bigger folder is served cut short, with a warning.
 constexpr uint16_t FOLDER_MAX_ENTRIES = 1024;
-constexpr uint32_t FOLDER_HEAP_LEFT = 16 * 1024;  // heap kept free after the list
+// Heap kept free after the list: for Print::printf, which allocates a line
+// over 63 characters (STATS goes in pieces of up to about 300). 16 KB until
+// 0.35.1, when the heap measured free included the DMA rings.
+constexpr uint32_t FOLDER_HEAP_LEFT = 4 * 1024;
 
 // The IORDY timer (iordy_timer.pio) counts and times reads that IORDY holds
 // longer than this. ATA's limit is 1250 ns (tB).

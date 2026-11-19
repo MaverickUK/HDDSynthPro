@@ -63,6 +63,7 @@
 #include "welcome_text.h"
 #endif
 
+#include "heap_limit.h"
 #include "main_state.h"
 
 #if FIRMWARE_SLICE != 0
@@ -278,7 +279,8 @@ static void chooseDevice1() {
     const char* name = g_config.device1;
     if (sd_card::isFolder(name)) {
         // The list on the heap, only when a folder is served: as long as RAM
-        // allows, leaving cfg::FOLDER_HEAP_LEFT for whatever allocates later.
+        // allows, leaving cfg::FOLDER_HEAP_LEFT for whatever allocates later
+        // (heapFree(): rp2040.getFreeHeap() counts the DMA rings as free).
         // malloc, not new (std::nothrow): Arduino-Pico's libstdc++ is built
         // without exceptions, so a nothrow new that runs out aborts (the board
         // never started with a folder, 3 Nov 2026). An Entry needs no constructor.
@@ -286,7 +288,7 @@ static void chooseDevice1() {
         folder_disk::Entry* entries = nullptr;
         while (capacity >= 64) {
             entries = static_cast<folder_disk::Entry*>(std::malloc(capacity * sizeof(folder_disk::Entry)));
-            if (entries && rp2040.getFreeHeap() >= int(cfg::FOLDER_HEAP_LEFT)) break;
+            if (entries && heapFree() >= cfg::FOLDER_HEAP_LEFT) break;
             std::free(entries);
             entries = nullptr;
             capacity /= 2;
