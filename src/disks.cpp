@@ -330,6 +330,29 @@ static void chooseDevice1() {
 // The disk: the test disk after console `T`, or HDDBENCH.IMG after `J`; else
 // the image HDDSYNTH.INI names (HDDSYNTH.IMG by default), or the test disk
 // for `device0 = none`; else HDDSYNTH.IMG; else the welcome disk.
+// The geometry setting, for the image only (the welcome and generated disks
+// lay theirs out for the default), its cylinders cut to fit if it's bigger.
+// At start, and for a new disk at the host's reset (serviceResetSwap).
+static void chooseGeometry() {
+    const bool image = strcmp(g_disk_name, "image") == 0;
+    Geometry geo = image ? g_config.geometry : Geometry{};
+    g_geometry_from = geo.cylinders ? "set" : "auto";
+    if (image && !geo.cylinders) {  // auto: the geometry the image's partition table was made with
+        static uint16_t sector0[256];  // bus order: as bytes, as on disk
+        if (g_disk->read(0, sector0)) {
+            geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), g_disk->sectors());
+            if (geo.cylinders) g_geometry_from = "partition table";
+        }
+    }
+    g_geometry_trimmed = false;
+    if (geo.cylinders && geo.sectors() > g_disk->sectors()) {
+        geo.cylinders = uint16_t(g_disk->sectors() / (uint32_t(geo.heads) * geo.sectors_per_track));
+        g_geometry_trimmed = true;
+    }
+    g_geometry.store(geo.cylinders ? uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track : 0,
+                     std::memory_order_relaxed);
+}
+
 void chooseDisk() {
     uint32_t start = millis();
     drive_config::defaults(g_config);
@@ -403,25 +426,7 @@ void chooseDisk() {
         default: break;
     }
     g_iordy.store(g_config.iordy);
-    // The geometry setting, for the image only (the welcome and generated disks
-    // lay theirs out for the default), its cylinders cut to fit if it's bigger
-    const bool image = strcmp(g_disk_name, "image") == 0;
-    Geometry geo = image ? g_config.geometry : Geometry{};
-    g_geometry_from = geo.cylinders ? "set" : "auto";
-    if (image && !geo.cylinders) {  // auto: the geometry the image's partition table was made with
-        static uint16_t sector0[256];  // bus order: as bytes, as on disk
-        if (g_disk->read(0, sector0)) {
-            geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), g_disk->sectors());
-            if (geo.cylinders) g_geometry_from = "partition table";
-        }
-    }
-    g_geometry_trimmed = false;
-    if (geo.cylinders && geo.sectors() > g_disk->sectors()) {
-        geo.cylinders = uint16_t(g_disk->sectors() / (uint32_t(geo.heads) * geo.sectors_per_track));
-        g_geometry_trimmed = true;
-    }
-    g_geometry.store(geo.cylinders ? uint32_t(geo.cylinders) << 16 | uint32_t(geo.heads) << 8 | geo.sectors_per_track : 0,
-                     std::memory_order_relaxed);
+    chooseGeometry();
     // A host that ignores IORDY reads whatever is on the bus: check image data
     // on the cable too, with early answers and on the data lane. Not with
     // `isa = on`: the ISA card that needs it strobes DIOR# with no chip select,
@@ -542,6 +547,52 @@ void serviceDiscChange() {
 // file and its comments (the defaults if there is no file). Returns "" when
 // saved, or why not: "card" (no card, or the file can't be read or written)
 // or "key" (not a setting, or the file would be too long).
+// HDDSYNTH.INI's device0 as SynthMinder or the console last set it, else as
+// read at boot: it's served from the host's next hardware reset (armResetSwap),
+// or the next start.
+static char g_device0_next[drive_config::MAX_NAME + 1] = "";
+
+// With device0 set to another image than the one served, the host's next
+// RESET# brings it in (main_state.h, ResetSwap). Not for a CD-ROM, the test or
+// bench disk, or the welcome disk: those wait for a restart, as before.
+static void armResetSwap() {
+    const uint8_t state = g_reset_swap.load(std::memory_order_acquire);
+    if (state == RESET_SWAP_REQUESTED || state == RESET_SWAP_DONE) return;  // one under way
+    const bool image = strcmp(g_disk_name, "image") == 0 && !g_device0_cdrom;
+    const size_t n = strlen(g_device0_next);
+    const bool img = n > 4 && strcasecmp(g_device0_next + n - 4, ".IMG") == 0;
+    const bool other = img && strcasecmp(g_device0_next, g_image_name) != 0;
+    g_reset_swap.store(image && other ? RESET_SWAP_ARMED : RESET_SWAP_NONE, std::memory_order_release);
+}
+
+// Core 0's part of a new disk at the host's reset: what's held for the old
+// image written out, the new one opened (the old again if it can't be), its
+// geometry, and its IDENTIFY built for core 1. The host waits: BSY.
+void serviceResetSwap() {
+    if (g_reset_swap.load(std::memory_order_acquire) != RESET_SWAP_REQUESTED) return;
+    char old[drive_config::MAX_NAME + 1];
+    std::snprintf(old, sizeof old, "%s", g_image_name);
+    g_disk->flush();
+    std::snprintf(g_config.device0, sizeof g_config.device0, "%s", g_device0_next);
+    const char* why = "";
+    if (useImage(g_config.device0, why)) {
+        g_disk_name = "image";
+        printfLine("DISK %s at the host's reset\n", g_config.device0);
+    } else {
+        printfLine("DISK %s can't be used (%s): %s again\n", g_config.device0, why, old);
+        std::snprintf(g_config.device0, sizeof g_config.device0, "%s", old);
+        useImage(g_config.device0, why);
+    }
+    g_device0_next[0] = 0;
+    chooseGeometry();
+    g_disk_sectors.store(g_disk->sectors(), std::memory_order_relaxed);
+    const IdentifyInfo info = driveIdentity();
+    ata::Device::identifyFor(info, g_reset_swap_identify);
+    g_reset_swap_info = info;
+    bus_observer::setIdentity(info);  // its IDENTIFY check, against the new disk's
+    g_reset_swap.store(RESET_SWAP_DONE, std::memory_order_release);
+}
+
 static const char* setConfig(const char* key, const char* value, Print& out) {
     char* const text = scratch::a;
     char* const edited = scratch::b;
@@ -589,7 +640,11 @@ void editConfig(const char* line) {
         Serial.println("# E: nothing changed; type key = value, e.g. device0 = GAMES.IMG");
         return;
     }
-    setConfig(key, value, Serial);
+    if (!setConfig(key, value, Serial)[0] && strcmp(key, "device0") == 0) {
+        std::snprintf(g_device0_next, sizeof g_device0_next, "%s", value);
+        armResetSwap();
+        if (g_reset_swap.load() == RESET_SWAP_ARMED) Serial.println("# device0: from the host's next reset (RESET#), or a restart");
+    }
 }
 
 // ---- SynthMinder's requests for the drive (synthminder.h, bay_service.cpp) ----
@@ -601,9 +656,6 @@ public:
     size_t write(uint8_t) override { return 1; }
 };
 
-// HDDSYNTH.INI's device0 as SynthMinder last set it, else as read at boot:
-// it's served from the next start.
-static char g_device0_next[drive_config::MAX_NAME + 1] = "";
 
 static bool hasExtension(const char* name, const char* ext) {
     size_t n = strlen(name), e = strlen(ext);
@@ -683,7 +735,10 @@ const char* baySet(const char* key, const char* value) {
     Quiet quiet;
     const char* why = setConfig(k, value, quiet);
     if (!why[0]) {
-        if (strcmp(k, "device0") == 0) std::snprintf(g_device0_next, sizeof g_device0_next, "%s", value);
+        if (strcmp(k, "device0") == 0) {
+            std::snprintf(g_device0_next, sizeof g_device0_next, "%s", value);
+            armResetSwap();  // from the host's next reset
+        }
         printfLine("SYNTHMINDER set %s = %s (from the next start)\n", k, value);
     }
     return why;

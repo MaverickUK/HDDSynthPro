@@ -60,6 +60,8 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)() = nullptr
 // BUSERR for a block that matches none. Costs core 0 about what checking
 // the generated disk does.
 void setImageChecks(bool on);
+// Device 0's IDENTIFY to check against, for a new disk (disks.cpp, serviceResetSwap).
+void setIdentity(const IdentifyInfo& identity);
 bool imageChecks();
 void expect(uint32_t lba, const uint16_t words[256]);  // core 0 only, before the result is posted
 uint32_t expectMissed();  // copies the host never read (abandoned, or samples dropped)

@@ -38,6 +38,21 @@ void Device::offerDma(uint8_t mdma_mode, const IdentifyPatch& unit0, const Ident
     }
 }
 
+CORE1_RAM_RARE void Device::setDisk(const IdentifyInfo& info, const uint16_t identify[256]) {
+    Unit& unit = units_[0];
+    unit.info = info;
+    unit.geometry = startGeometry(unit.info);
+    for (unsigned i = 0; i < 256; ++i) {
+        unit.identify[i] = identify[i];
+        __asm__ volatile("" ::: "memory");  // a plain copy, not a call to memcpy (in flash)
+    }
+}
+
+void Device::identifyFor(const IdentifyInfo& info, uint16_t out[256]) {
+    buildIdentify(info, out);
+    if (s_no_multiple) offerNoMultiple(out);
+}
+
 // The host changed the Device register: which unit answers from now on.
 CORE1_RAM void Device::deviceWritten() {
     uint8_t unit = (device_ & DEV_DEV) ? 1 : 0;

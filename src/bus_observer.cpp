@@ -232,6 +232,13 @@ void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
 }
 
 void setImageChecks(bool on) { s_image = on; }
+
+void setIdentity(const IdentifyInfo& identity) {
+    if (!s_checker) return;
+    uint16_t identify[256];
+    buildIdentify(identity, identify);
+    s_checker->setIdentify(identify);
+}
 bool imageChecks() { return s_image; }
 
 CORE0_RAM void expect(uint32_t lba, const uint16_t words[256]) {

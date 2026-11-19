@@ -128,6 +128,17 @@ extern bool g_test_disk;    // the generated disk: the bus observer can check it
 void chooseDisk();          // at boot, before core 1 is told (g_disk_chosen)
 void serviceDiscChange();   // each pass of loop()
 
+// A new hard disk at the host's hardware reset (docs/settings.md): with
+// HDDSYNTH.INI's device0 changed (SET, console E), core 0 arms it; core 1, at
+// RESET# asserted, asks for it; core 0 opens the new image (serviceResetSwap)
+// and builds its IDENTIFY; core 1 takes it, holding the device in reset (BSY,
+// as a drive spinning up) if RESET# is released first. Never at SRST.
+enum ResetSwap : uint8_t { RESET_SWAP_NONE, RESET_SWAP_ARMED, RESET_SWAP_REQUESTED, RESET_SWAP_DONE };
+extern std::atomic<uint8_t> g_reset_swap;
+extern IdentifyInfo g_reset_swap_info;          // core 0 writes, before RESET_SWAP_DONE
+extern uint16_t g_reset_swap_identify[256];
+void serviceResetSwap();    // each pass of loop()
+
 // link.cpp
 extern bool g_busy;  // the activity light's state (main.cpp's updateLed); the link sends it
 extern uint32_t g_activity_checked_us;

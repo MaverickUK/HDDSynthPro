@@ -184,6 +184,12 @@ public:
     // unit's patch from identifyDiff, worked out on core 0). Run once, from
     // flash.
     void offerDma(uint8_t mdma_mode, const IdentifyPatch& unit0, const IdentifyPatch& unit1);
+    // A new disk as device 0, at a hardware reset (main.cpp, resetSwapTake):
+    // its size and geometry, and the IDENTIFY core 0 built for it
+    // (identifyFor), copied in. Core 1's rare code: no flash.
+    void setDisk(const IdentifyInfo& info, const uint16_t identify[256]);
+    // Device 0's IDENTIFY for `info`, as the constructor builds it: for core 0.
+    static void identifyFor(const IdentifyInfo& info, uint16_t out[256]);
     // `device1`: device 1's identity, or nullptr for device 0 alone.
     explicit Device(const IdentifyInfo& info, const IdentifyInfo* device1 = nullptr);
     bool hasDevice1() const { return has_device1_; }

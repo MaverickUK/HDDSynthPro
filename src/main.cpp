@@ -199,6 +199,9 @@ static SharedFlag g_command_active{false};
 // Core 1 starts first, so it waits for it: IDENTIFY reports the real size.
 // The PIO mode to offer (HDDSYNTH.INI's `mode`) is set before it.
 std::atomic<uint32_t> g_disk_sectors{0};
+std::atomic<uint8_t> g_reset_swap{RESET_SWAP_NONE};
+IdentifyInfo g_reset_swap_info{};
+uint16_t g_reset_swap_identify[256];
 std::atomic<bool> g_disk_chosen{false};  // set after g_disk_sectors: a CD-ROM with no disc has 0
 std::atomic<uint8_t> g_pio_mode{0};
 std::atomic<uint8_t> g_mdma_mode{NO_DMA};       // set by core 1 at start-up (setup1)
@@ -671,6 +674,42 @@ CORE1_RAM_RARE __attribute__((noinline)) static bool busAutoStep(ata::Device& de
     return true;
 }
 
+// A new hard disk at the host's reset (main_state.h, ResetSwap), out of core
+// 1's hot block. At RESET# asserted, an armed swap is asked for; at its
+// release, true while core 0 is still opening the image: the device stays in
+// reset (BSY) until it's done.
+static bool s_reset_swap_held = false;
+
+// The new disk into the device: its size, geometry and IDENTIFY, as core 0 left them.
+CORE1_RAM_RARE static void resetSwapTake(ata::Device& dev) {
+    dev.setDisk(g_reset_swap_info, g_reset_swap_identify);
+    g_reset_swap.store(RESET_SWAP_NONE, std::memory_order_release);
+}
+
+// At each RESET# edge: true to stay in reset (BSY) after its release.
+CORE1_RAM_RARE __attribute__((noinline)) static bool resetSwapEdge(ata::Device& dev, bool low) {
+    const uint8_t state = g_reset_swap.load(std::memory_order_acquire);
+    s_reset_swap_held = false;
+    if (low) {
+        if (state == RESET_SWAP_ARMED) g_reset_swap.store(RESET_SWAP_REQUESTED, std::memory_order_release);
+        return false;
+    }
+    if (state == RESET_SWAP_DONE) resetSwapTake(dev);  // opened while RESET# was held
+    s_reset_swap_held = state == RESET_SWAP_REQUESTED;
+    return s_reset_swap_held;
+}
+
+// Held in reset after RESET#'s release: out of it once core 0 has the new disk open.
+CORE1_RAM_RARE __attribute__((noinline)) static void resetSwapFinish(ata::Device& dev) {
+    if (g_reset_swap.load(std::memory_order_acquire) != RESET_SWAP_DONE) return;
+    s_reset_swap_held = false;
+    resetSwapTake(dev);
+    dev.hardReset(false);
+    ide_bus::restart();
+    iordy_timer::requestReset();
+    ide_bus::updateIntrq(dev);
+}
+
 template <class Dev>
 __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first) {
     uint32_t started = dev.commandsStarted();
@@ -863,15 +902,22 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
                 bool low = !bus::high(pins, cfg::PIN_RESET_N);
                 if (low != reset_low) {
                     reset_low = low;
-                    dev.hardReset(low);
-                    if (!low) {
-                        ide_bus::restart();  // drop anything left from the bus going dead
-                        // Time only real traffic: while the host powers up, its
-                        // strobes float low, which looks like one long read.
-                        iordy_timer::requestReset();
+                    bool hold = false;  // a new disk still opening: stay in reset (BSY)
+                    if constexpr (std::is_same_v<Dev, ata::Device>) hold = resetSwapEdge(dev, low);
+                    if (!hold) {
+                        dev.hardReset(low);
+                        if (!low) {
+                            ide_bus::restart();  // drop anything left from the bus going dead
+                            // Time only real traffic: while the host powers up, its
+                            // strobes float low, which looks like one long read.
+                            iordy_timer::requestReset();
+                        }
+                        ide_bus::updateIntrq(dev);
                     }
-                    ide_bus::updateIntrq(dev);
                     record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
+                }
+                if constexpr (std::is_same_v<Dev, ata::Device>) {
+                    if (s_reset_swap_held) resetSwapFinish(dev);  // the new disk open: out of reset with it
                 }
                 // bus = auto (docs/auto-bus.md, the hard disk only), out of line:
                 // one test here when it's off
@@ -1415,6 +1461,7 @@ void loop() {
 #if FIRMWARE_SLICE != 0
     serveFetches();
     serviceDiscChange();
+    serviceResetSwap();
     iordy_timer::poll();
     bus_timing::poll();
     bus_timing::printPending(2);
