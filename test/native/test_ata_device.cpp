@@ -846,6 +846,30 @@ static std::vector<uint16_t> pattern(uint32_t sectors, uint16_t seed) {
     return words;
 }
 
+TEST(test_overlay_lends_its_store) {
+    GeneratedDisk base;
+    static RamOverlayDisk<4> disk(base);
+    uint16_t got[256];
+    std::vector<uint16_t> a = pattern(1, 1);
+    CHECK(disk.lend(0) == nullptr);              // nothing to lend
+    CHECK(disk.lend(4 * 512) == nullptr);        // would leave no sector
+    void* p = disk.lend(513);                    // two sectors' worth
+    CHECK(p != nullptr);
+    CHECK_EQ(uintptr_t(p) % 4, 0u);
+    CHECK_EQ(disk.capacity(), 2u);
+    CHECK(disk.lend(1) == nullptr);              // once only
+    std::memset(p, 0xA5, 1024);                  // the borrower's
+    CHECK(disk.write(1, a.data()));
+    CHECK(disk.write(2, a.data()));
+    CHECK(!disk.write(3, a.data()));             // full at its new capacity
+    CHECK(disk.read(1, got) && std::equal(got, got + 256, a.begin()));
+    const uint8_t* q = static_cast<const uint8_t*>(p);
+    CHECK(std::all_of(q, q + 1024, [](uint8_t b) { return b == 0xA5; }));  // writes kept off it
+    static RamOverlayDisk<4> written(base);
+    CHECK(written.write(1, a.data()));
+    CHECK(written.lend(512) == nullptr);         // not once written
+}
+
 TEST(test_overlay_disk) {
     GeneratedDisk base;
     static RamOverlayDisk<2> disk(base);
@@ -2322,6 +2346,7 @@ void runAtaDeviceTests() {
     RUN(test_read_last_sector_and_past_the_end);
     RUN(test_read_chs);
     RUN(test_read_fetch_failure);
+    RUN(test_overlay_lends_its_store);
     RUN(test_overlay_disk);
     RUN(test_image_disk);
     RUN(test_read_and_write_through_an_image);

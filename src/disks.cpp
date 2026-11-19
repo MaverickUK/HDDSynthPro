@@ -64,7 +64,6 @@
 #include "welcome_text.h"
 #endif
 
-#include "heap_limit.h"
 #include "main_state.h"
 
 #if FIRMWARE_SLICE != 0
@@ -279,28 +278,18 @@ static void chooseDevice1() {
         return;
     const char* name = g_config.device1;
     if (sd_card::isFolder(name)) {
-        // The list on the heap, only when a folder is served: as long as RAM
-        // allows, leaving cfg::FOLDER_HEAP_LEFT for whatever allocates later
-        // (heapFree(): rp2040.getFreeHeap() counts the DMA rings as free).
-        // malloc, not new (std::nothrow): Arduino-Pico's libstdc++ is built
-        // without exceptions, so a nothrow new that runs out aborts (the board
-        // never started with a folder, 3 Nov 2026). An Entry needs no constructor.
-        uint16_t capacity = cfg::FOLDER_MAX_ENTRIES;
-        folder_disk::Entry* entries = nullptr;
-        while (capacity >= 64) {
-            entries = static_cast<folder_disk::Entry*>(std::malloc(capacity * sizeof(folder_disk::Entry)));
-            if (entries && heapFree() >= cfg::FOLDER_HEAP_LEFT) break;
-            std::free(entries);
-            entries = nullptr;
-            capacity /= 2;
-        }
+        // The list in the RAM overlay's store, lent for good: the overlay is
+        // only written on the test disk, and then holds 64 sectors fewer. The
+        // heap (about 2 KB) can't hold it. An Entry needs no constructor.
+        const uint16_t capacity = cfg::FOLDER_MAX_ENTRIES;
+        static_assert(alignof(folder_disk::Entry) <= 4, "the overlay lends 4-byte aligned memory");
+        auto* entries = static_cast<folder_disk::Entry*>(g_overlay.lend(capacity * sizeof(folder_disk::Entry)));
         if (!entries) {
             std::snprintf(g_device1_note, sizeof g_device1_note, "%s: no RAM for its list", name);
             return;
         }
         if (!g_folder.build(sd_card::folderSource(name), entries, capacity, name)) {
             std::snprintf(g_device1_note, sizeof g_device1_note, "%s: can't list it, or nothing fits", name);
-            std::free(entries);
             return;
         }
         g_folder_capacity = capacity;

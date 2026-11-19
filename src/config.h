@@ -145,8 +145,15 @@ constexpr uint32_t COMMAND_QUIET_US = 4;
 constexpr unsigned COMMAND_POLLS_FIRST = 8;
 
 // Trace ring between core 1 (producer) and core 0 (consumer):
-// 8192 events x 16 bytes = 128 KB (12 bytes of data, padded).
+// 16 bytes an event (12 of data, padded). 8,192 (128 KB) for the listen
+// build, whose capture window needs two windows; 4,096 (64 KB) for the drive
+// builds since 0.36.0-dev.7, which record only commands unless the raw trace
+// (`t`) is on: the 64 KB went to the heap, which had 2 KB left.
+#if FIRMWARE_SLICE == 0
 constexpr size_t TRACE_RING_EVENTS = 8192;
+#else
+constexpr size_t TRACE_RING_EVENTS = 4096;
+#endif
 
 // The listen build's capture window (console `w`): with no drive answering,
 // the adapter probes about once a microsecond forever, faster than core 0 can
@@ -155,7 +162,9 @@ constexpr size_t TRACE_RING_EVENTS = 8192;
 // recorded until the next one. Two windows fit in the ring, so the adapter's
 // two detection resets never drop an event.
 constexpr uint32_t LISTEN_WINDOW_EVENTS = 3000;
+#if FIRMWARE_SLICE == 0
 static_assert(2 * LISTEN_WINDOW_EVENTS + 64 < TRACE_RING_EVENTS, "two windows must fit in the trace ring");
+#endif
 
 // Core 0 prints a run of identical accesses once it has been quiet this long.
 constexpr unsigned TRACE_FLUSH_MS = 20;
@@ -182,10 +191,6 @@ constexpr size_t RAM_DISK_SECTORS = 512;
 // folders its list holds, 32 bytes each, on the heap. Fewer if RAM is short
 // (halved until it fits); a bigger folder is served cut short, with a warning.
 constexpr uint16_t FOLDER_MAX_ENTRIES = 1024;
-// Heap kept free after the list: for Print::printf, which allocates a line
-// over 63 characters (STATS goes in pieces of up to about 300). 16 KB until
-// 0.35.1, when the heap measured free included the DMA rings.
-constexpr uint32_t FOLDER_HEAP_LEFT = 4 * 1024;
 
 // The IORDY timer (iordy_timer.pio) counts and times reads that IORDY holds
 // longer than this. ATA's limit is 1250 ns (tB).

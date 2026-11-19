@@ -77,7 +77,27 @@ public:
         return true;
     }
 
-    size_t used() const { return used_; }
+    size_t used() const { return used_ - lent_; }
+    // The sectors it can hold: SLOTS, less any lent.
+    size_t capacity() const { return SLOTS - lent_; }
+
+    // Lends the start of its store, `bytes` rounded up to whole sectors, for
+    // something else to keep there for good (the folder disk's list, as the
+    // overlay is only written on the test disk: docs/two-drives.md); it then
+    // holds that many fewer sectors. Only before anything is written, and
+    // once: nullptr otherwise, or if it would leave none. 4-byte aligned.
+    // The lent slots are held for LENT_LBA, which no disk has (write() refuses
+    // it, and ATA can't address it), so read(), write() and find() are
+    // unchanged: in core 0's RAM, their size sets where the code after them
+    // sits, and so its RAM banks.
+    void* lend(size_t bytes) {
+        const size_t slots = (bytes + sizeof data_[0] - 1) / sizeof data_[0];
+        if (used_ != 0 || slots == 0 || slots >= SLOTS) return nullptr;
+        for (size_t i = 0; i < slots; ++i) lbas_[i] = LENT_LBA;
+        used_ = lent_ = slots;
+        return data_[0];
+    }
+    static constexpr uint32_t LENT_LBA = 0xFFFFFFFF;
 
 private:
     CORE0_RAM int find(uint32_t lba) const {
@@ -90,6 +110,10 @@ private:
     uint32_t lbas_[SLOTS];
     uint16_t data_[SLOTS][256];
     size_t used_ = 0;
+    size_t lent_ = 0;
+    // To whole 32-byte steps with lent_: the objects after it keep their RAM
+    // banks (docs/speed-log.md, 19 Nov 2026).
+    uint8_t bank_pad_[32 - sizeof(size_t)];
 };
 
 // A disk image file, as ImageDisk sees it: byte-addressed reads and writes

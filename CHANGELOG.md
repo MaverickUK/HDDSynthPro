@@ -7,6 +7,13 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.7] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **A folder as device 1 lists up to 1,024 entries again, in the RAM overlay's store** (`RamOverlayDisk::lend`): the overlay is only written on the test disk, so its first 64 sectors' store holds the list for good, and the test disk then takes 448 sectors of writes, not 512. On dev.6 the 2 KB heap couldn't hold even 64 entries; on 0.35.0 the list was on the heap, partly over the DMA rings. The lent slots are held for an LBA no disk has, so the overlay's `read()`, `write()` and `find()` are unchanged, and core 0's RAM code keeps its place, byte for byte.
+- **The drive builds' trace ring is 4,096 events, not 8,192** (64 KB, not 128): they record commands unless the raw trace (`t`) is on. The listen build keeps 8,192 for its capture window. The 64 KB is heap now: about 66 KB, against 2.1, for `Print::printf` and whatever SynthMinder needs next. RAM 83.1% used, from 95.6%.
+- Not one object below the USB buffers changed RAM bank (the overlay grew 32 bytes, the ring shrank 64 KB); core 1's and core 0's RAM code unchanged.
+
 ## [0.36.0-dev.6] - 2026-11-19 (branch `synthminder`)
 
 ### Changed
