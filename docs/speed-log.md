@@ -309,6 +309,18 @@ The JMicron on the Mac, the PCB, the generated disk, `-m speed`, rig builds (`-D
 - **dev.5:** what must keep up with the bus runs every pass from RAM (`loop()`, the IORDY timer's and bus timing's checks for a report, `bus_observer::poll`, the sector checker: 2.9 KB more `CORE0_RAM`); the rest (`housekeeping()`) from flash once a millisecond. The pass is 5.7 us, and making it 23 or 57 us with a spin from the flash cache changed neither reads nor writes.
 - **Writes first came out 6% slower (42.4 ms):** the data lane holds a Status read past 1,250 ns for every sector written, so core 0 prints a `SLOWREAD` line a sector, about three a millisecond. Printed in one go once a millisecond, they kept the next sector's store waiting. Found by running each group of housekeeping on every pass again (a console knob in the experiment build): only the prints' group brought writes back. Now one line at a time with `serveFetches()` between: 40.1-40.2 ms whether housekeeping runs every pass or once a millisecond.
 - **RAM:** 2.1 KB of heap left on `pcb_drive` (0x2007a784 to 0x2007b000), from 5.3 KB. Not one object below the USB buffers changed bank against dev.4 (`check_ram_banks.py`); core 1's block is byte-identical.
+## 0.35.1: core 0's loop in RAM (19 Nov 2026)
+
+The JMicron on the Mac, the PCB, the generated disk, the data lane, `-m speed`, rig builds. Why and how: branch `synthminder`'s 0.36.0-dev.5 (its speed log), whose loop change 0.35.1 takes.
+
+| | 0.35.0 | 0.35.1's heap fix alone | 0.35.1 |
+|---|---|---|---|
+| 64 KB read in the drive | 43.8-45.3 ms | **54.0** | **42.7, 42.7** |
+| Random 4 KB | 78.4-78.7 IOPS | 77.8 | 78.7, 78.9 |
+| 64 KB write in the drive | 40.1 ms | 40.1 | 40.2, 40.2 |
+
+- The heap fix adds a few hundred bytes of flash code (`_sbrk`, `heapFree`) and nothing on any per-sector path, yet reads were 20% slower: core 0's loop in flash, as on the branch. With the loop in RAM the same as the branch's dev.5. Early answers not re-measured on 0.35.1 (dev.5, the same change: within 0.3% of 0.35.0).
+- RAM: 8.5 KB of heap on `pcb_drive` (11.6 on 0.35.0); not one object below the USB buffers changed bank; core 1's block byte-identical.
 
 ## Ceilings on this adapter
 

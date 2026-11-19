@@ -1,5 +1,8 @@
 # IDE Synth Bay
 
+[![Build and test](https://github.com/MaverickUK/HDDSynthPro/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/MaverickUK/HDDSynthPro/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/MaverickUK/HDDSynthPro?include_prereleases&sort=semver)](https://github.com/MaverickUK/HDDSynthPro/releases)
+
 <img src="media/IDESynthBay.png" alt="IDE Synth Bay logo" width="300" align="left">
 
 An RP2350 that pretends to be an IDE hard disk and CD-ROM drive, as the base for a future HDD Synth that *is* the drive rather than one that listens to it.

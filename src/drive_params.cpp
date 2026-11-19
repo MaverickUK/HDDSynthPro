@@ -6,51 +6,54 @@
 namespace {
 
 struct NumParam {
+    const char* group;  // the drive.json group, as the Drive Lab's cards
     const char* key;
     float DriveParams::*field;
     float min, max;
     bool integer;
 };
 
-// Ranges as the prototype's sliders.
+// Ranges as the prototype's sliders. A key that would repeat its group's
+// name is shorter in drive.json: platters.count, bearing.noise, and the
+// mixer's layers (gSpindle is mixer.spindle).
 const NumParam NUM_PARAMS[] = {
-    {"rpm", &DriveParams::rpm, 1800, 15000, true},
-    {"spinupS", &DriveParams::spinupS, 1, 20, false},
-    {"coastS", &DriveParams::coastS, 2, 30, false},
-    {"slots", &DriveParams::slots, 6, 18, true},
-    {"polePairs", &DriveParams::polePairs, 2, 8, true},
-    {"whine", &DriveParams::whine, 0, 1, false},
-    {"hum", &DriveParams::hum, 0, 1, false},
-    {"imbalance", &DriveParams::imbalance, 0, 1, false},
-    {"platters", &DriveParams::platters, 1, 10, true},
-    {"windage", &DriveParams::windage, 0, 1, false},
-    {"wear", &DriveParams::wear, 0, 1, false},
-    {"bearingLvl", &DriveParams::bearingLvl, 0, 1, false},
-    {"cylinders", &DriveParams::cylinders, 300, 100000, true},
-    {"fullStrokeMs", &DriveParams::fullStrokeMs, 8, 60, false},
-    {"trackMs", &DriveParams::trackMs, 0.5f, 8, false},
-    {"settleDamp", &DriveParams::settleDamp, 0.1f, 1.2f, false},
-    {"buzz", &DriveParams::buzz, 0, 1, false},
-    {"stepMs", &DriveParams::stepMs, 0.2f, 6, false},
-    {"stepRamp", &DriveParams::stepRamp, 0, 1, false},
-    {"tick", &DriveParams::tick, 0, 1, false},
-    {"armHz", &DriveParams::armHz, 200, 4000, false},
-    {"armRingMs", &DriveParams::armRingMs, 5, 200, false},
-    {"caseHz", &DriveParams::caseHz, 80, 1200, false},
-    {"caseRingMs", &DriveParams::caseRingMs, 10, 400, false},
-    {"hardness", &DriveParams::hardness, 0, 1, false},
-    {"calSeeks", &DriveParams::calSeeks, 0, 8, true},
-    {"recalS", &DriveParams::recalS, 0, 120, false},
-    {"wedges", &DriveParams::wedges, 0, 400, true},
-    {"servo", &DriveParams::servo, 0, 1, false},
-    {"bright", &DriveParams::bright, -1, 1, false},
-    {"caseRes", &DriveParams::caseRes, 0, 1, false},
-    {"gSpindle", &DriveParams::gSpindle, 0, 1.5f, false},
-    {"gBearing", &DriveParams::gBearing, 0, 1.5f, false},
-    {"gWind", &DriveParams::gWind, 0, 1.5f, false},
-    {"gAct", &DriveParams::gAct, 0, 1.5f, false},
-    {"gServo", &DriveParams::gServo, 0, 1.5f, false},
-    {"master", &DriveParams::master, 0, 1.5f, false},
+    {"spindle", "rpm", &DriveParams::rpm, 1800, 15000, true},
+    {"spindle", "spinupS", &DriveParams::spinupS, 1, 20, false},
+    {"spindle", "coastS", &DriveParams::coastS, 2, 30, false},
+    {"spindle", "slots", &DriveParams::slots, 6, 18, true},
+    {"spindle", "polePairs", &DriveParams::polePairs, 2, 8, true},
+    {"spindle", "whine", &DriveParams::whine, 0, 1, false},
+    {"spindle", "hum", &DriveParams::hum, 0, 1, false},
+    {"spindle", "imbalance", &DriveParams::imbalance, 0, 1, false},
+    {"platters", "count", &DriveParams::platters, 1, 10, true},
+    {"platters", "windage", &DriveParams::windage, 0, 1, false},
+    {"bearing", "wear", &DriveParams::wear, 0, 1, false},
+    {"bearing", "noise", &DriveParams::bearingLvl, 0, 1, false},
+    {"actuator", "cylinders", &DriveParams::cylinders, 300, 100000, true},
+    {"actuator", "fullStrokeMs", &DriveParams::fullStrokeMs, 8, 60, false},
+    {"actuator", "trackMs", &DriveParams::trackMs, 0.5f, 8, false},
+    {"actuator", "settleDamp", &DriveParams::settleDamp, 0.1f, 1.2f, false},
+    {"actuator", "buzz", &DriveParams::buzz, 0, 1, false},
+    {"actuator", "stepMs", &DriveParams::stepMs, 0.2f, 6, false},
+    {"actuator", "stepRamp", &DriveParams::stepRamp, 0, 1, false},
+    {"actuator", "tick", &DriveParams::tick, 0, 1, false},
+    {"resonance", "armHz", &DriveParams::armHz, 200, 4000, false},
+    {"resonance", "armRingMs", &DriveParams::armRingMs, 5, 200, false},
+    {"resonance", "caseHz", &DriveParams::caseHz, 80, 1200, false},
+    {"resonance", "caseRingMs", &DriveParams::caseRingMs, 10, 400, false},
+    {"resonance", "hardness", &DriveParams::hardness, 0, 1, false},
+    {"heads", "calSeeks", &DriveParams::calSeeks, 0, 8, true},
+    {"heads", "recalS", &DriveParams::recalS, 0, 120, false},
+    {"heads", "wedges", &DriveParams::wedges, 0, 400, true},
+    {"heads", "servo", &DriveParams::servo, 0, 1, false},
+    {"enclosure", "bright", &DriveParams::bright, -1, 1, false},
+    {"enclosure", "caseRes", &DriveParams::caseRes, 0, 1, false},
+    {"mixer", "spindle", &DriveParams::gSpindle, 0, 1.5f, false},
+    {"mixer", "bearing", &DriveParams::gBearing, 0, 1.5f, false},
+    {"mixer", "air", &DriveParams::gWind, 0, 1.5f, false},
+    {"mixer", "actuator", &DriveParams::gAct, 0, 1.5f, false},
+    {"mixer", "servo", &DriveParams::gServo, 0, 1.5f, false},
+    {"mixer", "master", &DriveParams::master, 0, 1.5f, false},
 };
 
 // A choice key: its names, in enum order.
@@ -129,14 +132,14 @@ bool drivePreset(const char* id, DriveParams& out) {
 size_t drivePresetCount() { return sizeof(PRESET_IDS) / sizeof(PRESET_IDS[0]); }
 const char* drivePresetId(size_t i) { return i < drivePresetCount() ? PRESET_IDS[i] : nullptr; }
 
-ParamResult setDriveParam(DriveParams& p, const char* key, float value) {
+ParamResult setDriveParam(DriveParams& p, const char* group, const char* key, float value) {
     if (!isfinite(value)) return ParamResult::BadValue;
-    if (!strcmp(key, "zoned")) {
+    if (!strcmp(group, "platters") && !strcmp(key, "zoned")) {
         p.zoned = value != 0;
         return ParamResult::Ok;
     }
     for (const NumParam& n : NUM_PARAMS) {
-        if (strcmp(key, n.key)) continue;
+        if (strcmp(group, n.group) || strcmp(key, n.key)) continue;
         float v = value < n.min ? n.min : (value > n.max ? n.max : value);
         if (n.integer) v = roundf(v);
         p.*n.field = v;
@@ -145,13 +148,14 @@ ParamResult setDriveParam(DriveParams& p, const char* key, float value) {
     return ParamResult::UnknownKey;
 }
 
-ParamResult setDriveChoice(DriveParams& p, const char* key, const char* value) {
+ParamResult setDriveChoice(DriveParams& p, const char* group, const char* key, const char* value) {
+    auto is = [&](const char* g, const char* k) { return !strcmp(group, g) && !strcmp(key, k); };
     bool ok;
-    if (!strcmp(key, "size")) ok = pick(value, SIZES, 3, p.size);
-    else if (!strcmp(key, "bearing")) ok = pick(value, BEARINGS, 2, p.bearing);
-    else if (!strcmp(key, "actuator")) ok = pick(value, ACTUATORS, 2, p.actuator);
-    else if (!strcmp(key, "park")) ok = pick(value, PARKINGS, 3, p.park);
-    else if (!strcmp(key, "mount")) ok = pick(value, MOUNTS, 3, p.mount);
+    if (is("platters", "size")) ok = pick(value, SIZES, 3, p.size);
+    else if (is("bearing", "type")) ok = pick(value, BEARINGS, 2, p.bearing);
+    else if (is("actuator", "type")) ok = pick(value, ACTUATORS, 2, p.actuator);
+    else if (is("heads", "parking")) ok = pick(value, PARKINGS, 3, p.park);
+    else if (is("enclosure", "mount")) ok = pick(value, MOUNTS, 3, p.mount);
     else return ParamResult::UnknownKey;
     return ok ? ParamResult::Ok : ParamResult::BadValue;
 }

@@ -7,6 +7,11 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.6] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **Merged `main` (0.35.1):** the heap stops under the DMA rings (`heap_limit.c`, `heapFree()`), the folder disk keeps 4 KB free, and `drive_params.*` from HDDSynth_Native v0.24.1. Core 0's loop change was already here (dev.5). The heap is 2.1 KB on this branch, so a folder as device 1 gets no list (`S` says no RAM for it) until RAM is freed. Core 1's and core 0's RAM blocks are dev.5's, byte for byte, and no object changed bank.
+
 ## [0.36.0-dev.5] - 2026-11-19 (branch `synthminder`)
 
 ### Changed
@@ -66,6 +71,15 @@ SynthMinder, the DOS program, talks to the drive: [docs/synthminder-protocol.md]
 
 ### Tested
 - **The Evesham, FreeDOS (`SYNTHMIN.IMG`), SynthMinder from its `firmware-protocol` branch, the HDD Synth Mk5 on 0.25.0:** the Bay's status and its disk and ISO lists, the synth's volume changed, and (with the longer relay timeout) its pack list. Exchanges take 0.2-6 ms; in the first minutes after a restart some took 50-109 ms, with the SEND ending still BSY (`d0`): not yet explained.
+## [0.35.1] - 2026-11-19
+
+### Fixed
+- **The data lane's reads no longer move with unrelated flash code** (from branch `synthminder`'s 0.36.0-dev.5): `loop()`, the IORDY timer's and bus timing's checks for reports, `bus_observer::poll` and the sector checker are `CORE0_RAM` (2.9 KB); the console, the lines core 0 prints, the link, the card and the LED run from `housekeeping()`, in flash, once a millisecond. Core 0's pass went from 31 us to about 6. The heap fix below alone, a few hundred bytes of flash code, read 54.0 ms per 64 KB on the lane (0.35.0: 43.8-45.3); with this, 42.7, in two runs, writes 40.2 (40.1). `SLOWREAD` and `EARLYDATA` lines go one at a time with the fetches served between (the lane causes one a sector on writes; a millisecond's worth printed together slowed writes 6%). docs/speed-log.md.
+- **The heap stops under the DMA rings.** The SDK's `_sbrk` let `malloc` grow the heap up to `__StackLimit`, the end of RAM, but since 0.35.0-dev.5 the register table's write ring and the bus observer's ring sit between `__HeapLimit` and there (`.ram_rings`). A large enough `malloc` could be given ring memory, which the DMA overwrites: the folder disk's list (device 1), and `Print::printf`'s buffer for any line over 63 characters if the heap had run short. `rp2040.getFreeHeap()` counted the rings as free too. So with a folder as device 1 the list was placed partly over the write ring (and, at 512 entries, the observer's), and the folder the host saw could be corrupted. Now `heap_limit.c` replaces `_sbrk`, stopping at `__HeapLimit`, and `heapFree()` gives the real figure. Its variable keeps the SDK's name, so not one object moved in RAM.
+
+### Changed
+- `drive_params.*` copied again from HDDSynth_Native v0.24.1 (d7f696c; they were its v0.21.0): its v0.22.0 grouped `drive.json`'s keys as the Drive Lab's cards, so `setDriveParam()` and `setDriveChoice()` take a group. The Bay calls neither (the linker drops them), and the presets, and `drive_timing.*`, are unchanged, so seek timing is as before.
+- The folder disk leaves 4 KB of heap free after its list (`cfg::FOLDER_HEAP_LEFT`, 16 KB before): enough for `Print::printf`, which allocates a line over 63 characters (the STATS line goes in pieces of up to about 300). With about 8.5 KB of heap on `pcb_drive`, a folder lists up to 128 entries (512 before, partly over the rings); a bigger one is served cut short, as `S` says.
 
 ## [0.35.0] - 2026-11-17
 
