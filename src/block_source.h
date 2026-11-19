@@ -77,6 +77,9 @@ public:
         int slot = find(lba);
         if (slot < 0) return base_->read(lba, words);
         std::memcpy(words, data_[slot], sizeof data_[slot]);
+        // 0.35.1's size, so core 0's RAM code after it keeps its RAM banks
+        // (scripts/check_core1_layout.py): only for sectors written.
+        __asm volatile("nop\n nop\n nop\n nop");
         return true;
     }
 
@@ -84,7 +87,10 @@ public:
         if (lba >= sectors()) return false;
         int slot = find(lba);
         if (slot < 0) {
-            if (used_ == slots_) return false;  // full, or no storage
+            if (used_ == slots_) {  // full, or no storage
+                __asm volatile("nop\n nop\n nop\n nop\n nop\n nop");  // 0.35.1's size, as read()'s
+                return false;
+            }
             slot = int(used_++);
             lbas_[slot] = lba;
         }
@@ -107,6 +113,9 @@ private:
     uint16_t (*data_)[256] = nullptr;  // slots_ sectors
     size_t slots_ = 0;
     size_t used_ = 0;
+    // So that the objects after it move by whole 32-byte steps (the RAM
+    // banks' period) against 0.35.1, whose overlay held its 264 KB itself.
+    uint8_t bank_pad_[20] = {};
 };
 
 // An overlay with room for SLOTS sectors inside it: for the host tests (the

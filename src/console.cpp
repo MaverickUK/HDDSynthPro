@@ -61,6 +61,7 @@
 #include "scratch.h"
 #endif
 
+#include "heap_limit.h"
 #include "main_state.h"
 
 // Prints a line only if USB serial can take it now. A blocked write would
@@ -348,9 +349,9 @@ static void printPins() {
 }
 
 static void printStats() {
-    Serial.printf("STATS events=%lu dropped=%lu stalls=%lu ring=%u ring_max=%u",
+    Serial.printf("STATS events=%lu dropped=%lu stalls=%lu ring=%u",
                   (unsigned long)g_events.load(), (unsigned long)g_dropped.load(),
-                  (unsigned long)g_stalls.load(), (unsigned)g_trace.size(), (unsigned)g_trace_max);
+                  (unsigned long)g_stalls.load(), (unsigned)g_trace.size());
     // The most each core's stack has held, of 4,096 bytes (core 1: 2,048 as the SDK set it up).
     Serial.printf(" stack0_max=%lu stack1_max=%lu", (unsigned long)stack_watch::used(0),
                   (unsigned long)stack_watch::used(1));
@@ -454,7 +455,7 @@ static void printStats() {
                   (unsigned long)g_disk_ms);
     Serial.printf(" image_name=%s config=%s", g_image_name, g_config_state);
     Serial.printf(" overlay=%u/%u heap_free=%d", unsigned(overlayUsed()), unsigned(overlaySlots()),
-                  rp2040.getFreeHeap());
+                  int(heapFree()));
     Serial.printf(" device1=%s device1_sectors=%lu", g_device1_kind,
                   (unsigned long)(g_device1_disk ? g_device1_disk->sectors() : 0));
     const media_watch::Watch& card = sd_card::media();

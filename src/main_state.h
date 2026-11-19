@@ -8,7 +8,6 @@
 extern SpscRing<TraceEvent, cfg::TRACE_RING_EVENTS> g_trace;
 extern std::atomic<uint32_t> g_events;   // recorded by core 1
 extern std::atomic<uint32_t> g_dropped;  // lost because the ring was full
-extern size_t g_trace_max;               // the most events ever waiting in it (core 0's)
 extern std::atomic<uint32_t> g_stalls;   // PIO FIFO filled: accesses missed
 
 // console.cpp

@@ -77,7 +77,6 @@
 SpscRing<TraceEvent, cfg::TRACE_RING_EVENTS> g_trace;
 std::atomic<uint32_t> g_events{0};   // recorded by core 1
 std::atomic<uint32_t> g_dropped{0};  // lost because the ring was full
-size_t g_trace_max = 0;  // the ring's high-water mark, of cfg::TRACE_RING_EVENTS: how big it needs to be
 std::atomic<uint32_t> g_stalls{0};   // PIO FIFO filled: accesses missed
 
 // Pins in sample layout (bit n = GPIO PIN_DD0 + n), for non-bus events.
@@ -1460,7 +1459,6 @@ CORE0_RAM void loop() {
         if (!printLine(line, n)) return;
         has_pending = false;
     }
-    if (size_t waiting = g_trace.size(); waiting > g_trace_max) g_trace_max = waiting;
     TraceEvent e;
     for (int i = 0; i < 64 && g_trace.pop(e); ++i) {
         g_last_event_ms = millis();
