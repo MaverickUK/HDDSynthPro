@@ -7,6 +7,14 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.5] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **Core 0's loop in RAM; its housekeeping once a millisecond.** `loop()`, the IORDY timer's and bus timing's checks for reports (their handling, rare, stays in flash), `bus_observer::poll` and the sector checker it runs are `CORE0_RAM` (2.9 KB). The console, the lines core 0 prints, the link, the card, the LED, the reset swap and the disc change run from `housekeeping()`, in flash, once a millisecond, as the activity check already did. Core 0's pass went from 31 us (0.35.0) and 42 (dev.4) to about 6, and the data lane's reads no longer move with unrelated flash code: dev.4 read 47 ms per 64 KB in the morning and 58.7 in the afternoon; dev.5 reads 42.7, the best on this rig (0.35.0: 43.8-45.3). Writes and early answers as 0.35.0's. docs/speed-log.md.
+- `SLOWREAD` and `EARLYDATA` lines go one at a time with the fetches served between: the data lane causes one a sector on writes, and a millisecond's worth printed together slowed writes 6%.
+- The flush of a held trace line, and the end of the IDENTIFY check after a reset, once a millisecond too.
+- **The layout recorded** (`scripts/core1_layout/*.txt`) after the benchmark: core 1's block is dev.4's, byte for byte, which this branch's commits since 0.35.0 had changed and the A-B-A runs (dev.3-dev.5) covered.
+
 ## [0.36.0-dev.4] - 2026-11-19 (branch `synthminder`)
 
 ### Changed

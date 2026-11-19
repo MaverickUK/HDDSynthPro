@@ -2,6 +2,7 @@
 
 #include "bus_sample.h"
 #include "gen_disk.h"
+#include "core1_ram.h"  // CORE0_RAM: the bus observer checks every sector with these
 
 namespace sector_check {
 
@@ -50,7 +51,7 @@ unsigned Checker::compareIdentify(unsigned unit, Mismatch& m) const {
     return matches;
 }
 
-bool Checker::checkIdentify(bool& is_identify) {
+CORE0_RAM bool Checker::checkIdentify(bool& is_identify) {
     is_identify = false;
     Mismatch m{};
     unsigned matches = 0;
@@ -118,7 +119,7 @@ Mismatch Checker::compare(uint32_t lba, const uint16_t* want) const {
 
 // Whether the block is one of expect()'s copies exactly: then it's good,
 // and that copy and the older ones are done with.
-bool Checker::matchesExpected() {
+CORE0_RAM bool Checker::matchesExpected() {
     for (unsigned k = 0; k < expect_count_; ++k) {
         const Expected& e = expected_[(expect_first_ + k) % EXPECT_SLOTS];
         unsigned i = 0;
@@ -137,7 +138,7 @@ bool Checker::matchesExpected() {
 // The block against expect()'s copies, oldest first: the first that matches
 // is good; failing that, it's reported against the closest. Either way that
 // copy and the older ones are done with.
-bool Checker::checkExpected() {
+CORE0_RAM bool Checker::checkExpected() {
     if (expect_count_ == 0) {
         ++skipped_;
         return false;
@@ -176,7 +177,7 @@ bool Checker::checkExpected() {
     return true;
 }
 
-bool Checker::observe(uint32_t word, bool data) {
+CORE0_RAM bool Checker::observe(uint32_t word, bool data) {
     uint32_t seq = (word >> SEQ_SHIFT) & SEQ_MASK;
     bool gap = have_seq_ && seq != ((last_seq_ - 1) & SEQ_MASK);
     have_seq_ = true;
@@ -206,7 +207,7 @@ bool Checker::observe(uint32_t word, bool data) {
     return finishSector(data);
 }
 
-bool Checker::finishSector(bool data) {
+CORE0_RAM bool Checker::finishSector(bool data) {
     if (!data && matchesExpected()) return false;
     bool is_identify;
     bool bad = checkIdentify(is_identify);
