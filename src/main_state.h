@@ -156,7 +156,7 @@ bool relayToSynth(const char* line, size_t len);
 void synthMinderLinkLine(const char* line, size_t len);
 const char* linkState();
 void seekTimingSummary(char* out, size_t size);
-extern uint32_t g_link_rx_lost;  // link bytes that found the RX ring full
+uint32_t linkRxLost();  // link bytes that found the RX ring full
 // serveFetches(): a Fetch with `message` set. True with its result now, or
 // false while a RECEIVE waits for the synth; synthMinderReady() then gives
 // its id once the reply is in its buffer.

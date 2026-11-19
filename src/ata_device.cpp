@@ -309,9 +309,6 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
         case CMD_SET_MULTIPLE_MODE:
             setMultipleMode();
             break;
-        case CMD_SYNTHMINDER:
-            synthMinder();
-            break;
         case CMD_READ_VERIFY:
         case CMD_READ_VERIFY_NO_RETRY:
             u().standby = false;
@@ -366,7 +363,12 @@ CORE1_RAM void Device::startCommand(uint8_t command) {
                 u().standby = false;
                 seek();
             } else {
-                fail(ER_ABRT);
+                otherCommand();  // SynthMinder's, or ABRT
+                // 0.35.0's size plus 32 bytes, a whole RAM bank period, so the
+                // per-sector code after this function keeps its banks (the
+                // compiler leaves it 10 bytes over without these 12 no-ops, on
+                // a path almost never taken). Check with check_core1_layout.py.
+                __asm__ volatile("nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop");
             }
             break;
     }
@@ -532,6 +534,18 @@ CORE1_RAM void Device::startWrite(uint8_t block) {
     uint32_t lba = 0;
     if (!checkRange(count, lba)) return;
     beginWrite(lba, count, block);
+}
+
+// A command startCommand's switch doesn't name: SynthMinder's 8Dh, else
+// ABRT. Out here, in core 1's rare code, so startCommand is 0.35.0's size and
+// the per-sector code after it in core 1's block sits where it did: a case of
+// its own made startCommand 20 bytes longer, which moved them to other RAM
+// banks (docs/speed-log.md, 19 Nov 2026).
+CORE1_RAM_RARE void Device::otherCommand() {
+    if (last_.command == CMD_SYNTHMINDER)  // the command startCommand recorded: no argument to pass
+        synthMinder();
+    else
+        fail(ER_ABRT);
 }
 
 // SynthMinder's 8Dh: one sector each way, through the same fetches as a

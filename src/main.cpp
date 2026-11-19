@@ -917,7 +917,12 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
                     record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
                 }
                 if constexpr (std::is_same_v<Dev, ata::Device>) {
-                    if (s_reset_swap_held) resetSwapFinish(dev);  // the new disk open: out of reset with it
+                    if (s_reset_swap_held) {
+                        resetSwapFinish(dev);  // the new disk open: out of reset with it
+                        // runDrive 0.35.0's size plus 32 bytes, a whole RAM bank
+                        // period, so the code after it keeps its banks
+                        __asm__ volatile("nop\n nop\n nop\n nop");
+                    }
                 }
                 // bus = auto (docs/auto-bus.md, the hard disk only), out of line:
                 // one test here when it's off
@@ -1325,7 +1330,12 @@ __attribute__((noinline, cold)) static void serveSynthMinderFetch(uint32_t id, u
 }
 
 CORE0_RAM static void serveFetches() {
-    if (__builtin_expect(g_synthminder_waiting, 0)) collectSynthMinderReply();
+    if (__builtin_expect(g_synthminder_waiting, 0)) {
+        collectSynthMinderReply();
+        // serveFetches 0.35.0's size plus 64 bytes, whole RAM bank periods, so
+        // core 0's per-sector code after it keeps its banks (check_core1_layout.py)
+        __asm__ volatile("nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop\n nop");
+    }
     releaseHeld();
     ata::Fetch fetch;
     while (g_held_count < HELD_MAX && g_mailbox.takeRequest(fetch)) {

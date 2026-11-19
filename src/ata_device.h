@@ -362,6 +362,7 @@ private:
     void beginRead(uint32_t lba, uint32_t count, uint8_t block);   // after the range check
     void beginWrite(uint32_t lba, uint32_t count, uint8_t block);
     void synthMinder();  // CMD_SYNTHMINDER
+    void otherCommand();  // one startCommand's switch doesn't name
     void setMultipleMode();
     void readVerify();
     void seek();

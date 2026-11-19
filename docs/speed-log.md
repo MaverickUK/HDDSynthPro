@@ -274,6 +274,23 @@ A1 and A2 agree, so the rig didn't drift. **B is slower than both** on the lane 
 
 **Done in 0.36.0-dev.3:** the new `Fetch` field had grown every copy of a fetch in core 1's loops, and `serveFetches` (core 0, per sector) had grown 164 bytes. Now core 1's per-access code is 0.35.0's again (only `startCommand`, 20 bytes longer, moves what follows), and `serveFetches` is 40 bytes longer, for its two checks. Owed: an A-B of 0.35.0 against dev.3 on the lane and early answers, then `check_core1_layout.py --update`.
 
+## 0.36.0-dev.4 against 0.35.0: RAM banks (19 Nov 2026)
+
+The JMicron on the Mac, the PCB, the generated disk, `-m speed`, two runs each, rig builds (`-DRIG_WATCHDOG_MS=8000`). A is `v0.35.0`, run first and last (A1, A2).
+
+| | A1 | dev.4 | dev.4, link RX polled | dev.4, banks matched | A2 |
+|---|---|---|---|---|---|
+| Lane: per sector in the drive (reads) | 342, 354 us | 374, 378 | 376, 363 | 368, 363 | 342, 354 |
+| Lane: random 4 KB | 78.7, 78.4 IOPS | 77.6, 77.3 | 77.6, 77.3 | 77.8, 77.5 | 78.7, 78.4 |
+| Lane: a 64 KB write in the drive | 40.1 ms | 40.3 | 40.3 | **40.0** | 40.1 |
+| Early answers: a 64 KB write | 59.2 ms | 59.5 | | | 59.2 |
+| Early answers: random 4 KB | 74.2 IOPS | 74.1, 74.0 | | | 74.3, 74.2 |
+
+- **dev.3's per-sector fix to core 1 wasn't the cause:** dev.4 was slower than dev.2.
+- **Not the link's new RX interrupt:** polled instead, the same (and the synth sent nothing during the runs).
+- **RAM banks, half of it:** `SENTENCE_MAX_LINE` 80 -> 96 grew every `LineAssembler` by 16 bytes, `g_loopback` gained `errors_before`, and the relay and RX ring were new: 40 bytes ahead of `g_device_mem` moved the device's sector buffers from bank 12 to bank 20 (`scripts/check_ram_banks.py`). Padding each new or grown object to whole 32-byte steps (`bank_pad`) put every object below the USB buffers back on 0.35.0's bank; aligning the device itself to 32 made it worse (the linker sorts `.bss` by alignment, then name: dozens of objects moved). In code: `startCommand` (the 8Dh case, then `otherCommand()` taking no argument, 10 bytes left), `runDrive` (the reset swap's test) and `serveFetches` padded with no-ops on rare paths to 0.35.0's size plus whole 32-byte steps, so `check_core1_layout.py` shows every function on its old bank. Writes came back (40.0 ms); reads half: about 3% slower per sector, against 8%.
+- **What's left on reads** isn't placement in RAM. Probably core 0's loop, in flash, where the branch's 5 KB more code changes what the flash cache holds (as on 16 Nov, before CORE0_RAM): the data lane's reads wait for core 0. Next: time core 0's loop pass on both builds, and put what it runs on every pass in RAM. Layout not recorded yet.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

@@ -9,6 +9,9 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 
 ## [0.36.0-dev.4] - 2026-11-19 (branch `synthminder`)
 
+### Changed
+- **RAM banks as 0.35.0's:** every variable this branch added or grew is padded to whole 32-byte steps, and `startCommand` (8Dh now goes through `otherCommand()`), `runDrive` and `serveFetches` to 0.35.0's sizes plus whole 32-byte steps, so every function and every object below the USB buffers keeps 0.35.0's bank (`scripts/check_ram_banks.py`, new; `check_core1_layout.py`). Writes on the data lane are back to 0.35.0's; reads are still about 3% slower (docs/speed-log.md): probably core 0's loop, in flash. Layout not recorded yet.
+
 ### Added
 - **A new hard disk at the host's next reset:** with `device0` changed to another image (console `E`, or SynthMinder's Bay tab), the host's next hardware reset (RESET#) brings it in, not only the drive's next start. On the Evesham the Bay is powered by USB, so restarting the PC kept the old disk (18 Nov). At RESET# asserted, core 1 asks core 0 for the swap (`ResetSwap`, main_state.h); core 0 writes out what's held for the old image, opens the new one (the old again if it can't be), works out its geometry (`chooseGeometry`, as at start) and builds its IDENTIFY; core 1 takes it (`Device::setDisk`, no flash), holding the device in reset (BSY) after RESET#'s release if core 0 isn't done, as a drive spinning up. Never at a software reset (SRST), which drivers send mid-session; a CD-ROM, the test, bench and welcome disks wait for a restart as before. Core 1's rare code holds it all but one test of a flag in `runDrive`'s idle step (24 bytes). Through the JMicron on the Mac: `device0 = HDDBENCH.IMG` set on the console, the adapter plugged in, and the Mac saw HDDBENCH.IMG's 64 MB at its first detection.
 

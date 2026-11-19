@@ -88,7 +88,15 @@ bool g_activity_unprinted = false;
 activity_link::Sender g_link(cfg::LINK_HEARTBEAT_MS);
 activity_link::HeadPacer g_head(cfg::LINK_HEAD_GAP_US);
 activity_link::Op g_link_op = activity_link::Op::None;  // the last media command's
-static LineAssembler g_link_rx;
+// RAM banks (CLAUDE.md, Core split): what this file added since 0.35.0 grows
+// .bss by whole 32-byte steps, so nothing after it changes bank. 40 bytes here
+// (0.36.0-dev.2) moved the device's sector buffers to another bank and made the
+// data lane's reads 8% slower (docs/speed-log.md, 19 Nov 2026). The names stay,
+// as the linker sorts .bss by them.
+static struct {
+    LineAssembler v;
+    char bank_pad[16];  // SENTENCE_MAX_LINE 80 -> 96 grew it by 16
+} g_link_rx;
 seek_timing::SynthModel g_synth;
 uint32_t g_link_rx_errors = 0;  // framing, parity, break or overrun
 
@@ -98,8 +106,13 @@ uint32_t g_link_rx_errors = 0;  // framing, parity, break or overrun
 // can be relied on to keep up with. serviceLinkRx() and the loopback test
 // read the ring. A byte with an error (framing, parity, break or overrun) is
 // counted in g_link_rx_errors and dropped.
-static SpscRing<uint8_t, 1024> g_link_rx_ring;
-uint32_t g_link_rx_lost = 0;  // bytes that found the ring full
+static struct {
+    SpscRing<uint8_t, 1024> ring;
+    uint32_t lost = 0;  // bytes that found the ring full
+    char bank_pad[20];
+} g_link_rx_store;
+static_assert(sizeof(g_link_rx_store) % 32 == 0, "whole RAM bank periods");
+uint32_t linkRxLost() { return g_link_rx_store.lost; }
 
 static void linkRxInterrupt() {
     uart_hw_t* hw = uart_get_hw(uart0);
@@ -107,8 +120,8 @@ static void linkRxInterrupt() {
         uint32_t dr = hw->dr;
         if (dr & (UART_UARTDR_FE_BITS | UART_UARTDR_PE_BITS | UART_UARTDR_BE_BITS | UART_UARTDR_OE_BITS))
             ++g_link_rx_errors;
-        else if (!g_link_rx_ring.push(uint8_t(dr & 0xFF)))
-            ++g_link_rx_lost;
+        else if (!g_link_rx_store.ring.push(uint8_t(dr & 0xFF)))
+            ++g_link_rx_store.lost;
     }
 }
 
@@ -131,15 +144,19 @@ void beginLink() {
 // serviceLink() between $HDA and $HDE sentences once the TX FIFO is empty. It
 // is at most synthminder::RELAY_LINE_MAX characters, so with its line ending
 // it fits the FIFO and sending it never waits.
-static char g_relay_line[synthminder::RELAY_LINE_MAX + 3];
-static size_t g_relay_len = 0;
+static struct {
+    char line[synthminder::RELAY_LINE_MAX + 3];
+    size_t len = 0;
+    char bank_pad[24];
+} g_relay;
+static_assert(sizeof(g_relay) % 32 == 0, "whole RAM bank periods");
 
 bool relayToSynth(const char* line, size_t len) {
     if (!g_link_on || len > synthminder::RELAY_LINE_MAX) return false;
-    memcpy(g_relay_line, line, len);
-    g_relay_line[len] = '\r';
-    g_relay_line[len + 1] = '\n';
-    g_relay_len = len + 2;
+    memcpy(g_relay.line, line, len);
+    g_relay.line[len] = '\r';
+    g_relay.line[len + 1] = '\n';
+    g_relay.len = len + 2;
     return true;
 }
 
@@ -163,10 +180,10 @@ static bool loopbackSending();
 
 void serviceLink() {
     if (!g_link_on || loopbackSending()) return;
-    if (g_relay_len) {  // SynthMinder's first: the PC is waiting for the answer
+    if (g_relay.len) {  // SynthMinder's first: the PC is waiting for the answer
         if (uart_get_hw(uart0)->fr & UART_UARTFR_TXFE_BITS) {
-            uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(g_relay_line), g_relay_len);  // fits: never waits
-            g_relay_len = 0;
+            uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(g_relay.line), g_relay.len);  // fits: never waits
+            g_relay.len = 0;
         }
         return;
     }
@@ -288,6 +305,7 @@ static struct {
     char model_line[SENTENCE_MAX_LINE + 4];
     size_t model_len = 0, model_sent = 0;
     bool model_back = false, model_wrong = false;
+    char bank_pad[28];  // RAM banks: 0.35.0's size plus 64 (errors_before, and two lines 16 longer)
 } g_loopback;
 
 static bool loopbackSending() {
@@ -343,7 +361,7 @@ static void loopbackLine(const char* line, size_t len) {
 static void drainLoopback() {
     g_loopback.errors = g_link_rx_errors - g_loopback.errors_before;
     uint8_t c;
-    while (g_link_rx_ring.pop(c)) {
+    while (g_link_rx_store.ring.pop(c)) {
         ++g_loopback.bytes;
         switch (g_loopback.rx.feed(char(c))) {
             case LineAssembler::Result::Line: loopbackLine(g_loopback.rx.line(), g_loopback.rx.length()); break;
@@ -375,7 +393,7 @@ void serviceLoopback() {
             startLinkUart();
             {
                 uint8_t c;
-                while (g_link_rx_ring.pop(c)) {}  // anything from before
+                while (g_link_rx_store.ring.pop(c)) {}  // anything from before
             }
             g_loopback.rx = LineAssembler();
             g_loopback.bytes = g_loopback.errors = 0;
@@ -431,15 +449,15 @@ void serviceLinkRx() {
     if (g_loopback.phase != decltype(g_loopback)::Phase::Off) return;
     uint32_t now = millis();
     uint8_t c;
-    while (g_link_rx_ring.pop(c)) {
-        switch (g_link_rx.feed(char(c))) {
+    while (g_link_rx_store.ring.pop(c)) {
+        switch (g_link_rx.v.feed(char(c))) {
             case LineAssembler::Result::Line: {
                 // $HDM to the seek model (and SynthMinder, which can ask for
                 // it); the rest ($HDS, $HDP, $HDK: answers to its relays) to
                 // SynthMinder only, so they don't count as rejected models
                 // (hdm_rejected rose with every relay)
-                const char* line = g_link_rx.line();
-                const size_t len = g_link_rx.length();
+                const char* line = g_link_rx.v.line();
+                const size_t len = g_link_rx.v.length();
                 if (len >= 4 && std::strncmp(line, "$HDM", 4) == 0) g_synth.onLine(line, len, now);
                 synthMinderLinkLine(line, len);
                 break;

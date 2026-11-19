@@ -192,7 +192,7 @@ void synthMinderLinkLine(const char* line, size_t len) { g_service.onLinkLine(li
 
 void printSynthMinderStats(Print& out) {
     out.printf(" sm_requests=%lu sm_relays=%lu sm_timeouts=%lu link_rx_lost=%lu", (unsigned long)g_service.requests(),
-               (unsigned long)g_service.relays(), (unsigned long)g_service.timeouts(), (unsigned long)g_link_rx_lost);
+               (unsigned long)g_service.relays(), (unsigned long)g_service.timeouts(), (unsigned long)linkRxLost());
 }
 
 #endif  // FIRMWARE_SLICE != 0
