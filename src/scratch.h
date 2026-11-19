@@ -14,7 +14,7 @@
 namespace scratch {
 
 constexpr size_t SIZE = 4096;
-extern char a[SIZE];  // HDDSYNTH.INI's text (boot, `E`); a new image's zeros
-extern char b[SIZE];  // `E`'s edited copy; a cue sheet (which boot's disk choice reads while `a` is done with)
+extern char a[SIZE];  // HDDSYNTH.INI's text (boot, `E`); a new image's zeros; an image's map check as it opens
+extern char b[SIZE];  // `E`'s edited copy; a cue sheet (which boot's disk choice reads while `a` is done with); sector 0 at boot
 
 }  // namespace scratch

@@ -64,6 +64,7 @@
 #include "welcome_text.h"
 #endif
 
+#include "heap_limit.h"
 #include "main_state.h"
 
 #if FIRMWARE_SLICE != 0
@@ -71,14 +72,16 @@
 // Core 0's share of the drive: move the sectors core 1 asks for. The disk is
 // an image on the SD card (slice 5) if there is one to serve (chooseDisk()),
 // else the welcome disk, or the generated test disk with `device0 = none` or
-// console `T`. Both keep writes in the one RAM overlay, until a restart.
+// console `T`. Both keep writes in the one RAM overlay, until a restart:
+// its storage on the heap, taken only when one of them is served
+// (reserveOverlay()), so an image leaves that RAM free.
 static const welcome_disk::File WELCOME_FILES[] = {
     {"README.TXT", welcome_text::README, welcome_text::README_SIZE},
     {drive_config::FILE_NAME, drive_config::defaultFile(), uint32_t(strlen(drive_config::defaultFile()))},
 };
 static WelcomeDisk g_welcome(WELCOME_FILES, 2, welcome_text::FAT_DATE);
 static GeneratedDisk g_generated;
-static RamOverlayDisk<cfg::RAM_DISK_SECTORS> g_overlay(g_welcome);
+static RamOverlayDisk g_overlay(g_welcome);
 BlockSource* g_disk = &g_overlay;
 const char* g_disk_name = "welcome";
 bool g_test_disk = false;  // the generated disk: the bus observer can check its data
@@ -118,6 +121,25 @@ static char busRequested() {
     uint32_t v = watchdog_hw->scratch[1];
     char c = char(v & 0xff);
     return (v & 0xffffff00) == BUS_MAGIC && (c == 'e' || c == 'l' || c == 'i' || c == 't' || c == 'a') ? c : 0;
+}
+
+size_t overlayUsed() { return g_overlay.used(); }
+size_t overlaySlots() { return g_overlay.slots(); }
+
+// The overlay's storage, when the hard disk is the welcome disk or the test
+// disk: cfg::RAM_DISK_SECTORS sectors (264 KB), or as many as the heap holds,
+// halved until it fits, down to cfg::RAM_DISK_MIN_SECTORS. Never freed (the
+// disk is served until a restart). With none the disk is read-only: writes
+// get an error, nothing is lost. malloc, not new: see chooseDevice1().
+static void reserveOverlay() {
+    if (g_disk != &g_overlay || g_device0_cdrom) return;  // the CD-ROM's test disc is read-only
+    for (size_t slots = cfg::RAM_DISK_SECTORS; slots >= cfg::RAM_DISK_MIN_SECTORS; slots /= 2) {
+        size_t bytes = slots * RamOverlayDisk::SLOT_BYTES;
+        if (void* storage = std::malloc(bytes)) {
+            g_overlay.setStorage(storage, bytes);
+            return;
+        }
+    }
 }
 
 // The generated test disk instead of the welcome disk, under the RAM overlay.
@@ -206,7 +228,9 @@ static BlockSource* openCdDisc(const char* name, const char*& why, uint8_t unit)
 // The geometry an image's partition table was made with, packed as
 // g_geometry is, or 0 (then 16 x 63).
 static uint32_t partitionGeometry(BlockSource& disk) {
-    static uint16_t sector0[256];  // bus order: as bytes, as on disk
+    // Bus order: as bytes, as on disk. scratch::b, not a: a read that fails
+    // restarts the card, and the image's map check (sd_card.cpp) uses a.
+    uint16_t* const sector0 = reinterpret_cast<uint16_t*>(scratch::b);
     if (!disk.read(0, sector0)) return 0;
     Geometry geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), disk.sectors());
     if (!geo.cylinders) return 0;
@@ -278,18 +302,28 @@ static void chooseDevice1() {
         return;
     const char* name = g_config.device1;
     if (sd_card::isFolder(name)) {
-        // The list in the RAM overlay's store, lent for good: the overlay is
-        // only written on the test disk, and then holds 64 sectors fewer. The
-        // heap (about 2 KB) can't hold it. An Entry needs no constructor.
-        const uint16_t capacity = cfg::FOLDER_MAX_ENTRIES;
-        static_assert(alignof(folder_disk::Entry) <= 4, "the overlay lends 4-byte aligned memory");
-        auto* entries = static_cast<folder_disk::Entry*>(g_overlay.lend(capacity * sizeof(folder_disk::Entry)));
+        // The list on the heap, only when a folder is served: as long as RAM
+        // allows, leaving cfg::FOLDER_HEAP_LEFT for whatever allocates later
+        // (heapFree(): rp2040.getFreeHeap() counts the DMA rings as free).
+        // malloc, not new (std::nothrow): Arduino-Pico's libstdc++ is built
+        // without exceptions, so a nothrow new that runs out aborts (the board
+        // never started with a folder, 3 Nov 2026). An Entry needs no constructor.
+        uint16_t capacity = cfg::FOLDER_MAX_ENTRIES;
+        folder_disk::Entry* entries = nullptr;
+        while (capacity >= 64) {
+            entries = static_cast<folder_disk::Entry*>(std::malloc(capacity * sizeof(folder_disk::Entry)));
+            if (entries && heapFree() >= cfg::FOLDER_HEAP_LEFT) break;
+            std::free(entries);
+            entries = nullptr;
+            capacity /= 2;
+        }
         if (!entries) {
             std::snprintf(g_device1_note, sizeof g_device1_note, "%s: no RAM for its list", name);
             return;
         }
         if (!g_folder.build(sd_card::folderSource(name), entries, capacity, name)) {
             std::snprintf(g_device1_note, sizeof g_device1_note, "%s: can't list it, or nothing fits", name);
+            std::free(entries);
             return;
         }
         g_folder_capacity = capacity;
@@ -329,7 +363,7 @@ static void chooseGeometry() {
     Geometry geo = image ? g_config.geometry : Geometry{};
     g_geometry_from = geo.cylinders ? "set" : "auto";
     if (image && !geo.cylinders) {  // auto: the geometry the image's partition table was made with
-        static uint16_t sector0[256];  // bus order: as bytes, as on disk
+        uint16_t* const sector0 = reinterpret_cast<uint16_t*>(scratch::b);  // as partitionGeometry()'s
         if (g_disk->read(0, sector0)) {
             geo = geometryFromPartitions(reinterpret_cast<const uint8_t*>(sector0), g_disk->sectors());
             if (geo.cylinders) g_geometry_from = "partition table";
@@ -423,6 +457,7 @@ void chooseDisk() {
     // `isa = on`: the ISA card that needs it strobes DIOR# with no chip select,
     // which the observer takes for data.
     bus_observer::setImageChecks(!g_isa.load() && !g_test_disk);
+    reserveOverlay();  // before device 1's folder list, which takes what RAM is left
     if (!g_device0_cdrom) chooseDevice1();  // a CD-ROM as device 0 is alone on the cable
     // Core 1 shares out the PIO blocks next, by whether the card holds one: so
     // after device 1's image, folder or disc is open (with device 0 on the

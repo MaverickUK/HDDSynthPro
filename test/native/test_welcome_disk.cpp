@@ -226,7 +226,7 @@ TEST(test_overlay_set_base) {
     // main.cpp's one RAM overlay, put on the disk chosen at boot.
     GeneratedDisk generated;
     WelcomeDisk welcome(nullptr, 0, DATE);
-    RamOverlayDisk<2> overlay(welcome);
+    FixedRamOverlayDisk<2> overlay(welcome);
     uint16_t a[256], b[256];
     overlay.read(PART_START, a);
     welcome.read(PART_START, b);

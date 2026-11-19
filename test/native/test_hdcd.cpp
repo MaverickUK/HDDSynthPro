@@ -603,7 +603,7 @@ TEST(hdcd_a_cdrom_as_device_0_by_dma) {
 TEST(hdcd_disk_writes_with_a_cdrom_beside_it) {
     Device dev(DISK, nullptr, &DISC);
     GeneratedDisk base(DISK.total_sectors);
-    RamOverlayDisk<8> disk(base);
+    FixedRamOverlayDisk<8> disk(base);
     DiscSource disc;
     Host host{dev, {&disk, &disc}};
     std::vector<uint8_t> d;

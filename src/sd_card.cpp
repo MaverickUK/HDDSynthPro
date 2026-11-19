@@ -508,7 +508,7 @@ static bool walkFat32(FsFile& f, uint32_t base, uint32_t sectors) {
     const Sector_t data = s_sd.dataStartSector(), fat = s_sd.fatStartSector();
     if (spc == 0 || f.firstSector() < data) return false;
     uint32_t cluster = uint32_t((f.firstSector() - data) / spc) + 2;
-    static uint8_t sector[512];
+    uint8_t* const sector = reinterpret_cast<uint8_t*>(scratch::a);  // see mapAgrees()
     Sector_t cached = ~Sector_t(0);
     uint32_t file_sector = base;
     const uint32_t image_sectors = base + sectors;
@@ -621,7 +621,13 @@ static bool mapped(uint64_t offset, size_t bytes, Io io) {
 // each of the first runs and the last one at its start, the middle, the end.
 static bool s_map_checked = false;
 static bool mapAgrees(FsFile& f, uint32_t base, uint32_t sectors, size_t first_extent) {
-    static uint8_t a[512], b[512];
+    // In scratch::a, as walkFat32()'s FAT sector (never at once). An image is
+    // opened at boot, by console M, or by a card restart: from fetches (never
+    // inside a console job), or from readConfig, which reads into a again
+    // after the restart, and writeConfig, whose text is in b by then.
+    static_assert(scratch::SIZE >= 2 * 512);
+    uint8_t* const a = reinterpret_cast<uint8_t*>(scratch::a);
+    uint8_t* const b = a + 512;
     if (sectors == 0) return true;
     uint32_t samples[8];  // the image's sectors (within this part: from `base`)
     size_t n = 0;

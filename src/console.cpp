@@ -61,6 +61,7 @@
 #include "scratch.h"
 #endif
 
+#include "heap_limit.h"
 #include "main_state.h"
 
 // Prints a line only if USB serial can take it now. A blocked write would
@@ -453,6 +454,8 @@ static void printStats() {
     Serial.printf(" disk=%s sectors=%lu disk_ms=%lu", g_disk_name, (unsigned long)g_disk->sectors(),
                   (unsigned long)g_disk_ms);
     Serial.printf(" image_name=%s config=%s", g_image_name, g_config_state);
+    Serial.printf(" overlay=%u/%u heap_free=%d", unsigned(overlayUsed()), unsigned(overlaySlots()),
+                  int(heapFree()));
     Serial.printf(" device1=%s device1_sectors=%lu", g_device1_kind,
                   (unsigned long)(g_device1_disk ? g_device1_disk->sectors() : 0));
     const media_watch::Watch& card = sd_card::media();

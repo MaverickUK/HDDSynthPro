@@ -126,6 +126,8 @@ __attribute__((always_inline)) static inline IdentifyInfo device1Identity() {
 // disks.cpp
 extern bool g_test_disk;    // the generated disk: the bus observer can check its data
 void chooseDisk();          // at boot, before core 1 is told (g_disk_chosen)
+size_t overlayUsed();       // the RAM overlay's sectors written, and
+size_t overlaySlots();      // how many it holds (0: none taken, an image is served)
 void serviceDiscChange();   // each pass of loop()
 
 // A new hard disk at the host's hardware reset (docs/settings.md): with

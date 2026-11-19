@@ -7,6 +7,11 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.8] - 2026-11-19 (branch `synthminder`)
+
+### Changed
+- **Merged `main` (0.35.2): the RAM overlay on the heap, only when it's used.** It replaces dev.7's loan of the overlay's store: a folder as device 1 takes its list from the heap again (with an image as device 0 the overlay takes nothing, so the list gets its full 1,024 entries), and `RamOverlayDisk::lend` is gone. `chooseGeometry()`'s sector 0 is in `scratch::b`, as 0.35.2's.
+
 ## [0.36.0-dev.7] - 2026-11-19 (branch `synthminder`)
 
 ### Changed
@@ -78,6 +83,16 @@ SynthMinder, the DOS program, talks to the drive: [docs/synthminder-protocol.md]
 
 ### Tested
 - **The Evesham, FreeDOS (`SYNTHMIN.IMG`), SynthMinder from its `firmware-protocol` branch, the HDD Synth Mk5 on 0.25.0:** the Bay's status and its disk and ISO lists, the synth's volume changed, and (with the longer relay timeout) its pack list. Exchanges take 0.2-6 ms; in the first minutes after a restart some took 50-109 ms, with the SEND ending still BSY (`d0`): not yet explained.
+## [0.35.2] - 2026-11-19
+
+### Changed
+- **The RAM overlay on the heap, only when it's used** (branch `ram-overlay-heap`, 18 Nov, rebased onto 0.35.1): the welcome disk and the test disk keep their writes in the overlay; an SD image never did. Its 264 KB now come from the heap at boot, only for those disks (`reserveOverlay()`, halved until it fits, down to `cfg::RAM_DISK_MIN_SECTORS`), so static RAM falls from 95.6% to 43.5% and an image leaves about 270 KB free: a folder as device 1 gets its full 1,024 entries (128 on 0.35.1), and there is room for a read cache and runs of sectors later. `RamOverlayDisk` takes its storage at run time (`FixedRamOverlayDisk<N>` for the host tests); with none it is read-only. `s` shows `overlay=used/slots` and `heap_free=` (`heapFree()`).
+- Five boot-time sector buffers (sector 0 for the partition geometry, the image map's checks) use the scratch buffers: 2.5 KB less static RAM.
+- **RAM banks and code as 0.35.1's:** the overlay object is padded so the objects after it move by whole 32-byte steps, and its `read()`/`write()` by no-ops on rare paths to 0.35.1's sizes, so core 0's RAM code keeps every address (`check_core1_layout.py`: only the overlay's name changed). The branch's `ring_max` counter was left out (a new variable moves banks); `synthminder` has since sized the trace ring.
+
+### Tested
+- The JMicron on the Mac, the PCB, the test disk on the data lane (rig build): reads 42.7 ms per 64 KB, random 4 KB 79.0 IOPS, writes 40.2 ms, as 0.35.1; slices 3 and 4 passed (7 tests); `overlay=0/512 heap_free=10784` after boot on the test disk.
+
 ## [0.35.1] - 2026-11-19
 
 ### Fixed

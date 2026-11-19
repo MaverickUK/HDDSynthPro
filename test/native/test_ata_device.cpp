@@ -846,33 +846,9 @@ static std::vector<uint16_t> pattern(uint32_t sectors, uint16_t seed) {
     return words;
 }
 
-TEST(test_overlay_lends_its_store) {
-    GeneratedDisk base;
-    static RamOverlayDisk<4> disk(base);
-    uint16_t got[256];
-    std::vector<uint16_t> a = pattern(1, 1);
-    CHECK(disk.lend(0) == nullptr);              // nothing to lend
-    CHECK(disk.lend(4 * 512) == nullptr);        // would leave no sector
-    void* p = disk.lend(513);                    // two sectors' worth
-    CHECK(p != nullptr);
-    CHECK_EQ(uintptr_t(p) % 4, 0u);
-    CHECK_EQ(disk.capacity(), 2u);
-    CHECK(disk.lend(1) == nullptr);              // once only
-    std::memset(p, 0xA5, 1024);                  // the borrower's
-    CHECK(disk.write(1, a.data()));
-    CHECK(disk.write(2, a.data()));
-    CHECK(!disk.write(3, a.data()));             // full at its new capacity
-    CHECK(disk.read(1, got) && std::equal(got, got + 256, a.begin()));
-    const uint8_t* q = static_cast<const uint8_t*>(p);
-    CHECK(std::all_of(q, q + 1024, [](uint8_t b) { return b == 0xA5; }));  // writes kept off it
-    static RamOverlayDisk<4> written(base);
-    CHECK(written.write(1, a.data()));
-    CHECK(written.lend(512) == nullptr);         // not once written
-}
-
 TEST(test_overlay_disk) {
     GeneratedDisk base;
-    static RamOverlayDisk<2> disk(base);
+    static FixedRamOverlayDisk<2> disk(base);
     uint16_t got[256], want[256];
     // Unwritten sectors read from the disk underneath.
     CHECK(disk.read(5, got));
@@ -968,7 +944,7 @@ TEST(test_read_and_write_through_an_image) {
 TEST(test_ns1081_detection) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<8> disk(base);
+    static FixedRamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
     for (int pulse = 0; pulse < 2; ++pulse) {
         d.hardReset(true);
@@ -1017,7 +993,7 @@ TEST(test_ns1081_detection) {
 TEST(test_write_one_sector) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<8> disk(base);
+    static FixedRamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
     std::vector<uint16_t> words = pattern(1, 7);
     h.setLba(100, 1);
@@ -1054,7 +1030,7 @@ TEST(test_write_multiple_sectors_interrupt_each) {
     Device d(INFO);
     d.setWriteBehind(false);
     GeneratedDisk base;
-    static RamOverlayDisk<8> disk(base);
+    static FixedRamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
     std::vector<uint16_t> words = pattern(3, 9);
     h.setLba(2000, 3);
@@ -1084,7 +1060,7 @@ TEST(test_write_multiple_sectors_interrupt_each) {
 TEST(test_data_out_by_block_stores_what_word_writes_store) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<8> disk(base);
+    static FixedRamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
     std::vector<uint16_t> words = pattern(3, 13);
     h.setLba(3000, 3);
@@ -1122,7 +1098,7 @@ TEST(test_write_behind_overlaps_the_store) {
     VirtualHost h{d};
     std::vector<uint16_t> words = pattern(3, 21);
     GeneratedDisk base;
-    RamOverlayDisk<8> disk(base);
+    FixedRamOverlayDisk<8> disk(base);
     h.setLba(3000, 3);
     d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
     for (int i = 0; i < 256; ++i) d.write(Reg::Data, words[size_t(i)]);
@@ -1199,7 +1175,7 @@ TEST(test_write_behind_store_failure) {
 TEST(test_write_behind_through_the_virtual_host) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<64> disk(base);
+    static FixedRamOverlayDisk<64> disk(base);
     VirtualHost h{d, &disk};
     std::vector<uint16_t> words = pattern(40, 23);
     CHECK(h.writeSectors(9000, 40, words));
@@ -1213,7 +1189,7 @@ TEST(test_write_behind_through_the_virtual_host) {
 TEST(test_write_count_zero_means_256) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<256> disk(base);
+    static FixedRamOverlayDisk<256> disk(base);
     VirtualHost h{d, &disk};
     std::vector<uint16_t> words = pattern(256, 3);
     CHECK(h.writeSectors(4096, 0, words));
@@ -1226,7 +1202,7 @@ TEST(test_write_count_zero_means_256) {
 TEST(test_write_past_the_end) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<8> disk(base);
+    static FixedRamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
     h.setLba(INFO.total_sectors - 1, 2);
     d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
@@ -1239,7 +1215,7 @@ TEST(test_write_past_the_end) {
 TEST(test_write_store_failure) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<1> disk(base);  // room for one sector only
+    static FixedRamOverlayDisk<1> disk(base);  // room for one sector only
     VirtualHost h{d, &disk};
     std::vector<uint16_t> words = pattern(2, 5);
     CHECK(!h.writeSectors(300, 2, words));
@@ -1256,7 +1232,7 @@ TEST(test_write_store_failure) {
 TEST(test_data_writes_outside_a_write_are_ignored) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<8> disk(base);
+    static FixedRamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
     for (int i = 0; i < 300; ++i) d.write(Reg::Data, 0xBEEF);
     Fetch f;
@@ -1268,7 +1244,7 @@ TEST(test_data_writes_outside_a_write_are_ignored) {
 TEST(test_reset_mid_write_makes_store_stale) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<8> disk(base);
+    static FixedRamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
     h.setLba(40, 2);
     d.write(Reg::StatusCommand, CMD_WRITE_SECTORS);
@@ -1445,7 +1421,7 @@ TEST(test_set_features_other_subcommands_abort) {
 // Writable storage that counts flushes, and can fail them.
 struct FlushCounter : BlockSource {
     GeneratedDisk base;
-    RamOverlayDisk<16> ram{base};
+    FixedRamOverlayDisk<16> ram{base};
     uint32_t sectors() const override { return ram.sectors(); }
     bool read(uint32_t lba, uint16_t words[256]) override { return ram.read(lba, words); }
     bool write(uint32_t lba, const uint16_t words[256]) override { return ram.write(lba, words); }
@@ -1886,7 +1862,7 @@ TEST(test_read_multiple_fetch_failure) {
 TEST(test_write_multiple) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<32> disk(base);
+    static FixedRamOverlayDisk<32> disk(base);
     VirtualHost h{d, &disk};
     CHECK(h.setMultiple(4));
     std::vector<uint16_t> data = pattern(10, 77);
@@ -1915,7 +1891,7 @@ TEST(test_write_multiple) {
 TEST(test_write_multiple_without_write_behind) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<32> disk(base);
+    static FixedRamOverlayDisk<32> disk(base);
     VirtualHost h{d, &disk};
     d.setWriteBehind(false);
     CHECK(h.setMultiple(MAX_MULTIPLE));
@@ -1929,7 +1905,7 @@ TEST(test_write_multiple_without_write_behind) {
 TEST(test_write_multiple_store_failure) {
     Device d(INFO);
     GeneratedDisk base;
-    static RamOverlayDisk<2> disk(base);  // room for two sectors: the block's third fails
+    static FixedRamOverlayDisk<2> disk(base);  // room for two sectors: the block's third fails
     VirtualHost h{d, &disk};
     CHECK(h.setMultiple(4));
     std::vector<uint16_t> data = pattern(4, 80);
@@ -2168,7 +2144,7 @@ TEST(test_read_dma_uses_read_ahead) {
 TEST(test_write_dma_sectors) {
     Device d(dmaInfo());
     GeneratedDisk base;
-    RamOverlayDisk<8> disk(base);
+    FixedRamOverlayDisk<8> disk(base);
     VirtualHost h{d, &disk};
     std::vector<uint16_t> words = pattern(3, 77);
     h.setLba(300, 3);
@@ -2346,7 +2322,6 @@ void runAtaDeviceTests() {
     RUN(test_read_last_sector_and_past_the_end);
     RUN(test_read_chs);
     RUN(test_read_fetch_failure);
-    RUN(test_overlay_lends_its_store);
     RUN(test_overlay_disk);
     RUN(test_image_disk);
     RUN(test_read_and_write_through_an_image);

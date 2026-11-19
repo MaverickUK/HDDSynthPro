@@ -84,7 +84,7 @@ PIO on a real PC runs at well under half of what its mode allows, and the card i
 
 **Why.** Core 0 reads one sector ahead and stores one sector at a time, each a card command. A card streams several sectors per command far faster than it starts commands.
 
-**What needs doing.** Item 1 gives `Fetch` a sector count; `ImageDisk` then reads or writes the run in one call (the card layer's `readSectors`/`writeSectors` already take a count). Beyond that: read-ahead of more than one block, and writes gathered into runs before they are stored, both of which need buffer RAM. **The RAM overlay** holds 264 KB whether it is used or not (only the welcome disk and the test disk write through it): freeing it when an image is served pays for this and for item 5. Check first what slices 3-4 and the soak need of it (they write to the test disk).
+**What needs doing.** Item 1 gives `Fetch` a sector count; `ImageDisk` then reads or writes the run in one call (the card layer's `readSectors`/`writeSectors` already take a count). Beyond that: read-ahead of more than one block, and writes gathered into runs before they are stored, both of which need buffer RAM. **The RAM overlay** held 264 KB whether it was used or not (only the welcome disk and the test disk write through it). Since 0.35.1-ram.1 (branch `ram-overlay-heap`) it is on the heap, taken only for those disks, so with an image served the 264 KB are free heap: buffers for this and for item 5 take them with malloc on the image's path. Slices 3-4 and the soak write 256 sectors of the overlay's 512.
 
 ### 5. A read cache
 
