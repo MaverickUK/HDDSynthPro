@@ -267,19 +267,18 @@ void printIgnoredIordy() {
 // A SLOWREAD line for each read IORDY held past ATA's limit. The time is when
 // core 0 collected the report: up to a sector's store (about 0.5 ms on the
 // SD card) after the read.
-void printSlowReads() {
+bool printSlowReads() {
     static iordy_timer::OverLimit pending;
     static bool has_pending = false;
-    for (;;) {
-        if (!has_pending && !iordy_timer::takeOverLimit(pending)) return;
-        has_pending = true;
-        char line[48];
-        int n = pending.ns ? std::snprintf(line, sizeof line, "SLOWREAD %lu %s %lu\n", (unsigned long)pending.at_us,
-                                           pending.reg, (unsigned long)pending.ns)
-                           : std::snprintf(line, sizeof line, "EARLYDATA %lu\n", (unsigned long)pending.at_us);
-        if (n <= 0 || !printLine(line, size_t(n) < sizeof line ? size_t(n) : sizeof line - 1)) return;
-        has_pending = false;
-    }
+    if (!has_pending && !iordy_timer::takeOverLimit(pending)) return false;
+    has_pending = true;
+    char line[48];
+    int n = pending.ns ? std::snprintf(line, sizeof line, "SLOWREAD %lu %s %lu\n", (unsigned long)pending.at_us,
+                                       pending.reg, (unsigned long)pending.ns)
+                       : std::snprintf(line, sizeof line, "EARLYDATA %lu\n", (unsigned long)pending.at_us);
+    if (n <= 0 || !printLine(line, size_t(n) < sizeof line ? size_t(n) : sizeof line - 1)) return false;
+    has_pending = false;
+    return true;
 }
 
 // HDDPRO_ACCESS_LOG (access_log.h): core 1's work before a late read, as

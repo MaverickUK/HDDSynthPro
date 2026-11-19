@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "bus_timing.pio.h"
+#include "core1_ram.h"  // CORE0_RAM: poll() runs on every pass of core 0's loop
 
 namespace bus_timing {
 
@@ -57,8 +58,8 @@ void end() {
 // program drops what the full FIFO can't take.
 constexpr unsigned POLL_BATCH = 16;
 
-void poll() {
-    if (!s_running) return;
+// The timings, while a measurement runs (rarely): in flash.
+__attribute__((noinline)) static void drain() {
     for (unsigned n = 0; n < POLL_BATCH && !pio_sm_is_rx_fifo_empty(s_pio, s_sm); ++n) {
         uint32_t w = pio_sm_get(s_pio, s_sm);
         // Plus what the loops take to notice the edges, on average (t1 reads
@@ -76,6 +77,11 @@ void poll() {
             ++s_kept;
         }
     }
+}
+
+// Every pass of core 0's loop, so in RAM: only the check for a measurement.
+CORE0_RAM void poll() {
+    if (s_running) drain();
 }
 
 void printPending(unsigned max) {

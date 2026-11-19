@@ -11,6 +11,7 @@
 #include "config.h"
 #include "iordy_check.pio.h"
 #include "iordy_timer.pio.h"
+#include "core1_ram.h"  // CORE0_RAM: poll() runs on every pass of core 0's loop
 
 namespace iordy_timer {
 
@@ -107,8 +108,8 @@ void begin(uint32_t threshold_ns) {
     s_started.store(true, std::memory_order_release);
 }
 
-void poll() {
-    if (!s_started.load(std::memory_order_acquire)) return;
+// The reports, when there are any: in flash, as they come only with slow reads.
+__attribute__((noinline)) static void drain() {
     // A bounded batch: reports can come every few microseconds (a read held
     // past the threshold each), and core 0 must get back to the fetches.
     // Draining until empty, with each report converted to ns, kept it here
@@ -164,6 +165,15 @@ void poll() {
         if (isData(sample)) ++s_ignored_data;
     }
     if (s_reset_requested.exchange(false, std::memory_order_relaxed)) reset();
+}
+
+// Every pass of core 0's loop, so in RAM: only the check for something to do.
+CORE0_RAM void poll() {
+    if (!s_started.load(std::memory_order_acquire)) return;
+    if (pio_sm_is_rx_fifo_empty(s_pio, s_sm) && pio_sm_is_rx_fifo_empty(s_check_pio, s_check_sm) &&
+        !s_reset_requested.load(std::memory_order_relaxed))
+        return;
+    drain();
 }
 
 void end() {

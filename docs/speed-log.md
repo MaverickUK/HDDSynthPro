@@ -257,6 +257,19 @@ The PCB through the JMicron (Windows rig), `HDDBENCH.IMG` over SDIO in high-spee
 
 0.31.0's 10-hour soak at default speed: writes 1.42-1.97 MB/s, reads 2.15-2.73, about 15% slower after the first hour (read-backs 11.1 s, then 13.5-13.8). High-speed mode lifts the reads a little in this mix; the slowdown after about 70 minutes is the same, and the second run was slow from its start, so it is the card's state, not the drive's. 0 wrong in 57.2 GB written and 86.9 GB read.
 
+## 0.35.1: core 0's loop in RAM (19 Nov 2026)
+
+The JMicron on the Mac, the PCB, the generated disk, the data lane, `-m speed`, rig builds. Why and how: branch `synthminder`'s 0.36.0-dev.5 (its speed log), whose loop change 0.35.1 takes.
+
+| | 0.35.0 | 0.35.1's heap fix alone | 0.35.1 |
+|---|---|---|---|
+| 64 KB read in the drive | 43.8-45.3 ms | **54.0** | **42.7, 42.7** |
+| Random 4 KB | 78.4-78.7 IOPS | 77.8 | 78.7, 78.9 |
+| 64 KB write in the drive | 40.1 ms | 40.1 | 40.2, 40.2 |
+
+- The heap fix adds a few hundred bytes of flash code (`_sbrk`, `heapFree`) and nothing on any per-sector path, yet reads were 20% slower: core 0's loop in flash, as on the branch. With the loop in RAM the same as the branch's dev.5. Early answers not re-measured on 0.35.1 (dev.5, the same change: within 0.3% of 0.35.0).
+- RAM: 8.5 KB of heap on `pcb_drive` (11.6 on 0.35.0); not one object below the USB buffers changed bank; core 1's block byte-identical.
+
 ## Ceilings on this adapter
 
 A 64 KB sequential read, if our part took no longer than each mode's cycle time allows, with the adapter's 10.7 ms per command and ~70 µs per sector unchanged:

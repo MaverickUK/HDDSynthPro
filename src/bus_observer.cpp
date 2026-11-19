@@ -59,7 +59,7 @@ static constexpr uint32_t OVERRUN_US = 400;
 
 // Whether an observer word is a read that ends a block of data: anything but
 // the data register or a DMA strobe (no chip select), e.g. a status poll.
-static bool endsData(uint32_t word) {
+CORE0_RAM static bool endsData(uint32_t word) {
     uint32_t sample = word & sector_check::SAMPLE_MASK;
     bus::Block block = bus::block(sample);
     return block != bus::Block::None && !(block == bus::Block::Command && bus::address(sample) == 0);
@@ -68,7 +68,7 @@ static bool endsData(uint32_t word) {
 // Where DMA has written up to. Too far behind, or away long enough for an
 // overrun, and all but the newest samples are dropped: poll() then finds the
 // next sector start in those, and checks from there.
-static void look(uint32_t& written) {
+CORE0_RAM static void look(uint32_t& written) {
     uint32_t now = time_us_32();
     bool overrun = now - s_looked_us > OVERRUN_US;
     s_looked_us = now;
@@ -150,7 +150,8 @@ uint32_t ringWords() { return RING_WORDS; }
 unsigned ringChannel() { return s_dma; }
 
 
-void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
+// Every pass of core 0's loop: in RAM, with the checker's per-word code.
+CORE0_RAM void poll(Print& out, bool check, bool check_identify, void (*serve)()) {
     if (!s_started.load(std::memory_order_acquire)) return;
     static bool checking = false;
     if (!check && !check_identify && !s_image) {

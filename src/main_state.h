@@ -192,6 +192,7 @@ void printCardChanges();
 void printAutoBus();
 void printNoChipSelect();
 void printIgnoredIordy();
-void printSlowReads();
+// One SLOWREAD or EARLYDATA line, if one waits and USB serial has room: true if it printed one.
+bool printSlowReads();
 void printAccessLog();
 #endif

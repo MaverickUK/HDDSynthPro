@@ -1375,23 +1375,27 @@ void setup() {
     printReady();
 }
 
-void loop() {
-#ifdef RIG_WATCHDOG_MS
-    watchdog_update();
-#endif
+// Core 0's housekeeping, once a millisecond from loop(): the console, the
+// lines core 0 prints, the link, the card, the LED. In flash: run on every
+// pass, it took about 30-40 us a pass in flash cache misses, and how many
+// depended on where unrelated code sat, so the data lane's reads (which wait
+// on core 0) changed speed with code that never ran (19 Nov 2026). Nothing
+// here has to keep up with the bus; what does is in loop(), in RAM.
+__attribute__((noinline)) static void housekeeping(uint32_t now_us) {
 #if FIRMWARE_SLICE != 0
-    serveFetches();
     serviceDiscChange();
-    iordy_timer::poll();
-    bus_timing::poll();
     bus_timing::printPending(2);
-    printSlowReads();
+    // A line at a time, with the fetches served between: the data lane holds
+    // a Status read past 1,250 ns for every sector it writes, so these come
+    // about three a millisecond, and printed in one go they kept the next
+    // write's sector waiting (writes 6% slower, 19 Nov 2026).
+    for (int i = 0; i < 8 && printSlowReads(); ++i) serveFetches();
     printAccessLog();
     printIgnoredIordy();
     printNoChipSelect();
     printAutoBus();
-    // Data sectors only on the generated disk; IDENTIFY there, and around detection.
-    bus_observer::poll(Serial, g_test_disk, int32_t(g_identify_check_until_ms - millis()) > 0, serveFetches);
+    serveFetches();
+    if (g_identify_check_until_ms && int32_t(g_identify_check_until_ms - millis()) <= 0) g_identify_check_until_ms = 0;
     updateLed();
     serviceLoopback();
     serviceLinkRx();
@@ -1405,23 +1409,45 @@ void loop() {
     }
     sd_card::serviceMedia();
     printCardChanges();
+    serveFetches();
 
-    // Re-evaluate the activity state once a millisecond, before anything
-    // below can return early on a busy serial link.
-    uint32_t now_us = time_us_32();
-    if (now_us - g_activity_checked_us >= 1000) {
-        g_activity_checked_us = now_us;
-        if (g_activity.update(now_us)) g_activity_unprinted = true;
-        g_seek.setModel(seekModel(millis()));
-        serviceLink();
-    }
+    if (g_activity.update(now_us)) g_activity_unprinted = true;
+    g_seek.setModel(seekModel(millis()));
+    serviceLink();
     if (g_activity_unprinted) {
         char line[48];
         size_t n = activity::formatActivity(now_us, g_activity, line, sizeof line);
         if (printLine(line, n)) g_activity_unprinted = false;
     }
+#else
+    (void)now_us;
 #endif
     handleConsole();
+}
+
+CORE0_RAM void loop() {
+#ifdef RIG_WATCHDOG_MS
+    watchdog_update();
+#endif
+#if FIRMWARE_SLICE != 0
+    // Every pass, from RAM: the fetches, and the diagnostics' FIFOs and ring,
+    // which fill as fast as the bus runs.
+    serveFetches();
+    iordy_timer::poll();
+    bus_timing::poll();
+    // Data sectors only on the generated disk; IDENTIFY there, and around detection.
+    bus_observer::poll(Serial, g_test_disk, g_identify_check_until_ms != 0, serveFetches);
+#endif
+    // The rest once a millisecond, from flash (housekeeping()).
+#if FIRMWARE_SLICE == 0
+    static uint32_t g_activity_checked_us = 0;  // the drive build's is link.cpp's
+#endif
+    const uint32_t now_us = time_us_32();
+    const bool tick = now_us - g_activity_checked_us >= 1000;
+    if (tick) {
+        g_activity_checked_us = now_us;
+        housekeeping(now_us);
+    }
 
     // Print what core 1 recorded; a bounded batch so fetches and the console
     // stay responsive. A run that can't be printed yet is kept and retried.
@@ -1451,7 +1477,7 @@ void loop() {
         serveFetches();
 #endif
     }
-    if (millis() - g_last_event_ms >= cfg::TRACE_FLUSH_MS && g_coalescer.flush(pending)) {
+    if (tick && millis() - g_last_event_ms >= cfg::TRACE_FLUSH_MS && g_coalescer.flush(pending)) {
         char line[96];
         size_t n = formatRun(pending, line, sizeof line);
         if (!printLine(line, n)) has_pending = true;
