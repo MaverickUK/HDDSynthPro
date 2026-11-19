@@ -12,6 +12,9 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Changed
 - **Merged `main` (0.35.2): the RAM overlay on the heap, only when it's used.** It replaces dev.7's loan of the overlay's store: a folder as device 1 takes its list from the heap again (with an image as device 0 the overlay takes nothing, so the list gets its full 1,024 entries), and `RamOverlayDisk::lend` is gone. `chooseGeometry()`'s sector 0 is in `scratch::b`, as 0.35.2's.
 
+### Tested
+- The JMicron on the Mac, the test disk on the data lane (rig build): reads 42.7 ms per 64 KB, random 78.9 IOPS, writes 40.2 ms, as dev.7; slices 3 and 4 passed (7 tests); `overlay=0/512 heap_free=69944` after boot.
+
 ## [0.36.0-dev.7] - 2026-11-19 (branch `synthminder`)
 
 ### Changed
