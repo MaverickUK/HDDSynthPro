@@ -7,6 +7,20 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.12] - 2026-11-21 (branch `amiga`)
+
+**The Amiga 1200 boots to Workbench from the drive** (PCB rev 0.3, a buffered IDE adapter, `bus = table`, `iordy = off`; [docs/amiga.md](docs/amiga.md), section 7). Kickstart's register test passes, then detection, IDENTIFY and the boot: 237 commands, none failed, 126 sectors checked on the cable, 0 bad.
+
+### Fixed
+- **The register table's read-back of a register just written:** Kickstart writes Cylinder Low and reads it back with the next instruction, a few hundred ns later, and core 1's pass takes up to 2 µs (measured), so the read-back came back stale and Kickstart decided there was no drive. Now, from wherever in the pass core 1 takes a register write, it runs a **hot loop** for 100 µs after the last write (`cfg::TABLE_HOT_US`), unless a command comes or the device is busy or in a data phase: `ide_table::popWritesHot` stores each plain register's entry (Sector Count to Device) straight from the write's sample, before the device handles it, then the device takes the batch and the whole table is published. Outside the hot loop, writes are taken at five places in the pass, each plain register's entry published as soon as the device has it (`publishRegister`, `publishPlain`), Status still at the end of the pass.
+
+### Changed
+- `C1_PROFILE` also records the register table's longest gaps, per place W's ring is looked at (`c1_gap_ns`).
+- Core 1's hard disk code is unchanged and no object changed RAM bank; the table's code grew, which moves `.bss` (whole bank periods). The layout check fails on `.bss` until the table is benchmarked through the USB adapters and the layout recorded.
+
+### Added
+- `host/reference/a1200_bay_table_boot.txt`: the A1200 booting from the drive, its first 1,500 lines.
+
 ## [0.36.0-dev.11] - 2026-11-21 (branch `amiga`)
 
 The register table for the Amiga 1200: `bus = table` with `iordy = off` ([docs/amiga.md](docs/amiga.md)). Simulated against a Gayle model built from the CF card's capture; not yet tried on the A1200.

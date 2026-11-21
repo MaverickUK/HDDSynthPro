@@ -34,9 +34,23 @@ struct Image {
 // Into the entries, Status (and Alternate Status) last, and as BSY while a
 // busy write the DMA made isn't yet accounted for (the busy rule).
 void publish(const Image& image);
+// The entries but Status and Alternate Status: register writes taken mid-pass,
+// whose read-backs can't wait for the pass to end (docs/amiga.md).
+void publishPlain(const Image& image);
+// One plain register's entry, as publish() writes it, straight after its write
+// is taken: `address` the command block's (2 Sector Count to 6 Device). One
+// store, for a read-back within a microsecond (docs/amiga.md).
+void publishRegister(unsigned address, uint8_t value);
 
 // The next write from W's ring (the sample as ide_bus's write samples read).
 bool popWrite(uint32_t& sample);
+// The register table's hot loop (main.cpp): up to `max` writes from W's ring
+// into `out`, in order, each plain register's entry (Sector Count to Device)
+// stored straight from its sample first, before the device has even seen it:
+// a host can read one back a few hundred ns after writing it (docs/amiga.md).
+// Not after a Command write in the batch (the device is busy from it). Only
+// while the device is neither busy nor in a data phase (the caller's rule).
+unsigned popWritesHot(uint32_t* out, unsigned max);
 // bus_observer's ring, in order: its absolute position now, and whether a
 // Status read (which acknowledges the interrupt) came at or after `since`.
 // `each_read`, if given (the raw trace, console `t`), gets every read the

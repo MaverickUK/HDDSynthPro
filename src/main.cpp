@@ -994,6 +994,47 @@ __attribute__((always_inline)) static inline void tableIntrq(Dev& dev) {
     ide_table::setIntrq(now & 1, now & 2);
 }
 
+// Writes, in order, from W's ring. A Command write's busy came from C's DMA
+// chain; queueCommand makes the device busy too, so C1 is armed again. True if
+// any were taken. One function, called from several places in runTableT's
+// pass: inlined there, it made GCC outline record(), which moved runDrive.
+CORE1_RAM_TABLE __attribute__((noinline)) static bool tableHandleWrite(ata::Device& dev, uint32_t sample,
+                                                                       bool publish_plain) {
+    {
+        bus::Block block = bus::block(sample);
+        ata::Reg reg = ata::regFor(block == bus::Block::Command, block == bus::Block::Control, bus::address(sample));
+        if (reg == ata::Reg::Data || reg == ata::Reg::None) {  // WD has the data words; the clock chip's
+            if (g_trace_bus.load()) record(TraceKind::Bus, sample);  // console `t`: every write
+            return false;
+        }
+        if (reg == ata::Reg::StatusCommand) {
+            dev.queueCommand(uint8_t(bus::data(sample)));
+            ide_table::armCommandBusy();
+            if (g_table_intrq > 0) g_table_intrq = int8_t(g_table_intrq & ~1);  // C lowered INTRQ
+        } else {
+            dev.write(reg, bus::data(sample));
+            // Its entry first, before anything else: Kickstart reads each one
+            // back within a microsecond (docs/amiga.md), and building and
+            // publishing the whole table takes longer than that.
+            if (publish_plain && (reg == ata::Reg::SectorCount || reg == ata::Reg::LbaLow ||
+                                  reg == ata::Reg::LbaMid || reg == ata::Reg::LbaHigh || reg == ata::Reg::Device))
+                ide_table::publishRegister(bus::address(sample), uint8_t(dev.peek(reg)));
+        }
+        if (g_trace_bus.load()) record(TraceKind::Bus, sample);  // console `t`: every write, after it's in place
+        return true;
+    }
+}
+
+// Every write waiting in W's ring, through tableHandleWrite: true if any was
+// a register's (not data, not the clock chip's).
+CORE1_RAM_TABLE __attribute__((noinline)) static bool tableTakeWrites(ata::Device& dev) {
+    bool took = false;
+    uint32_t sample;
+    while (ide_table::popWrite(sample))
+        if (tableHandleWrite(dev, sample, true)) took = true;
+    return took;
+}
+
 template <class Dev>
 __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
     g_done_recorded = dev.commandsCompleted();
@@ -1008,44 +1049,87 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
     // next block's interrupt). irq_events counts what could raise one.
     uint32_t irq_raised_at = 0;
     uint32_t irq_events = 0, irq_events_shown = ~0u;
-    for (;;) {
-        // Writes, in order. A Command write's busy came from C's DMA chain;
-        // queueCommand makes the device busy too, so C1 is armed again.
-        uint32_t sample;
-        while (ide_table::popWrite(sample)) {
-            if (g_trace_bus.load()) record(TraceKind::Bus, sample);  // console `t`: every write, the clock chip's too
-            bus::Block block = bus::block(sample);
-            ata::Reg reg = ata::regFor(block == bus::Block::Command, block == bus::Block::Control, bus::address(sample));
-            if (reg == ata::Reg::Data || reg == ata::Reg::None) continue;  // WD has the data words
-            if (reg == ata::Reg::StatusCommand) {
-                dev.queueCommand(uint8_t(bus::data(sample)));
-                ide_table::armCommandBusy();
-                if (g_table_intrq > 0) g_table_intrq = int8_t(g_table_intrq & ~1);  // C lowered INTRQ
-            } else {
-                dev.write(reg, bus::data(sample));
-            }
-            dirty = true;
+    uint32_t last_take = m33_hw->dwt_cyccnt;
+    auto takeWrites = [&](unsigned site) __attribute__((always_inline)) -> bool {
+        if constexpr (C1_PROFILE) {  // the longest gap between looks at W's ring, by where it ended (c1_gap_ns)
+            uint32_t now = m33_hw->dwt_cyccnt;
+            if (now - last_take > g_c1_gap[site]) g_c1_gap[site] = now - last_take;
+            last_take = now;
+            g_c1_passes = g_c1_passes + 1;
         }
-        // Writes into the table at once, before the rest of the pass: Kickstart
-        // reads each register back within a microsecond of writing it (its
-        // register test, docs/amiga.md), and the table answers whatever its
-        // entry holds as the strobe ends.
+        return tableTakeWrites(dev);
+    };
+    // Hot: after a register write, only writes and the table, for
+    // TABLE_HOT_US after the last one, unless a command comes or the device is
+    // busy or has data. Kickstart reads each register back within a
+    // microsecond of writing it (docs/amiga.md), and a whole pass takes up to
+    // 2 us (21 Nov 2026, C1_PROFILE); this loop takes a few hundred ns. With no
+    // command running and no data phase, Status can go out too, wherever in the
+    // pass the write was taken.
+    auto hot = [&]() __attribute__((always_inline)) {
+        uint32_t last_us = timer_hw->timerawl;
+        for (unsigned turn = 0;; ++turn) {
+            // The plain registers' entries straight from W's ring, then the
+            // device: the read-back can come a few hundred ns after the write.
+            uint32_t batch[8];
+            const unsigned n = ide_table::popWritesHot(batch, 8);
+            if (n) {
+                bool took = false;
+                for (unsigned i = 0; i < n; ++i)
+                    if (tableHandleWrite(dev, batch[i], false)) took = true;
+                if (took) {
+                    ide_table::publish(tableImage(dev));
+                    last_us = timer_hw->timerawl;
+                }
+            }
+            if ((turn & 31) == 31 && (dev.commandQueued() || (dev.status() & (ata::ST_BSY | ata::ST_DRQ)) ||
+                                      timer_hw->timerawl - last_us >= cfg::TABLE_HOT_US))
+                break;
+            if (n && dev.commandQueued()) break;  // a command: the normal pass runs it at once
+        }
+        dirty = true;  // the rest of the pass sees what came meanwhile
+    };
+    // Between the pass's steps too: Kickstart reads each register back within
+    // a microsecond of writing it (its register test, docs/amiga.md), less
+    // than a whole pass. The plain registers only, never Status: that waits
+    // for the end of the pass, after any data block has started (DRQ).
+    auto takeWritesMidPass = [&](unsigned site) __attribute__((always_inline)) {
+        if (takeWrites(site)) {
+            ide_table::publishPlain(tableImage(dev));
+            dirty = true;  // and everything at the end of the pass
+            hot();         // which publishes everything, Status too, if it may
+        }
+    };
+    for (;;) {
+        const bool took = takeWrites(1);
+        if (took) dirty = true;
+        // Writes into the table at once, before the rest of the pass, as the
+        // table answers whatever its entry holds as the strobe ends.
         if (dirty) {
             ide_table::publish(tableImage(dev));
             dirty = false;
         }
+        // Hot: after a register write, only writes and the table, for
+        // TABLE_HOT_US after the last one, unless a command comes or the device
+        // is busy or has data. Kickstart reads each register back within a
+        // microsecond of writing it (docs/amiga.md), and a whole pass takes up
+        // to 2 us (21 Nov 2026, C1_PROFILE); this loop is a few hundred ns.
+        // With no command running and no data phase, Status can go out too.
+        if (took) hot();
         // With `t`, the reads too, from the observer's ring: writes and reads are
         // each in order, interleaved as core 1 takes them (within a pass).
         if (ide_table::statusReadSince(irq_raised_at, g_trace_bus.load() ? recordBus : nullptr) && dev.intrq()) {
             dev.consumeRead(ata::Reg::StatusCommand);  // acknowledges the interrupt raised at irq_raised_at
             dirty = true;
         }
+        takeWritesMidPass(2);
         if (dev.commandQueued()) {
             if (ide_table::dataInActive()) ide_table::stopDataIn();  // a new command abandons a block
             if (ide_table::dataOutActive()) ide_table::stopDataOut();
             runCommandEarly(dev);  // its CMD line, and it runs
             dirty = true;
         }
+        takeWritesMidPass(3);
 
         // Core 0's side, and the timers
         postFetch(dev, posted_fetch);
@@ -1054,8 +1138,10 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             dev.fetchDone(result.id, result.ok, result.failed);
             dirty = true;
         }
+        takeWritesMidPass(4);
         busyTimers(dev);
         recordDone(dev);
+        takeWritesMidPass(5);
 
         if (g_absent.load()) {  // console V: off the bus, as if unplugged, until it's lifted
             ide_table::stopDataIn();
@@ -1083,6 +1169,7 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             record(low ? TraceKind::ResetAssert : TraceKind::ResetRelease, pins);
             dirty = true;
         }
+        takeWritesMidPass(6);
 
         // Data blocks, after everything that can start one (a command, a fetch, a
         // timer) and before publishing: the host must not see DRQ before its block

@@ -328,6 +328,28 @@ __attribute__((always_inline)) inline bool busyOwed() {
 
 }  // namespace
 
+CORE1_RAM_TABLE void publishRegister(unsigned address, uint8_t value) {
+    const uint32_t v = DRIVE | value;
+    switch (address) {
+        case 2: s_pio->rxf_putget[s_r0][2] = v | at(SECTOR_COUNT_ADDRESS); break;
+        case 3: s_pio->rxf_putget[s_r0][3] = v | at(LBA_LOW_ADDRESS); break;
+        case 4: s_pio->rxf_putget[s_r1][0] = v | at(LBA_MID_ADDRESS); break;
+        case 5: s_pio->rxf_putget[s_r1][1] = v | at(LBA_HIGH_ADDRESS); break;
+        case 6: s_pio->rxf_putget[s_r1][2] = v | at(DEVICE_ADDRESS); break;
+        default: break;
+    }
+}
+
+CORE1_RAM_TABLE void publishPlain(const Image& image) {
+    PIO pio = s_pio;
+    pio->rxf_putget[s_r0][1] = image.error | at(ERROR_ADDRESS);
+    pio->rxf_putget[s_r0][2] = image.sector_count | at(SECTOR_COUNT_ADDRESS);
+    pio->rxf_putget[s_r0][3] = image.lba_low | at(LBA_LOW_ADDRESS);
+    pio->rxf_putget[s_r1][0] = image.lba_mid | at(LBA_MID_ADDRESS);
+    pio->rxf_putget[s_r1][1] = image.lba_high | at(LBA_HIGH_ADDRESS);
+    pio->rxf_putget[s_r1][2] = image.device | at(DEVICE_ADDRESS);
+}
+
 CORE1_RAM_TABLE void publish(const Image& image) {
     PIO pio = s_pio;
     pio->rxf_putget[s_r0][1] = image.error | at(ERROR_ADDRESS);
@@ -345,6 +367,22 @@ CORE1_RAM_TABLE void publish(const Image& image) {
         pio->rxf_putget[s_r1][3] = s_busy_status;
         pio->rxf_putget[s_r2][2] = s_busy_alt;
     }
+}
+
+CORE1_RAM_TABLE unsigned popWritesHot(uint32_t* out, unsigned max) {
+    const uint32_t written = (dma_hw->ch[s_wring].write_addr - uint32_t(uintptr_t(s_wring_buf))) / 4;
+    unsigned n = 0;
+    bool plain = true;
+    while (n < max && s_wring_read != written) {
+        const uint32_t sample = s_wring_buf[s_wring_read];
+        s_wring_read = (s_wring_read + 1) % WRING_WORDS;
+        out[n++] = sample;
+        if (!plain || bus::block(sample) != bus::Block::Command) continue;
+        const unsigned address = bus::address(sample);
+        if (address == 7) plain = false;  // a Command: the device is busy from here
+        else if (address >= 2) publishRegister(address, uint8_t(bus::data(sample)));
+    }
+    return n;
 }
 
 CORE1_RAM_TABLE bool popWrite(uint32_t& sample) {

@@ -1,8 +1,6 @@
 # The Amiga 1200
 
-**Status, 21 Nov 2026 (branch `amiga`, 0.36.0-dev.11, from `synthminder` 0.36.0-dev.8):** the A1200 doesn't boot from the drive yet. Kickstart's detection gives up after ten rounds and shows its "insert disk" screen, without sending a command. This page holds what's been learned, the captures to work from, and the next steps, so the work can carry on from any machine.
-
-**Next to try (dev.11): the register table with `iordy = off`** (section 6 below): `E bus = table`, `E iordy = off`, `!`, then `t` for the raw trace, and power the A1200 on.
+**Status, 21 Nov 2026 (branch `amiga`, 0.36.0-dev.12, from `synthminder` 0.36.0-dev.8): the A1200 boots to Workbench from the drive.** PCB rev 0.3, the buffered adapter, `bus = table`, `iordy = off`, `A1200DH0.IMG`: Kickstart's detection passes (its register test reads back 12h and 34h), then RECALIBRATE, IDENTIFY, INITIALIZE DEVICE PARAMETERS, SET MULTIPLE and the boot, 237 commands with no error, 126 sectors checked on the cable with none bad (section 7). The sections before 7 are how it got there.
 
 Earlier attempts (October, the BB48 on a breadboard) are in `CHANGELOG.md` under 0.24.0-0.26.0: Gayle checks IORDY before each strobe (hence `iordy = off`), and its chip selects and address lines change as the strobe starts (hence `ide_bus_noiordy`).
 
@@ -95,9 +93,23 @@ A Gayle model in `host/tests/test_register_table_sim.py` runs Kickstart's two de
 
 `bus = table` sets it from the file (`register_table = on` is overridden by `bus = auto`); console `P t` still sets it until a power cycle, and `iordy = off` comes from the file either way.
 
+### 7. Core 1 too slow for the read-back, and the hot loop (dev.12): boots
+
+dev.11's table answered Kickstart's reads and Status 50h, but read Cylinder Low back as 00h after the write of 12h (stale), and Kickstart gave up after one round. With the raw trace off, the same. Taking writes at five more places in core 1's pass (between its steps) didn't help either.
+
+**Measured** (`C1_PROFILE`, a gap per place W's ring is looked at, the A1200 idle): up to 2,050 ns from the end of one pass to the next look, 1,720 ns across the bus observer's ring scan, 400-560 ns across each cheap step (DMA and SDIO contending for RAM, it seems). A whole pass is far longer than Kickstart leaves: it writes a register and reads it back with consecutive instructions, so the read's strobe starts a few hundred ns after the write's ends.
+
+**The fix, the hot loop** (`runTableT`'s `hot()`, `cfg::TABLE_HOT_US` = 100): from any place a register write is taken, core 1 stays in a tight loop until 100 µs after the last write, a command, or BSY or DRQ. Each turn `ide_table::popWritesHot` reads W's ring and stores each plain register's entry (Sector Count to Device) straight from the write's own sample, one store, before the device has handled it; then the device takes the batch (`tableHandleWrite`) and the whole table is published (Status too: with no command and no data phase that's safe anywhere in the pass). The exit conditions are checked every 32 turns. Two earlier versions failed: a loop that went through the device and the whole table before the entry (still stale; its gap reached 2 µs), and one that started only at the top of the pass (writes were nearly always taken mid-pass, so it never ran).
+
+**On the A1200** (`host/reference/a1200_bay_table_boot.txt`, the first 1,500 lines): `RD CMD 4 LBAMID 1212`, then `3434`, as the CF card; Workbench. The raw trace overflows during the boot (`dropped=`, the trace ring only; the drive isn't affected).
+
+Kept for later: `C1_PROFILE` now records the register table's gaps per place too (`c1_gap_ns`: `access` the end of the pass, `lane` the observer's ring, `command`, `busonly` fetches, `step0` timers, `step1` the reset check, `step2` the hot loop).
+
 ## Next steps
 
-0. **The A1200 on dev.11's table** (`bus = table`, `iordy = off`, `t` on, `scripts/retro_log.py` recording): if detection still fails, compare the trace with the CF card's capture access by access, and see whether the read-backs come back stale (core 1 too slow: then a PIO path for plain register writes) or the reads look wrong (the address during the strobe).
+0. **Done (dev.12): the A1200 boots.** Still to do: a benchmark on the A1200 (SysInfo or DiskSpeed), longer use (copying files, writes), the hot loop's effect on the table's speed through the USB adapters (`-m speed` on the table; then record the layout, which fails on `.bss` until then), whether early answers (`noiordy`) could take the same fix, and the floppy drive reconnected.
+
+0a. **(Done in dev.12.) The A1200 on dev.11's table** (`bus = table`, `iordy = off`, `t` on, `scripts/retro_log.py` recording): if detection still fails, compare the trace with the CF card's capture access by access, and see whether the read-backs come back stale (core 1 too slow: then a PIO path for plain register writes) or the reads look wrong (the address during the strobe).
 1. **A Gayle host model from the capture** (done for the table in dev.11) (`host/hddproto/pio_sim.py`; `host/tests/test_pio_bus_noiordy_sim.py` has a Gayle model from October to extend): chip select to strobe 110-200 ns, strobes of about 300 ns, accesses 1-1.5 µs apart, Kickstart's exact sequence above (WR Device; RD Cylinder Low; RD Status; WR/RD Cylinder Low twice), and clock-chip strobes with no chip select in between. Run `ide_bus_noiordy` (with core 1's answer delay modelled) and the register table against it.
 2. **Fix whichever fails**, e.g. for `noiordy`: answer a register read from a value core 1 left ready before the write was even processed, as the table does; never take a strobe without a chip select as an access. For the table: the write-to-read-back path within 1 µs.
 3. **A trace for the register table** (done in dev.11: `t`).

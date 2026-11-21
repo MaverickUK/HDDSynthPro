@@ -51,7 +51,7 @@ isa = off
 | A USB-IDE adapter that can do DMA | `dma = on`, or `mode = mdma2` (DMA hasn't run on a retro PC yet) |
 | A USB-IDE adapter, in PIO | `register_table = on` (experimental) |
 | The CD-ROM through the Windows rig's USB-IDE adapter | `mode = mdma2`: it sends every packet by DMA |
-| Amiga 1200 (not booting yet: [amiga.md](amiga.md)) | `iordy = off`; through a buffered adapter, firmware 0.36.0-dev.9 or later (IORDY pulled up) |
+| Amiga 1200 ([amiga.md](amiga.md)) | `bus = table`, `iordy = off`, firmware 0.36.0-dev.12 or later, through a buffered 44-pin adapter |
 
 The on/off settings also take `yes`/`no`, `true`/`false` and `1`/`0`. The console's `W`, `A` and `L` switch write-behind, read-ahead and the activity link until the next restart, without changing the file, and `H` switches seek timing off and on (to compare speeds).
 

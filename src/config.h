@@ -189,6 +189,12 @@ constexpr uint32_t LED_MIN_MS = 25;
 // heap is short, down to the minimum: the rig tests write 256 (host/tests,
 // WINDOW), so below that slices 4 and the soak fail with write errors.
 constexpr size_t RAM_DISK_SECTORS = 512;
+
+// The register table's hot loop (main.cpp, runTableT): after a register
+// write, core 1 takes only writes and publishes the table for this long after
+// the last one, for a host that reads a register back within a microsecond of
+// writing it (Kickstart's register test, docs/amiga.md).
+constexpr uint32_t TABLE_HOT_US = 100;
 constexpr size_t RAM_DISK_MIN_SECTORS = 64;
 
 // A folder served as device 1 (docs/two-drives.md): the most files and
