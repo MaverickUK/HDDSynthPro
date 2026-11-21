@@ -603,6 +603,12 @@ void begin(bool isa, bool early, bool iordy, bool lane_allowed) {
         gpio_init(pin);           // input until claimed below
         gpio_disable_pulls(pin);  // never internal pull-downs (RP2350 erratum E9)
     }
+    // iordy = off: the drive never drives IORDY, and PCB rev 0.3 has no pull-up
+    // on it (rev 0.4 adds R53). An A1200's buffered IDE adapter copies the
+    // floating line to Gayle, which never starts an access while IORDY is low:
+    // a black screen (21 Nov 2026). A weak pull-up instead, as R53 would be;
+    // pull-ups are safe (E9 is about pull-downs), and the line is never driven.
+    if (!iordy) gpio_pull_up(cfg::PIN_IORDY);
     // INTRQ: SIO, released until the device drives it (updateIntrq).
     gpio_put(cfg::PIN_INTRQ, 1);
     gpio_set_dir(cfg::PIN_INTRQ, false);

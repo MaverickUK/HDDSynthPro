@@ -104,6 +104,11 @@ void begin() {
         gpio_init(pin);
         gpio_disable_pulls(pin);
     }
+    // IORDY: D only pulls it low during a strobe and releases it between, and
+    // PCB rev 0.3 has no pull-up on it (rev 0.4 adds R53). A buffered adapter
+    // (an A1200's) copies a floating IORDY to the host, and Gayle never starts
+    // an access while it's low (21 Nov 2026): a weak pull-up, as R53 is.
+    gpio_pull_up(cfg::PIN_IORDY);
     gpio_put(cfg::PIN_INTRQ, 1);
     gpio_set_dir(cfg::PIN_INTRQ, false);
 

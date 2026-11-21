@@ -7,6 +7,19 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.10] - 2026-11-21 (branch `amiga`)
+
+The Amiga 1200 on PCB rev 0.3 through a buffered IDE adapter: [docs/amiga.md](docs/amiga.md) holds what was found, the captures and the next steps.
+
+### Fixed
+- **IORDY pulled up when the drive never drives it high:** the RP2350's internal pull-up on IORDY with `iordy = off` (`ide_bus::begin`, dev.9) and always with the register table (`ide_table::begin`, dev.10), as PCB rev 0.4's R53 does. Rev 0.3 has no pull-up there, so with `iordy = off` the line floated, and a buffered adapter on an A1200 passed it to Gayle low: a black screen, since Gayle never starts an access while IORDY is low. With it the A1200 reaches Kickstart's detection through the buffer. Pull-ups only (RP2350 erratum E9 is about pull-downs); the line is still never driven high.
+
+### Added
+- `host/reference/`: `a1200_cf_kickstart_listen.txt` (the listen build on the PCB, beside a working CF card: Kickstart's detection and boot, 3,000 accesses), `a1200_bay_noiordy_buffered.txt` and `a1200_bay_noiordy_direct_cable.txt` (the Bay's raw trace: the read after each Device write missed).
+
+### Tested
+- The listen build (`bb48`) runs on the PCB unchanged: it turns on the bus switches and never drives a line.
+
 ## [0.36.0-dev.8] - 2026-11-19 (branch `synthminder`)
 
 ### Changed
