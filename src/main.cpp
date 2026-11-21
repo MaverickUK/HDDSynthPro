@@ -397,7 +397,7 @@ void setup1() {
     // sees no drive for that moment (well under a second with an SD card).
     while (!g_disk_chosen.load(std::memory_order_acquire)) tight_loop_contents();  // a CD-ROM with no disc: 0 sectors
     if (g_table.load())
-        ide_table::begin();  // every read answered from the PIO's registers (docs/register-table.md)
+        ide_table::begin(g_iordy.load());  // every read answered from the PIO's registers (docs/register-table.md)
     else
         ide_bus::begin(g_isa.load(), g_early.load(), g_iordy.load(), !g_no_lane.load());
     busSwitchesOn();
@@ -1013,6 +1013,7 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
         // queueCommand makes the device busy too, so C1 is armed again.
         uint32_t sample;
         while (ide_table::popWrite(sample)) {
+            if (g_trace_bus.load()) record(TraceKind::Bus, sample);  // console `t`: every write, the clock chip's too
             bus::Block block = bus::block(sample);
             ata::Reg reg = ata::regFor(block == bus::Block::Command, block == bus::Block::Control, bus::address(sample));
             if (reg == ata::Reg::Data || reg == ata::Reg::None) continue;  // WD has the data words
@@ -1025,7 +1026,17 @@ __attribute__((always_inline)) static inline void runTableT(Dev& dev) {
             }
             dirty = true;
         }
-        if (ide_table::statusReadSince(irq_raised_at) && dev.intrq()) {
+        // Writes into the table at once, before the rest of the pass: Kickstart
+        // reads each register back within a microsecond of writing it (its
+        // register test, docs/amiga.md), and the table answers whatever its
+        // entry holds as the strobe ends.
+        if (dirty) {
+            ide_table::publish(tableImage(dev));
+            dirty = false;
+        }
+        // With `t`, the reads too, from the observer's ring: writes and reads are
+        // each in order, interleaved as core 1 takes them (within a pass).
+        if (ide_table::statusReadSince(irq_raised_at, g_trace_bus.load() ? recordBus : nullptr) && dev.intrq()) {
             dev.consumeRead(ata::Reg::StatusCommand);  // acknowledges the interrupt raised at irq_raised_at
             dirty = true;
         }

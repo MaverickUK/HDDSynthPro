@@ -135,7 +135,7 @@ bool parseMode(Span v, Mode& out) {
 const char* modeName(Mode m) { return size_t(m) < MODE_COUNT ? MODE_NAMES[size_t(m)] : "?"; }
 
 namespace {
-const char* const BUS_NAMES[] = {"settings", "auto", "early", "lane", "ide_bus"};
+const char* const BUS_NAMES[] = {"settings", "auto", "early", "lane", "ide_bus", "table"};
 constexpr size_t BUS_COUNT = sizeof BUS_NAMES / sizeof BUS_NAMES[0];
 }  // namespace
 
@@ -331,7 +331,7 @@ void parse(const char* text, size_t len, Config& out) {
                 }
             }
             if (!found)
-                warn(out, "line %d: bus '%.*s' isn't auto, early, lane or ide_bus; ignored%s", n, l.value);
+                warn(out, "line %d: bus '%.*s' isn't auto, early, lane, ide_bus or table; ignored%s", n, l.value);
             else
                 seen_bus = true;
         } else if (equalsNoCase(l.key, "seek_timing")) {
@@ -539,8 +539,9 @@ const char* defaultFile() {
            "isa = off\r\n"
            "\r\n"
            "# Which way the drive answers the IDE bus: auto (it starts safe and learns\r\n"
-           "# the PC, docs/auto-bus.md), early, lane or ide_bus. isa = on, iordy = off\r\n"
-           "# and a CD-ROM drive each keep their own; with auto, early_answers and\r\n"
+           "# the PC, docs/auto-bus.md), early, lane, ide_bus or table (the register\r\n"
+           "# table: with iordy = off, the Amiga 1200's). isa = on, iordy = off and a\r\n"
+           "# CD-ROM drive each keep their own; with auto, early_answers and\r\n"
            "# register_table below aren't used.\r\n"
            "bus = auto\r\n"
            "\r\n"

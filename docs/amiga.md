@@ -1,6 +1,8 @@
 # The Amiga 1200
 
-**Status, 21 Nov 2026 (branch `amiga`, 0.36.0-dev.10, from `synthminder` 0.36.0-dev.8):** the A1200 doesn't boot from the drive yet. Kickstart's detection gives up after ten rounds and shows its "insert disk" screen, without sending a command. This page holds what's been learned, the captures to work from, and the next steps, so the work can carry on from any machine.
+**Status, 21 Nov 2026 (branch `amiga`, 0.36.0-dev.11, from `synthminder` 0.36.0-dev.8):** the A1200 doesn't boot from the drive yet. Kickstart's detection gives up after ten rounds and shows its "insert disk" screen, without sending a command. This page holds what's been learned, the captures to work from, and the next steps, so the work can carry on from any machine.
+
+**Next to try (dev.11): the register table with `iordy = off`** (section 6 below): `E bus = table`, `E iordy = off`, `!`, then `t` for the raw trace, and power the A1200 on.
 
 Earlier attempts (October, the BB48 on a breadboard) are in `CHANGELOG.md` under 0.24.0-0.26.0: Gayle checks IORDY before each strobe (hence `iordy = off`), and its chip selects and address lines change as the strobe starts (hence `ide_bus_noiordy`).
 
@@ -82,17 +84,49 @@ A second risk: once armed, `ide_bus_noiordy` takes any strobe as the armed regis
 
 `P t` (console; the file's `bus = auto` overrides `register_table = on`). The A1200 also reached "insert disk" without a command. In table mode the raw trace records nothing (only the RESET# lines), so there's no evidence of what failed. The table decides each read's register from the address at the strobe, which, through the buffer, should now be right; its write path goes through core 1, so the register test's read-back a microsecond after the write may come before core 1 has updated the entry.
 
+### 6. The register table, fixed for Gayle (dev.11, simulated)
+
+The table answers every read from the PIO's own registers within about 30 ns of the strobe, without core 1, which is what a host that never waits needs; `noiordy` waits on core 1 at every read. Through the buffer the address is valid during the strobe, which the table relies on. Three changes:
+- **IORDY:** with `iordy = off` the table no longer touches it. Its data state machine had pulled IORDY low for 80 ns at every read that wasn't the data register's (the clock chip's too), and on the RP2350's weak pull-up the line then takes microseconds to rise, with Gayle waiting for it before each access: the likeliest reason the table failed in section 5.
+- **Writes published at once,** before the rest of core 1's pass, for the register test.
+- **The raw trace** (`t`) records every write (W's ring) and every read (the observer's ring) in table mode.
+
+A Gayle model in `host/tests/test_register_table_sim.py` runs Kickstart's two detection rounds with the clock chip's strobes between: the table reads Cylinder Low, Status 50h, and each value written back (12h, 34h), and drives nothing for the clock chip, with core 1 up to 925 ns late with a write at Gayle's usual 1 µs spacing (625 ns at 700 ns). How late core 1 really is hasn't been measured; on the rig the table passes slices 3-4.
+
+`bus = table` sets it from the file (`register_table = on` is overridden by `bus = auto`); console `P t` still sets it until a power cycle, and `iordy = off` comes from the file either way.
+
 ## Next steps
 
-1. **A Gayle host model from the capture** (`host/hddproto/pio_sim.py`; `host/tests/test_pio_bus_noiordy_sim.py` has a Gayle model from October to extend): chip select to strobe 110-200 ns, strobes of about 300 ns, accesses 1-1.5 µs apart, Kickstart's exact sequence above (WR Device; RD Cylinder Low; RD Status; WR/RD Cylinder Low twice), and clock-chip strobes with no chip select in between. Run `ide_bus_noiordy` (with core 1's answer delay modelled) and the register table against it.
+0. **The A1200 on dev.11's table** (`bus = table`, `iordy = off`, `t` on, `scripts/retro_log.py` recording): if detection still fails, compare the trace with the CF card's capture access by access, and see whether the read-backs come back stale (core 1 too slow: then a PIO path for plain register writes) or the reads look wrong (the address during the strobe).
+1. **A Gayle host model from the capture** (done for the table in dev.11) (`host/hddproto/pio_sim.py`; `host/tests/test_pio_bus_noiordy_sim.py` has a Gayle model from October to extend): chip select to strobe 110-200 ns, strobes of about 300 ns, accesses 1-1.5 µs apart, Kickstart's exact sequence above (WR Device; RD Cylinder Low; RD Status; WR/RD Cylinder Low twice), and clock-chip strobes with no chip select in between. Run `ide_bus_noiordy` (with core 1's answer delay modelled) and the register table against it.
 2. **Fix whichever fails**, e.g. for `noiordy`: answer a register read from a value core 1 left ready before the write was even processed, as the table does; never take a strobe without a chip select as an access. For the table: the write-to-read-back path within 1 µs.
-3. **A trace for the register table:** at least its writes and the reads it served, so the A1200's run can be read.
+3. **A trace for the register table** (done in dev.11: `t`).
 4. **Back on the A1200:** the buffered adapter, dev.10 or later, the settings above, the raw trace on, and `scripts/retro_log.py` recording. Compare the Bay's trace with the reference capture access by access.
 
 ## How to reproduce
 
-- Firmware: `pio run -e pcb_drive` on this branch; flash by console `b`, then copy the UF2 to the `RP2350` drive.
-- Settings by console `E` (`E device0 = A1200DH0.IMG`, `E device1 = none`, `E isa = off`, `E iordy = off`), then `!`. A card that ran on the BB48 (SPI) runs over SPI on the PCB until it's taken out and put back.
-- Log: `HDDPRO_PORT=/dev/cu.usbmodemNNNN python3 scripts/retro_log.py a1200` records everything to `host/runs/`; `t` turns on the raw trace (it's off after every restart), `p` prints the pins.
+### Dev.11 on the A1200 (from the Mac)
+
+1. **Build:** `git pull` on branch `amiga`, then `~/.platformio-venv/bin/pio run -e pcb_drive`. Check `.pio/build/pcb_drive/firmware.uf2` is new.
+2. **Flash:** the PCB is on the listen build: console `b` (or hold BOOTSEL and plug in), then copy the UF2 to the `RP2350` drive. `h` must say `READY HDDSynthPro 0.36.0-dev.11 slice3`.
+3. **Settings,** once (by console `E`, then `!`): `E device0 = A1200DH0.IMG`, `E device1 = none`, `E isa = off`, `E iordy = off`, `E bus = table`. `S` should then show `iordy=off` on its `CONFIG dmarq=...` line, with no `CONFIG bus program set from the console` line, and `s` should show `bus=table` (a console `P` from before is gone after a power cycle; `P 0` clears it otherwise).
+4. **Log:** `HDDPRO_PORT=/dev/cu.usbmodemNNNN python3 scripts/retro_log.py a1200` (it records everything to `host/runs/`). In its console: `t` (the raw trace; off after every restart), `p` (the pins: with the A1200 on and idle, CS0#, CS1#, DIOR#, DIOW# and IORDY all 1).
+5. **Power the A1200 on** (the buffered adapter, the Bay on USB power). Wait for Workbench or "insert disk", then `s` and `S` in the console, and stop the log.
+
+**What to look for in the trace,** against `host/reference/a1200_cf_kickstart_listen.txt` (the CF card; table in section 3):
+- Each round: `WR CMD 6 DEVICE`, `RD CMD 4 LBAMID`, `RD CMD 7 STATUS 0050` (or `xx50`: the upper byte is the bus's), then `WR CMD 4 LBAMID 1212` and `RD CMD 4 LBAMID xx12`, then `3434` and `xx34`. A `CMD` line (RECALIBRATE, then IDENTIFY) means detection passed.
+- **Stale read-backs** (`RD ... LBAMID` showing the value before the write): core 1 publishes too late. Then the fix is a PIO path for plain register writes.
+- **Reads missing or at the wrong register:** the address isn't valid during the strobe after all (compare the `NONE` lines and the pins).
+- **No accesses at all** (only `RESET` lines): IORDY or the lines idle low again; `p` with the A1200 on.
+- The clock chip's strobes show as `NONE` lines; the drive must not answer them (their values are the clock's).
+- Writes and reads come from two rings, so their order in the trace is right only to within about a microsecond.
+
+The trace format is in `CLAUDE.md` (*Trace format*); `EV` lines' last field is the raw sample.
+
+### Other
+
+- With `bus = auto` instead (`noiordy`, dev.10's run): `E bus = auto`, `!`; `noiordy` misses the reads after each write (section 4).
+- A card that ran on the BB48 (SPI) runs over SPI on the PCB until it's taken out and put back.
 - The reference capture: the listen build (`pio run -e bb48`) on the PCB, the Bay and a working device on one IDE cable, `w` (capture window), then power on the A1200.
-- The PCB was left on the listen build after the capture, and the card's `HDDSYNTH.INI` has `register_table = on` (harmless while `bus = auto` overrides it). Console `P t` was set until the Bay's next power cycle.
+- Simulation: `cd host && python3 -m pytest -q tests/test_register_table_sim.py -k "kickstart or read_back or clock_chip"` runs the Gayle model against the table.
+- After the A1200: put the card back for the Evesham (`CLAUDE.md`, *The card's settings*): `bus`, `iordy` and `device0` at least.

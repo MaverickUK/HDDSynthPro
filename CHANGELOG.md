@@ -7,6 +7,20 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.11] - 2026-11-21 (branch `amiga`)
+
+The register table for the Amiga 1200: `bus = table` with `iordy = off` ([docs/amiga.md](docs/amiga.md)). Simulated against a Gayle model built from the CF card's capture; not yet tried on the A1200.
+
+### Changed
+- **The register table never touches IORDY with `iordy = off`:** IORDY stays the RP2350's input on its pull-up, so D's side-set reaches no pin. D pulls IORDY low for 80 ns at every read that isn't the data register's, the clock chip's strobes (no chip select) too; on the weak pull-up it then takes microseconds to rise, and Gayle starts no access while IORDY is low. The likeliest reason the table failed on the A1200 (dev.10).
+- **`bus = table`** in `HDDSYNTH.INI`: the register table from the file, as console `P t` gave it until a power cycle (with `bus = auto` in the file, `register_table = on` is overridden). For the A1200: `bus = table`, `iordy = off`.
+- **Register writes reach the table at once:** core 1 publishes the table straight after taking writes from W's ring, before the rest of its pass (fetches, timers, data blocks). Kickstart reads each register back within a microsecond of writing it; simulated, core 1 has the access spacing less about 75 ns for it (925 ns at Gayle's usual 1 us).
+- **The raw trace (`t`) in table mode:** every write as core 1 takes it from W's ring (the clock chip's too), and every read from the bus observer's ring, as `EV` lines like the other programs'. Writes and reads are each in order, interleaved as core 1 takes them, within about a microsecond. Before, the table traced nothing but RESET#.
+- Core 1's hard disk code hasn't moved; the table's grew, which moves `.bss` 160 bytes (five whole bank periods; no object changed bank, `check_ram_banks.py`). The layout check fails on `.bss` until the table's speed is benchmarked on the rig and the layout recorded.
+
+### Added
+- `host/tests/test_register_table_sim.py`: Gayle (chip select 110-200 ns before a 300 ns strobe, still valid during it through the buffer, accesses 0.7-1 us apart, IORDY never waited for) running Kickstart's detection as the capture has it, with the clock chip's strobes between: every register right, the read-backs too with core 1 up to 925 ns late, and nothing driven for the clock chip. `ide_host_model.Access` takes `block="NONE"`, a strobe with no chip select.
+
 ## [0.36.0-dev.10] - 2026-11-21 (branch `amiga`)
 
 The Amiga 1200 on PCB rev 0.3 through a buffered IDE adapter: [docs/amiga.md](docs/amiga.md) holds what was found, the captures and the next steps.

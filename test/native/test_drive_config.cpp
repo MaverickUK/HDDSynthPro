@@ -305,6 +305,8 @@ TEST(test_config_isa) {
     CHECK(parsed("bus = LANE\n").bus == drive_config::Bus::Lane);
     CHECK(parsed("bus = ide_bus\n").bus == drive_config::Bus::IdeBus);
     CHECK(parsed("bus = early\n").bus == drive_config::Bus::Early);
+    CHECK(parsed("bus = table\n").bus == drive_config::Bus::Table);  // the Amiga's, with iordy = off
+    CHECK(std::strcmp(drive_config::busName(drive_config::Bus::Table), "table") == 0);
     {
         Config c = parsed("bus = fast\n");
         CHECK(c.bus == drive_config::Bus::Auto);  // ignored: the default

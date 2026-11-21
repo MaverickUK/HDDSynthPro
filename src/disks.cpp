@@ -438,6 +438,7 @@ void chooseDisk() {
             case drive_config::Bus::Early: g_early.store(true); g_table.store(false); break;
             case drive_config::Bus::Lane: g_early.store(false); g_table.store(false); break;
             case drive_config::Bus::IdeBus: g_early.store(false); g_table.store(false); g_no_lane.store(true); break;
+            case drive_config::Bus::Table: g_early.store(false); g_table.store(true); break;  // with iordy = off: the Amiga's
             default: break;
         }
     }

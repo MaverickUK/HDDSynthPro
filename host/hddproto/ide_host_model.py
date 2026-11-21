@@ -119,7 +119,7 @@ FAST_PIO_MODES = {3: Mode3(), 4: Mode4()}  # 3 is offered; 4 fails the bus progr
 @dataclass
 class Access:
     write: bool
-    block: str          # "CMD" or "CTL"
+    block: str          # "CMD" or "CTL", or "NONE" (no chip select)
     addr: int
     data: int = 0       # for writes
     hold_cs: bool = False  # keep CS/DA asserted afterwards (back-to-back data)
@@ -270,7 +270,8 @@ def run_host(sim: PioSim, core1: Core1, accesses: list[Access], timing: Mode0 = 
                 a = accesses[i]
                 cur = Result(a)
                 prev_address = (cs0, cs1, da)
-                new_cs = (0, 1) if a.block == "CMD" else (1, 0)
+                # "NONE": a strobe with no chip select (an A1200's clock chip shares them)
+                new_cs = {"CMD": (0, 1), "CTL": (1, 0), "NONE": (1, 1)}[a.block]
                 if T["address_lag"] and prev_address[:2] != (1, 1) and (*new_cs, a.addr) != prev_address:
                     late_address, late_at = (*new_cs, a.addr), None  # applied after the strobe falls
                     state, t_next = "setup", t

@@ -96,7 +96,7 @@ void oneShot(uint ch, enum dma_channel_transfer_size size, bool read_inc, uint d
 
 }  // namespace
 
-void begin() {
+void begin(bool iordy) {
     // The bus pins as ide_bus leaves them: inputs with no pulls (never pull-
     // downs: RP2350 erratum E9), INTRQ released for updateIntrq.
     for (unsigned pin = cfg::BUS_FIRST_PIN; pin <= cfg::BUS_LAST_PIN; ++pin) {
@@ -126,7 +126,13 @@ void begin() {
     s_d = uint(pio_claim_unused_sm(s_pio, true));
 
     for (unsigned i = 0; i < 16; ++i) pio_gpio_init(s_pio, cfg::PIN_DD0 + i);
-    pio_gpio_init(s_pio, cfg::PIN_IORDY);
+    // IORDY only for hosts that may look at it. Gayle (an A1200's) checks it
+    // before each strobe and starts no access while it's low, and D pulls it
+    // low for 80 ns at every read that isn't the data register's (the clock
+    // chip's strobes, with no chip select, too); on the pull-up alone it then
+    // takes microseconds to rise. With iordy = off the pin stays SIO's input
+    // (gpio_init above), so D's side-set changes nothing on it.
+    if (iordy) pio_gpio_init(s_pio, cfg::PIN_IORDY);
     pio_sm_set_pins_with_mask(s_pio, s_d, 0, 1u << cfg::PIN_IORDY);  // IORDY's value 0: an output pulls it low
     pio_sm_set_pindirs_with_mask(s_pio, s_d, 0, DRIVEN_PINS);       // everything released
     // DIOR# skips the input synchroniser, so D pulls IORDY low inside tA (35 ns)
@@ -362,13 +368,15 @@ CORE1_RAM_TABLE uint32_t observerPosition() {
 // A Status read at or after absolute position `since` (when the interrupt it
 // would acknowledge was raised), showing the device not busy: earlier ones,
 // and ones answered before the raise, belong to an earlier interrupt.
-CORE1_RAM_TABLE bool statusReadSince(uint32_t since) {
+CORE1_RAM_TABLE bool statusReadSince(uint32_t since, void (*each_read)(uint32_t sample)) {
     if (!s_obs_ring) return false;
     uint32_t written = (dma_hw->ch[s_obs_dma].write_addr - uint32_t(uintptr_t(s_obs_ring))) / 4;
     bool seen = false;
     while (s_obs_read != written) {
         uint32_t word = s_obs_ring[s_obs_read];
         s_obs_read = (s_obs_read + 1) % s_obs_words;
+        // As a read's sample: DD0-15, DA2-0, CS0#, CS1# (bits 0-20), DIOR# low, DIOW# high
+        if (each_read) each_read((word & 0x1FFFFFu) | bus::maskOf(cfg::PIN_DIOW_N));
         // A Status read the host saw BSY in came before the interrupt (the device
         // raises it only once it isn't busy), even if its strobe ended after the
         // raise: the slice 4 writes lost their interrupt to one (12 Nov 2026).

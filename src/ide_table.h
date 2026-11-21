@@ -11,8 +11,10 @@ namespace ide_table {
 
 // The bus pins, the read side's four state machines, the write side's three
 // and their DMA channels. In place of ide_bus::begin(); INTRQ is set up as
-// ide_bus leaves it (ide_bus::updateIntrq drives it).
-void begin();
+// ide_bus leaves it (ide_bus::updateIntrq drives it). `iordy` false (`iordy =
+// off`, an Amiga's Gayle): IORDY is never the PIO's, so D's side-set reaches
+// no pin and IORDY stays an input on its pull-up.
+void begin(bool iordy);
 // The write side's PIO block, claimed by begin() (pio_plan's table_write).
 bool running();
 // Once bus_observer has started: core 1 reads Status reads from its ring.
@@ -37,8 +39,10 @@ void publish(const Image& image);
 bool popWrite(uint32_t& sample);
 // bus_observer's ring, in order: its absolute position now, and whether a
 // Status read (which acknowledges the interrupt) came at or after `since`.
+// `each_read`, if given (the raw trace, console `t`), gets every read the
+// ring holds as a bus sample (DIOR# low), as the other programs record them.
 uint32_t observerPosition();
-bool statusReadSince(uint32_t since);
+bool statusReadSince(uint32_t since, void (*each_read)(uint32_t sample) = nullptr);
 
 // C's busy write: armed for the next Command write. Core 1 re-arms it once
 // it has taken that command from W's ring.

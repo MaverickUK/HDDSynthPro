@@ -519,3 +519,102 @@ def test_status_after_a_command_is_on_dd_within_30_ns_of_its_strobe(programs, ho
     assert all(r.read_value is not None and r.read_value & 0xFF == 0x50 for r in reads)
     late = [r.rise_ns - r.fall_ns - r.data_setup_ns for r in reads]
     assert max(late) <= 30, late
+
+
+# ---- The Amiga 1200's Gayle (docs/amiga.md) ------------------------------------
+#
+# From the listen capture of a CF card booting the A1200 through its buffered
+# adapter (host/reference/a1200_cf_kickstart_listen.txt, 21 Nov 2026): chip
+# select 110-200 ns before each strobe and still valid during it (the buffer
+# cleans the lines), strobes of about 300 ns, accesses 1-1.5 us apart, IORDY
+# never waited for (`iordy = off`). Kickstart's detection writes a register and
+# reads it back within the same microsecond, and the A1200's clock chip shares
+# the strobes with no IDE chip select.
+
+GAYLE = dataclasses.replace(Mode0(), t1=150, t2=300, t0=1000, waits_for_iordy=False)
+GAYLE_FAST = dataclasses.replace(GAYLE, t1=110, t0=700)  # tighter than seen: a read-back 700 ns after its write
+
+
+def kickstart_round(device: int) -> list[Access]:
+    """One round of Kickstart's detection, as the capture has it: Device, then
+    Cylinder Low (LBA Mid) and Status read, then Cylinder Low written and read
+    back twice. Gayle writes 8-bit registers on both bytes."""
+    return [Access(True, "CMD", 6, device * 0x0101), Access(False, "CMD", 4), Access(False, "CMD", 7),
+            Access(True, "CMD", 4, 0x1212), Access(False, "CMD", 4),
+            Access(True, "CMD", 4, 0x3434), Access(False, "CMD", 4)]
+
+
+CLOCK_CHIP = [Access(True, "NONE", 7, 0x0404), Access(False, "NONE", 5), Access(True, "NONE", 6, 0x0101)]
+
+
+class Core1Writes:
+    """Core 1 in table mode, as far as register writes go: each sample W puts in
+    its ring reaches the table `latency_ns` later (runTable: popWrite, then
+    publish, at once since 0.36.0-dev.11)."""
+
+    def __init__(self, writes: Writes, table: Table, latency_ns: float):
+        self.writes, self.table = writes, table
+        self.latency = int(latency_ns * 1000 / CYCLE_PS)
+        self.taken = 0
+        self.due: list[tuple[int, int]] = []
+        dma = writes.block.on_cycle
+
+        def on_cycle(block):
+            dma(block)
+            while self.taken < len(writes.ring):
+                self.due.append((block.cycle + self.latency, writes.ring[self.taken]))
+                self.taken += 1
+            while self.due and self.due[0][0] <= block.cycle:
+                block_name, addr, value = decode_write(self.due.pop(0)[1])
+                if block_name == "CMD" and 2 <= addr <= 6:  # the registers a write reads back from
+                    table.load({("CMD", addr): value & 0xFF})
+
+        writes.block.on_cycle = on_cycle
+
+
+def run_gayle(programs, write_programs, accesses, timing=GAYLE, latency_ns=400.0):
+    table = Table(programs)
+    writes = Writes(write_programs, table)
+    Core1Writes(writes, table, latency_ns)
+    return run_host(table.block, idle_core1(), accesses, timing=timing, observers=(writes.block,))
+
+
+def reads_of(run) -> list[int | None]:
+    return [r.read_value & 0xFF if r.read_value is not None else None for r in run.results if not r.access.write]
+
+
+@pytest.mark.parametrize("timing", [GAYLE, GAYLE_FAST], ids=["gayle", "gayle-700ns"])
+@pytest.mark.parametrize("latency_ns", [0, 300, 500])
+def test_kickstarts_detection_reads_every_register_right(programs, write_programs, timing, latency_ns):
+    # Cylinder Low as the drive left it, Status, then each value written read
+    # back: the round the drive must pass for Kickstart to send a command.
+    run = run_gayle(programs, write_programs, kickstart_round(0) + kickstart_round(0xA0), timing, latency_ns)
+    assert not run.errors
+    assert reads_of(run) == [0x00, 0x50, 0x12, 0x34, 0x34, 0x50, 0x12, 0x34]
+
+
+def test_a_read_back_follows_a_write_that_lands_during_the_strobe(programs, write_programs):
+    # The table's `hold` re-reads its entry every 6 cycles while DIOR# is low, so
+    # a write core 1 publishes after the read's strobe has started still reaches
+    # the host: core 1's budget, from DIOW# rising to the entry written, is the
+    # access spacing less about 75 ns (`hold`'s pass, the synchroniser, data
+    # setup): 925 ns at Gayle's usual 1 us, 625 ns at 700 ns spacing
+    # (simulated, 21 Nov 2026).
+    budget_ns = GAYLE_FAST.t0 - 75
+    run = run_gayle(programs, write_programs, kickstart_round(0), GAYLE_FAST, latency_ns=budget_ns)
+    assert reads_of(run)[2:] == [0x12, 0x34]
+    stale = run_gayle(programs, write_programs, kickstart_round(0), GAYLE_FAST, latency_ns=budget_ns + 100)
+    assert reads_of(stale)[2:] != [0x12, 0x34]  # too late: the test would see it
+
+
+def test_the_clock_chips_strobes_are_never_answered(programs, write_programs):
+    # Strobes with no IDE chip select between Kickstart's accesses: nothing is
+    # driven for them, and the round around them still reads right.
+    round_ = kickstart_round(0)
+    accesses = round_[:2] + CLOCK_CHIP + round_[2:5] + CLOCK_CHIP + round_[5:]
+    run = run_gayle(programs, write_programs, accesses)
+    assert not run.errors
+    clock_reads = [r.read_value for r in run.results if not r.access.write and r.access.block == "NONE"]
+    assert clock_reads == [None, None]
+    ide = [r for r in run.results if not r.access.write and r.access.block != "NONE"]
+    assert [r.read_value & 0xFF for r in ide] == [0x00, 0x50, 0x12, 0x34]

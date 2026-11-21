@@ -17,7 +17,7 @@
 //   isa = off              # a 16-bit ISA IDE card: IORDY let go if held for 23 us
 //   early_answers = on     # answers ready at the chip select, for hosts that don't wait for IORDY
 //   iordy = on             # off: never touch IORDY, for hosts that wait for it before the strobe
-//   bus = auto             # the bus program: auto (the default), early, lane or ide_bus; left out of a file
+//   bus = auto             # the bus program: auto (the default), early, lane, ide_bus or table; left out of a file
 //                          # that sets early_answers or register_table, those decide
 //   register_table = off   # on: every read answered by the PIO from a table core 1 keeps (docs/register-table.md)
 //   sd_high_speed = on     # the card's reads at 40 MHz over SDIO (the PCB), 20 if it can't (docs/performance.md, 3)
@@ -70,10 +70,10 @@ const char* modeName(Mode m);  // "auto", "pio0", ... "udma6"
 // every power-up and reset, the data lane once the host has shown it's a PCI
 // controller that waits for IORDY, switched live. Early, Lane, IdeBus: that
 // program (`isa = on` still keeps ide_bus with its watchdog).
-enum class Bus : uint8_t { Settings, Auto, Early, Lane, IdeBus };
+enum class Bus : uint8_t { Settings, Auto, Early, Lane, IdeBus, Table };
 // The bus program by default: auto since 0.35.0 (docs/auto-bus.md).
 constexpr Bus DEFAULT_BUS = Bus::Auto;
-const char* busName(Bus b);  // "settings", "auto", "early", "lane", "ide_bus"
+const char* busName(Bus b);  // "settings", "auto", "early", "lane", "ide_bus", "table"
 
 // Can this firmware run `m`? Auto, PIO 0-3 and multiword DMA 0-2 so far.
 bool modeSupported(Mode m);
