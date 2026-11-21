@@ -18,6 +18,9 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 - `C1_PROFILE` also records the register table's longest gaps, per place W's ring is looked at (`c1_gap_ns`).
 - Core 1's hard disk code is unchanged and no object changed RAM bank; the table's code grew, which moves `.bss` (whole bank periods). The layout check fails on `.bss` until the table is benchmarked through the USB adapters and the layout recorded.
 
+### Tested
+- **A split image on a real disk, for the first time:** the A1200's whole 8 GB CF card (DH0 and DH1, PFS3) copied by `tools/split_image.py` into `A1200CF.IMG` and `A1200CF.I01`, served as one disk (`parts=2`, geometry 15636/16/63 as the CF card's). Both partitions on the Workbench, Cannon Fodder run from DH1: 932 commands, none failed, 3,653 sectors checked on the cable with 0 bad, reads to DH1's last block in the second part.
+
 ### Added
 - `host/reference/a1200_bay_table_boot.txt`: the A1200 booting from the drive, its first 1,500 lines.
 

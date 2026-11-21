@@ -105,9 +105,22 @@ dev.11's table answered Kickstart's reads and Status 50h, but read Cylinder Low 
 
 Kept for later: `C1_PROFILE` now records the register table's gaps per place too (`c1_gap_ns`: `access` the end of the pass, `lane` the observer's ring, `command`, `busonly` fetches, `step0` timers, `step1` the reset check, `step2` the hot loop).
 
+### 8. The whole CF card, as a split image: the games run
+
+`A1200DH0.IMG` (October) holds only DH0: its RDB had been cut to 1,984 cylinders, and the CF card's second partition was left out:
+
+| | The CF card | `A1200DH0.IMG` |
+|---|---|---|
+| DH0, PFS3, bootable | 520 MB (cylinders 2-1983) | the same |
+| DH1 (GAMES), PFS3 | 7,549 MB (cylinders 1984-30782) | missing |
+
+So on the Bay the A1200 showed DH0 alone. The whole card (8,069,677,056 bytes, RDB 16 heads x 32 sectors, IDENTIFY 15636/16/63) copied with `tools/split_image.py /dev/rdiskN /Volumes/HDDSYNTH A1200CF.IMG` (12.5 minutes from a USB CF reader; each part SHA-256-checked against the card): `A1200CF.IMG` (4,095 MiB) and `A1200CF.I01`. `E device0 = A1200CF.IMG`, `!`: `CONFIG ... parts=2 extents=12`, `geometry=15636/16/63 (auto)`, the CF card's own. To list a disk's or an image's partitions, read its RDSK and PART blocks (block 0, then the list from RDSK's offset 28; each PART's DosEnvec from offset 128: heads at 12, sectors per track at 20, low and high cylinder at 36 and 40).
+
+**On the A1200 (21 Nov, dev.12):** both partitions on the Workbench; Cannon Fodder ran from GAMES. 932 commands, none failed; 3,653 sectors checked on the cable, 0 bad; the highest block read 15,760,895, DH1's last, in the second part. The first real split image the drive has served.
+
 ## Next steps
 
-0. **Done (dev.12): the A1200 boots.** Still to do: a benchmark on the A1200 (SysInfo or DiskSpeed), longer use (copying files, writes), the hot loop's effect on the table's speed through the USB adapters (`-m speed` on the table; then record the layout, which fails on `.bss` until then), whether early answers (`noiordy`) could take the same fix, and the floppy drive reconnected.
+0. **Done (dev.12): the A1200 boots, and runs the games from the whole CF card (split image, section 8).** Still to do: a benchmark on the A1200 (SysInfo or DiskSpeed), longer use (copying files, writes), the hot loop's effect on the table's speed through the USB adapters (`-m speed` on the table; then record the layout, which fails on `.bss` until then), whether early answers (`noiordy`) could take the same fix, and the floppy drive reconnected.
 
 0a. **(Done in dev.12.) The A1200 on dev.11's table** (`bus = table`, `iordy = off`, `t` on, `scripts/retro_log.py` recording): if detection still fails, compare the trace with the CF card's capture access by access, and see whether the read-backs come back stale (core 1 too slow: then a PIO path for plain register writes) or the reads look wrong (the address during the strobe).
 1. **A Gayle host model from the capture** (done for the table in dev.11) (`host/hddproto/pio_sim.py`; `host/tests/test_pio_bus_noiordy_sim.py` has a Gayle model from October to extend): chip select to strobe 110-200 ns, strobes of about 300 ns, accesses 1-1.5 µs apart, Kickstart's exact sequence above (WR Device; RD Cylinder Low; RD Status; WR/RD Cylinder Low twice), and clock-chip strobes with no chip select in between. Run `ide_bus_noiordy` (with core 1's answer delay modelled) and the register table against it.
