@@ -114,7 +114,11 @@ class Session:
     def speeds(self, max_x: float):
         """Reading at each speed, and spinning idle after it."""
         mid = self.ops.sectors // 3
-        for x in [s for s in (1, 2, 4, 8, 16, 24, 32, 48) if s < max_x - 1] + [None]:
+        speeds = [s for s in (1, 2, 4, 8, 16, 24, 32, 48) if s < max_x - 1]
+        if not self.fast and not self.ops.speed_obeyed():
+            print("  the drive ignores the speed asked: recording it at its own speed only")
+            speeds = []
+        for x in speeds + [None]:
             name = f"{x}x" if x else "max"
             r = self.ops.set_speed(x)
             self.ops.wait_ready(30)

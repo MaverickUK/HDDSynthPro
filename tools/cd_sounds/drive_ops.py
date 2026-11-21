@@ -106,6 +106,27 @@ class Ops:
             done += chunk
         return done
 
+    def read_rate_x(self, seconds: float = 2.0) -> float:
+        """How fast the drive reads now, in x, a third of the way out (after
+        a moment to reach its speed)."""
+        lba = self.sectors // 3
+        self.read_at(lba, 1)
+        time.sleep(1.5)
+        start = time.perf_counter()
+        n = self.read_for(seconds, lba)
+        return n * scsi.SECTOR / (time.perf_counter() - start) / 1024 / scsi.KX
+
+    def speed_obeyed(self) -> bool:
+        """Whether the drive really reads slower when asked: some accept SET CD
+        SPEED and go on at their own speed (the LG GCC-4320B, 21 Nov 2026).
+        Leaves it at the fastest."""
+        self.set_speed(None)
+        fastest = self.read_rate_x()
+        self.set_speed(4)
+        slow = self.read_rate_x()
+        self.set_speed(None)
+        return slow < fastest * 0.7
+
     def random_seeks(self, count: int, gap_s: float, rng: random.Random, lo_mm: float = 25.0,
                      hi_mm: float | None = None) -> list[float]:
         """Seeks to random radii, up to the disc's last data (a part-filled

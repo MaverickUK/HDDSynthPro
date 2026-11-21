@@ -62,6 +62,10 @@ def main():
         results["speed_max"] = check("SET CD SPEED fastest", ops.set_speed(None))
         results["speed_4x"] = check("SET CD SPEED 4x", ops.set_speed(4))
         ops.set_speed(None)
+        if results["speed_4x"]:
+            obeyed = ops.speed_obeyed()
+            results["speed_4x"] = obeyed
+            print(f"       {'the drive reads slower at 4x' if obeyed else 'but the drive reads at its own speed whatever is asked'}")
         results["read"] = check("READ(10) 32 sectors", ops.read_at(1000, 32))
         results["seek_in"] = check("seek to 26 mm (READ 1)", ops.seek_radius(26))
         results["seek_out"] = check(f"seek to {ops.max_radius():.0f} mm (READ 1)", ops.seek_radius(ops.max_radius()))
@@ -80,7 +84,8 @@ def main():
 
         print()
         if not results["speed_4x"]:
-            print("SET CD SPEED doesn't reach the drive (or it has one speed): the session records at its own pace.")
+            print("The read speed can't be set (refused, or accepted and ignored): the session records the drive at "
+                  "its own speed only, and there's no 1x sound for CD audio.")
         if not (results["stop"] and results["start"]):
             print("Spin up/down don't reach the drive: the session can't record them on command; the drive's own "
                   "idle spin-down (a minute or more untouched) still can be.")

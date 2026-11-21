@@ -52,6 +52,15 @@ def set_cd_speed(read_kbs: int = 0xFFFF) -> bytes:
     return bytes([0xBB, 0]) + struct.pack(">HH", read_kbs, 0xFFFF) + bytes(6)
 
 
+def set_streaming(read_kbs: int, last_lba: int) -> tuple[bytes, bytes]:
+    """SET STREAMING (B6h, MMC-3): the read speed for the whole disc, as DVD-era
+    drives take it (some ignore SET CD SPEED). Returns the CDB and its 28-byte
+    performance descriptor (sent as data): `read_kbs` kB in each 1,000 ms."""
+    descriptor = bytes([0, 0, 0, 0]) + struct.pack(">IIIIII", 0, last_lba, read_kbs, 1000, read_kbs, 1000)
+    cdb = bytes([0xB6]) + bytes(8) + struct.pack(">H", len(descriptor)) + bytes([0])
+    return cdb, descriptor
+
+
 def read10(lba: int, count: int) -> bytes:
     return bytes([0x28, 0]) + struct.pack(">I", lba) + bytes([0]) + struct.pack(">H", count) + bytes([0])
 

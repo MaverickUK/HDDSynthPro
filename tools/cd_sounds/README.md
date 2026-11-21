@@ -98,8 +98,12 @@ To play it on the HDD Synth: copy `packs/<name>/` (without `takes/`) into
 ## What may not work
 
 - **SET CD SPEED** is the command an adapter or an old drive most often
-  refuses (`probe.py` says). Without it every read is at the drive's own
-  speed, and there's no 1x recording for CD audio.
+  refuses, or accepts and ignores: `probe.py` measures the read rate at 4x
+  against the fastest, and the session then records the drive at its own
+  speed only. No 1x recording for CD audio then. The LG GCC-4320B (a DVD/CD-RW
+  combo, 21 Nov 2026) accepts it and ignores it, and refuses SET STREAMING:
+  it spins at one speed (constant angular velocity: about 15x at the inner
+  edge, 28x at the outer).
 - **Spin down** on command: some drives ignore it, or spin up again at
   Windows' next poll. The drive's own idle spin-down (`--idle-timeout`) still
   gives one.
