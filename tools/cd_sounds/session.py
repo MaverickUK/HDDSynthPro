@@ -3,13 +3,17 @@ times, with quiet between, and every one is logged against two sync beeps so
 cut.py can cut the recording into a sample pack.
 
     python session.py --list-mics                     # microphones ffmpeg can record
-    python session.py --mic "Microphone (USB Audio)"  # run it and record from that mic
+    python session.py --mic "Microphone (USB Audio)"  # run it and record from that mic (Windows)
+    python session.py --mic "Samson Meteor Mic"       # the same on macOS
     python session.py                                 # run it; record on your own recorder
     python session.py --tray --idle-timeout 60        # the tray too; leave the drive alone 60 s (45 by default)
     python session.py --dry-run --fast                # a fake drive: check the plan and the log
 
-Start your recorder first (if it's not this PC's), with the PC's speakers
+Start your recorder first (if it's not this computer's), with the speakers
 loud enough for it to hear the beeps; keep still and quiet during the run.
+Windows: an administrator terminal. macOS: Xcode's command line tools (the
+drive's helper is built with clang) and ffmpeg (Homebrew); the disc is
+unmounted while the session runs.
 Writes runs/session-<time>.json (and .wav with --mic) beside this script.
 """
 from __future__ import annotations
@@ -17,14 +21,16 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import platform_io
 import scsi
 from drive_ops import Ops
+# recording from this computer: listen.py imports these from here
+from platform_io import start_recording, stop_recording  # noqa: F401
 
 HERE = Path(__file__).resolve().parent
 BEEP_HZ, BEEP_MS, BEEP_GAP_S = 1000, 200, 0.5  # two beeps, starts 0.5 s apart
@@ -47,7 +53,7 @@ class Session:
         self.fast = fast  # dry runs: every wait cut to a tenth
         self.events: list[Event] = []
         self.t0 = 0.0
-        self.beep = beep or _beep
+        self.beep = beep or platform_io.beep
         self.rng = random.Random(1)
 
     # ---- timing ------------------------------------------------------------------
@@ -308,37 +314,9 @@ class Session:
         return self.events
 
 
-def _beep(hz: int, ms: int):
-    import winsound
-    winsound.Beep(hz, ms)
-
-
-# ---- Recording from this PC (ffmpeg) -------------------------------------------------
-
-
 def list_mics():
-    p = subprocess.run(["ffmpeg", "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
-                       capture_output=True, text=True)
-    for line in p.stderr.splitlines():
-        if "(audio)" in line:
-            print(line.split("]", 1)[-1].strip())
-
-
-def start_recording(mic: str, path: Path, rate: int) -> subprocess.Popen:
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "dshow", "-audio_buffer_size", "50",
-           "-i", f"audio={mic}", "-ac", "1", "-ar", str(rate), "-c:a", "pcm_s16le", str(path)]
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    time.sleep(2)  # ffmpeg opens the device
-    if p.poll() is not None:
-        sys.exit(f"ffmpeg couldn't record from {mic!r} (python session.py --list-mics)")
-    return p
-
-
-def stop_recording(p: subprocess.Popen):
-    try:
-        p.communicate(b"q", timeout=10)
-    except subprocess.TimeoutExpired:
-        p.kill()
+    for name in platform_io.mic_names():
+        print(name)
 
 
 # ---- A drive for dry runs ------------------------------------------------------------
@@ -371,8 +349,8 @@ class FakeDrive:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--drive", help="\\\\.\\CdRomN or a drive letter (default: the only CD drive)")
-    ap.add_argument("--mic", help="record on this PC from this microphone (ffmpeg's dshow name)")
+    ap.add_argument("--drive", help=platform_io.DRIVE_HELP)
+    ap.add_argument("--mic", help="record on this computer from this microphone (a name --list-mics gives)")
     ap.add_argument("--list-mics", action="store_true")
     ap.add_argument("--rate", type=int, default=48000, help="recording sample rate (default 48000)")
     ap.add_argument("--takes", type=int, default=4, help="takes of each sound (default 4)")
@@ -394,9 +372,7 @@ def main():
     if a.dry_run:
         drive, beep = FakeDrive(fast=a.fast), (lambda hz, ms: time.sleep(ms / 1000))
     else:
-        from probe import pick_drive
-        from scsi_win import CdDrive
-        drive, beep = CdDrive(pick_drive(a.drive)), _beep
+        drive, beep = platform_io.open_drive(platform_io.pick_drive(a.drive)), platform_io.beep
     ops = Ops(drive)
     info = ops.info()
     if not info.sectors:

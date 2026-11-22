@@ -25,8 +25,8 @@ at random gaps) and `sequential.wav` from the head stepping outwards, both
 high-passed at 100 Hz and level with `idle.wav` (`--access-boost`; the synth's
 balance turns them up or down from there).
 
-Windows, Python 3.10 or later, the standard library and ffmpeg (on this PC
-from scoop). No numpy.
+Windows or macOS, Python 3.10 or later, the standard library and ffmpeg (on
+the Windows PC from scoop; on the Mac from Homebrew). No numpy.
 
 | Script | Does |
 |---|---|
@@ -36,7 +36,8 @@ from scoop). No numpy.
 | `preview.py` | The pack in scenarios (the synth, a game, an install, CD audio), played or saved |
 | `listen.py` | Recording from this PC's microphone (ffmpeg), and the spindle's tone (its speed) |
 | `placement.py` | Where to put the microphone: 20 s of seeks and reads against spinning, in dB, logged per position |
-| `scsi.py`, `scsi_win.py`, `drive_ops.py`, `audio.py` | The commands, Windows' SCSI pass-through, the drive's sounds as operations, WAV editing |
+| `scsi.py`, `drive_ops.py`, `audio.py` | The commands, the drive's sounds as operations, WAV editing |
+| `platform_io.py`, `scsi_win.py`, `scsi_mac.py` + `scsi_mac.c` | What differs by OS: the drive (Windows' SCSI pass-through; on macOS IOKit's MMC interface, by a helper in C), the beep, the microphone |
 
 ## Setting up
 
@@ -52,6 +53,22 @@ from scoop). No numpy.
   about once a second, which is quiet once the disc is known.
 - **An administrator terminal** (Git Bash or PowerShell): the SCSI
   pass-through needs it.
+- **On the Mac** instead (first written 22 Nov 2026 and not yet run on one):
+  - Xcode's command line tools (`xcode-select --install`): the first run
+    builds `runs/scsi_mac` from `scsi_mac.c` with clang. No `sudo` needed.
+  - `brew install ffmpeg`; the Terminal asks for the microphone the first time.
+  - The adapter shows as `2537:1081` there. macOS hands the drive over only
+    while its disc isn't mounted: the scripts unmount it (`diskutil
+    unmountDisk`) and macOS mounts it again when they finish. If `probe.py`
+    says the disc is still mounted, quit whatever has it open (the Finder
+    window, Spotlight indexing it) and try again.
+  - `python3 probe.py` lists the drives by number (and `diskN`):
+    `--drive 0` or `--drive disk4` picks one.
+  - `--list-mics` gives AVFoundation's names (`Samson Meteor Mic`, not
+    Windows' `Microphone (Samson Meteor Mic)`). The beeps play through the
+    Mac's output (`afplay`).
+  - Keep the Mac awake for the session (`caffeinate -dimsu python3 session.py
+    ...`).
 - **The microphone:** close to the drive (10-20 cm, toward the tray and the
   side where the motor is), in a quiet room, nothing touching the drive. A
   bare drive on a desk sounds thinner than one in a case: for a PC's sound,
@@ -64,7 +81,7 @@ from scoop). No numpy.
 
 ## Recording
 
-From an administrator terminal in `tools/cd_sounds`:
+From an administrator terminal in `tools/cd_sounds` (on the Mac, any Terminal, with `python3`):
 
 ```
 python probe.py                  # the drive, the disc, what works (about 20 s)

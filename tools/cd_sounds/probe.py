@@ -5,8 +5,10 @@ commands the recording session needs reach it. Run before a session.
     python probe.py --drive E:      # this one
     python probe.py --tray          # also open and close the tray
 
-Administrator terminal; a data CD in the drive (as full as you have: seeks
-reach as far out as its data does).
+Windows: an administrator terminal. macOS: Xcode's command line tools (the
+drive's helper is built with clang; `--drive 0` or `--drive disk4`), and the
+disc is unmounted while it runs. A data CD in the drive (as full as you
+have: seeks reach as far out as its data does).
 """
 from __future__ import annotations
 
@@ -14,20 +16,10 @@ import argparse
 import sys
 import time
 
+import platform_io
 import scsi
 from drive_ops import Ops
-
-
-def pick_drive(arg: str | None) -> str:
-    from scsi_win import list_cd_drives
-    drives = list_cd_drives()
-    for path, letter, name in drives:
-        print(f"  {letter}  {name}")
-    if arg:
-        return arg
-    if len(drives) == 1:
-        return drives[0][0]
-    sys.exit("give --drive (none found)" if not drives else "more than one CD drive: give --drive")
+from platform_io import pick_drive
 
 
 def check(label: str, result, extra: str = "") -> bool:
@@ -38,14 +30,13 @@ def check(label: str, result, extra: str = "") -> bool:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--drive", help="\\\\.\\CdRomN or a drive letter")
+    ap.add_argument("--drive", help=platform_io.DRIVE_HELP)
     ap.add_argument("--tray", action="store_true", help="open and close the tray too")
     a = ap.parse_args()
 
-    from scsi_win import CdDrive
     print("CD drives:")
     path = pick_drive(a.drive)
-    with CdDrive(path) as drive:
+    with platform_io.open_drive(path) as drive:
         ops = Ops(drive)
         d = ops.info()
         print(f"\n{path}: {d.name or '?'}")

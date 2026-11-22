@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import random
 import statistics
+import sys
 import time
 from pathlib import Path
 
@@ -33,14 +34,14 @@ def levels(samples, start_s: float, end_s: float, window_s: float = 0.01) -> lis
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--mic", default="Microphone (Samson Meteor Mic)")
-    ap.add_argument("--drive", default="D:")
+    ap.add_argument("--mic", default="Samson Meteor Mic" if sys.platform == "darwin" else "Microphone (Samson Meteor Mic)")
+    ap.add_argument("--drive", help="the drive (default: the only one)")
     ap.add_argument("--label", default="", help="a name for this position, for the log")
     a = ap.parse_args()
 
-    from scsi_win import CdDrive
+    import platform_io
     rng = random.Random(5)
-    with CdDrive(a.drive) as d:
+    with platform_io.open_drive(platform_io.pick_drive(a.drive)) as d:
         ops = Ops(d)
         ops.info()
         ops.set_speed(None)

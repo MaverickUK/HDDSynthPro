@@ -204,3 +204,65 @@ def test_a_recording_cuts_into_a_pack_and_every_scenario_renders(tmp_path):
     for scenario in preview.SCENARIOS:
         rendered = preview.render(pk, scenario)
         assert len(rendered) > 5 * RATE and audio.peak(rendered) > 1000, scenario
+
+
+# ---- macOS: the drive helper's protocol, and ffmpeg's device list --------------------
+
+FAKE_HELPER = r'''
+import struct, sys
+out, inp = sys.stdout.buffer, sys.stdin.buffer
+out.write(b"READY\n"); out.flush()
+while True:
+    req = inp.read(26)
+    if len(req) < 26:
+        break
+    n, cdb, (direction, length, timeout) = req[0], req[1:17], struct.unpack("<BII", req[17:26])
+    sent = inp.read(length) if direction == 2 else b""
+    if cdb[0] == 0x12:      # INQUIRY: echo the timeout and the CDB's length in the data
+        data = bytes(8) + b"FAKE    " + struct.pack("<I", timeout) + bytes([n]) + bytes(length - 21)
+        out.write(struct.pack("<iB32sII", 0, 0, bytes(32), len(data), 7) + data)
+    elif cdb[0] == 0xB6:    # SET STREAMING: report how much came
+        out.write(struct.pack("<iB32sII", 0, 0, bytes(32), 0, 7)); assert len(sent) == length == 28
+    elif cdb[0] == 0x00:    # TEST UNIT READY: no disc
+        sense = bytes([0x70, 0, 0x02]) + bytes(9) + bytes([0x3A, 0x00]) + bytes(18)
+        out.write(struct.pack("<iB32sII", 0, 2, sense, 0, 7))
+    else:                   # an IOKit failure
+        out.write(struct.pack("<iB32sII", -536870206, 0, bytes(32), 0, 7))
+    out.flush()
+'''
+
+
+def test_the_mac_helpers_protocol(tmp_path):
+    import scsi_mac
+    fake = tmp_path / "fake_helper.py"
+    fake.write_text(FAKE_HELPER)
+    with scsi_mac.CdDrive("0", argv=[sys.executable, str(fake)]) as d:
+        r = d.command(scsi.inquiry(64), data_in=64, timeout_s=12)
+        assert r.ok and len(r.data) == 64 and r.data[8:16] == b"FAKE    "
+        assert int.from_bytes(r.data[16:20], "little") == 12_000 and r.data[20] == 6
+        cdb, descriptor = scsi.set_streaming(705, 300_000)
+        assert d.command(cdb, data_out=descriptor).ok
+        r = d.command(scsi.test_unit_ready())
+        assert not r.ok and r.status == 2 and r.sense.meaning == "no disc"
+        r = d.command(scsi.seek10(5))
+        assert not r.ok and "0xe00002c2" in r.error
+
+
+def test_a_mac_helper_that_cant_open_the_drive_says_why(tmp_path):
+    import scsi_mac
+    fake = tmp_path / "refuses.py"
+    fake.write_text('print("ERROR the drive is busy: its disc is still mounted (0xe00002d5)")')
+    with pytest.raises(OSError, match="still mounted"):
+        scsi_mac.CdDrive("0", argv=[sys.executable, str(fake)])
+
+
+def test_ffmpegs_avfoundation_list_gives_the_microphones():
+    import platform_io
+    text = """[AVFoundation indev @ 0x7f8] AVFoundation video devices:
+[AVFoundation indev @ 0x7f8] [0] FaceTime HD Camera
+[AVFoundation indev @ 0x7f8] [1] Capture screen 0
+[AVFoundation indev @ 0x7f8] AVFoundation audio devices:
+[AVFoundation indev @ 0x7f8] [0] Samson Meteor Mic
+[AVFoundation indev @ 0x7f8] [1] MacBook Pro Microphone
+: Input/output error"""
+    assert platform_io.parse_avfoundation_list(text) == ["Samson Meteor Mic", "MacBook Pro Microphone"]
