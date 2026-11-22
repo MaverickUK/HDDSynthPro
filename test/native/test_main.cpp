@@ -463,6 +463,7 @@ void runPioPlanTests();
 void runWelcomeDiskTests();
 void runSeekTimingTests();
 void runTwoDrivesTests();
+void runOpticalDriveTests();
 void runFolderDiskTests();
 void runMmcTests();
 void runAtapiDeviceTests();
@@ -508,6 +509,7 @@ int main() {
     runWelcomeDiskTests();
     runSeekTimingTests();
     runTwoDrivesTests();
+    runOpticalDriveTests();
     runFolderDiskTests();
     runMmcTests();
     runAtapiDeviceTests();

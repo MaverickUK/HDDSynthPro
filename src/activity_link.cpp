@@ -205,4 +205,54 @@ bool parseHeadLine(const char* line, size_t len, HeadTarget& out) {
     return true;
 }
 
+size_t formatOpticalSentence(const OpticalFields& f, char* buf, size_t size) {
+    char body[16];
+    int n = std::snprintf(body, sizeof body, "HDO,3,%d,%c,%d,%c", f.busy ? 1 : 0, classChar(f.state), f.motor ? 1 : 0,
+                          f.tray_open ? 'O' : 'C');
+    if (n <= 0 || size_t(n) >= sizeof body) return 0;
+    uint8_t checksum = 0;
+    for (int i = 0; i < n; ++i) checksum ^= uint8_t(body[i]);
+    int len = std::snprintf(buf, size, "$%s*%02X\r\n", body, unsigned(checksum));
+    return (len > 0 && size_t(len) < size) ? size_t(len) : 0;
+}
+
+bool parseOpticalLine(const char* line, size_t len, OpticalFields& out) {
+    static const char PREFIX[] = "$HDO,";
+    const size_t prefix_len = sizeof PREFIX - 1;
+    size_t star = checkedStar(line, len, PREFIX);
+    if (star == 0) return false;
+    // version, busy, class, motor, tray, then any that later versions add
+    const char* field[5] = {};
+    size_t field_len[5] = {};
+    if (splitAt(line, prefix_len, star, field, field_len, 5) < 5) return false;
+    if (!allDigits(field[0], field_len[0])) return false;
+    if (field_len[0] == 1 && field[0][0] < '3') return false;  // $HDO came in version 3
+    for (int i = 1; i < 5; ++i)
+        if (field_len[i] != 1) return false;
+    OpticalFields f;
+    switch (field[1][0]) {
+        case '0': f.busy = false; break;
+        case '1': f.busy = true; break;
+        default: return false;
+    }
+    switch (field[2][0]) {
+        case 'I': f.state = activity::State::Idle; break;
+        case 'S': f.state = activity::State::Sequential; break;
+        case 'R': f.state = activity::State::Random; break;
+        default: return false;
+    }
+    switch (field[3][0]) {
+        case '0': f.motor = false; break;
+        case '1': f.motor = true; break;
+        default: return false;
+    }
+    switch (field[4][0]) {
+        case 'C': f.tray_open = false; break;
+        case 'O': f.tray_open = true; break;
+        default: return false;
+    }
+    out = f;
+    return true;
+}
+
 }  // namespace activity_link

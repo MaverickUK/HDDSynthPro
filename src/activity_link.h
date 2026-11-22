@@ -18,6 +18,15 @@
 // $HDA's; sectors the command's sector count. At most one every 2 ms, the
 // newest; $HDA goes first when one is due.
 //
+// Version 3 adds $HDO, the CD-ROM drive (only while there is one), for the
+// synth's CD-ROM pack:
+//
+//   $HDO,3,<busy>,<class>,<motor>,<tray>*<checksum>\r\n
+//
+// busy and class as $HDA's, for the CD-ROM's reads; motor 1 while its disc
+// spins; tray O (open) or C (closed): optical_drive.h's model of a real
+// drive. On every change and every 200 ms, after a due $HDA.
+//
 // Pure C++, host-tested; main.cpp writes the sentences to the UART.
 #pragma once
 
@@ -84,10 +93,13 @@ private:
 };
 
 // Decides when to send: on any change of the fields, or once `heartbeat_ms`
-// has passed since the last sentence that went out.
-class Sender {
+// has passed since the last sentence that went out. (Sender for $HDA's
+// Fields, OpticalSender for $HDO's.)
+template <class F>
+class BasicSender {
 public:
-    explicit Sender(uint32_t heartbeat_ms) : heartbeat_ms_(heartbeat_ms) {}
+    using Fields = F;
+    explicit BasicSender(uint32_t heartbeat_ms) : heartbeat_ms_(heartbeat_ms) {}
 
     // Is a sentence for `f` due at `now_ms`?
     bool due(const Fields& f, uint32_t now_ms) const {
@@ -112,6 +124,30 @@ private:
     uint32_t last_ms_ = 0;
     uint32_t count_ = 0;
 };
+using Sender = BasicSender<Fields>;
+
+// ---- Version 3: $HDO, the CD-ROM drive ------------------------------------------
+
+struct OpticalFields {
+    bool busy = false;
+    activity::State state = activity::State::Idle;
+    bool motor = false;
+    bool tray_open = false;
+    bool operator==(const OpticalFields& o) const {
+        return busy == o.busy && state == o.state && motor == o.motor && tray_open == o.tray_open;
+    }
+    bool operator!=(const OpticalFields& o) const { return !(*this == o); }
+};
+using OpticalSender = BasicSender<OpticalFields>;
+
+// The longest $HDO ("$HDO,3,1,S,1,C*hh"), with \r\n and a NUL.
+constexpr size_t OPTICAL_SENTENCE_MAX = 24;
+
+// As formatSentence(), for the CD-ROM drive.
+size_t formatOpticalSentence(const OpticalFields& f, char* buf, size_t size);
+
+// Validates a received $HDO line, as parseLine() does a $HDA.
+bool parseOpticalLine(const char* line, size_t len, OpticalFields& out);
 
 // ---- Version 2: $HDE, head targets -------------------------------------------
 
@@ -181,10 +217,13 @@ private:
 
 // Which sentence goes out next on the shared UART: a due $HDA first (a
 // change, or the heartbeat that keeps the link alive), then a due $HDE.
-enum class Next : uint8_t { Nothing, Activity, Head };
+// With a CD-ROM drive (`optical` not null), a due $HDO comes between them.
+enum class Next : uint8_t { Nothing, Activity, Head, Optical };
 inline Next nextSentence(const Sender& activity, const Fields& f, uint32_t now_ms, const HeadPacer& head,
-                         uint64_t now_us) {
+                         uint64_t now_us, const OpticalSender* optical = nullptr,
+                         const OpticalFields& of = OpticalFields()) {
     if (activity.due(f, now_ms)) return Next::Activity;
+    if (optical && optical->due(of, now_ms)) return Next::Optical;
     if (head.due(now_us)) return Next::Head;
     return Next::Nothing;
 }

@@ -1193,6 +1193,7 @@ CommandHistory g_commands;
 
 static void noteActivity(const TraceEvent& e) {
     g_commands.note(e);
+    noteOptical(e);
     if (e.kind == TraceKind::CommandStart) {
         g_last_started.command = uint8_t(e.extra);
         g_last_started.packet = uint8_t(e.extra >> 24);
@@ -1364,6 +1365,7 @@ void setup() {
 #endif
     chooseDisk();
     beginSeekTiming();
+    beginOptical();
 #endif
 #ifdef RIG_WATCHDOG_MS
     // Rig only, for unattended work (PLATFORMIO_BUILD_FLAGS=-DRIG_WATCHDOG_MS=8000):
@@ -1414,6 +1416,7 @@ __attribute__((noinline)) static void housekeeping(uint32_t now_us) {
     if (g_activity.update(now_us)) g_activity_unprinted = true;
     g_seek.setModel(seekModel(millis()));
     serviceLink();
+    printOptical();
     if (g_activity_unprinted) {
         char line[48];
         size_t n = activity::formatActivity(now_us, g_activity, line, sizeof line);

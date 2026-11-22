@@ -143,6 +143,12 @@ void serviceLoopback();
 void printSeekConfig();  // console `S`'s seek timing lines
 const SeekModel* seekModel(uint32_t now_ms);
 void postHeadTarget(uint32_t lba, uint32_t sectors, activity_link::Op op, uint64_t at_us);
+// The CD-ROM drive's sounds ($HDO, optical_drive.h), with a CD-ROM configured.
+void beginOptical();                   // after chooseDisk()
+void noteOptical(const TraceEvent& e);  // each command event, as noteActivity
+void opticalEject();                   // console `M`: the disc comes out,
+void opticalLoad(bool disc);           // and the next goes in (or none)
+void printOptical();                   // an OPTICAL line on each change
 
 // Console `J`, `T` and `P`: what to serve, and the bus program, after the
 // restart they trigger; in watchdog scratch registers 0 and 1, which a restart

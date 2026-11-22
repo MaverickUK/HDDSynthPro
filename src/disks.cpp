@@ -538,6 +538,7 @@ void startDiscChange(const char* name) {
     }
     std::snprintf(g_disc_next, sizeof g_disc_next, "%s", name);
     requestDisc(0);  // out first: core 1 confirms once nothing for the old disc is under way
+    opticalEject();  // the synth's tray opens
     g_disc_step = DiscStep::Ejecting;
     Serial.printf("# DISC ejecting, then %s\n", g_disc_next);
 }
@@ -553,7 +554,9 @@ void serviceDiscChange() {
             return;
         }
         Serial.println("DISC none");
+        opticalLoad(false);
     } else {
+        opticalLoad(true);
         Serial.printf("DISC %s frames=%lu\n", g_disc_next,
                       (unsigned long)(g_disc_sectors.load(std::memory_order_relaxed) / atapi::SECTORS_PER_FRAME));
     }

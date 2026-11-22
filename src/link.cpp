@@ -34,6 +34,7 @@
 #include "drive_config.h"
 #include "drive_params.h"
 #include "drive_timing.h"
+#include "optical_drive.h"
 #include "identify.h"
 #include "seek_timing.h"
 #include "sentence.h"
@@ -106,24 +107,103 @@ void postHeadTarget(uint32_t lba, uint32_t sectors, activity_link::Op op, uint64
 
 static bool loopbackSending();
 
+// The CD-ROM drive as a real one would sound (optical_drive.h), for $HDO:
+// only with a CD-ROM configured. Its commands are told apart by unit; the
+// hard disk's then light $HDA's busy on their own (g_busy, the board's LED,
+// counts both), or Windows' poll of the CD-ROM every second would sound
+// like the disk.
+optical::Drive g_optical;
+activity_link::OpticalSender g_optical_link(cfg::LINK_HEARTBEAT_MS);
+static bool g_optical_on = false;
+static uint8_t g_cd_unit = 0;
+static bool g_last_start_cd = false;  // the command in progress is the CD-ROM's (ends don't say)
+static bool g_hd_active = false;
+static uint32_t g_hd_busy_until_ms = 0;
+static activity_link::OpticalFields g_optical_printed;
+static bool g_optical_printed_any = false;
+
+static activity_link::OpticalFields opticalFields(uint32_t now_ms) {
+    optical::State s = g_optical.state(now_ms);
+    activity_link::OpticalFields f;
+    f.busy = s.busy;
+    f.state = s.reads;
+    f.motor = s.motor;
+    f.tray_open = s.tray_open;
+    return f;
+}
+
+void beginOptical() {
+    g_optical_on = g_device0_cdrom || g_device1_cdrom;
+    g_cd_unit = g_device0_cdrom ? 0 : 1;
+    if (g_optical_on) g_optical.begin(millis(), g_disc_sectors.load(std::memory_order_relaxed) != 0);
+}
+
+void noteOptical(const TraceEvent& e) {
+    if (!g_optical_on) return;
+    uint32_t now = millis();
+    if (e.kind == TraceKind::CommandStart) {
+        g_last_start_cd = e.unit == g_cd_unit;
+        if (g_last_start_cd) {
+            g_optical.onCommand(now, e.time_us, uint8_t(e.extra >> 24), e.pins, commandCount(e));
+        } else {
+            g_hd_active = true;
+            g_hd_busy_until_ms = now + cfg::LED_MIN_MS;
+        }
+    } else if (e.kind == TraceKind::CommandEnd) {
+        if (g_last_start_cd)
+            g_optical.onCommandEnd(now, e.time_us);
+        else
+            g_hd_active = false;
+    }
+}
+
+void opticalEject() {
+    if (g_optical_on) g_optical.eject(millis());
+}
+
+void opticalLoad(bool disc) {
+    if (g_optical_on) g_optical.load(millis(), disc);
+}
+
+// An OPTICAL line on each change of what the synth is told.
+void printOptical() {
+    if (!g_optical_on) return;
+    activity_link::OpticalFields f = opticalFields(millis());
+    if (g_optical_printed_any && f == g_optical_printed) return;
+    char line[80];
+    int n = std::snprintf(line, sizeof line, "OPTICAL t=%lu motor=%d tray=%s busy=%d reads=%s spinups=%lu\n",
+                          (unsigned long)time_us_32(), f.motor ? 1 : 0, f.tray_open ? "open" : "closed",
+                          f.busy ? 1 : 0, activity::stateName(f.state), (unsigned long)g_optical.spinUps());
+    if (n > 0 && printLine(line, size_t(n))) {
+        g_optical_printed = f;
+        g_optical_printed_any = true;
+    }
+}
+
 void serviceLink() {
+    uint32_t now = millis();
+    if (g_optical_on) g_optical.update(now, time_us_32());
     if (!g_link_on || loopbackSending()) return;
     activity_link::Fields f;
-    f.busy = g_busy;
+    f.busy = g_optical_on ? (g_hd_active || int32_t(g_hd_busy_until_ms - now) > 0) : g_busy;
     f.state = g_activity.state();
     f.op = g_link_op;
-    uint32_t now = millis();
+    activity_link::OpticalFields of = opticalFields(now);
     uint64_t now_us = time_us_64();
-    activity_link::Next next = activity_link::nextSentence(g_link, f, now, g_head, now_us);
+    activity_link::Next next =
+        activity_link::nextSentence(g_link, f, now, g_head, now_us, g_optical_on ? &g_optical_link : nullptr, of);
     if (next == activity_link::Next::Nothing) return;
     if (!(uart_get_hw(uart0)->fr & UART_UARTFR_TXFE_BITS)) return;  // not empty yet
     char line[activity_link::HEAD_SENTENCE_MAX];
-    size_t n = next == activity_link::Next::Activity ? activity_link::formatSentence(f, line, sizeof line)
-                                                     : activity_link::formatHeadSentence(g_head.target(), line, sizeof line);
+    size_t n = next == activity_link::Next::Activity  ? activity_link::formatSentence(f, line, sizeof line)
+               : next == activity_link::Next::Optical ? activity_link::formatOpticalSentence(of, line, sizeof line)
+                                                      : activity_link::formatHeadSentence(g_head.target(), line, sizeof line);
     if (n == 0) return;
     uart_write_blocking(uart0, reinterpret_cast<const uint8_t*>(line), n);  // fits: never waits
     if (next == activity_link::Next::Activity)
         g_link.sent(f, now);
+    else if (next == activity_link::Next::Optical)
+        g_optical_link.sent(of, now);
     else
         g_head.sent(now_us);
 }

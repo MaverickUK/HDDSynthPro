@@ -147,6 +147,34 @@ ready_k = arrive + wait + transferUs(k + 1, 63)                 sector k under t
 - No command is held more than 1 s (`seek_capped` in `s`). The slowest preset, `stepper85`, takes 528 ms for a full stroke.
 - Not modelled yet: `SEEK` commands don't move the modelled head (no fetch reaches core 0 for them), and a write's first sector is timed from when it arrives, after the host has sent it.
 
+## Protocol version 3: the CD-ROM drive's sounds (`$HDO`)
+
+Built 22 Nov 2026 (branch `cdrom-sounds`: IDE Synth Bay 0.36.0-cd.1, HDDSynth_Native 0.26.0-cd.1), so the HDD Synth can play a CD-ROM drive beside the hard disk, from a CD-ROM sample pack recorded with [`tools/cd_sounds`](../tools/cd_sounds/README.md). Sent only with a CD-ROM drive configured (`device0 = cdrom` or `device1 = cdrom`), on every change and every 200 ms, after a due `$HDA` and before `$HDE`:
+
+```
+$HDO,3,<busy>,<class>,<motor>,<tray>*<checksum>\r\n
+```
+
+| Field | Values | Meaning |
+|---|---|---|
+| `busy` | `0`, `1` | the CD-ROM is reading: a read command running, or one started in the last 25 ms |
+| `class` | `I`, `S`, `R` | its reads, classified as the disk's are (in 2,048-byte frames) |
+| `motor` | `0`, `1` | its disc spins |
+| `tray` | `O`, `C` | open or closed |
+
+Known answers: `$HDO,3,0,I,0,C*56`, `$HDO,3,1,S,1,C*4C`, `$HDO,3,0,I,0,O*5A`. A receiver ignores fields after `tray` (later versions), and versions below 3.
+
+**The emulated drive answers at once and never spins**, so `optical_drive.*` models what a real one would be doing, from the CD-ROM's commands (told from the disk's by unit):
+
+- **The motor** starts when a disc goes in, at power-on with a disc in, and when the host reads the disc while it's stopped (READ(10), READ(12), READ CD, SEEK, READ TOC, PLAY AUDIO: `optical::readsDisc`). It stops after 30 s without a read (`optical::Config::spin_down_ms`), as drives of the time did. Windows' poll every second (GET EVENT STATUS NOTIFICATION, TEST UNIT READY) doesn't wake it, as it doesn't wake a real drive.
+- **The tray** opens when console `M` takes the disc out (the motor stops in the same sentence: the synth plays the brake, then the tray), and closes once the next disc is in, but not before 3 s (a person's time, and the synth's `tray_open.wav`). With a disc, the motor starts as it closes. A host's eject (START STOP UNIT with LoEj) doesn't move it yet: the emulated drive keeps its disc, and the command's bytes aren't in the trace.
+- With a CD-ROM configured, **`$HDA`'s busy counts the hard disk's commands only** (the board's LED still shows both), or Windows' poll of the CD-ROM would sound like the disk every second.
+- Console: an `OPTICAL t=... motor= tray= busy= reads= spinups=` line on each change.
+
+**On the synth** (HDDSynth_Native 0.26.0-cd.1): a CD-ROM pack is a disk's pack (`spinup`, `idle`, `access`, `spindown`, and `sequential` if it has one) plus `tray_open.wav` and `tray_close.wav`, in `/cdrom/<name>/` on its card, at the disk's pack's sample rate (16 kHz for every pack so far). `CDROM_SAMPLE_PACK` names it (default: the first in `/cdrom`), and `CDROM_ENABLED` (default on) turns it off; both need `EXPERIMENTAL_HDDSYNTHPRO_SUPPORT`. Its one-shots play in turn on one voice (spin-down, then the tray opening; the tray closing, then the spin-up), and while the disc is at speed its loops run as the disk's do: idle, with access or sequential at the access level while it reads. It follows the volume and balance, scaled by its `pack.json` `GAIN`. Its four voices take 128 KB of rings, allocated only when the card has a CD-ROM pack.
+
+The version 3 sentences designed for the synth's display and disc control ([hddsynth-cdrom-display-brief.md](hddsynth-cdrom-display-brief.md): `$HDU`, `$HDD`, ...) aren't built; `$HDO` is the part the sound needs, and sits beside them.
+
 ## IDE Synth Bay side: the plan (version 1)
 
 All on core 0. Core 1 and the bus timing are untouched.
@@ -169,5 +197,5 @@ All on core 0. Core 1 and the bus timing are untouched.
 
 - **Protocol version 3, designed (4 Nov 2026):** the CD-ROM on the HDD Synth's OLED, FDDSynthPro-style, and discs swapped from the synth: per-drive activity (`$HDU`), the disc (`$HDD`), the CD-ROM's position (`$HDP`), the disc list (`$HDL`) and requests from the synth (`$HDQ`, answered by `$HDR`), for the synth's next hardware revision, which gives the link pins of its own: [hddsynth-cdrom-display-brief.md](hddsynth-cdrom-display-brief.md).
 
-- More sounds from the same link: separate read and write samples (the `op` field), seek sizes, spin-down and spin-up from the drive's STANDBY and wake.
+- More sounds from the same link: separate read and write samples (the `op` field), seek sizes, spin-down and spin-up from the drive's STANDBY and wake. (The CD-ROM drive's spin-up, spin-down and tray: `$HDO`, above.)
 - A reply from the synth on GPIO 1 (link up, which pack, volume), if it turns out to be useful.

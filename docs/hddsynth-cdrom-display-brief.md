@@ -1,5 +1,7 @@
 # Brief: the HDD Synth's screen for the CD-ROM drive, and swapping discs from it
 
+> **Built since (22 Nov 2026, branch `cdrom-sounds`):** `$HDO`, the CD-ROM drive's sounds (busy, the reads' class, the motor, the tray), a version 3 sentence beside these: [activity-link.md](activity-link.md#protocol-version-3-the-cd-rom-drives-sounds-hdo).
+>
 > **Design, 4 Nov 2026; nothing built yet.** Protocol version 3 of the activity link ("Synth Link"), for the HDD Synth hardware revision that gives the link its own pins. Build the IDE Synth Bay side only after the CD-ROM drive has run on a real PC through the bench ([bench-checklist.md](bench-checklist.md)).
 
 For whoever builds either side: Claude Code in **HDDSynth_Native** (the synth) or in **HDDSynthPro** (the drive). Each repo's CLAUDE.md comes first. On the IDE Synth Bay side: core 1 never touches the UART or SD; core 0 never waits; pure, host-tested modules; SemVer and a CHANGELOG entry with every change.
