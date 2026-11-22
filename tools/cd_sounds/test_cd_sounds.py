@@ -101,7 +101,7 @@ def test_loop_and_tail():
 # ---- A whole pack from a synthetic recording ------------------------------------------------
 
 SOUNDS = {  # label: (hz, level): each sound a tone of its own, so a cut in the wrong place shows
-    "room": (0, 0), "spinup": (300, 6000), "idle_max": (400, 3000), "spindown": (250, 5000),
+    "room": (0, 0), "spinup": (300, 6000), "spinning": (400, 3000), "left_alone": (138, 5000), "spindown": (250, 5000),
     "read_max": (600, 4000), "idle_1x": (150, 2000), "read_1x": (180, 2500), "access": (800, 7000),
     "seek_short": (900, 5000), "loading": (650, 4000), "tray_open": (1200, 6000), "tray_close": (1100, 6000),
 }
@@ -111,7 +111,8 @@ def synthetic_session() -> dict:
     t, events = 0.0, [{"label": "sync_start", "take": 1, "start": 0.0, "end": 0.7, "detail": {}}]
     t = 2.0
     plan = [("room", 1, 4.0)] + [(lbl, k, d) for k in (1, 2, 3) for lbl, d in
-                                 (("spinup", 2.5), ("idle_max", 6.0), ("spindown", 4.0))]
+                                 (("spinup", 2.5), ("spinning", 6.0), ("spindown", 4.0))]
+    plan += [("left_alone", 1, 20.0)]
     plan += [("read_1x", 1, 6.0), ("idle_1x", 1, 5.0), ("read_max", 1, 7.0)]
     plan += [(lbl, k, d) for k in (1, 2, 3) for lbl, d in
              (("access", 1.0), ("seek_short", 0.8), ("loading", 3.0), ("tray_open", 1.5), ("tray_close", 3.0))]
@@ -147,8 +148,9 @@ def render_recording(log: dict, offset: float, clock: float, rate: int) -> list[
         hz, level = SOUNDS[ev["label"]]
         if hz:
             decay = ev["label"] == "spindown"
+            brake = ev["label"] == "left_alone"  # full level for 12 s, then a tenth (the drive's slow idle)
             lay(at, [level * math.sin(2 * math.pi * hz * i / rate) * (math.exp(-3 * i / rate) if decay else 1)
-                     for i in range(int(d * rate))])
+                     * (0.1 if brake and i > 12 * rate else 1) for i in range(int(d * rate))])
     return out
 
 
@@ -178,10 +180,11 @@ def test_a_recording_cuts_into_a_pack_and_every_scenario_renders(tmp_path):
     ppm = int(re.search(r"recorder clock ([+-]\d+) ppm", p.stdout).group(1))
     assert abs(ppm - 200) <= 20, p.stdout  # beeps found to about a millisecond, 150 s apart
     pack = out / "CD_Test"
-    for name in ("spinup", "idle", "access", "spindown", "sequential"):
+    for name in ("spinup", "idle", "access", "spindown", "sequential", "tray_open", "tray_close"):
         assert (pack / f"{name}.wav").exists(), name
-    meta = json.loads((pack / "pack.json").read_text())
-    assert abs(meta["sync_s"] - 3.4) < 0.011 and meta["rate"] == 44100
+    meta = json.loads((pack / "cut.json").read_text())
+    assert json.loads((pack / "pack.json").read_text())["NAME"] == "FAKE CD-ROM"
+    assert abs(meta["sync_s"] - 3.4) < 0.011 and meta["rate"] == 16000
 
     # Each file is its own sound: the idle loop is 400 Hz, access 800 Hz
     for name, hz in (("idle", 400), ("access", 800), ("sequential", 600)):
@@ -192,6 +195,9 @@ def test_a_recording_cuts_into_a_pack_and_every_scenario_renders(tmp_path):
     assert len(spindown) < 4.0 * RATE  # trimmed once it fell into the room's noise
     assert len(list((pack / "takes").glob("spinup_*.wav"))) == 3
     assert (pack / "extras" / "tray_close.wav").exists() and (pack / "extras" / "read_1x.wav").exists()
+    assert "slowed down by itself 12.0 s" in p.stdout or "slowed down by itself 12.2 s" in p.stdout, p.stdout
+    for name in ("spin_to_idle", "idle_slow", "spinning_long"):
+        assert (pack / "extras" / f"{name}.wav").exists(), name
 
     import preview
     pk = preview.Pack(pack)

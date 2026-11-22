@@ -18,6 +18,7 @@ import json
 import random
 import sys
 import tempfile
+import wave
 from array import array
 from pathlib import Path
 
@@ -27,8 +28,12 @@ import audio
 class Pack:
     def __init__(self, folder: Path):
         self.folder = folder
-        meta = json.loads((folder / "pack.json").read_text()) if (folder / "pack.json").exists() else {}
-        self.rate = meta.get("rate", 44100)
+        self.rate = 44100  # the pack's own, from its idle.wav (any pack: an HDD pack too)
+        try:
+            with wave.open(str(folder / "idle.wav")) as w:
+                self.rate = w.getframerate()
+        except (OSError, wave.Error, EOFError):
+            pass
         self.cache: dict[str, array | None] = {}
 
     def get(self, name: str) -> array | None:
@@ -92,58 +97,81 @@ class Timeline:
         if s is not None:
             audio.mix_into(self.out, s, at, gain)
 
+    def running(self, idle: array | None, seconds: float, busy: list[tuple[array | None, float, float]],
+                rng: random.Random):
+        """The drive running, as the HDD Synth plays it: the idle loop all
+        along, and over it each (loop, start, length) in `busy` (access.wav or
+        sequential.wav while the drive is busy), from a random point in the
+        loop, faded in and out over 50 ms."""
+        at = self.now
+        self.loop(idle, seconds)
+        fade = int(0.05 * self.rate)
+        for s, start, length in busy:
+            if s is None or not len(s):
+                continue
+            n = int(length * self.rate)
+            k = rng.randrange(len(s))
+            piece = array("h")
+            while len(piece) < n:
+                piece.extend(s[k:])
+                k = 0
+            piece = piece[:n]
+            for i in range(min(fade, n)):
+                piece[i] = int(piece[i] * i / fade)
+                piece[n - 1 - i] = int(piece[n - 1 - i] * i / fade)
+            self.over(piece, at + int(start * self.rate))
+
 
 def synth(p: Pack, t: Timeline, rng: random.Random):
+    """Spin up, the drive running with accesses now and then and a sequential
+    read, spin down: today's HDD Synth with this pack."""
     t.play(p.get("spinup"))
-    idle = p.get("idle")
-    start = t.now
-    t.loop(idle, 14)
-    for k in range(5):  # accesses now and then, laid over the idle sound
-        t.over(p.get("access"), start + int((1.5 + k * 2.4 + rng.uniform(-0.4, 0.4)) * t.rate))
-    t.loop(p.first("sequential", "read_max"), 4)
-    t.loop(idle, 3)
+    t.running(p.get("idle"), 20, [(p.get("access"), 1.5, 1.2), (p.get("access"), 4.0, 0.6), (p.get("access"), 6.5, 2.5),
+                                  (p.get("sequential"), 10.5, 5.0), (p.get("access"), 17.0, 0.8)], rng)
     t.play(p.get("spindown"))
     t.silence(1)
 
 
 def game(p: Pack, t: Timeline, rng: random.Random):
+    """A disc going in, a level loading, the drive left alone until it slows
+    down by itself, and spinning up again for the next level."""
     t.silence(0.5)
-    t.play(p.first("tray_close", "spinup"))  # the disc goes in and loads
-    t.loop(p.get("idle"), 2)
-    for _ in range(3):  # the level loads: a seek, a burst of reading
-        t.play(p.first("seek_full", "seek_medium", "access"))
-        t.loop(p.first("sequential", "read_max"), rng.uniform(1.0, 2.5))
-    t.loop(p.get("idle"), 6)  # playing; the drive left alone
-    t.play(p.first("auto_spindown", "spindown"))
-    t.silence(3)
+    t.play(p.first("tray_close", "spinup"))
+    t.running(p.get("idle"), 9, [(p.get("access"), 0.5, 1.0), (p.get("sequential"), 1.6, 2.2),
+                                 (p.get("access"), 4.0, 0.7), (p.get("sequential"), 4.8, 2.5)], rng)
+    t.running(p.get("idle"), 4, [], rng)  # playing; the drive left alone
+    t.play(p.first("spin_to_idle", "spindown"))
+    t.loop(p.first("idle_slow"), 4)
     t.play(p.get("spinup"))  # the next level: up to speed again, then load
-    for _ in range(2):
-        t.play(p.first("seek_medium", "access"))
-        t.loop(p.first("sequential", "read_max"), rng.uniform(1.0, 2.0))
-    t.loop(p.get("idle"), 3)
+    t.running(p.get("idle"), 6, [(p.get("access"), 0.3, 0.8), (p.get("sequential"), 1.2, 3.0)], rng)
     t.play(p.get("spindown"))
     t.silence(1)
 
 
 def install(p: Pack, t: Timeline, rng: random.Random):
+    """A long sequential read with seeks now and then."""
     t.play(p.get("spinup"))
+    busy, at = [], 0.5
     for _ in range(4):
-        t.play(p.first("seek_short", "access"))
-        t.loop(p.first("sequential", "read_max"), rng.uniform(3, 6))
-    t.loop(p.get("idle"), 3)
+        busy.append((p.get("access"), at, 0.5))
+        length = rng.uniform(3, 5)
+        busy.append((p.get("sequential"), at + 0.5, length))
+        at += length + 0.8
+    t.running(p.get("idle"), at + 1, busy, rng)
     t.play(p.get("spindown"))
     t.silence(1)
 
 
 def audio_cd(p: Pack, t: Timeline, rng: random.Random):
+    """CD audio: the disc at 1x where the drive could record it, with a skip
+    between tracks."""
     t.play(p.get("spinup"))
     one_x = p.first("read_1x", "idle_1x", "read_2x")
     if one_x is None:
-        print("  (no 1x recording: SET CD SPEED didn't reach the drive?) using the fastest")
-        one_x = p.first("sequential", "idle")
-    for _ in range(3):  # a track, then a skip to the next
-        t.loop(one_x, rng.uniform(4, 6))
-        t.play(p.first("seek_short", "access"))
+        print("  (no 1x recording: this drive spins at its own speed) using idle.wav")
+        one_x = p.get("idle")
+    for _ in range(3):
+        t.running(one_x, rng.uniform(4, 6), [(p.get("access"), 0.0, 0.6)], rng)
     t.play(p.get("spindown"))
     t.silence(1)
 

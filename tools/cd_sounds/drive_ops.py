@@ -25,6 +25,7 @@ class Ops:
         self.drive = drive
         self.log = log
         self.sectors = 0
+        self.max_kbs = 0  # the fastest the drive says it reads (mode page 2Ah)
 
     # ---- state ----------------------------------------------------------------
 
@@ -51,6 +52,7 @@ class Ops:
         caps = scsi.parse_capabilities(r.data) if r.ok else None
         if caps:
             d.max_x, d.tray = caps.max_x, caps.tray
+            self.max_kbs = caps.max_read_kbs
         else:
             d.notes.append(f"no capabilities page (MODE SENSE 2Ah: {r})")
         self.wait_ready(20)
@@ -77,8 +79,11 @@ class Ops:
         return self.drive.command(scsi.start_stop(True, load_eject=True), timeout_s=30)
 
     def set_speed(self, x: float | None):
-        """`None`: the fastest. Returns the command's result."""
-        kbs = 0xFFFF if x is None else int(round(x * scsi.KX))
+        """`None`: the fastest, as the drive gives it (its mode page's maximum:
+        the LG GCC-4320B takes 0xFFFF, "the fastest you have", as a middling
+        5,400 rpm, and its maximum, 40x, as its full 8,300). Returns the
+        command's result."""
+        kbs = (self.max_kbs or 0xFFFF) if x is None else int(round(x * scsi.KX))
         return self.drive.command(scsi.set_cd_speed(kbs))
 
     # ---- the laser ---------------------------------------------------------------

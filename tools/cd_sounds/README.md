@@ -5,10 +5,25 @@ of them. The drive is on the rig's USB-IDE adapter; the PC drives it with SCSI
 commands (spin up and down, the tray, seeks, reads at each speed) while a
 microphone records, then the recording is cut into a pack by the session's log.
 
-The pack has the four files today's HDD Synth plays (`spinup.wav`, `idle.wav`,
-`access.wav`, `spindown.wav`, plus the optional `sequential.wav`), so it plays
-on the synth as it is; the rest (`extras/`) is for a CD-ROM voice of its own
-later (the Bay telling the synth what its CD-ROM drive is doing).
+A CD-ROM pack is a hard disk's pack (`spinup.wav`, `idle.wav`, `access.wav`,
+`spindown.wav`, and `sequential.wav`) plus `tray_open.wav` and
+`tray_close.wav`. The HDD Synth plays it beside the disk's pack, from what the
+Bay says its CD-ROM drive is doing (`$HDO`,
+[activity-link.md](../../docs/activity-link.md#protocol-version-3-the-cd-rom-drives-sounds-hdo)):
+copy `packs/<name>/` (only the pack's files and `pack.json`) to `cdrom/<name>/`
+on the synth's card. The rest (`extras/`, `takes/`) is for listening and for
+simulations.
+
+**Access and sequential are the head alone.** At full speed the disc's rush
+buries the head (the LG's seeks stand 6-8 dB over it at best), and a loop
+recorded while reading is mostly spinning: laid over `idle.wav` by the synth,
+two spindle hums beat together (a slow pulsing). So the session also records
+the head with the disc stopped (SEEK only, no reads: the LG then turns the
+disc only slowly, and its head stands about 25 dB clear), and `cut.py` builds
+`access.wav` from those seeks (half short, a third medium, a few full strokes,
+at random gaps) and `sequential.wav` from the head stepping outwards, both
+high-passed at 100 Hz and level with `idle.wav` (`--access-boost`; the synth's
+balance turns them up or down from there).
 
 Windows, Python 3.10 or later, the standard library and ffmpeg (on this PC
 from scoop). No numpy.
@@ -19,6 +34,8 @@ from scoop). No numpy.
 | `session.py` | The recording session: every sound a few times, logged against two sync beeps |
 | `cut.py` | The recording and the log into `packs/<name>/` |
 | `preview.py` | The pack in scenarios (the synth, a game, an install, CD audio), played or saved |
+| `listen.py` | Recording from this PC's microphone (ffmpeg), and the spindle's tone (its speed) |
+| `placement.py` | Where to put the microphone: 20 s of seeks and reads against spinning, in dB, logged per position |
 | `scsi.py`, `scsi_win.py`, `drive_ops.py`, `audio.py` | The commands, Windows' SCSI pass-through, the drive's sounds as operations, WAV editing |
 
 ## Setting up
@@ -56,19 +73,25 @@ python session.py --dry-run --fast --tray   # the plan, with a fake drive (no so
 python session.py --tray --mic "Microphone (USB Audio)"
 ```
 
-The session (about 10 minutes; `--idle-timeout 180` adds the drive's own
-spin-down after three minutes alone):
+The session (about 15 minutes), its steps in order (`--steps a,b` runs only
+some: a second session can redo the head, say, and `cut.py` takes both):
 
-1. Two beeps (the sync), then the room's noise with the disc stopped.
-2. Four takes of: spin up from rest, eight seconds spinning idle, spin down.
-3. Reading at each speed up to the fastest (1x, 2x, 4x, ...), each followed by
-   six seconds spinning idle at it.
-4. Single seeks: short (0.6 mm), medium (12 mm), and full stroke, eight each.
-5. Access bursts (six random seeks with short reads), and loading (a seek and
-   two seconds of reading, three times), four takes each.
-6. With `--tray`: the tray out, then in (the disc loading: spin up and the
-   drive reading its table of contents), four takes.
-7. Two beeps.
+1. Two beeps (the sync); `room`: the room's noise with the disc stopped.
+2. `spinups`: four takes of spin up from rest (reading), ten seconds spinning,
+   spin down.
+3. `left_alone`: a read, then nothing, until the drive slows by itself
+   (`--idle-timeout`, 45 s; the LG brakes to a slow idle after 30 s).
+4. `speeds`: reading at each speed the drive obeys, and spinning after it.
+5. `seeks`: single seeks at full speed, short (0.6 mm), medium (12 mm) and full.
+6. `access`, `access_loops`: bursts of random seeks with short reads, and 12 s
+   of them nonstop (at full and medium speed).
+7. `head`: the disc stopped, then SEEK only: loops, and single short, medium
+   and full seeks (full strokes from a little way out, so the sled doesn't
+   knock its stop); `head_sequential`: SEEK 1,000 sectors on, nonstop, 12 s.
+8. `loading`: a seek and a few seconds of reading, three times.
+9. With `--tray`: the tray out, then in (the disc clamped, spun up, its table
+   of contents read), four takes.
+10. Two beeps.
 
 Keep quiet while it runs: every sound has a few seconds of quiet around it,
 but a cough in a take is a take lost (`cut.py` picks among four).
@@ -79,21 +102,37 @@ The log goes to `runs/session-<time>.json` (and the recording beside it with
 ## Making the pack
 
 ```
-python cut.py runs/session-<time>.wav runs/session-<time>.json --name CD_Mitsumi_FX400
+python cut.py runs/session-<time>.json --name CD_Mitsumi_FX400
+python cut.py runs/session-A.json runs/session-B.json --name CD_LG_GCC4320B --pick spinning=3
 python preview.py packs/CD_Mitsumi_FX400          # every scenario
-python preview.py packs/CD_Mitsumi_FX400 game     # one
+python preview.py packs/CD_Mitsumi_FX400 game --save game.wav
 ```
+
+A session recorded on this PC (`--mic`) has its recording beside its log; for
+another recorder's file give `LOG=RECORDING`. With several sessions, each
+later one's sounds replace the earlier's (the LG's pack: the full session,
+then one redoing the room, the head and the sequential steps).
 
 `cut.py` finds the beeps (give `--offset SECONDS` if it can't: where the first
 starts), corrects for the recorder's clock from the end beeps, and writes
-`packs/<name>/`: the pack's files, `extras/`, every take in `takes/`, and
-`pack.json` (where each file came from). It picks the median take of each
-sound by loudness; listen to `takes/` and choose others with
-`--pick spinup=3 --pick access=1`. The whole pack shares one gain, so the
-sounds keep their loudness against each other.
+`packs/<name>/`: the pack's files, `pack.json` (its `NAME`, for the synth,
+which reads only 1 KB of it; add `GAIN` or `AUTHOR` by hand), `cut.json`
+(where each file came from, the gain, the clocks), `extras/` and every take
+in `takes/`. It picks the median take of each sound by loudness; listen to
+`takes/` and choose others with `--pick spinup=3 --pick spinning=1`. The
+whole pack shares one gain, so the sounds keep their loudness against each
+other.
 
-To play it on the HDD Synth: copy `packs/<name>/` (without `takes/`) into
-`samples/` on its SD card, as any pack (HDDSynth_Samples' README).
+- **16 kHz** by default (`--rate`): the synth plays the disk's pack and the
+  CD-ROM's at one rate, and every HDD pack so far is 16 kHz.
+- **The tray:** `tray_open.wav` is the tray coming out after the brake, and
+  `tray_close.wav` the tray going in and the disc clamped, before it spins
+  up: the synth plays `spindown.wav` before the one and `spinup.wav` after
+  the other.
+- **Access and sequential** level with idle (`--access-boost 0`); +6 dB was
+  easy to hear but too prominent.
+- Seeks from a take with a noisy background (over 4 dB above the typical) or
+  a loud outlier (over 6 dB above) are left out of `access.wav`.
 
 ## What may not work
 

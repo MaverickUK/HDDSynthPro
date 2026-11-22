@@ -102,39 +102,56 @@ def tone_power(frame, rate: int, hz: float) -> float:
     return power / (energy * len(frame) / 2)
 
 
+def _goertzel(frame, rate: int, hz: float) -> float:
+    k = 2 * math.cos(2 * math.pi * hz / rate)
+    s1 = s2 = 0.0
+    for x in frame:
+        s0 = x + k * s1 - s2
+        s2, s1 = s1, s0
+    return s1 * s1 + s2 * s2 - k * s1 * s2
+
+
+def tone_snr(frame, rate: int, hz: float) -> float:
+    """The power at `hz` against the power nearby (at 0.7, 0.8, 1.2 and 1.3
+    times it): a pure tone stands far above its neighbours even under a loud
+    broadband sound, such as a drive at full speed."""
+    near = sum(_goertzel(frame, rate, hz * f) for f in (0.7, 0.8, 1.2, 1.3)) / 4
+    return _goertzel(frame, rate, hz) / (near + 1.0)
+
+
 def find_beeps(samples, rate: int, hz: float, gap_s: float, search_from_s: float = 0.0,
-               search_s: float = 90.0, frame_s: float = 0.01) -> float | None:
+               search_s: float = 90.0, snr: float = 15.0) -> float | None:
     """The start of the first of two beeps `gap_s` apart (start to start), in
-    seconds, searching `search_s` from `search_from_s`; None if not found."""
-    n = int(rate * frame_s)
+    seconds, searching `search_s` from `search_from_s`; None if not found.
+    Each 20 ms window is a beep's if `hz` stands `snr` times above the
+    frequencies near it; then the start is found to 5 ms."""
+    n = int(rate * 0.02)
     first = int(search_from_s * rate)
     last = min(len(samples), first + int(search_s * rate))
-    tone: list[bool] = []
-    for i in range(first, last - n, n):
-        frame = samples[i:i + n]
-        # loud enough (above -44 dBFS) and mostly the beep's pitch
-        tone.append(rms(frame) > 200 and tone_power(frame, rate, hz) > 0.5)
-    gap = int(round(gap_s / frame_s))
+    tone = [tone_snr(samples[i:i + n], rate, hz) > snr for i in range(first, last - n, n)]
+    gap = int(round(gap_s / 0.02))
 
-    def starts(j: int) -> bool:  # a beep starts here: tone now and next, none just before
+    def starts(j: int) -> bool:  # a beep starts here: tone for 40 ms at least, none just before
         return 0 <= j < len(tone) - 1 and tone[j] and tone[j + 1] and (j == 0 or not tone[j - 1])
 
     for j in range(len(tone) - gap - 3):
         # two beep starts a gap apart, with quiet (no tone) between them: a whistle isn't a sync
-        if starts(j) and any(starts(j + gap + d) for d in (-2, -1, 0, 1, 2)) and not tone[j + int(gap * 0.7)]:
-            return _onset(samples, rate, first + j * n, n) / rate
+        # (quiet at two of three points: a beep's echo can linger into the first)
+        # (the second within 80 ms of where it's due: a recording can drop audio as it starts)
+        if starts(j) and any(starts(j + gap + d) for d in range(-4, 5)) and sum(
+                tone[j + int(gap * f)] for f in (0.6, 0.7, 0.8)) <= 1:
+            # to 5 ms: the first window, sliding back from the coarse one, that's still the beep's
+            at = first + j * n
+            hop = max(1, rate // 200)
+            while at - hop >= first and tone_snr(samples[at - hop:at - hop + n], rate, hz) > snr:
+                at -= hop
+            # that window only has to overlap the beep: its first 5 ms window, at 1 ms steps
+            m, ms = max(1, rate // 200), max(1, rate // 1000)
+            for i in range(at, at + n + hop, ms):
+                if tone_snr(samples[i:i + m], rate, hz) > snr:
+                    return i / rate
+            return at / rate
     return None
-
-
-def _onset(samples, rate: int, at: int, frame: int) -> int:
-    """The beep's first sample, to about a millisecond: the first 1 ms window
-    from a frame before `at` whose level is half the beep's own."""
-    ms = max(1, rate // 1000)
-    level = rms(samples, at + frame, at + 3 * frame)  # inside the beep
-    for i in range(max(0, at - frame), at + frame, ms):
-        if rms(samples, i, i + ms) > level / 2:
-            return i
-    return at
 
 
 # ---- Editing ---------------------------------------------------------------------------
@@ -177,6 +194,24 @@ def trim_tail(samples, rate: int, floor: float, margin_s: float = 0.3, factor: f
             end = min(len(samples), i + w + int(rate * margin_s))
             break
     return array("h", samples[:end])
+
+
+def highpass(samples, rate: int, hz: float) -> array:
+    """A second-order Butterworth high-pass (RBJ's biquad), run forwards: takes
+    the spindle's hum (its tone and first harmonics) out from under a click."""
+    w = 2 * math.pi * hz / rate
+    alpha = math.sin(w) / math.sqrt(2)
+    cw = math.cos(w)
+    a0 = 1 + alpha
+    b0, b1, b2 = (1 + cw) / 2 / a0, -(1 + cw) / a0, (1 + cw) / 2 / a0
+    a1, a2 = -2 * cw / a0, (1 - alpha) / a0
+    out = array("h", bytes(2 * len(samples)))
+    x1 = x2 = y1 = y2 = 0.0
+    for i, x in enumerate(samples):
+        y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        x2, x1, y2, y1 = x1, x, y1, y
+        out[i] = 32767 if y > 32767 else -32768 if y < -32768 else int(y)
+    return out
 
 
 def scale(samples, gain: float) -> array:

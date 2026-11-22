@@ -5,7 +5,7 @@ cut.py can cut the recording into a sample pack.
     python session.py --list-mics                     # microphones ffmpeg can record
     python session.py --mic "Microphone (USB Audio)"  # run it and record from that mic
     python session.py                                 # run it; record on your own recorder
-    python session.py --tray --idle-timeout 180       # the tray too, and the drive's own spin-down
+    python session.py --tray --idle-timeout 60        # the tray too; leave the drive alone 60 s (45 by default)
     python session.py --dry-run --fast                # a fake drive: check the plan and the log
 
 Start your recorder first (if it's not this PC's), with the PC's speakers
@@ -91,25 +91,42 @@ class Session:
         self.wait(5)
         self.mark("room", 1, start)
 
+    def warm(self, seconds: float = 7.0):
+        """Reads long enough for the disc to reach full speed: drives run
+        slowly when idle, climb to full speed under steady reads (the LG
+        GCC-4320B: about 5 s from rest) and stay there for a while after the
+        last read (30 s). 21 Nov 2026, measured by the disc's tone."""
+        self.ops.read_for(seconds / 10 if self.fast else seconds, self.ops.sectors // 3)
+
     def spinups(self):
-        """Spin up from rest, a few seconds spinning idle at full speed, then
-        spin down: the HDD Synth's spinup.wav, idle.wav and spindown.wav."""
+        """From rest: spin up while reading (8 s: the climb to full speed,
+        about 5 s on the LG), full speed left alone (10 s, no reads: inside
+        the drive's own timer), then spin down on command and coast to rest.
+        The HDD Synth's spinup.wav, idle.wav and spindown.wav."""
         self.ops.set_speed(None)
         for take in range(1, self.takes + 1):
             start = self.now()
             self.ops.spin_up()
-            ready = self.ops.wait_ready(30)
-            self.ops.read_at(1000, 1)  # some drives spin up fully only on a read
-            self.wait(1.5)
-            self.mark("spinup", take, start, ready_s=round(ready, 2))
+            self.ops.wait_ready(30)
+            self.ops.read_for(max(0.1, 8 - (self.now() - start)) / (10 if self.fast else 1), self.ops.sectors // 3)
+            self.mark("spinup", take, start)
             start = self.now()
-            self.wait(8)
-            self.mark("idle_max", take, start)
+            self.wait(10)
+            self.mark("spinning", take, start)
             start = self.now()
             self.ops.spin_down()
-            self.wait(10)
+            self.wait(8)
             self.mark("spindown", take, start)
             self.quiet()
+
+    def left_alone(self, seconds: float):
+        """Read, then nothing: the drive at full speed until its own timer
+        runs out, then it brakes to its slow idle speed. One long take;
+        cut.py finds the moment it slows (`spin_to_idle`, `idle_slow`)."""
+        self.warm()
+        start = self.now()
+        self.wait(seconds)
+        self.mark("left_alone", 1, start, waited_s=seconds)
 
     def speeds(self, max_x: float):
         """Reading at each speed, and spinning idle after it."""
@@ -122,8 +139,7 @@ class Session:
             name = f"{x}x" if x else "max"
             r = self.ops.set_speed(x)
             self.ops.wait_ready(30)
-            self.ops.read_at(mid, 1)
-            self.wait(2)  # to the new speed
+            self.warm()  # to the new speed
             start = self.now()
             n = self.ops.read_for(8 if not self.fast else 0.8, mid)
             self.mark(f"read_{name}", 1, start, sectors=n, speed_set=r.ok)
@@ -133,15 +149,17 @@ class Session:
             self.quiet(1.5)
 
     def seeks(self):
-        """Single seeks of three lengths, with the drive at full speed."""
+        """Single seeks of three lengths, with the drive at full speed (warmed
+        before each kind: each lasts well under the drive's 30 s)."""
         self.ops.set_speed(None)
         self.ops.wait_ready(30)
         top = self.ops.max_radius()
         mid = (25 + top) / 2
         kinds = (("seek_short", mid, 0.6, 1.0), ("seek_medium", mid - 6, 12.0, 1.2), ("seek_full", 25.5, top - 26, 1.5))
         for label, base, span, gap in kinds:
+            self.warm()
             self.ops.seek_radius(base)
-            self.quiet(2)
+            self.quiet(1.5)
             for take in range(1, 2 * self.takes + 1):
                 r = base + (span if take % 2 else 0) + self.rng.uniform(-0.2, 0.2)
                 start = self.now()
@@ -153,6 +171,7 @@ class Session:
     def access(self):
         """Bursts of random seeks, each with a short read: the HDD Synth's
         access.wav, as a game or a directory listing makes."""
+        self.warm()
         for take in range(1, self.takes + 1):
             start = self.now()
             for _ in range(6):
@@ -165,6 +184,7 @@ class Session:
     def loading(self):
         """A program loading: a seek, then a few seconds of reading, again:
         the HDD Synth's sequential.wav, and material for simulations."""
+        self.warm()
         for take in range(1, self.takes + 1):
             start = self.now()
             for _ in range(3):
@@ -178,8 +198,9 @@ class Session:
             self.quiet(2)
 
     def tray(self):
-        """The tray out and in; closing it loads the disc (spin up, the
-        drive finding its table of contents)."""
+        """The tray out and in; closing it loads the disc: the drive spins up
+        and reads its table of contents, then Windows reads the disc, which
+        the LG does at full speed (a few seconds after it's ready)."""
         for take in range(1, self.takes + 1):
             start = self.now()
             self.ops.open_tray()
@@ -189,28 +210,94 @@ class Session:
             start = self.now()
             self.ops.close_tray()
             ready = self.ops.wait_ready(40)
-            self.wait(2)
+            self.wait(8)
             self.mark("tray_close", take, start, ready_s=round(ready, 2))
             self.quiet()
 
-    def idle_timeout(self, seconds: float):
-        """Read once, then leave the drive alone: it spins down by itself when
-        its own timer runs out. One long take."""
-        self.ops.spin_up()
-        self.ops.wait_ready(30)
-        self.ops.read_for(2, 1000)
-        start = self.now()
-        self.wait(seconds)
-        self.mark("auto_spindown", 1, start, waited_s=seconds)
+    def access_loops(self):
+        """Nonstop random seeks with short reads, 12 s a take: the HDD Synth
+        plays access.wav as a loop for as long as the drive is busy (turned up
+        and down by activity, over the idle loop), so it needs a busy stretch,
+        not one burst. At full speed and at the drive's medium speed (the LG
+        takes 0xFFFF as 5,400 rpm), where the seeks may stand out more."""
+        for name, kbs in (("max", None), ("medium", 0xFFFF)):
+            if kbs is None:
+                self.ops.set_speed(None)
+            else:
+                self.ops.drive.command(scsi.set_cd_speed(kbs))
+            self.warm()
+            for take in range(1, 3):
+                start = self.now()
+                end = time.perf_counter() + (1.2 if self.fast else 12)
+                while time.perf_counter() < end:
+                    self.ops.read_at(scsi.lba_at_radius(self.rng.uniform(25, self.ops.max_radius())), 16)
+                self.mark(f"access_loop_{name}", take, start, speed=name)
+                self.quiet()
+        self.ops.set_speed(None)
 
-    def run(self, max_x: float, tray: bool, idle_timeout: float) -> list[Event]:
+    def head(self):
+        """The head on its own: plain SEEKs (no reads) with the disc stopped
+        first. The LG then turns the disc only slowly (about 2,200 rpm, barely
+        above the room) and each seek stands 11-14 dB clear of it (21 Nov
+        2026), where reads keep it at full speed and bury the seeks. For an
+        access loop laid over the idle, as the HDD Synth plays it."""
+        self.stop_and_settle()
+        top = scsi.lba_at_radius(self.ops.max_radius()) - 100
+        self.ops.drive.command(scsi.seek10(top // 2), timeout_s=30)  # the disc starts, slowly
+        self.wait(3)
+        for take in range(1, 3):
+            start = self.now()
+            end = time.perf_counter() + (1.2 if self.fast else 12)
+            while time.perf_counter() < end:
+                self.ops.drive.command(scsi.seek10(int(self.rng.uniform(100, top))))
+            self.mark("head_loop", take, start)
+            self.quiet()
+        mid = top // 2
+        # (full strokes from a little way out: at the very start the sled can knock against its stop)
+        for label, a, b in (("head_short", mid, mid + 4000), ("head_medium", top // 4, 3 * top // 4),
+                            ("head_full", 2000, top)):
+            self.ops.drive.command(scsi.seek10(a))
+            self.quiet(1.5)
+            for take in range(1, 2 * self.takes + 1):
+                start = self.now()
+                self.ops.drive.command(scsi.seek10(b if take % 2 else a))
+                self.wait(1.2)
+                self.mark(label, take, start)
+        self.ops.set_speed(None)
+
+    def head_sequential(self):
+        """The head creeping outwards as it does while reading a long file,
+        with the disc slow and quiet: SEEKs 1,000 sectors apart, nonstop, 12 s
+        a take. The synth's sequential.wav, without the full-speed spinning
+        that reads bring (cut.py lays it over the idle loop)."""
+        self.stop_and_settle()
+        top = scsi.lba_at_radius(self.ops.max_radius()) - 100
+        self.ops.drive.command(scsi.seek10(2000), timeout_s=30)  # the disc starts, slowly
+        self.wait(3)
+        lba = 2000
+        for take in range(1, 3):
+            start = self.now()
+            end = time.perf_counter() + (1.2 if self.fast else 12)
+            while time.perf_counter() < end:
+                lba = lba + 1000 if lba + 1000 < top else 2000
+                self.ops.drive.command(scsi.seek10(lba))
+            self.mark("head_sequential", take, start)
+            self.quiet()
+        self.ops.set_speed(None)
+
+    STEPS = ("room", "spinups", "left_alone", "speeds", "seeks", "access", "access_loops", "head",
+             "head_sequential", "loading", "tray")
+
+    def run(self, max_x: float, tray: bool, idle_timeout: float, only: list[str] | None = None) -> list[Event]:
         self.sync("start")
-        steps = [("room", self.room), ("spin up and down", self.spinups), ("speeds", lambda: self.speeds(max_x)),
-                 ("seeks", self.seeks), ("access", self.access), ("loading", self.loading)]
+        steps = [("room", self.room), ("spinups", self.spinups),
+                 ("left_alone", lambda: self.left_alone(idle_timeout or 45)), ("speeds", lambda: self.speeds(max_x)),
+                 ("seeks", self.seeks), ("access", self.access), ("access_loops", self.access_loops),
+                 ("head", self.head), ("head_sequential", self.head_sequential), ("loading", self.loading)]
         if tray:
             steps.append(("tray", self.tray))
-        if idle_timeout:
-            steps.append(("idle timeout", lambda: self.idle_timeout(idle_timeout)))
+        if only:
+            steps = [s for s in steps if s[0] in only]
         for name, step in steps:
             print(f"{self.now():8.2f}  {name}")
             self.quiet(2)
@@ -291,7 +378,8 @@ def main():
     ap.add_argument("--takes", type=int, default=4, help="takes of each sound (default 4)")
     ap.add_argument("--quiet", type=float, default=3.0, help="seconds of quiet between sounds (default 3)")
     ap.add_argument("--tray", action="store_true", help="record the tray opening and closing (and the disc loading)")
-    ap.add_argument("--idle-timeout", type=float, default=0, help="also wait this long for the drive's own spin-down")
+    ap.add_argument("--idle-timeout", type=float, default=45, help="how long to leave the drive alone for its own slow-down (default 45 s)")
+    ap.add_argument("--steps", help="only these steps, comma-separated: " + ", ".join(Session.STEPS))
     ap.add_argument("--dry-run", action="store_true", help="a fake drive: check the plan and the log")
     ap.add_argument("--fast", action="store_true", help="with --dry-run: every wait a tenth as long")
     a = ap.parse_args()
@@ -323,7 +411,8 @@ def main():
     else:
         input("Start your recorder, then press Enter (beeps first) ...") if not a.dry_run else None
     try:
-        events = session.run(info.max_x or 8, a.tray, a.idle_timeout)
+        events = session.run(info.max_x or 8, a.tray or bool(a.steps and "tray" in a.steps), a.idle_timeout,
+                             a.steps.split(",") if a.steps else None)
     finally:
         if recorder:
             stop_recording(recorder)
