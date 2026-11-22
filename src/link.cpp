@@ -135,7 +135,10 @@ static activity_link::OpticalFields opticalFields(uint32_t now_ms) {
 void beginOptical() {
     g_optical_on = g_device0_cdrom || g_device1_cdrom;
     g_cd_unit = g_device0_cdrom ? 0 : 1;
-    if (g_optical_on) g_optical.begin(millis(), g_disc_sectors.load(std::memory_order_relaxed) != 0);
+    // The disc chosen at boot (disks.cpp): g_disc_sectors is only console `M`'s.
+    const bool disc = g_device0_cdrom ? g_disk && g_disk->sectors() != 0
+                                      : g_device1_sectors.load(std::memory_order_relaxed) != 0;
+    if (g_optical_on) g_optical.begin(millis(), disc);
 }
 
 void noteOptical(const TraceEvent& e) {
