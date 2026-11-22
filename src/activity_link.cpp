@@ -206,9 +206,9 @@ bool parseHeadLine(const char* line, size_t len, HeadTarget& out) {
 }
 
 size_t formatOpticalSentence(const OpticalFields& f, char* buf, size_t size) {
-    char body[16];
-    int n = std::snprintf(body, sizeof body, "HDO,3,%d,%c,%d,%c", f.busy ? 1 : 0, classChar(f.state), f.motor ? 1 : 0,
-                          f.tray_open ? 'O' : 'C');
+    char body[24];
+    int n = std::snprintf(body, sizeof body, "HDO,3,%d,%c,%d,%c,%d", f.busy ? 1 : 0, classChar(f.state),
+                          f.motor ? 1 : 0, f.tray_open ? 'O' : 'C', f.disk ? 1 : 0);
     if (n <= 0 || size_t(n) >= sizeof body) return 0;
     uint8_t checksum = 0;
     for (int i = 0; i < n; ++i) checksum ^= uint8_t(body[i]);
@@ -221,10 +221,12 @@ bool parseOpticalLine(const char* line, size_t len, OpticalFields& out) {
     const size_t prefix_len = sizeof PREFIX - 1;
     size_t star = checkedStar(line, len, PREFIX);
     if (star == 0) return false;
-    // version, busy, class, motor, tray, then any that later versions add
-    const char* field[5] = {};
-    size_t field_len[5] = {};
-    if (splitAt(line, prefix_len, star, field, field_len, 5) < 5) return false;
+    // version, busy, class, motor, tray, disk (since 0.36.0-cd.3; absent: a
+    // hard disk), then any that later versions add
+    const char* field[6] = {};
+    size_t field_len[6] = {};
+    const size_t fields = splitAt(line, prefix_len, star, field, field_len, 6);
+    if (fields < 5) return false;
     if (!allDigits(field[0], field_len[0])) return false;
     if (field_len[0] == 1 && field[0][0] < '3') return false;  // $HDO came in version 3
     for (int i = 1; i < 5; ++i)
@@ -250,6 +252,10 @@ bool parseOpticalLine(const char* line, size_t len, OpticalFields& out) {
         case 'C': f.tray_open = false; break;
         case 'O': f.tray_open = true; break;
         default: return false;
+    }
+    if (fields == 6) {
+        if (field_len[5] != 1 || (field[5][0] != '0' && field[5][0] != '1')) return false;
+        f.disk = field[5][0] == '1';
     }
     out = f;
     return true;

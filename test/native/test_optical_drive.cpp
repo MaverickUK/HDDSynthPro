@@ -12,21 +12,23 @@
 using activity::State;
 using activity_link::OpticalFields;
 
-static std::string opticalSentence(bool busy, State state, bool motor, bool tray_open) {
+static std::string opticalSentence(bool busy, State state, bool motor, bool tray_open, bool disk = true) {
     char buf[activity_link::OPTICAL_SENTENCE_MAX];
     OpticalFields f;
     f.busy = busy;
     f.state = state;
     f.motor = motor;
     f.tray_open = tray_open;
+    f.disk = disk;
     size_t n = activity_link::formatOpticalSentence(f, buf, sizeof buf);
     return std::string(buf, n);
 }
 
 TEST(test_optical_known_answers) {
-    CHECK_STR(opticalSentence(false, State::Idle, false, false), "$HDO,3,0,I,0,C*56\r\n");
-    CHECK_STR(opticalSentence(true, State::Sequential, true, false), "$HDO,3,1,S,1,C*4C\r\n");
-    CHECK_STR(opticalSentence(false, State::Idle, false, true), "$HDO,3,0,I,0,O*5A\r\n");
+    CHECK_STR(opticalSentence(false, State::Idle, false, false), "$HDO,3,0,I,0,C,1*4B\r\n");
+    CHECK_STR(opticalSentence(true, State::Sequential, true, false), "$HDO,3,1,S,1,C,1*51\r\n");
+    CHECK_STR(opticalSentence(false, State::Idle, false, true), "$HDO,3,0,I,0,O,1*47\r\n");
+    CHECK_STR(opticalSentence(false, State::Idle, false, false, false), "$HDO,3,0,I,0,C,0*4A\r\n");  // a CD-ROM alone
     std::string longest = opticalSentence(true, State::Random, true, true);
     CHECK(longest.size() < activity_link::OPTICAL_SENTENCE_MAX);
 }
@@ -35,14 +37,20 @@ TEST(test_optical_parse) {
     for (bool busy : {false, true})
         for (State st : {State::Idle, State::Sequential, State::Random})
             for (bool motor : {false, true})
-                for (bool tray : {false, true}) {
-                    std::string s = opticalSentence(busy, st, motor, tray);
-                    OpticalFields f;
-                    CHECK(activity_link::parseOpticalLine(s.data(), s.size() - 2, f));
-                    CHECK(f.busy == busy && f.state == st && f.motor == motor && f.tray_open == tray);
-                }
+                for (bool tray : {false, true})
+                    for (bool disk : {false, true}) {
+                        std::string s = opticalSentence(busy, st, motor, tray, disk);
+                        OpticalFields f;
+                        CHECK(activity_link::parseOpticalLine(s.data(), s.size() - 2, f));
+                        CHECK(f.busy == busy && f.state == st && f.motor == motor && f.tray_open == tray &&
+                              f.disk == disk);
+                    }
     OpticalFields f;
-    const char* bad[] = {"$HDO,3,1,S,1,X*57", "$HDO,2,0,I,0,C*57", "$HDA,1,0,I,-*28", "$HDO,3,0,I,0,C*30"};
+    // cd.1-cd.2's five fields: a hard disk; a later version's seventh is ignored
+    CHECK(activity_link::parseOpticalLine("$HDO,3,0,I,0,C*56", 17, f) && f.disk);
+    const char* later = "$HDO,4,0,I,0,C,0,X*39";
+    CHECK(activity_link::parseOpticalLine(later, std::strlen(later), f) && !f.disk);
+    const char* bad[] = {"$HDO,3,1,S,1,X*57", "$HDO,2,0,I,0,C*57", "$HDA,1,0,I,-*28", "$HDO,3,0,I,0,C*30", "$HDO,3,0,I,0,C,2*48"};
     for (const char* line : bad) CHECK(!activity_link::parseOpticalLine(line, std::strlen(line), f));
 }
 

@@ -129,6 +129,7 @@ static activity_link::OpticalFields opticalFields(uint32_t now_ms) {
     f.state = s.reads;
     f.motor = s.motor;
     f.tray_open = s.tray_open;
+    f.disk = !g_device0_cdrom;  // a CD-ROM as device 0 is alone (disks.cpp)
     return f;
 }
 

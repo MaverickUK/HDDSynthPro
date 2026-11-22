@@ -152,7 +152,7 @@ ready_k = arrive + wait + transferUs(k + 1, 63)                 sector k under t
 Built 22 Nov 2026 (branch `cdrom-sounds`: IDE Synth Bay 0.36.0-cd.1, HDDSynth_Native 0.26.0-cd.1), so the HDD Synth can play a CD-ROM drive beside the hard disk, from a CD-ROM sample pack recorded with [`tools/cd_sounds`](../tools/cd_sounds/README.md). Sent only with a CD-ROM drive configured (`device0 = cdrom` or `device1 = cdrom`), on every change and every 200 ms, after a due `$HDA` and before `$HDE`:
 
 ```
-$HDO,3,<busy>,<class>,<motor>,<tray>*<checksum>\r\n
+$HDO,3,<busy>,<class>,<motor>,<tray>,<disk>*<checksum>\r\n
 ```
 
 | Field | Values | Meaning |
@@ -161,8 +161,11 @@ $HDO,3,<busy>,<class>,<motor>,<tray>*<checksum>\r\n
 | `class` | `I`, `S`, `R` | its reads, classified as the disk's are (in 2,048-byte frames) |
 | `motor` | `0`, `1` | its disc spins |
 | `tray` | `O`, `C` | open or closed |
+| `disk` | `0`, `1` | a hard disk on the cable too (`1`), or a CD-ROM drive alone as device 0 (`0`): the synth leaves the disk's pack silent (since 0.36.0-cd.3; a receiver takes a sentence without it as `1`) |
 
-Known answers: `$HDO,3,0,I,0,C*56`, `$HDO,3,1,S,1,C*4C`, `$HDO,3,0,I,0,O*5A`. A receiver ignores fields after `tray` (later versions), and versions below 3.
+Known answers: `$HDO,3,0,I,0,C,1*4B`, `$HDO,3,1,S,1,C,1*51`, `$HDO,3,0,I,0,O,1*47`, and a CD-ROM alone `$HDO,3,0,I,0,C,0*4A`. A receiver ignores fields after `disk` (later versions), and versions below 3.
+
+The Bay's configurations and what the synth plays: a hard disk alone, or two (an image or a folder as device 1), plays the disk's pack, both disks' accesses in `$HDA` (one pack, one `DISK_LEVEL`); a hard disk with a CD-ROM as device 1 plays both packs; a CD-ROM alone as device 0 (it can't have a device 1) plays the CD-ROM's pack only (`disk` 0). Two CD-ROMs aren't offered. The synth's `DISK_LEVEL` and `CDROM_LEVEL` (0-200%, default 100%) set the two packs against each other, over each pack's `GAIN`.
 
 **The emulated drive answers at once and never spins**, so `optical_drive.*` models what a real one would be doing, from the CD-ROM's commands (told from the disk's by unit):
 

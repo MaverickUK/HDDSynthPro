@@ -133,14 +133,17 @@ struct OpticalFields {
     activity::State state = activity::State::Idle;
     bool motor = false;
     bool tray_open = false;
+    // A hard disk on the cable too (device 0); false for a CD-ROM drive alone,
+    // so the synth leaves the disk's pack silent. Absent before 0.36.0-cd.3: true.
+    bool disk = true;
     bool operator==(const OpticalFields& o) const {
-        return busy == o.busy && state == o.state && motor == o.motor && tray_open == o.tray_open;
+        return busy == o.busy && state == o.state && motor == o.motor && tray_open == o.tray_open && disk == o.disk;
     }
     bool operator!=(const OpticalFields& o) const { return !(*this == o); }
 };
 using OpticalSender = BasicSender<OpticalFields>;
 
-// The longest $HDO ("$HDO,3,1,S,1,C*hh"), with \r\n and a NUL.
+// The longest $HDO ("$HDO,3,1,S,1,C,1*hh"), with \r\n and a NUL.
 constexpr size_t OPTICAL_SENTENCE_MAX = 24;
 
 // As formatSentence(), for the CD-ROM drive.

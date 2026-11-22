@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 import audio
+import cut
 import scsi
 from drive_ops import Ops
 from session import BEEP_GAP_S, BEEP_HZ, BEEP_MS, FakeDrive
@@ -266,3 +267,17 @@ def test_ffmpegs_avfoundation_list_gives_the_microphones():
 [AVFoundation indev @ 0x7f8] [1] MacBook Pro Microphone
 : Input/output error"""
     assert platform_io.parse_avfoundation_list(text) == ["Samson Meteor Mic", "MacBook Pro Microphone"]
+
+
+def test_the_pack_is_levelled_against_a_disk_packs_idle():
+    from array import array
+    idle = array("h", [1000, -1000] * 800)          # RMS 1000
+    tray = array("h", [20000, -20000, 0, 0] * 400)  # a loud peak
+    head = array("h", [500, -500] * 800)
+    files = {"idle.wav": idle, "tray_open.wav": tray, "access.wav": head}
+    gain = cut.pack_gain(files, 4000)
+    assert abs(gain - 4.0) < 1e-9
+    assert cut.file_gain(head, gain) == gain                 # quiet: the pack's gain
+    assert abs(cut.file_gain(tray, gain) * 20000 - cut.PEAK_MAX) < 1e-6  # held to -1 dBFS
+    no_idle = {"tray_open.wav": tray}
+    assert abs(cut.pack_gain(no_idle, 4000) * 20000 - cut.PEAK_MAX) < 1e-6

@@ -27,8 +27,12 @@ SEEKs with the disc turning slowly and quietly), filtered below 100 Hz, and
 set `--access-boost` dB over the idle. Sessions without those steps fall back
 to the drive's reads at full speed, which are mostly the spinning.
 
-All at one level (one gain for the whole pack, the loudest peak at -1 dBFS),
-so the sounds keep their loudness against each other.
+Levelled against a disk's pack: one gain puts idle.wav at `--idle-rms`
+(default 4000, a disk pack's idle), and every file takes it, so the sounds
+keep their loudness against each other, except where a file's peak would pass
+-1 dBFS: that one stops there (`held` in cut.json). With the loudest peak at
+-1 dBFS instead (0.36.0-cd.1), the tray held the pack about 12 dB under a
+disk's, and the disk's idle buried it (the Evesham, 22 Nov 2026).
 """
 from __future__ import annotations
 
@@ -194,6 +198,24 @@ def build_access(seeks: list[tuple[str, array]], rate: int, seconds: float = 10.
     return audio.make_loop(out[:int(seconds * rate)], rate, 0.2)
 
 
+IDLE_RMS = 4000.0   # a disk pack's idle.wav (HDDSynth_Samples: 3,000-5,000 of 32767)
+PEAK_MAX = 32767 * 10 ** (-1 / 20)  # -1 dBFS
+
+
+def pack_gain(files: dict[str, array], idle_rms: float) -> float:
+    """The pack's gain: idle.wav at `idle_rms` (else the loudest peak at -1 dBFS)."""
+    idle = files.get("idle.wav")
+    if idle is not None and audio.rms(idle) > 0:
+        return idle_rms / audio.rms(idle)
+    loudest = max((audio.peak(s) for n, s in files.items() if not n.startswith("takes/")), default=1)
+    return PEAK_MAX / max(loudest, 1)
+
+
+def file_gain(s: array, gain: float) -> float:
+    """`gain`, or less if it would take the file's peak past -1 dBFS."""
+    return min(gain, PEAK_MAX / max(audio.peak(s), 1))
+
+
 def match_level(s: array, ref: array, boost_db: float) -> array:
     """`s` at `boost_db` over `ref` (RMS)."""
     return audio.scale(s, audio.rms(ref) / max(1.0, audio.rms(s)) * 10 ** (boost_db / 20))
@@ -225,6 +247,8 @@ def main():
                     help="the pack's sample rate: the same as the disk's pack it plays beside (every HDD pack so far: 16000)")
     ap.add_argument("--access-boost", type=float, default=0.0, metavar="DB",
                     help="access.wav and sequential.wav this far over idle.wav (default 0: level with it)")
+    ap.add_argument("--idle-rms", type=float, default=IDLE_RMS, metavar="RMS",
+                    help=f"idle.wav's level, as a disk pack's (default {IDLE_RMS:.0f}, of 32767)")
     ap.add_argument("--pick", action="append", default=[], help="label=N: use take N of that sound")
     ap.add_argument("--offset", type=float, help="where the first beep starts in the (first) recording, if not found")
     ap.add_argument("--out", default=str(HERE / "packs"))
@@ -350,19 +374,23 @@ def main():
         for ev in takes:
             files[f"takes/{label}_{ev['take']}.wav"] = audio.fade(window(ev, ("s", -0.3), ("e", 0.3)), rate)
 
-    # ---- one gain for the pack: its loudest peak at -1 dBFS
-    loudest = max(audio.peak(s) for n, s in files.items() if not n.startswith("takes/"))
-    gain = (32767 * 10 ** (-1 / 20)) / max(loudest, 1)
+    # ---- one gain for the pack: idle.wav at a disk pack's level, each file's
+    # peak held to -1 dBFS
+    gain = pack_gain(files, a.idle_rms)
+    gains = {rel: file_gain(smp, gain) for rel, smp in files.items()}
+    held = {rel: round(20 * math.log10(g / gain), 1) for rel, g in gains.items()
+            if g < gain and not rel.startswith("takes/")}
     name = a.name or "CD_" + re.sub(r"[^A-Za-z0-9]+", "_", log.get("drive", "drive")).strip("_")[:60]
     out = Path(a.out) / name
     for rel, s in files.items():
-        audio.save(out / rel, audio.scale(s, gain), rate)
+        audio.save(out / rel, audio.scale(s, gains[rel]), rate)
     # pack.json holds the HDD Synth's keys only (it reads 1 KB of it; GAIN and
     # AUTHOR can be added by hand); cut.json, how the pack was made.
     synth = {"NAME": " ".join((log.get("drive") or name).split()[:-1] or [name])[:47]}
     (out / "pack.json").write_text(json.dumps(synth, indent=1))
     meta = {"drive": log.get("drive"), "sectors": log.get("sectors"), "max_x": log.get("max_x"),
             "rate": rate, "gain_db": round(20 * math.log10(gain), 1), "access_boost_db": a.access_boost,
+            "idle_rms": a.idle_rms, "held_db": held,
             "room_noise_dbfs": round(audio.db(floor * gain), 1),
             "sessions": [{"log": s.log_path.name, "sync_s": round(s.start, 3), "clock_ppm": round((s.scale - 1) * 1e6)}
                          for s in sessions],
