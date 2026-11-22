@@ -172,6 +172,11 @@ public:
     const CommandInfo& lastCommand() const;
     __attribute__((always_inline)) bool transferring() const { return cdSelected() ? cd_.transferring() : hd_.transferring(); }
 
+    // A new hard disk at the host's reset (main.cpp's resetSwapTake), while in reset.
+    __attribute__((always_inline)) void setDisk(const IdentifyInfo& info, const uint16_t identify[256]) {
+        hd_.setDisk(info, identify);
+    }
+
     const ata::Device& disk() const { return hd_; }
     const atapi::Device& cdrom() const { return cd_; }
 

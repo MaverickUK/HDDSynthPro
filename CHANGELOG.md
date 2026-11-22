@@ -7,6 +7,15 @@ All notable changes to this firmware. The format follows [Keep a Changelog](http
 ### Tested (on 0.35.0, 17-18 Nov, the PCB through the JMicron on the Windows rig)
 - **The card soak in high-speed mode** (`-m cardsoak`, owed since 0.34.0): `pcb_drive` serving `HDDBENCH.IMG` over SDIO in high-speed mode (the calibration `commands=1111 reads=111 delay=1` at the start and still at the end) by multiword DMA 2 (offered by `dma = auto` once learned, then a re-detection). About 10 hours in two runs: 3 h 18 min, then 6 h 40 min (passed). **0 wrong** in 57.2 GB written and 86.9 GB read, every sector checked as read, and 20 full read-backs; no card lost or restarted, high-speed mode never ended, `iordy_ignored=0`, no `STUCK`, `SLOWREAD`, `BUSERR` or `CARD` lines. The first run stopped when the adapter reset the drive (two RESET# pulses) 7 ms into a READ DMA of 89 sectors and came back with its USB serial garbled (`152D20337A0C`), as it does when it declines; the drive answered right after one re-detection. Writes 1.9 MB/s and reads 2.9 for the first 70 minutes, then 1.55 and 2.35 (a full read-back 7.7 s, then 10.8 s), as 0.31.0's soak at default speed slowed; the second run was slow from its start, so the card's own state, it seems. One card so far.
 
+## [0.36.0-dev.13] - 2026-11-22 (branch `amiga`)
+
+### Fixed (on the Evesham, 22 Nov 2026)
+- **A new hard disk at the host's next reset with a CD-ROM as device 1:** core 1 asked for the swap only when the drive was a hard disk alone (`if constexpr (std::is_same_v<Dev, ata::Device>)` in `runDriveT`), so with `device1 = cdrom` (`hdcd::Device`) SynthMinder's "next reset" disk waited for a restart, although core 0 had armed the swap and SynthMinder said it would come at the next reset. `resetSwapEdge`, `resetSwapTake` and `resetSwapFinish` are templates over the device, and `hdcd::Device::setDisk` hands the new disk to its hard disk. The hard disk alone builds as before (core 1's block unchanged; only `.bss`'s start differs, as since dev.9).
+
+### Tested (on the Evesham, 22 Nov 2026: PCB rev 0.3, `SYNTHMIN.IMG` and the Doom CD as device 1, SynthMinder from `main`, the HDD Synth Mk5 on 0.25.0 with the pack list kept)
+- From a cold start: the Bay's status, the Synth tab's pack list (at once: the synth answers `$HDQ,1,PACKS` in 55 ms over USB, against about 900 ms before `fb5cda7`), balance, pack, and changing the CD (Sam & Max, then Doom again): all as expected.
+- **The next disk:** on dev.12 `WIN98.IMG` set from SynthMinder and Ctrl-Alt-Delete (the Evesham's BIOS pulses RESET# on a warm boot) kept `SYNTHMIN.IMG` (the bug above); on dev.13 the same brought up Windows 98, the Bay not restarted.
+
 ## [0.36.0-dev.12] - 2026-11-21 (branch `amiga`)
 
 **The Amiga 1200 boots to Workbench from the drive** (PCB rev 0.3, a buffered IDE adapter, `bus = table`, `iordy = off`; [docs/amiga.md](docs/amiga.md), section 7). Kickstart's register test passes, then detection, IDENTIFY and the boot: 237 commands, none failed, 126 sectors checked on the cable, 0 bad.

@@ -681,13 +681,17 @@ CORE1_RAM_RARE __attribute__((noinline)) static bool busAutoStep(ata::Device& de
 static bool s_reset_swap_held = false;
 
 // The new disk into the device: its size, geometry and IDENTIFY, as core 0 left them.
-CORE1_RAM_RARE static void resetSwapTake(ata::Device& dev) {
+// Dev is ata::Device, or hdcd::Device with a CD-ROM as device 1 (the hard
+// disk is device 0: a CD-ROM as device 0 never arms a swap, disks.cpp).
+template <class Dev>
+CORE1_RAM_RARE static void resetSwapTake(Dev& dev) {
     dev.setDisk(g_reset_swap_info, g_reset_swap_identify);
     g_reset_swap.store(RESET_SWAP_NONE, std::memory_order_release);
 }
 
 // At each RESET# edge: true to stay in reset (BSY) after its release.
-CORE1_RAM_RARE __attribute__((noinline)) static bool resetSwapEdge(ata::Device& dev, bool low) {
+template <class Dev>
+CORE1_RAM_RARE __attribute__((noinline)) static bool resetSwapEdge(Dev& dev, bool low) {
     const uint8_t state = g_reset_swap.load(std::memory_order_acquire);
     s_reset_swap_held = false;
     if (low) {
@@ -700,7 +704,8 @@ CORE1_RAM_RARE __attribute__((noinline)) static bool resetSwapEdge(ata::Device& 
 }
 
 // Held in reset after RESET#'s release: out of it once core 0 has the new disk open.
-CORE1_RAM_RARE __attribute__((noinline)) static void resetSwapFinish(ata::Device& dev) {
+template <class Dev>
+CORE1_RAM_RARE __attribute__((noinline)) static void resetSwapFinish(Dev& dev) {
     if (g_reset_swap.load(std::memory_order_acquire) != RESET_SWAP_DONE) return;
     s_reset_swap_held = false;
     resetSwapTake(dev);
@@ -903,7 +908,7 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
                 if (low != reset_low) {
                     reset_low = low;
                     bool hold = false;  // a new disk still opening: stay in reset (BSY)
-                    if constexpr (std::is_same_v<Dev, ata::Device>) hold = resetSwapEdge(dev, low);
+                    hold = resetSwapEdge(dev, low);
                     if (!hold) {
                         dev.hardReset(low);
                         if (!low) {
@@ -923,6 +928,8 @@ __attribute__((always_inline)) static inline void runDriveT(Dev& dev, bool first
                         // period, so the code after it keeps its banks
                         __asm__ volatile("nop\n nop\n nop\n nop");
                     }
+                } else if (s_reset_swap_held) {
+                    resetSwapFinish(dev);  // the hard disk beside a CD-ROM
                 }
                 // bus = auto (docs/auto-bus.md, the hard disk only), out of line:
                 // one test here when it's off
